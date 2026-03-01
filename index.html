@@ -11,17 +11,15 @@
       --muted:#6b7280;
       --line:#e5e7eb;
       --soft:#f3f4f6;
-      --accent:#4f46e5;     /* controlled colour */
+      --accent:#4f46e5;
       --ok:#16a34a;
       --bad:#ef4444;
       --btn:#111827;
       --btnText:#ffffff;
-      --radius:14px;
       --shadow: 0 10px 30px rgba(17,24,39,.08);
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-
     *{box-sizing:border-box}
     body{
       margin:0;
@@ -44,16 +42,15 @@
       font-size:18px;
     }
     .top b{color:var(--text); font-weight:650}
-
     .center{
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:22px;
+      gap:18px;
       margin-top:6px;
     }
 
-    /* Word display row */
+    /* Choice display */
     .wordRow{
       display:flex;
       align-items:center;
@@ -68,17 +65,15 @@
       letter-spacing: .02em;
       color:#1f2937;
     }
-
-    /* Choice slot (fixed width so no wobble) */
     .slot{
-      width:124px;              /* fixed */
+      width:124px;
       height:84px;
       border:2px solid var(--line);
       border-radius: 12px;
       display:flex;
       align-items:center;
       justify-content:center;
-      font-size:32px;           /* fits long graphemes */
+      font-size:32px;
       font-family: var(--mono);
       color:#111827;
       padding:0 10px;
@@ -89,7 +84,6 @@
     .slot.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
     .slot.active{border-color: rgba(79,70,229,.55); box-shadow: 0 0 0 6px rgba(79,70,229,.08)}
 
-    /* Picker controls */
     .picker{
       display:flex;
       flex-direction:column;
@@ -120,83 +114,72 @@
       box-shadow: 0 0 0 6px rgba(79,70,229,.10);
     }
 
-    /* Input area */
+    /* Guided/Recall segmented inputs */
     .inputs{
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:12px;
-      width:min(640px, 100%);
+      gap:10px;
+      width:min(760px, 100%);
     }
-    .inputLine{
+    .labelRow{
       width:100%;
       display:flex;
       align-items:center;
-      gap:12px;
       justify-content:center;
-      flex-wrap:wrap;
-    }
-    .inputLine label{
       color: var(--muted);
       font-size:16px;
-      width:130px;
-      text-align:right;
     }
-    .typeBox{
-      flex:1;
-      min-width:280px;
-      max-width:460px;
-      height:54px;
+    .segRow{
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .segInput{
+      width:110px;
+      height:62px;
       border-radius: 12px;
-      border:1px solid var(--line);
-      padding:0 14px;
-      font-size:20px;
+      border:2px solid var(--line);
+      background:#fff;
       font-family: var(--mono);
-      letter-spacing: .04em;
-      transition: border-color .15s ease, box-shadow .15s ease;
+      font-size:22px;
+      text-align:center;
+      letter-spacing:.06em;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
     }
-    .typeBox:focus{
+    .segInput:focus{
       outline:none;
       border-color: rgba(79,70,229,.55);
       box-shadow: 0 0 0 6px rgba(79,70,229,.10);
     }
-
-    /* Guide row (with / separators) */
-    .guide{
-      width:100%;
-      display:flex;
-      align-items:flex-start;
-      gap:12px;
-      justify-content:center;
-      flex-wrap:wrap;
-      color: var(--muted);
-      font-size:16px;
-    }
-    .guide label{
-      width:130px;
-      text-align:right;
-    }
-    .guideRow{
-      flex:1;
-      min-width:280px;
-      max-width:460px;
-      display:flex;
-      gap:10px;
-      justify-content:flex-start;
-      flex-wrap:wrap;
+    .segInput.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
+    .segInput.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+    .slash{
       font-family: var(--mono);
-      letter-spacing: .05em;
+      color:#9ca3af;
+      font-size:22px;
+      user-select:none;
     }
-    .guideSeg{
-      border-bottom:2px solid var(--line);
-      padding:0 4px 6px 4px;
-      color:#374151;
+    .hint{
+      color: var(--muted);
+      font-size:14px;
+      text-align:center;
+      margin-top:4px;
     }
-    .slash{color:#9ca3af}
 
     /* Buttons */
+    .btnRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:center;
+      align-items:center;
+      margin-top:4px;
+    }
     .btn{
-      margin-top:6px;
       width:min(360px, 92%);
       height:66px;
       border-radius: 12px;
@@ -210,7 +193,6 @@
       transition: transform .05s ease, opacity .15s ease;
     }
     .btn:active{transform: translateY(1px)}
-
     .btn.secondary{
       background:#fff;
       color: var(--text);
@@ -220,27 +202,17 @@
       font-size:16px;
       width:auto;
       padding:0 16px;
-      margin-top:0;
     }
     .btn.secondary:hover{background:var(--soft)}
-    .btnRow{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      justify-content:center;
-      align-items:center;
-    }
 
-    /* Feedback */
     .feedback{
-      margin-top:2px;
       min-height:26px;
       color: var(--muted);
       font-size:18px;
       text-align:center;
+      margin-top:2px;
     }
     .feedback strong{color:var(--text)}
-
     .shake{ animation: shake .18s linear 0s 2; }
     @keyframes shake{
       0%{transform: translateX(0)}
@@ -250,14 +222,13 @@
       100%{transform: translateX(0)}
     }
 
-    /* Teacher controls */
     details{
-      margin-top:16px;
+      margin-top:14px;
       border:1px solid var(--line);
       border-radius: 12px;
       padding:10px 12px;
       background:#fff;
-      width:min(720px, 100%);
+      width:min(760px, 100%);
     }
     summary{
       cursor:pointer;
@@ -288,6 +259,7 @@
     @media (max-width:520px){
       .letter{font-size:64px}
       .slot{height:74px; width:112px; font-size:28px}
+      .segInput{width:92px}
     }
   </style>
 </head>
@@ -302,9 +274,7 @@
       <div id="mainArea"></div>
 
       <div class="btnRow">
-        <button class="btn secondary" id="speakBtn" type="button" aria-label="Speak word" title="Listen">
-          🔊 Listen
-        </button>
+        <button class="btn secondary" id="speakBtn" type="button" aria-label="Speak word" title="Listen">🔊 Listen</button>
       </div>
 
       <div class="feedback" id="feedback" aria-live="polite"></div>
@@ -344,44 +314,22 @@
   const el = (id)=>document.getElementById(id);
 
   /**
-   * Data model supports all three modes.
-   * - word: correct spelling
-   * - guide: grapheme/phoneme guide segments shown in guided mode
-   * - choice: one target slot with options (choice mode)
+   * For guided/recall segmented inputs, we need the correct segments (not shown to pupil).
+   * In recall mode: we still use segments internally to check the full word.
    */
   const TEST = [
-    {
-      word: "bright",
-      guide: ["b","r","igh","t"],
-      choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" }
-    },
-    {
-      word: "happy",
-      guide: ["h","a","pp","y"],
-      choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" }
-    },
-    {
-      word: "chief",
-      guide: ["ch","ie","f"],
-      choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" }
-    },
-    {
-      word: "train",
-      guide: ["t","r","ai","n"],
-      choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" }
-    },
-    {
-      word: "spoil",
-      guide: ["s","p","oi","l"],
-      choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" }
-    }
+    { word: "bright", segments: ["b","r","igh","t"], choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" } },
+    { word: "happy",  segments: ["h","a","pp","y"],  choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" } },
+    { word: "chief",  segments: ["ch","ie","f"],     choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" } },
+    { word: "train",  segments: ["t","r","ai","n"],  choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" } },
+    { word: "spoil",  segments: ["s","p","oi","l"],  choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" } }
   ];
 
   let queue = [];
   let current = 0;
   let score = 0;
-  let attempts = 0;          // attempts for current word
-  let selectedIndex = 0;     // choice picker option index
+  let attempts = 0;
+  let selectedIndex = 0;
   let mode = "choice";
 
   const mainArea = el("mainArea");
@@ -408,22 +356,11 @@
     el("score").textContent = score;
   }
 
-  function clearFeedback(){
-    feedback.textContent = "";
-    feedback.style.color = "var(--muted)";
-  }
+  function clearFeedback(){ feedback.textContent = ""; }
 
-  function showTryAgain(){
-    feedback.innerHTML = `Not quite. <strong>Try again.</strong>`;
-  }
-
-  function showCorrect(){
-    feedback.innerHTML = `<strong>Correct.</strong>`;
-  }
-
-  function showReveal(word){
-    feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`;
-  }
+  function showTryAgain(){ feedback.innerHTML = `Not quite. <strong>Try again.</strong>`; }
+  function showCorrect(){ feedback.innerHTML = `<strong>Correct.</strong>`; }
+  function showReveal(word){ feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`; }
 
   function setButtonsForState({canNext=false, canShowAnswer=false}){
     nextBtn.style.display = canNext ? "inline-block" : "none";
@@ -439,15 +376,12 @@
       return;
     }
 
-    // cancel anything already speaking
     window.speechSynthesis.cancel();
-
     const u = new SpeechSynthesisUtterance(word);
-    u.rate = 0.9;   // slightly slower for clarity
+    u.rate = 0.9;
     u.pitch = 1.0;
     u.volume = 1.0;
 
-    // try to prefer English voice
     const voices = window.speechSynthesis.getVoices?.() || [];
     const preferred = voices.find(v => /en-GB/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
     if (preferred) u.voice = preferred;
@@ -459,17 +393,15 @@
     mode = getMode();
     attempts = 0;
     selectedIndex = 0;
-
     clearFeedback();
     setButtonsForState({canNext:false, canShowAnswer:false});
     primaryBtn.textContent = "Check Word";
-
     setTopBar();
 
     const item = queue[current];
     if (mode === "choice") renderChoice(item);
-    if (mode === "guided") renderTyped(item, true);
-    if (mode === "recall") renderTyped(item, false);
+    if (mode === "guided") renderSegmented(item, true);
+    if (mode === "recall") renderSegmented(item, false);
   }
 
   function renderChoice(item){
@@ -503,7 +435,6 @@
         pickerWrap.appendChild(up);
         pickerWrap.appendChild(slot);
         pickerWrap.appendChild(down);
-
         wordRow.appendChild(pickerWrap);
       } else {
         const span = document.createElement("div");
@@ -516,7 +447,6 @@
     mainArea.innerHTML = "";
     mainArea.appendChild(wordRow);
 
-    // keyboard support
     window.onkeydown = (e)=>{
       if (mode !== "choice") return;
       if (e.key === "ArrowUp") moveChoice(-1);
@@ -528,7 +458,6 @@
   function moveChoice(delta){
     const item = queue[current];
     const opts = item.choice.options;
-
     selectedIndex = (selectedIndex + delta + opts.length) % opts.length;
 
     const slot = el("choiceSlot");
@@ -537,77 +466,102 @@
       slot.classList.remove("bad","ok","shake");
       slot.classList.add("active");
     }
-
     clearFeedback();
     setButtonsForState({canNext:false, canShowAnswer:false});
   }
 
-  function renderTyped(item, showGuide){
-    const inputs = document.createElement("div");
-    inputs.className = "inputs";
+  // Segmented input mode:
+  // guided=true: show the segmented boxes with slashes (but never show the correct segments)
+  // guided=false (recall): still segmented boxes, but the user must spell whole word correctly across segments
+  function renderSegmented(item, guided){
+    const box = document.createElement("div");
+    box.className = "inputs";
 
-    const line = document.createElement("div");
-    line.className = "inputLine";
+    const label = document.createElement("div");
+    label.className = "labelRow";
+    label.textContent = "Type the spelling for each sound:";
 
-    const lab = document.createElement("label");
-    lab.textContent = "Type answer:";
+    const row = document.createElement("div");
+    row.className = "segRow";
 
-    const input = document.createElement("input");
-    input.className = "typeBox";
-    input.id = "typeInput";
-    input.autocomplete = "off";
-    input.spellcheck = false;
+    const segCount = item.segments.length;
 
-    line.appendChild(lab);
-    line.appendChild(input);
-    inputs.appendChild(line);
+    for (let i=0;i<segCount;i++){
+      const inp = document.createElement("input");
+      inp.className = "segInput";
+      inp.inputMode = "text";
+      inp.autocomplete = "off";
+      inp.spellcheck = false;
+      inp.maxLength = 6; // enough for "eigh" etc
+      inp.dataset.index = String(i);
+      inp.placeholder = "___";
+      inp.addEventListener("input", ()=>{
+        // clear styling on edit
+        inp.classList.remove("bad","ok");
+        clearFeedback();
+        setButtonsForState({canNext:false, canShowAnswer:false});
+      });
 
-    if (showGuide){
-      const guide = document.createElement("div");
-      guide.className = "guide";
-
-      const glab = document.createElement("label");
-      glab.textContent = "Looks like:";
-
-      const row = document.createElement("div");
-      row.className = "guideRow";
-
-      item.guide.forEach((seg, i)=>{
-        const s = document.createElement("span");
-        s.className = "guideSeg";
-        s.textContent = seg;
-        row.appendChild(s);
-
-        if (i < item.guide.length - 1){
-          const slash = document.createElement("span");
-          slash.className = "slash";
-          slash.textContent = "/";
-          row.appendChild(slash);
+      // keyboard: advance on space or /
+      inp.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter"){ e.preventDefault(); check(); return; }
+        if (e.key === "/" || e.key === " "){
+          e.preventDefault();
+          focusSeg(i+1);
+        }
+        if (e.key === "Backspace" && inp.value === ""){
+          focusSeg(i-1);
         }
       });
 
-      guide.appendChild(glab);
-      guide.appendChild(row);
-      inputs.appendChild(guide);
+      row.appendChild(inp);
+
+      if (i < segCount - 1){
+        const slash = document.createElement("span");
+        slash.className = "slash";
+        slash.textContent = "/";
+        row.appendChild(slash);
+      }
     }
 
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = guided
+      ? "Use the sound slots. You won’t be shown the answer."
+      : "Full recall: spell the word correctly across the sound slots.";
+
+    box.appendChild(label);
+    box.appendChild(row);
+    box.appendChild(hint);
+
     mainArea.innerHTML = "";
-    mainArea.appendChild(inputs);
+    mainArea.appendChild(box);
+
+    // focus first segment
+    setTimeout(()=> focusSeg(0), 50);
 
     window.onkeydown = (e)=>{
       if (mode === "guided" || mode === "recall"){
         if (e.key === "Enter") check();
       }
     };
+  }
 
-    setTimeout(()=> input.focus(), 50);
+  function focusSeg(i){
+    const inputs = [...document.querySelectorAll(".segInput")];
+    if (i < 0 || i >= inputs.length) return;
+    inputs[i].focus();
+    inputs[i].select?.();
+  }
+
+  function getSegmentInputs(){
+    return [...document.querySelectorAll(".segInput")];
   }
 
   function check(){
     const item = queue[current];
     const revealAfter2 = el("revealAfter2").checked;
 
-    // CHOICE MODE
     if (mode === "choice"){
       const slot = el("choiceSlot");
       const picked = item.choice.options[selectedIndex];
@@ -616,54 +570,68 @@
       if (correct){
         slot.classList.remove("bad","active","shake");
         slot.classList.add("ok");
-
         showCorrect();
-
-        if (attempts === 0) score += 1; // first-try only
+        if (attempts === 0) score += 1;
         attempts = 0;
-
         setTopBar();
         setButtonsForState({canNext:true, canShowAnswer:false});
         return;
       }
 
-      // wrong
       attempts += 1;
       slot.classList.remove("ok");
       slot.classList.add("bad","shake");
       showTryAgain();
-
       setButtonsForState({canNext:false, canShowAnswer: revealAfter2 && attempts >= 2});
       setTimeout(()=> slot.classList.remove("shake"), 250);
       return;
     }
 
-    // GUIDED / RECALL MODE
-    const input = el("typeInput");
-    const typed = (input.value || "").trim().toLowerCase();
-    const correct = item.word.toLowerCase();
+    // guided / recall segmented checking (never show answer automatically)
+    const inputs = getSegmentInputs();
+    const typedSegments = inputs.map(i => (i.value || "").trim().toLowerCase());
+    const correctSegments = item.segments.map(s => s.toLowerCase());
 
-    if (typed === correct){
+    // Check full word correctness: typedSegments must match exact segments
+    const allMatch = typedSegments.length === correctSegments.length &&
+      typedSegments.every((v, i) => v === correctSegments[i]);
+
+    if (allMatch){
+      // mark all ok
+      inputs.forEach(inp => { inp.classList.remove("bad","shake"); inp.classList.add("ok"); });
       showCorrect();
-      if (attempts === 0) score += 1; // first-try only
+      if (attempts === 0) score += 1;
       attempts = 0;
-
       setTopBar();
       setButtonsForState({canNext:true, canShowAnswer:false});
       return;
     }
 
     attempts += 1;
+
+    // mark incorrect segments (only where non-empty and wrong)
+    inputs.forEach((inp, i)=>{
+      const v = (inp.value || "").trim().toLowerCase();
+      inp.classList.remove("ok");
+      if (v && v !== correctSegments[i]) inp.classList.add("bad");
+      if (!v) inp.classList.remove("bad");
+    });
+
     showTryAgain();
 
-    input.classList.add("shake");
-    setTimeout(()=> input.classList.remove("shake"), 250);
+    // shake the row subtly
+    const row = document.querySelector(".segRow");
+    if (row){
+      row.classList.add("shake");
+      setTimeout(()=> row.classList.remove("shake"), 250);
+    }
 
     setButtonsForState({canNext:false, canShowAnswer: revealAfter2 && attempts >= 2});
   }
 
   function revealAnswer(){
     const item = queue[current];
+    // Only reveal via explicit button (or toggle logic)
     showReveal(item.word);
   }
 
@@ -683,7 +651,6 @@
   showAnswerBtn.addEventListener("click", revealAnswer);
   speakBtn.addEventListener("click", speakCurrentWord);
 
-  // Re-render on mode changes
   document.querySelectorAll('input[name="mode"]').forEach(r=>{
     r.addEventListener("change", ()=> render());
   });
