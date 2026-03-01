@@ -1,568 +1,665 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Phoneme → Grapheme Spelling</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Phoneme Spelling</title>
   <style>
     :root{
-      --bg:#0b1220;
-      --panel:#0f1b2e;
-      --card:#101c31;
-      --text:#e8eefc;
-      --muted:#9fb0d0;
-      --line:rgba(255,255,255,.10);
-      --focus:rgba(255,255,255,.18);
-      --ok:#2ecc71;
-      --bad:#ff5b5b;
-      --shadow: 0 20px 60px rgba(0,0,0,.45);
-      --radius: 16px;
+      --bg:#ffffff;
+      --text:#111827;
+      --muted:#6b7280;
+      --line:#e5e7eb;
+      --soft:#f3f4f6;
+      --accent:#4f46e5;  /* indigo */
+      --ok:#16a34a;
+      --bad:#ef4444;
+      --btn:#111827;
+      --btnText:#ffffff;
+      --radius:14px;
+      --shadow: 0 10px 30px rgba(17,24,39,.08);
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
+
     *{box-sizing:border-box}
     body{
       margin:0;
       font-family: var(--sans);
-      background:
-        radial-gradient(900px 500px at 15% 10%, rgba(110,168,255,.12), transparent 60%),
-        radial-gradient(900px 500px at 90% 25%, rgba(255,220,120,.10), transparent 60%),
-        radial-gradient(900px 500px at 50% 90%, rgba(120,255,200,.08), transparent 60%),
-        var(--bg);
+      background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
+      min-height:100vh;
       display:flex;
       align-items:center;
       justify-content:center;
-      padding: 28px;
+      padding:32px 18px;
     }
     .wrap{
       width:min(980px, 100%);
     }
-    header{
+    .top{
       display:flex;
-      align-items:flex-end;
+      align-items:center;
       justify-content:space-between;
-      gap:16px;
-      margin-bottom:16px;
+      margin-bottom:28px;
+      color: var(--muted);
+      font-size:18px;
     }
-    .title{
+    .top b{color:var(--text); font-weight:650}
+    .center{
       display:flex;
       flex-direction:column;
-      gap:6px;
-    }
-    h1{
-      margin:0;
-      font-size: 18px;
-      font-weight: 650;
-      letter-spacing:.2px;
-    }
-    .sub{
-      margin:0;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-      max-width: 64ch;
-    }
-    .meta{
-      display:flex;
-      gap:10px;
       align-items:center;
-      color: var(--muted);
-      font-size: 13px;
-      white-space:nowrap;
+      gap:26px;
+      margin-top:10px;
     }
-    .pill{
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.03);
-      padding:8px 10px;
-      border-radius: 999px;
-      display:flex;
-      align-items:center;
-      gap:8px;
-    }
-    .pill b{color: var(--text); font-weight:650}
-    .card{
-      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-      border:1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-    }
-    .card-inner{
-      padding: 22px;
-    }
-    .row{
-      display:flex;
-      gap: 18px;
-      align-items:center;
-      justify-content:space-between;
-      flex-wrap:wrap;
-    }
-    .wordline{
-      display:flex;
-      align-items:center;
-      gap: 14px;
-      flex-wrap:wrap;
-      padding: 18px 18px 8px 18px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(0,0,0,.10);
-    }
-    .label{
-      font-family: var(--mono);
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing:.6px;
-      text-transform: uppercase;
-      margin-right: 6px;
-    }
-    .phoneme-rail{
-      display:flex;
-      align-items:center;
-      gap: 10px;
-      flex-wrap:wrap;
-    }
-    .slot{
-      min-width: 54px;
-      height: 54px;
-      border-radius: 14px;
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.03);
+
+    /* Word display row */
+    .wordRow{
       display:flex;
       align-items:center;
       justify-content:center;
-      position:relative;
-      transition: border-color .15s ease, background .15s ease, transform .05s ease;
+      gap:26px;
+      flex-wrap:wrap;
       user-select:none;
     }
-    .slot.fixed{
-      padding: 0 12px;
-      min-width: unset;
-      height: 54px;
-      border-radius: 14px;
-      background: rgba(255,255,255,.02);
+    .letter{
+      font-size:82px;
+      font-weight:300;
+      letter-spacing: .02em;
+      color:#1f2937;
     }
-    .slot .txt{
-      font-size: 22px;
-      font-weight: 650;
-      letter-spacing:.2px;
-    }
-    .slot.target{
-      cursor:pointer;
-      outline:none;
-    }
-    .slot.target:focus-visible{
-      box-shadow: 0 0 0 4px rgba(110,168,255,.25);
-      border-color: rgba(110,168,255,.55);
-    }
-    .slot.ok{ border-color: rgba(46,204,113,.8); }
-    .slot.bad{ border-color: rgba(255,91,91,.85); }
-    .slot.bad{ background: rgba(255,91,91,.06); }
-    .slot.ok{ background: rgba(46,204,113,.06); }
-
-    /* picker */
-    .picker{
-      width: 120px;
-      height: 110px;
-      border-radius: 14px;
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.03);
-      overflow:auto;
-      scroll-snap-type: y mandatory;
-      position:relative;
-    }
-    .picker:focus-visible{
-      box-shadow: 0 0 0 4px rgba(110,168,255,.25);
-      border-color: rgba(110,168,255,.55);
-      outline:none;
-    }
-    .picker .item{
-      height: 38px;
+    .slot{
+      min-width:110px;
+      height:84px;
+      border:2px solid var(--line);
+      border-radius: 12px;
       display:flex;
       align-items:center;
       justify-content:center;
+      font-size:34px;
       font-family: var(--mono);
-      font-size: 16px;
-      color: var(--muted);
-      scroll-snap-align: center;
+      color:#111827;
+      padding:0 10px;
+      position:relative;
+      background:#fff;
     }
-    .picker .item.selected{
-      color: var(--text);
-      font-weight: 700;
-      letter-spacing:.3px;
-    }
-    .picker::before,
-    .picker::after{
-      content:"";
-      position:sticky;
-      left:0; right:0;
-      height: 36px;
-      display:block;
-      pointer-events:none;
-      z-index: 2;
-    }
-    .picker::before{
-      top:0;
-      background: linear-gradient(180deg, rgba(11,18,32,1), rgba(11,18,32,0));
-    }
-    .picker::after{
-      bottom:0;
-      background: linear-gradient(0deg, rgba(11,18,32,1), rgba(11,18,32,0));
-    }
-    .picker .centerline{
-      position:sticky;
-      top: 36px;
-      height: 38px;
-      border-top:1px solid var(--focus);
-      border-bottom:1px solid var(--focus);
-      pointer-events:none;
-      z-index: 3;
-    }
+    .slot.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
+    .slot.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+    .slot.active{border-color: rgba(79,70,229,.55); box-shadow: 0 0 0 6px rgba(79,70,229,.08)}
 
-    .controls{
-      padding: 18px;
+    /* Picker controls */
+    .picker{
       display:flex;
-      gap:12px;
+      flex-direction:column;
       align-items:center;
-      justify-content:space-between;
-      flex-wrap:wrap;
-    }
-    .btns{
-      display:flex;
       gap:10px;
-      flex-wrap:wrap;
     }
-    button{
-      border-radius: 12px;
+    .arrows{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      color: var(--accent);
+      opacity:.9;
+      font-size:18px;
+      line-height:1;
+      user-select:none;
+    }
+    .arrowBtn{
+      width:34px;
+      height:34px;
+      border-radius:10px;
       border:1px solid var(--line);
-      background: rgba(255,255,255,.05);
-      color: var(--text);
-      padding: 10px 14px;
-      font-weight: 650;
-      font-size: 13px;
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       cursor:pointer;
       transition: transform .05s ease, background .15s ease, border-color .15s ease;
     }
-    button:hover{ background: rgba(255,255,255,.07); }
-    button:active{ transform: translateY(1px); }
-    button.primary{
-      border-color: rgba(110,168,255,.45);
-      background: rgba(110,168,255,.14);
-    }
-    button.primary:hover{ background: rgba(110,168,255,.18); }
-    button.ghost{
-      background: transparent;
-    }
-    .feedback{
-      padding: 0 18px 18px 18px;
-      color: var(--muted);
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-    .answer{
-      font-family: var(--mono);
-      font-size: 18px;
-      color: var(--text);
-      letter-spacing:.3px;
-    }
-    .hint{
-      font-size: 13px;
-      line-height: 1.45;
-    }
-    .kbd{
-      font-family: var(--mono);
-      border:1px solid var(--line);
-      padding:2px 6px;
-      border-radius: 8px;
-      background: rgba(255,255,255,.03);
-      color: var(--text);
-      font-size: 12px;
+    .arrowBtn:hover{background:var(--soft)}
+    .arrowBtn:active{transform: translateY(1px)}
+    .arrowBtn:focus-visible{
+      outline:none;
+      border-color: rgba(79,70,229,.55);
+      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
     }
 
-    @media (max-width:560px){
-      .picker{ width: 100px; }
-      .slot .txt{ font-size: 20px; }
+    /* Input */
+    .inputs{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:10px;
+      width:min(560px, 100%);
     }
+    .inputLine{
+      width:100%;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
+    .inputLine label{
+      color: var(--muted);
+      font-size:16px;
+      width:110px;
+      text-align:right;
+    }
+    .typeBox{
+      flex:1;
+      min-width:260px;
+      max-width:420px;
+      height:54px;
+      border-radius: 12px;
+      border:1px solid var(--line);
+      padding:0 14px;
+      font-size:20px;
+      font-family: var(--mono);
+      letter-spacing: .04em;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .typeBox:focus{
+      outline:none;
+      border-color: rgba(79,70,229,.55);
+      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
+    }
+    .guide{
+      width:100%;
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      justify-content:center;
+      flex-wrap:wrap;
+      color: var(--muted);
+      font-size:16px;
+    }
+    .guide label{
+      width:110px;
+      text-align:right;
+    }
+    .guideRow{
+      flex:1;
+      min-width:260px;
+      max-width:420px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-start;
+      flex-wrap:wrap;
+      font-family: var(--mono);
+      letter-spacing: .05em;
+    }
+    .guideSeg{
+      border-bottom:2px solid var(--line);
+      padding:0 4px 6px 4px;
+      color:#374151;
+    }
+    .slash{color:#c0c4cc}
+
+    /* Buttons */
+    .btn{
+      margin-top:10px;
+      width:min(360px, 92%);
+      height:66px;
+      border-radius: 12px;
+      border:none;
+      background: var(--btn);
+      color: var(--btnText);
+      font-size:20px;
+      font-weight:650;
+      cursor:pointer;
+      box-shadow: var(--shadow);
+      transition: transform .05s ease, opacity .15s ease;
+    }
+    .btn:active{transform: translateY(1px)}
+    .btn.secondary{
+      background:#fff;
+      color: var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+      height:52px;
+      font-size:16px;
+      width:auto;
+      padding:0 16px;
+    }
+    .btn.secondary:hover{background:var(--soft)}
+    .btnRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:center;
+      align-items:center;
+    }
+
+    /* Feedback */
+    .feedback{
+      margin-top:6px;
+      min-height:26px;
+      color: var(--muted);
+      font-size:18px;
+      text-align:center;
+    }
+    .feedback strong{color:var(--text)}
+    .shake{
+      animation: shake .18s linear 0s 2;
+    }
+    @keyframes shake{
+      0%{transform: translateX(0)}
+      25%{transform: translateX(-4px)}
+      50%{transform: translateX(4px)}
+      75%{transform: translateX(-3px)}
+      100%{transform: translateX(0)}
+    }
+
+    /* Teacher bar */
+    details{
+      margin-top:18px;
+      border:1px solid var(--line);
+      border-radius: 12px;
+      padding:10px 12px;
+      background:#fff;
+    }
+    summary{
+      cursor:pointer;
+      color: var(--muted);
+      font-size:14px;
+      user-select:none;
+    }
+    .toggles{
+      margin-top:12px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      align-items:center;
+      color: var(--text);
+      font-size:14px;
+    }
+    .toggle{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:#fff;
+    }
+    .toggle input{accent-color: var(--accent);}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <div class="title">
-        <h1>Phoneme → Grapheme Spelling</h1>
-        <p class="sub">Select the grapheme that matches the target sound position. Built to feel neutral and usable from KS2+ through adult learners.</p>
-      </div>
-      <div class="meta">
-        <div class="pill"><span>Word</span> <b id="wordName">bright</b></div>
-        <div class="pill"><span>Target</span> <b id="targetLabel">/ī/</b></div>
-      </div>
-    </header>
+    <div class="top">
+      <div>Word <b id="wordNum">1</b> of <b id="wordTotal">10</b></div>
+      <div>Score: <b id="score">0</b></div>
+    </div>
 
-    <section class="card">
-      <div class="wordline">
-        <span class="label">phonemes</span>
-        <div id="rail" class="phoneme-rail"></div>
+    <div class="center">
+      <div id="mainArea"></div>
+
+      <div class="feedback" id="feedback"></div>
+
+      <div class="btnRow">
+        <button class="btn" id="primaryBtn">Check Word</button>
+        <button class="btn secondary" id="resetBtn" type="button">Reset</button>
+        <button class="btn secondary" id="nextBtn" type="button" style="display:none;">Next Word</button>
+        <button class="btn secondary" id="showAnswerBtn" type="button" style="display:none;">Show Answer</button>
       </div>
 
-      <div class="card-inner">
-        <div class="row">
-          <div>
-            <div class="label" style="margin-bottom:10px;">choose grapheme</div>
-            <div id="pickerWrap"></div>
+      <details>
+        <summary>Teacher controls (prototype)</summary>
+        <div class="toggles">
+          <div class="toggle">
+            <input type="radio" name="mode" id="modeChoice" value="choice" checked>
+            <label for="modeChoice">Mode: Grapheme choice</label>
           </div>
-
-          <div class="btns">
-            <button class="primary" id="checkBtn">Check</button>
-            <button class="ghost" id="resetBtn">Reset</button>
-            <button class="ghost" id="nextBtn" title="Loads another example (demo list)">Next</button>
+          <div class="toggle">
+            <input type="radio" name="mode" id="modeGuided" value="guided">
+            <label for="modeGuided">Mode: Guided encoding</label>
+          </div>
+          <div class="toggle">
+            <input type="radio" name="mode" id="modeRecall" value="recall">
+            <label for="modeRecall">Mode: Full recall</label>
+          </div>
+          <div class="toggle">
+            <input type="checkbox" id="revealAfter2">
+            <label for="revealAfter2">Reveal answer after 2 wrong attempts</label>
           </div>
         </div>
-      </div>
-
-      <div class="feedback" id="feedback" aria-live="polite"></div>
-    </section>
-
-    <p class="hint" style="margin:14px 4px 0;color:var(--muted);">
-      Tip: scroll the picker. Keyboard: <span class="kbd">↑</span> <span class="kbd">↓</span> inside the picker, then <span class="kbd">Enter</span> to check.
-    </p>
+      </details>
+    </div>
   </div>
 
-  <script>
-    // Demo dataset (no database required)
-    // Each word: phonemes array where consonants are fixed; targetIndex indicates the slot to choose for.
-    const WORDS = [
-      {
-        word: "bright",
-        targetPhonemeLabel: "/ī/",
-        phonemes: ["b","r","[TARGET]","t"],
-        targetIndex: 2,
-        options: ["igh","i-e","ie","y"],
-        answer: "igh"
-      },
-      {
-        word: "chief",
-        targetPhonemeLabel: "/ee/",
-        phonemes: ["ch","[TARGET]","f"],
-        targetIndex: 1,
-        options: ["ee","ea","e","y","ie"],
-        answer: "ie"
-      },
-      {
-        word: "train",
-        targetPhonemeLabel: "/ai/",
-        phonemes: ["t","r","[TARGET]","n"],
-        targetIndex: 2,
-        options: ["ai","ay","a-e","eigh","ea"],
-        answer: "ai"
-      },
-      {
-        word: "spoil",
-        targetPhonemeLabel: "/oi/",
-        phonemes: ["s","p","[TARGET]","l"],
-        targetIndex: 2,
-        options: ["oi","oy"],
-        answer: "oi"
-      }
-    ];
+<script>
+/**
+ * Data model supports all three modes.
+ * - word: correct spelling
+ * - guide: phoneme guide segments (for guided mode)
+ * - choice: describes a single target slot with selectable graphemes (choice mode)
+ */
+const TEST = [
+  {
+    word: "bright",
+    guide: ["b","r","igh","t"],
+    choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" }
+  },
+  {
+    word: "happy",
+    guide: ["h","a","pp","y"],
+    // for choice mode we’ll target the /ee/ ending spellings as a demo
+    choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" }
+  },
+  {
+    word: "chief",
+    guide: ["ch","ie","f"],
+    choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" }
+  },
+  {
+    word: "train",
+    guide: ["t","r","ai","n"],
+    choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" }
+  },
+  {
+    word: "spoil",
+    guide: ["s","p","oi","l"],
+    choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" }
+  }
+];
 
-    let idx = 0;
-    let selected = null;
-    let checked = false;
+let queue = [];           // 10 items (cycled from TEST)
+let current = 0;
+let score = 0;
+let attempts = 0;         // attempts on current word
+let selectedIndex = 0;    // choice picker index
+let mode = "choice";      // choice | guided | recall
 
-    const railEl = document.getElementById("rail");
-    const pickerWrap = document.getElementById("pickerWrap");
-    const feedbackEl = document.getElementById("feedback");
-    const wordNameEl = document.getElementById("wordName");
-    const targetLabelEl = document.getElementById("targetLabel");
+const el = (id)=>document.getElementById(id);
+const mainArea = el("mainArea");
+const feedback = el("feedback");
+const primaryBtn = el("primaryBtn");
+const nextBtn = el("nextBtn");
+const resetBtn = el("resetBtn");
+const showAnswerBtn = el("showAnswerBtn");
 
-    const checkBtn = document.getElementById("checkBtn");
-    const resetBtn = document.getElementById("resetBtn");
-    const nextBtn = document.getElementById("nextBtn");
+function buildQueue(){
+  // Make 10 words by cycling the demo list
+  queue = [];
+  for (let i=0;i<10;i++) queue.push(TEST[i % TEST.length]);
+}
 
-    function render(){
-      const w = WORDS[idx];
-      selected = w.options[0]; // default
-      checked = false;
-      feedbackEl.innerHTML = "";
-      wordNameEl.textContent = w.word;
-      targetLabelEl.textContent = w.targetPhonemeLabel;
+function getMode(){
+  const checked = document.querySelector('input[name="mode"]:checked');
+  return checked ? checked.value : "choice";
+}
 
-      // rail
-      railEl.innerHTML = "";
-      w.phonemes.forEach((p,i)=>{
-        const isTarget = i === w.targetIndex;
-        const d = document.createElement("div");
-        d.className = "slot " + (isTarget ? "target" : "fixed");
-        d.tabIndex = isTarget ? 0 : -1;
-        d.setAttribute("role", isTarget ? "button" : "text");
-        d.setAttribute("aria-label", isTarget ? "Target phoneme grapheme selector" : `Phoneme ${p}`);
-        const t = document.createElement("div");
-        t.className = "txt";
-        t.textContent = isTarget ? "—" : p;
-        d.appendChild(t);
-        railEl.appendChild(d);
-      });
+function setTopBar(){
+  el("wordTotal").textContent = queue.length;
+  el("wordNum").textContent = (current + 1);
+  el("score").textContent = score;
+}
 
-      // picker
-      pickerWrap.innerHTML = "";
-      const picker = document.createElement("div");
-      picker.className = "picker";
-      picker.tabIndex = 0;
-      picker.setAttribute("aria-label", "Grapheme options picker");
-      // padding items to let first/last snap to centre
-      const padTop = document.createElement("div"); padTop.className="item"; padTop.textContent=""; picker.appendChild(padTop);
-      const padTop2 = document.createElement("div"); padTop2.className="item"; padTop2.textContent=""; picker.appendChild(padTop2);
+function clearFeedback(){
+  feedback.textContent = "";
+  feedback.style.color = "var(--muted)";
+}
 
-      w.options.forEach((opt,i)=>{
-        const it = document.createElement("div");
-        it.className = "item" + (i===0 ? " selected":"");
-        it.textContent = opt;
-        it.dataset.value = opt;
-        picker.appendChild(it);
-      });
+function showTryAgain(){
+  feedback.innerHTML = `Not quite. <strong>Try again.</strong>`;
+  feedback.style.color = "var(--muted)";
+}
 
-      const padBot = document.createElement("div"); padBot.className="item"; padBot.textContent=""; picker.appendChild(padBot);
-      const padBot2 = document.createElement("div"); padBot2.className="item"; padBot2.textContent=""; picker.appendChild(padBot2);
+function showCorrect(){
+  feedback.innerHTML = `<strong>Correct.</strong>`;
+  feedback.style.color = "var(--muted)";
+}
 
-      const center = document.createElement("div");
-      center.className = "centerline";
-      picker.appendChild(center);
+function showReveal(word){
+  feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`;
+  feedback.style.color = "var(--muted)";
+}
 
-      pickerWrap.appendChild(picker);
+function setButtonsForState({canNext=false, canShowAnswer=false}){
+  nextBtn.style.display = canNext ? "inline-block" : "none";
+  showAnswerBtn.style.display = canShowAnswer ? "inline-block" : "none";
+}
 
-      // set initial scroll so first option is centred
-      requestAnimationFrame(()=>{
-        snapToIndex(picker, 0);
-      });
+function render(){
+  mode = getMode();
+  attempts = 0;
+  selectedIndex = 0;
+  clearFeedback();
+  setButtonsForState({canNext:false, canShowAnswer:false});
+  primaryBtn.textContent = "Check Word";
 
-      picker.addEventListener("scroll", ()=>{
-        if (checked) return;
-        updateSelectedFromScroll(picker);
-      });
+  setTopBar();
 
-      picker.addEventListener("click", (e)=>{
-        if (checked) return;
-        // If user clicks an item, centre it
-        const item = e.target.closest(".item[data-value]");
-        if (!item) return;
-        const items = [...picker.querySelectorAll(".item[data-value]")];
-        const i = items.indexOf(item);
-        if (i >= 0) snapToIndex(picker, i);
-      });
+  const item = queue[current];
 
-      // keyboard support
-      picker.addEventListener("keydown", (e)=>{
-        if (checked) return;
-        const items = [...picker.querySelectorAll(".item[data-value]")];
-        const currentIndex = items.findIndex(x => x.classList.contains("selected"));
-        if (e.key === "ArrowDown"){
-          e.preventDefault();
-          snapToIndex(picker, Math.min(items.length-1, currentIndex+1));
-        }
-        if (e.key === "ArrowUp"){
-          e.preventDefault();
-          snapToIndex(picker, Math.max(0, currentIndex-1));
-        }
-        if (e.key === "Enter"){
-          e.preventDefault();
-          doCheck();
-        }
-      });
+  if (mode === "choice") renderChoice(item);
+  if (mode === "guided") renderGuided(item, true);
+  if (mode === "recall") renderGuided(item, false);
+}
 
-      // allow clicking target slot to focus picker
-      const targetSlot = railEl.querySelector(".slot.target");
-      targetSlot.addEventListener("click", ()=> picker.focus());
-      targetSlot.addEventListener("keydown", (e)=>{
-        if (e.key === "Enter" || e.key === " "){
-          e.preventDefault();
-          picker.focus();
-        }
-      });
+function renderChoice(item){
+  const { parts, targetIndex, options } = item.choice;
+
+  const wordRow = document.createElement("div");
+  wordRow.className = "wordRow";
+
+  parts.forEach((p, i) => {
+    if (i === targetIndex){
+      const pickerWrap = document.createElement("div");
+      pickerWrap.className = "picker";
+
+      const up = document.createElement("button");
+      up.className = "arrowBtn";
+      up.innerHTML = "˄";
+      up.addEventListener("click", ()=> moveChoice(-1));
+      up.setAttribute("aria-label","Previous option");
+
+      const slot = document.createElement("div");
+      slot.className = "slot active";
+      slot.id = "choiceSlot";
+      slot.textContent = options[selectedIndex];
+
+      const down = document.createElement("button");
+      down.className = "arrowBtn";
+      down.innerHTML = "˅";
+      down.addEventListener("click", ()=> moveChoice(1));
+      down.setAttribute("aria-label","Next option");
+
+      pickerWrap.appendChild(up);
+      pickerWrap.appendChild(slot);
+      pickerWrap.appendChild(down);
+
+      wordRow.appendChild(pickerWrap);
+    } else {
+      const span = document.createElement("div");
+      span.className = "letter";
+      span.textContent = p;
+      wordRow.appendChild(span);
     }
+  });
 
-    function snapToIndex(picker, optionIndex){
-      const items = [...picker.querySelectorAll(".item[data-value]")];
-      const item = items[optionIndex];
-      if (!item) return;
+  mainArea.innerHTML = "";
+  mainArea.appendChild(wordRow);
 
-      // scroll so item is at centerline (approx)
-      const pickerRect = picker.getBoundingClientRect();
-      const itemRect = item.getBoundingClientRect();
-      const currentTop = picker.scrollTop;
-      const delta = (itemRect.top - pickerRect.top) - 36; // 36px aligns to centerline top
-      picker.scrollTop = currentTop + delta;
+  // Keyboard for choice mode
+  window.onkeydown = (e)=>{
+    if (mode !== "choice") return;
+    if (e.key === "ArrowUp") moveChoice(-1);
+    if (e.key === "ArrowDown") moveChoice(1);
+    if (e.key === "Enter") check();
+  };
+}
 
-      updateSelected(items, optionIndex);
-    }
+function moveChoice(delta){
+  const item = queue[current];
+  const opts = item.choice.options;
+  selectedIndex = (selectedIndex + delta + opts.length) % opts.length;
+  const slot = el("choiceSlot");
+  if (slot) slot.textContent = opts[selectedIndex];
+  // clear wrong styling when changing selection
+  if (slot){
+    slot.classList.remove("bad");
+    slot.classList.add("active");
+  }
+  clearFeedback();
+  setButtonsForState({canNext:false, canShowAnswer:false});
+}
 
-    function updateSelectedFromScroll(picker){
-      const items = [...picker.querySelectorAll(".item[data-value]")];
-      const pickerRect = picker.getBoundingClientRect();
-      const centerY = pickerRect.top + 36 + 19; // middle of the centerline band
-      let bestI = 0;
-      let bestDist = Infinity;
+function renderGuided(item, showGuide){
+  const inputs = document.createElement("div");
+  inputs.className = "inputs";
 
-      items.forEach((it,i)=>{
-        const r = it.getBoundingClientRect();
-        const mid = r.top + r.height/2;
-        const d = Math.abs(mid - centerY);
-        if (d < bestDist){
-          bestDist = d;
-          bestI = i;
-        }
-      });
+  // Audio button placeholder (later)
+  // Keeping minimal: you can wire it when ready.
+  // const audio = document.createElement("button");
 
-      updateSelected(items, bestI);
-    }
+  const line = document.createElement("div");
+  line.className = "inputLine";
+  const lab = document.createElement("label");
+  lab.textContent = "Type answer:";
+  const input = document.createElement("input");
+  input.className = "typeBox";
+  input.id = "typeInput";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "";
+  line.appendChild(lab);
+  line.appendChild(input);
 
-    function updateSelected(items, i){
-      items.forEach((it,idx)=> it.classList.toggle("selected", idx===i));
-      selected = items[i]?.dataset.value ?? selected;
-      // show selection in target slot rail
-      const t = railEl.querySelector(".slot.target .txt");
-      if (t) t.textContent = selected;
-    }
+  inputs.appendChild(line);
 
-    function doCheck(){
-      const w = WORDS[idx];
-      checked = true;
-
-      const targetSlot = railEl.querySelector(".slot.target");
-      targetSlot.classList.remove("ok","bad");
-      const isCorrect = selected === w.answer;
-      targetSlot.classList.add(isCorrect ? "ok":"bad");
-
-      const completed = w.phonemes.map((p,i)=> i===w.targetIndex ? w.answer : p).join("");
-      feedbackEl.innerHTML = `
-        <div class="hint">${isCorrect ? "Correct." : "Not quite."} Correct spelling:</div>
-        <div class="answer">${completed}</div>
-        <div class="hint">Selected: <span class="kbd">${selected}</span> · Answer: <span class="kbd">${w.answer}</span></div>
-      `;
-    }
-
-    function doReset(){
-      render();
-    }
-
-    function doNext(){
-      idx = (idx + 1) % WORDS.length;
-      render();
-    }
-
-    checkBtn.addEventListener("click", doCheck);
-    resetBtn.addEventListener("click", doReset);
-    nextBtn.addEventListener("click", doNext);
-
-    // keyboard shortcut for whole page
-    window.addEventListener("keydown", (e)=>{
-      if (e.key === "Enter" && (document.activeElement?.classList.contains("picker") === false)){
-        // if focus isn't in picker, Enter checks too
-        doCheck();
+  if (showGuide){
+    const guide = document.createElement("div");
+    guide.className = "guide";
+    const glab = document.createElement("label");
+    glab.textContent = "Looks like:";
+    const row = document.createElement("div");
+    row.className = "guideRow";
+    item.guide.forEach((seg, i)=>{
+      const s = document.createElement("span");
+      s.className = "guideSeg";
+      s.textContent = seg;
+      row.appendChild(s);
+      if (i < item.guide.length - 1){
+        const slash = document.createElement("span");
+        slash.className = "slash";
+        slash.textContent = "/";
+        row.appendChild(slash);
       }
     });
+    guide.appendChild(glab);
+    guide.appendChild(row);
+    inputs.appendChild(guide);
+  }
 
-    render();
-  </script>
+  mainArea.innerHTML = "";
+  mainArea.appendChild(inputs);
+
+  window.onkeydown = (e)=>{
+    if (mode === "guided" || mode === "recall"){
+      if (e.key === "Enter") check();
+    }
+  };
+
+  // focus
+  setTimeout(()=> input.focus(), 50);
+}
+
+function check(){
+  const item = queue[current];
+  const revealAfter2 = el("revealAfter2").checked;
+
+  // CHOICE MODE
+  if (mode === "choice"){
+    const slot = el("choiceSlot");
+    const picked = item.choice.options[selectedIndex];
+    const correct = picked === item.choice.answer;
+
+    if (correct){
+      slot.classList.remove("bad","active");
+      slot.classList.add("ok");
+      showCorrect();
+
+      // score only if correct on first attempt
+      if (attempts === 0) score += 1;
+      attempts = 0;
+
+      setTopBar();
+      setButtonsForState({canNext:true, canShowAnswer:false});
+      return;
+    }
+
+    // wrong
+    attempts += 1;
+    slot.classList.remove("ok");
+    slot.classList.add("bad","shake");
+    showTryAgain();
+
+    // allow reveal option after 2 wrong attempts (optional)
+    setButtonsForState({canNext:false, canShowAnswer: revealAfter2 && attempts >= 2});
+
+    setTimeout(()=> slot.classList.remove("shake"), 250);
+    return;
+  }
+
+  // GUIDED / RECALL MODE
+  const input = el("typeInput");
+  const typed = (input.value || "").trim().toLowerCase();
+  const correct = item.word.toLowerCase();
+
+  if (typed === correct){
+    showCorrect();
+    if (attempts === 0) score += 1; // first-try scoring
+    attempts = 0;
+    setTopBar();
+    setButtonsForState({canNext:true, canShowAnswer:false});
+    return;
+  }
+
+  attempts += 1;
+  showTryAgain();
+
+  // subtle shake the input
+  input.classList.add("shake");
+  setTimeout(()=> input.classList.remove("shake"), 250);
+
+  setButtonsForState({canNext:false, canShowAnswer: el("revealAfter2").checked && attempts >= 2});
+}
+
+function revealAnswer(){
+  const item = queue[current];
+  showReveal(item.word);
+}
+
+function next(){
+  current = (current + 1) % queue.length;
+  render();
+}
+
+function reset(){
+  // reset current word attempts/visuals only
+  render();
+}
+
+primaryBtn.addEventListener("click", check);
+nextBtn.addEventListener("click", next);
+resetBtn.addEventListener("click", reset);
+showAnswerBtn.addEventListener("click", revealAnswer);
+
+// Teacher mode changes should rerender
+document.querySelectorAll('input[name="mode"]').forEach(r=>{
+  r.addEventListener("change", ()=> render());
+});
+el("revealAfter2").addEventListener("change", ()=> {
+  // doesn’t need rerender, but keeps state consistent
+  setButtonsForState({canNext:false, canShowAnswer:false});
+});
+
+buildQueue();
+render();
+</script>
 </body>
 </html>
