@@ -1,1 +1,188 @@
+:root{
+  --bg:#ffffff;
+  --text:#111827;
+  --muted:#6b7280;
+  --line:#e5e7eb;
+  --soft:#f3f4f6;
+  --accent:#4f46e5;
+  --btn:#111827;
+  --btnText:#ffffff;
+  --shadow: 0 10px 30px rgba(17,24,39,.08);
+  --radius: 14px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
 
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  padding:26px 16px;
+}
+.wrap{width:min(1100px,100%); margin:0 auto;}
+
+.topbar{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:14px;
+}
+.brandTitle{font-size:22px; font-weight:800; letter-spacing:.2px;}
+.brandSub{font-size:13px; color:var(--muted); margin-top:3px;}
+
+.card{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:#fff;
+  box-shadow:var(--shadow);
+  padding:18px;
+  margin-top:14px;
+}
+
+h2{margin:0 0 10px 0; font-size:18px;}
+p{margin:0 0 10px 0; line-height:1.45;}
+.muted{color:var(--muted);}
+
+.row{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px;}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+@media (max-width:720px){ .grid2{grid-template-columns:1fr;} }
+
+label{display:block; font-size:12px; color:var(--muted); margin:8px 0 6px;}
+
+.input, .select, .textarea{
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:12px 12px;
+  font-size:14px;
+  outline:none;
+  background:#fff;
+}
+.textarea{min-height:90px; resize:vertical; font-family:var(--mono); font-size:13px;}
+.input:focus, .select:focus, .textarea:focus{
+  border-color:rgba(79,70,229,.55);
+  box-shadow:0 0 0 6px rgba(79,70,229,.10);
+}
+
+.btn{
+  height:44px;
+  padding:0 14px;
+  border-radius:12px;
+  border:none;
+  background:var(--btn);
+  color:var(--btnText);
+  font-weight:700;
+  cursor:pointer;
+}
+.btn.secondary{
+  background:#fff;
+  color:var(--text);
+  border:1px solid var(--line);
+  font-weight:650;
+}
+.btn.secondary:hover{background:var(--soft);}
+
+.banner{
+  border:1px solid rgba(239,68,68,.35);
+  background:rgba(239,68,68,.06);
+  border-radius:12px;
+  padding:10px 12px;
+  color:var(--text);
+  margin-top:10px;
+}
+
+.notice{
+  margin-top:10px;
+  border:1px solid rgba(79,70,229,.25);
+  background:rgba(79,70,229,.06);
+  border-radius:12px;
+  padding:10px 12px;
+  font-size:13px;
+  color:var(--text);
+}
+
+.hr{height:1px; background:var(--line); margin:14px 0;}
+
+.pills{display:flex; gap:8px; flex-wrap:wrap;}
+.pill{border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:13px; color:var(--muted);}
+.pill b{color:var(--text);}
+
+.table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+.table th, .table td{
+  text-align:left;
+  padding:10px;
+  border-bottom:1px solid var(--line);
+}
+.table th{color:var(--muted); font-weight:700;}
+
+.gameTop{
+  display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+  color:var(--muted); font-size:14px;
+  margin-bottom:10px;
+}
+.gameTop b{color:var(--text);}
+.center{display:flex; flex-direction:column; align-items:center; gap:12px; padding:8px 0;}
+
+.bigLetters{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:22px;
+  flex-wrap:wrap;
+  margin-top:6px;
+}
+.bigLetter{
+  font-size:72px;
+  font-weight:500;
+  opacity:.88;
+  user-select:none;
+  cursor:pointer;
+}
+.scrollSlot{
+  width:140px;
+  height:86px;
+  border-radius:14px;
+  border:2px solid var(--line);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  background:#fff;
+  box-shadow:0 10px 30px rgba(17,24,39,.06);
+  cursor:pointer;
+}
+.scrollSlot.active{
+  border-color:rgba(79,70,229,.55);
+  box-shadow:0 0 0 7px rgba(79,70,229,.12);
+}
+.scrollArrow{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  color:#9ca3af;
+  user-select:none;
+  font-size:20px;
+  line-height:1;
+}
+.scrollArrow.up{top:-24px;}
+.scrollArrow.down{bottom:-26px;}
+.scrollVal{
+  font-family:var(--mono);
+  font-size:34px;
+  font-weight:800;
+  user-select:none;
+}
+
+.feedback{min-height:22px; font-size:15px; color:var(--muted); text-align:center;}
+.feedback strong{color:var(--text);}
+
+.badgeOk{color:#16a34a; font-weight:800;}
+.badgeBad{color:#ef4444; font-weight:800;}
