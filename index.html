@@ -1,1170 +1,189 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Phoneme Spelling</title>
-  <style>
-    :root{
-      --bg:#ffffff;
-      --text:#111827;
-      --muted:#6b7280;
-      --line:#e5e7eb;
-      --soft:#f3f4f6;
-      --accent:#4f46e5;
-      --ok:#16a34a;
-      --bad:#ef4444;
-      --btn:#111827;
-      --btnText:#ffffff;
-      --shadow: 0 10px 30px rgba(17,24,39,.08);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      --radius: 12px;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family: var(--sans);
-      background: var(--bg);
-      color: var(--text);
-      min-height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:28px 16px;
-    }
-    .wrap{ width:min(1060px, 100%); }
+<meta charset="UTF-8" />
+<title>Phoneme Spelling App</title>
 
-    .top{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      margin-bottom:18px;
-      color: var(--muted);
-      font-size:16px;
-      gap:12px;
-      flex-wrap:wrap;
-    }
-    .top b{color:var(--text); font-weight:650}
-    .chips{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
-    .chip{
-      border:1px solid var(--line);
-      border-radius:999px;
-      padding:7px 10px;
-      background:#fff;
-      display:flex;
-      gap:8px;
-      align-items:center;
-      font-size:13px;
-      color:var(--muted);
-    }
-    .chip select{
-      border:none;
-      outline:none;
-      font-size:13px;
-      background:transparent;
-      color:var(--text);
-      font-weight:650;
-      cursor:pointer;
-    }
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-    .center{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:14px;
-    }
+<style>
+body {
+  font-family: system-ui;
+  text-align: center;
+  padding: 40px;
+  transition: background 0.3s, color 0.3s;
+}
 
-    /* Shared buttons */
-    .btnRow{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      justify-content:center;
-      align-items:center;
-      margin-top:4px;
-    }
-    .btn{
-      width:min(360px, 92%);
-      height:62px;
-      border-radius: var(--radius);
-      border:none;
-      background: var(--btn);
-      color: var(--btnText);
-      font-size:18px;
-      font-weight:650;
-      cursor:pointer;
-      box-shadow: var(--shadow);
-      transition: transform .05s ease, opacity .15s ease;
-    }
-    .btn:active{transform: translateY(1px)}
-    .btn.secondary{
-      background:#fff;
-      color: var(--text);
-      border:1px solid var(--line);
-      box-shadow:none;
-      height:48px;
-      font-size:15px;
-      width:auto;
-      padding:0 14px;
-    }
-    .btn.secondary:hover{background:var(--soft)}
+h1 { font-weight: 600; }
 
-    .feedback{
-      min-height:26px;
-      color: var(--muted);
-      font-size:16px;
-      text-align:center;
-      margin-top:2px;
-    }
-    .feedback strong{color:var(--text)}
+.word-box {
+  font-size: 32px;
+  letter-spacing: 8px;
+  margin: 30px 0;
+}
 
-    .shake{ animation: shake .18s linear 0s 2; }
-    @keyframes shake{
-      0%{transform: translateX(0)}
-      25%{transform: translateX(-4px)}
-      50%{transform: translateX(4px)}
-      75%{transform: translateX(-3px)}
-      100%{transform: translateX(0)}
-    }
+input {
+  font-size: 20px;
+  padding: 10px;
+  width: 260px;
+  text-align: center;
+}
 
-    /* Mode: Grapheme Choice */
-    .wordRow{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:22px;
-      flex-wrap:wrap;
-      user-select:none;
-    }
-    .letter{
-      font-size:78px;
-      font-weight:300;
-      letter-spacing: .02em;
-      color:#1f2937;
-    }
-    .slot{
-      width:124px;
-      height:82px;
-      border:2px solid var(--line);
-      border-radius: var(--radius);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:32px;
-      font-family: var(--mono);
-      color:#111827;
-      padding:0 10px;
-      background:#fff;
-      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
-    }
-    .slot.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
-    .slot.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
-    .slot.active{border-color: rgba(79,70,229,.55); box-shadow: 0 0 0 6px rgba(79,70,229,.08)}
+button {
+  padding: 12px 20px;
+  margin: 10px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
 
-    .picker{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:10px;
-    }
-    .arrowBtn{
-      width:36px;
-      height:36px;
-      border-radius:10px;
-      border:1px solid var(--line);
-      background:#fff;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      cursor:pointer;
-      transition: transform .05s ease, background .15s ease, border-color .15s ease;
-      color: var(--accent);
-      font-size:16px;
-      line-height:1;
-      user-select:none;
-    }
-    .arrowBtn:hover{background:var(--soft)}
-    .arrowBtn:active{transform: translateY(1px)}
-    .arrowBtn:focus-visible{
-      outline:none;
-      border-color: rgba(79,70,229,.55);
-      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
-    }
+.primary {
+  background: #0f172a;
+  color: white;
+}
 
-    /* Mode: Guided segmented inputs */
-    .inputs{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:10px;
-      width:min(860px, 100%);
-    }
-    .labelRow{
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      color: var(--muted);
-      font-size:15px;
-      text-align:center;
-      padding: 0 6px;
-    }
-    .segRow{
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-    .segInput{
-      width:112px;
-      height:60px;
-      border-radius: var(--radius);
-      border:2px solid var(--line);
-      background:#fff;
-      font-family: var(--mono);
-      font-size:20px;
-      text-align:center;
-      letter-spacing:.06em;
-      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-    }
-    .segInput:focus{
-      outline:none;
-      border-color: rgba(79,70,229,.55);
-      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
-    }
-    .segInput.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
-    .segInput.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
-    .slash{
-      font-family: var(--mono);
-      color:#9ca3af;
-      font-size:20px;
-      user-select:none;
-    }
+.secondary {
+  background: #e2e8f0;
+}
 
-    /* Mode: Full recall input */
-    .recallBox{
-      width:min(520px, 92%);
-      height:60px;
-      border-radius: var(--radius);
-      border:2px solid var(--line);
-      background:#fff;
-      font-family: var(--mono);
-      font-size:22px;
-      text-align:center;
-      letter-spacing:.08em;
-      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-    }
-    .recallBox:focus{
-      outline:none;
-      border-color: rgba(79,70,229,.55);
-      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
-    }
-    .recallBox.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
-    .recallBox.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+.correct { color: #15803d; }
+.wrong { color: #b91c1c; }
 
-    .sentence{
-      width:min(860px, 100%);
-      border:1px solid var(--line);
-      border-radius: var(--radius);
-      padding:10px 12px;
-      background:#fff;
-      color: var(--text);
-      font-size:15px;
-      line-height:1.4;
-    }
-    .sentence small{color:var(--muted)}
-
-    /* Teacher builder panel */
-    details{
-      margin-top:10px;
-      border:1px solid var(--line);
-      border-radius: var(--radius);
-      padding:10px 12px;
-      background:#fff;
-      width:min(980px, 100%);
-    }
-    summary{
-      cursor:pointer;
-      color: var(--muted);
-      font-size:14px;
-      user-select:none;
-    }
-    .grid{
-      margin-top:12px;
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:12px;
-    }
-    @media (max-width:900px){
-      .grid{grid-template-columns:1fr}
-      .letter{font-size:64px}
-      .slot{height:74px; width:112px; font-size:28px}
-      .segInput{width:92px}
-    }
-    textarea, input[type="text"]{
-      width:100%;
-      border:1px solid var(--line);
-      border-radius: var(--radius);
-      padding:10px 12px;
-      font-family: var(--sans);
-      font-size:14px;
-      line-height:1.35;
-      outline:none;
-      transition: box-shadow .15s ease, border-color .15s ease;
-    }
-    textarea:focus, input[type="text"]:focus{
-      border-color: rgba(79,70,229,.55);
-      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
-    }
-    textarea{min-height: 160px; resize: vertical}
-    .muted{color:var(--muted); font-size:13px; line-height:1.35}
-    .row{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      align-items:center;
-      justify-content:flex-start;
-      margin-top:10px;
-    }
-    .tinybtn{
-      border:1px solid var(--line);
-      background:#fff;
-      border-radius: 999px;
-      padding:8px 10px;
-      cursor:pointer;
-      font-size:13px;
-      color:var(--text);
-    }
-    .tinybtn:hover{background:var(--soft)}
-    .codebox{
-      font-family: var(--mono);
-      font-size:12px;
-      background: #0b1220;
-      color: #e5e7eb;
-      border-radius: var(--radius);
-      padding:10px 12px;
-      overflow:auto;
-      max-height: 240px;
-      border: 1px solid rgba(0,0,0,.08);
-    }
-  </style>
+.controls {
+  margin-top: 40px;
+  padding: 20px;
+  border-top: 1px solid #ddd;
+}
+</style>
 </head>
 
 <body>
-  <div class="wrap">
-    <div class="top">
-      <div>Word <b id="wordNum">1</b> of <b id="wordTotal">10</b> · Score: <b id="score">0</b></div>
 
-      <div class="chips">
-        <div class="chip">
-          <span>Session</span>
-          <select id="sessionType">
-            <option value="practice" selected>Practice</option>
-            <option value="assess">Assess</option>
-            <option value="teach">Teach</option>
-          </select>
-        </div>
+<h1>Phoneme Spelling App</h1>
 
-        <div class="chip">
-          <span>Mode</span>
-          <select id="modeSelect">
-            <option value="choice" selected>Grapheme choice</option>
-            <option value="guided">Guided encoding</option>
-            <option value="recall">Full recall</option>
-            <option value="dictation">Dictation sentence</option>
-          </select>
-        </div>
+<div id="auth"></div>
 
-        <div class="chip">
-          <span>Reveal</span>
-          <select id="revealPolicy">
-            <option value="never" selected>Never</option>
-            <option value="after2">After 2 wrong</option>
-            <option value="always">Always (teach)</option>
-          </select>
-        </div>
-      </div>
-    </div>
+<div id="app" style="display:none">
 
-    <div class="center">
-      <div id="sentenceBox" class="sentence" style="display:none;"></div>
-      <div id="mainArea"></div>
+<div>
+  <button onclick="speakWord()">🔊 Listen</button>
+</div>
 
-      <div class="btnRow">
-        <button class="btn secondary" id="speakBtn" type="button" aria-label="Speak" title="Listen">🔊 Listen</button>
-      </div>
+<div class="word-box" id="wordDisplay"></div>
 
-      <div class="feedback" id="feedback" aria-live="polite"></div>
+<input id="answerInput" placeholder="Type spelling..." />
 
-      <div class="btnRow">
-        <button class="btn" id="primaryBtn">Check</button>
-        <button class="btn secondary" id="resetBtn" type="button">Reset</button>
-        <button class="btn secondary" id="nextBtn" type="button" style="display:none;">Next</button>
-        <button class="btn secondary" id="showAnswerBtn" type="button" style="display:none;">Show answer</button>
-      </div>
+<div>
+  <button class="primary" onclick="checkAnswer()">Check</button>
+  <button class="secondary" onclick="nextWord()">Next</button>
+</div>
 
-      <details>
-        <summary>Teacher builder (paste words, add sentences, AI segment suggestions)</summary>
+<div id="feedback"></div>
 
-        <div class="grid">
-          <div>
-            <div class="muted"><b>1) Paste words</b> (one per line). Optional: add a sentence after a pipe <span style="font-family:var(--mono)">|</span>.</div>
-            <textarea id="wordsPaste" placeholder="chisel | Use a chisel to pare the joint.
-mallet | Tap the chisel with a mallet.
-workshop | The workshop must be kept tidy."></textarea>
-            <div class="row">
-              <button class="tinybtn" id="loadFromPaste">Load test from paste</button>
-              <button class="tinybtn" id="saveTest">Save to this browser</button>
-              <button class="tinybtn" id="clearSaved">Clear saved test</button>
-            </div>
-            <div class="muted" style="margin-top:8px;">
-              Tip: “Save” stores locally on this device (no logins yet). Later we’ll add classes/accounts.
-            </div>
-          </div>
+<div class="controls">
+  <h3>Accessibility</h3>
+  Background:
+  <input type="color" onchange="document.body.style.background=this.value">
+  Text:
+  <input type="color" onchange="document.body.style.color=this.value">
+</div>
 
-          <div>
-            <div class="muted"><b>2) AI segmentation loop (no backend needed yet)</b></div>
-            <div class="muted" style="margin-top:6px;">
-              Click <b>Build AI prompt</b>, paste it into ChatGPT, then paste the returned JSON into <b>AI JSON</b> and click <b>Apply segments</b>.
-            </div>
-
-            <div class="row">
-              <button class="tinybtn" id="buildAiPrompt">Build AI prompt</button>
-              <button class="tinybtn" id="applyAiJson">Apply segments</button>
-              <button class="tinybtn" id="exportJson">Export test JSON</button>
-              <button class="tinybtn" id="importJsonBtn">Import test JSON</button>
-            </div>
-
-            <div class="muted" style="margin-top:10px;"><b>AI prompt</b> (copy this):</div>
-            <div class="codebox" id="aiPromptBox">(click “Build AI prompt”)</div>
-
-            <div class="muted" style="margin-top:10px;"><b>AI JSON</b> (paste response here):</div>
-            <textarea id="aiJsonPaste" placeholder='[{"word":"chisel","segments":["ch","i","s","el"]}]'></textarea>
-
-            <div class="muted" style="margin-top:8px;">
-              The app will never show these segments to pupils. They’re used to create the guided sound slots and to check answers.
-            </div>
-          </div>
-        </div>
-      </details>
-    </div>
-  </div>
+</div>
 
 <script>
-  const el = (id)=>document.getElementById(id);
+/* ================================
+   🔐 PASTE YOUR SUPABASE DETAILS HERE
+   ================================ */
 
-  // ---------- Data model ----------
-  // Each item:
-  // { word: "bright", sentence?: "...", segments?: ["b","r","igh","t"], choice?: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" } }
-  const DEFAULT_BANK = [
-    {
-      word: "bright",
-      sentence: "The light is bright.",
-      segments: ["b","r","igh","t"],
-      choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" }
-    },
-    {
-      word: "happy",
-      sentence: "She felt happy after the match.",
-      segments: ["h","a","pp","y"],
-      choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" }
-    },
-    {
-      word: "chief",
-      sentence: "The chief spoke first.",
-      segments: ["ch","ie","f"],
-      choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" }
-    },
-    {
-      word: "train",
-      sentence: "The train arrived late.",
-      segments: ["t","r","ai","n"],
-      choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" }
-    },
-    {
-      word: "spoil",
-      sentence: "Don’t spoil the surprise.",
-      segments: ["s","p","oi","l"],
-      choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" }
-    }
-  ];
+const SUPABASE_URL = "https://hkorcwsbuwreaupdbkaf.supabase.co";
+const SUPABASE_KEY = "sb_publishable_3Qz-fLYy9x5dEPvFVu2dlw_WBlczkBW";
 
-  // Session state
-  let queue = [];
-  let current = 0;
-  let score = 0;
-  let attempts = 0;
-  let selectedIndex = 0;
+/* ================================= */
 
-  // UI refs
-  const mainArea = el("mainArea");
-  const feedback = el("feedback");
-  const primaryBtn = el("primaryBtn");
-  const nextBtn = el("nextBtn");
-  const resetBtn = el("resetBtn");
-  const showAnswerBtn = el("showAnswerBtn");
-  const speakBtn = el("speakBtn");
-  const sentenceBox = el("sentenceBox");
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const sessionTypeEl = el("sessionType");
-  const modeSelectEl = el("modeSelect");
-  const revealPolicyEl = el("revealPolicy");
+let words = [];
+let currentIndex = 0;
 
-  // Teacher builder refs
-  const wordsPasteEl = el("wordsPaste");
-  const loadFromPasteBtn = el("loadFromPaste");
-  const saveTestBtn = el("saveTest");
-  const clearSavedBtn = el("clearSaved");
-  const buildAiPromptBtn = el("buildAiPrompt");
-  const applyAiJsonBtn = el("applyAiJson");
-  const aiPromptBox = el("aiPromptBox");
-  const aiJsonPasteEl = el("aiJsonPaste");
-  const exportJsonBtn = el("exportJson");
-  const importJsonBtn = el("importJsonBtn");
+init();
 
-  // ---------- Storage ----------
-  const LS_KEY = "phoneme_spelling_saved_test_v1";
+async function init() {
 
-  function loadSavedOrDefault(){
-    const saved = localStorage.getItem(LS_KEY);
-    if (saved){
-      try{
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length){
-          return parsed;
-        }
-      }catch{}
-    }
-    return DEFAULT_BANK;
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    showLogin();
+  } else {
+    loadApp();
   }
-
-  function buildQueueFromBank(bank){
-    // For now: 10 items by cycling
-    const out = [];
-    for (let i=0;i<10;i++){
-      out.push(bank[i % bank.length]);
-    }
-    return out;
-  }
-
-  function setTopBar(){
-    el("wordTotal").textContent = queue.length;
-    el("wordNum").textContent = (current + 1);
-    el("score").textContent = score;
-  }
-
-  function clearFeedback(){ feedback.textContent = ""; }
-  function showTryAgain(){ feedback.innerHTML = `Not quite. <strong>Try again.</strong>`; }
-  function showCorrect(){ feedback.innerHTML = `<strong>Correct.</strong>`; }
-  function showReveal(word){ feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`; }
-
-  function revealAllowedNow(){
-    const policy = revealPolicyEl.value; // never | after2 | always
-    if (policy === "always") return true;
-    if (policy === "after2") return attempts >= 2;
-    return false;
-  }
-
-  function setButtonsForState({canNext=false, canShowAnswer=false}){
-    nextBtn.style.display = canNext ? "inline-block" : "none";
-    showAnswerBtn.style.display = canShowAnswer ? "inline-block" : "none";
-  }
-
-  // ---------- Speech ----------
-  function speak(text){
-    if (!("speechSynthesis" in window)){
-      feedback.textContent = "Text-to-speech not supported in this browser.";
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.9;
-    u.pitch = 1.0;
-    u.volume = 1.0;
-
-    const voices = window.speechSynthesis.getVoices?.() || [];
-    const preferred = voices.find(v => /en-GB/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
-    if (preferred) u.voice = preferred;
-
-    window.speechSynthesis.speak(u);
-  }
-
-  function speakCurrent(){
-    const item = queue[current];
-    const mode = modeSelectEl.value;
-    if (mode === "dictation" && item.sentence) speak(item.sentence);
-    else speak(item.word);
-  }
-
-  // ---------- Rendering ----------
-  function render(){
-    attempts = 0;
-    selectedIndex = 0;
-    clearFeedback();
-    setButtonsForState({canNext:false, canShowAnswer:false});
-    primaryBtn.textContent = "Check";
-    setTopBar();
-
-    const item = queue[current];
-    const mode = modeSelectEl.value;
-
-    // sentence panel
-    if (mode === "dictation"){
-      sentenceBox.style.display = "block";
-      const sent = item.sentence || "(No sentence set for this word yet.)";
-      sentenceBox.innerHTML = `<small>Dictation sentence:</small><br>${escapeHtml(sent)}`;
-    } else {
-      sentenceBox.style.display = "none";
-      sentenceBox.textContent = "";
-    }
-
-    if (mode === "choice") renderChoice(item);
-    if (mode === "guided") renderGuidedSegmented(item);
-    if (mode === "recall") renderFullRecall(item);
-    if (mode === "dictation") renderFullRecall(item, true); // dictation uses same UI as recall
-  }
-
-  function renderChoice(item){
-    if (!item.choice){
-      // If no choice mapping exists, fall back to recall
-      renderFullRecall(item);
-      return;
-    }
-    const { parts, targetIndex, options } = item.choice;
-
-    const wordRow = document.createElement("div");
-    wordRow.className = "wordRow";
-
-    parts.forEach((p, i) => {
-      if (i === targetIndex){
-        const pickerWrap = document.createElement("div");
-        pickerWrap.className = "picker";
-
-        const up = document.createElement("button");
-        up.className = "arrowBtn";
-        up.textContent = "˄";
-        up.addEventListener("click", ()=> moveChoice(-1));
-        up.setAttribute("aria-label","Previous option");
-
-        const slot = document.createElement("div");
-        slot.className = "slot active";
-        slot.id = "choiceSlot";
-        slot.textContent = options[selectedIndex];
-
-        const down = document.createElement("button");
-        down.className = "arrowBtn";
-        down.textContent = "˅";
-        down.addEventListener("click", ()=> moveChoice(1));
-        down.setAttribute("aria-label","Next option");
-
-        pickerWrap.appendChild(up);
-        pickerWrap.appendChild(slot);
-        pickerWrap.appendChild(down);
-        wordRow.appendChild(pickerWrap);
-      } else {
-        const span = document.createElement("div");
-        span.className = "letter";
-        span.textContent = p;
-        wordRow.appendChild(span);
-      }
-    });
-
-    mainArea.innerHTML = "";
-    mainArea.appendChild(wordRow);
-
-    window.onkeydown = (e)=>{
-      if (modeSelectEl.value !== "choice") return;
-      if (e.key === "ArrowUp") moveChoice(-1);
-      if (e.key === "ArrowDown") moveChoice(1);
-      if (e.key === "Enter") check();
-    };
-  }
-
-  function moveChoice(delta){
-    const item = queue[current];
-    const opts = item.choice.options;
-    selectedIndex = (selectedIndex + delta + opts.length) % opts.length;
-
-    const slot = el("choiceSlot");
-    if (slot){
-      slot.textContent = opts[selectedIndex];
-      slot.classList.remove("bad","ok","shake");
-      slot.classList.add("active");
-    }
-    clearFeedback();
-    setButtonsForState({canNext:false, canShowAnswer:false});
-  }
-
-  function renderGuidedSegmented(item){
-    // Requires segments. If missing, fall back to recall.
-    if (!Array.isArray(item.segments) || item.segments.length === 0){
-      renderFullRecall(item);
-      return;
-    }
-
-    const box = document.createElement("div");
-    box.className = "inputs";
-
-    const label = document.createElement("div");
-    label.className = "labelRow";
-    label.textContent = "Fill each sound slot (you won’t be shown the answer).";
-
-    const row = document.createElement("div");
-    row.className = "segRow";
-
-    const segCount = item.segments.length;
-
-    for (let i=0;i<segCount;i++){
-      const inp = document.createElement("input");
-      inp.className = "segInput";
-      inp.autocomplete = "off";
-      inp.spellcheck = false;
-      inp.maxLength = 6;
-      inp.dataset.index = String(i);
-      inp.placeholder = "___";
-
-      inp.addEventListener("input", ()=>{
-        inp.classList.remove("bad","ok");
-        clearFeedback();
-        setButtonsForState({canNext:false, canShowAnswer:false});
-      });
-
-      inp.addEventListener("keydown", (e)=>{
-        if (e.key === "Enter"){ e.preventDefault(); check(); return; }
-        if (e.key === "/" || e.key === " "){
-          e.preventDefault();
-          focusSeg(i+1);
-        }
-        if (e.key === "Backspace" && inp.value === ""){
-          focusSeg(i-1);
-        }
-      });
-
-      row.appendChild(inp);
-
-      if (i < segCount - 1){
-        const slash = document.createElement("span");
-        slash.className = "slash";
-        slash.textContent = "/";
-        row.appendChild(slash);
-      }
-    }
-
-    box.appendChild(label);
-    box.appendChild(row);
-
-    mainArea.innerHTML = "";
-    mainArea.appendChild(box);
-
-    setTimeout(()=> focusSeg(0), 40);
-
-    window.onkeydown = (e)=>{
-      if (modeSelectEl.value === "guided" && e.key === "Enter") check();
-    };
-  }
-
-  function renderFullRecall(item, isDictation=false){
-    const box = document.createElement("div");
-    box.className = "inputs";
-
-    const label = document.createElement("div");
-    label.className = "labelRow";
-    label.textContent = isDictation ? "Dictation: listen, then type the whole word." : "Type the whole word (full recall).";
-
-    const input = document.createElement("input");
-    input.className = "recallBox";
-    input.id = "recallInput";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-
-    input.addEventListener("input", ()=>{
-      input.classList.remove("bad","ok","shake");
-      clearFeedback();
-      setButtonsForState({canNext:false, canShowAnswer:false});
-    });
-
-    input.addEventListener("keydown", (e)=>{
-      if (e.key === "Enter"){ e.preventDefault(); check(); }
-    });
-
-    box.appendChild(label);
-    box.appendChild(input);
-
-    mainArea.innerHTML = "";
-    mainArea.appendChild(box);
-
-    setTimeout(()=> input.focus(), 40);
-  }
-
-  function focusSeg(i){
-    const inputs = [...document.querySelectorAll(".segInput")];
-    if (i < 0 || i >= inputs.length) return;
-    inputs[i].focus();
-    inputs[i].select?.();
-  }
-
-  // ---------- Checking ----------
-  function check(){
-    const item = queue[current];
-    const mode = modeSelectEl.value;
-    const sessionType = sessionTypeEl.value; // practice | assess | teach
-
-    // Teach mode: allow “always reveal”
-    if (sessionType === "teach"){
-      revealPolicyEl.value = "always";
-    }
-
-    // CHOICE
-    if (mode === "choice" && item.choice){
-      const slot = el("choiceSlot");
-      const picked = item.choice.options[selectedIndex];
-      const correct = picked === item.choice.answer;
-
-      if (correct){
-        slot.classList.remove("bad","active","shake");
-        slot.classList.add("ok");
-        showCorrect();
-
-        if (attempts === 0) score += 1; // first-try only
-        attempts = 0;
-
-        setTopBar();
-        setButtonsForState({canNext:true, canShowAnswer:false});
-        return;
-      }
-
-      attempts += 1;
-      slot.classList.remove("ok");
-      slot.classList.add("bad","shake");
-      showTryAgain();
-
-      setButtonsForState({canNext:false, canShowAnswer: revealAllowedNow()});
-      setTimeout(()=> slot.classList.remove("shake"), 250);
-      return;
-    }
-
-    // GUIDED (segmented exact match)
-    if (mode === "guided"){
-      const inputs = [...document.querySelectorAll(".segInput")];
-      const correctSegments = Array.isArray(item.segments) ? item.segments.map(s=>s.toLowerCase()) : [];
-      const typedSegments = inputs.map(i => (i.value || "").trim().toLowerCase());
-
-      if (!inputs.length || !correctSegments.length){
-        // fallback to recall
-        return checkRecall(item);
-      }
-
-      const allMatch = typedSegments.length === correctSegments.length &&
-        typedSegments.every((v, i) => v === correctSegments[i]);
-
-      if (allMatch){
-        inputs.forEach(inp => { inp.classList.remove("bad","shake"); inp.classList.add("ok"); });
-        showCorrect();
-
-        if (attempts === 0) score += 1;
-        attempts = 0;
-
-        setTopBar();
-        setButtonsForState({canNext:true, canShowAnswer:false});
-        return;
-      }
-
-      attempts += 1;
-
-      // mark wrong (only where non-empty and wrong)
-      inputs.forEach((inp, i)=>{
-        const v = (inp.value || "").trim().toLowerCase();
-        inp.classList.remove("ok");
-        if (v && v !== correctSegments[i]) inp.classList.add("bad");
-        if (!v) inp.classList.remove("bad");
-      });
-
-      showTryAgain();
-
-      const row = document.querySelector(".segRow");
-      if (row){
-        row.classList.add("shake");
-        setTimeout(()=> row.classList.remove("shake"), 250);
-      }
-
-      setButtonsForState({canNext:false, canShowAnswer: revealAllowedNow()});
-      return;
-    }
-
-    // RECALL / DICTATION (same check)
-    return checkRecall(item);
-  }
-
-  function checkRecall(item){
-    const input = el("recallInput");
-    if (!input) return;
-
-    const typed = (input.value || "").trim().toLowerCase();
-    const correct = (item.word || "").trim().toLowerCase();
-
-    if (typed === correct){
-      input.classList.remove("bad","shake");
-      input.classList.add("ok");
-      showCorrect();
-
-      if (attempts === 0) score += 1;
-      attempts = 0;
-
-      setTopBar();
-      setButtonsForState({canNext:true, canShowAnswer:false});
-      return;
-    }
-
-    attempts += 1;
-    input.classList.remove("ok");
-    input.classList.add("bad","shake");
-    showTryAgain();
-    setTimeout(()=> input.classList.remove("shake"), 250);
-
-    setButtonsForState({canNext:false, canShowAnswer: revealAllowedNow()});
-  }
-
-  function revealAnswer(){
-    const item = queue[current];
-    showReveal(item.word);
-  }
-
-  function next(){
-    current = (current + 1) % queue.length;
-    render();
-  }
-
-  function reset(){
-    render();
-  }
-
-  // ---------- Teacher builder ----------
-  function parsePaste(text){
-    // lines: "word | sentence"
-    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-    const items = [];
-    for (const line of lines){
-      const parts = line.split("|").map(s=>s.trim());
-      const word = parts[0];
-      if (!word) continue;
-      const sentence = parts[1] ? parts.slice(1).join(" | ") : "";
-      items.push({ word, sentence: sentence || undefined });
-    }
-    return items;
-  }
-
-  function loadFromPaste(){
-    const items = parsePaste(wordsPasteEl.value || "");
-    if (!items.length){
-      feedback.textContent = "Paste at least 1 word (one per line).";
-      return;
-    }
-    // merge with any existing default “choice” mappings for matching words
-    const merged = items.map(it=>{
-      const found = DEFAULT_BANK.find(d => d.word.toLowerCase() === it.word.toLowerCase());
-      return {
-        word: it.word,
-        sentence: it.sentence || found?.sentence,
-        segments: found?.segments,   // may be undefined until AI applied
-        choice: found?.choice        // optional
-      };
-    });
-
-    const bank = merged;
-    queue = buildQueueFromBank(bank);
-    current = 0;
-    score = 0;
-    render();
-    feedback.textContent = "Loaded test from paste.";
-  }
-
-  function saveToBrowser(){
-    // Save current BANK source by reconstructing from queue base (we’ll store unique words)
-    const unique = [];
-    const seen = new Set();
-    for (const w of queue){
-      const key = (w.word || "").toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      unique.push(w);
-    }
-    localStorage.setItem(LS_KEY, JSON.stringify(unique, null, 2));
-    feedback.textContent = "Saved to this browser.";
-  }
-
-  function clearSaved(){
-    localStorage.removeItem(LS_KEY);
-    feedback.textContent = "Cleared saved test.";
-  }
-
-  function buildAiPrompt(){
-    // Build a strict JSON schema prompt teachers can use.
-    // We ask for grapheme segments used for spelling practice (not phonetic IPA).
-    const unique = [];
-    const seen = new Set();
-    for (const w of queue){
-      const key = (w.word || "").trim();
-      if (!key) continue;
-      const k = key.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      unique.push(key);
-    }
-
-    const prompt =
-`You are helping a teacher build a spelling app.
-
-Task:
-For each word below, split the written word into grapheme chunks suitable for spelling practice.
-Return STRICT JSON ONLY (no commentary), as an array of objects:
-[
-  {"word":"bright","segments":["b","r","igh","t"]},
-  ...
-]
-
-Rules:
-- segments must concatenate to exactly the original word (case-insensitive).
-- Use grapheme chunks that reflect common spelling patterns (e.g., ch, sh, th, igh, ee, ai, oa, oo, ea, ou, ow, igh, tion, sion, ture, etc.).
-- Keep segments reasonably sized (1–4 letters typically).
-- If unsure, choose the most instructionally useful split.
-
-Words:
-${unique.map(w=>`- ${w}`).join("\n")}
-`;
-
-    aiPromptBox.textContent = prompt;
-    feedback.textContent = "AI prompt built. Copy it into ChatGPT and paste the JSON back.";
-  }
-
-  function applyAiJson(){
-    let arr;
-    try{
-      arr = JSON.parse(aiJsonPasteEl.value || "[]");
-    }catch(e){
-      feedback.textContent = "AI JSON couldn't be parsed. Make sure it’s valid JSON.";
-      return;
-    }
-    if (!Array.isArray(arr) || !arr.length){
-      feedback.textContent = "AI JSON is empty. Paste the array of {word, segments}.";
-      return;
-    }
-
-    const map = new Map();
-    for (const obj of arr){
-      if (!obj || typeof obj.word !== "string" || !Array.isArray(obj.segments)) continue;
-      map.set(obj.word.toLowerCase().trim(), obj.segments.map(s=>String(s)));
-    }
-
-    // apply into queue items (and future unique bank)
-    let applied = 0;
-    queue = queue.map(it=>{
-      const seg = map.get((it.word||"").toLowerCase().trim());
-      if (seg && seg.join("").toLowerCase() === (it.word||"").toLowerCase()){
-        applied += 1;
-        return { ...it, segments: seg };
-      }
-      return it;
-    });
-
-    if (applied === 0){
-      feedback.textContent = "No segments applied. Check the words match exactly.";
-      return;
-    }
-
-    feedback.textContent = `Applied segments to ${applied} word(s).`;
-    render();
-  }
-
-  function exportJson(){
-    const unique = [];
-    const seen = new Set();
-    for (const w of queue){
-      const key = (w.word || "").toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      unique.push(w);
-    }
-    const json = JSON.stringify(unique, null, 2);
-    aiJsonPasteEl.value = json;
-    feedback.textContent = "Exported test JSON into the AI JSON box (copy it).";
-  }
-
-  function importJson(){
-    let arr;
-    try{
-      arr = JSON.parse(aiJsonPasteEl.value || "[]");
-    }catch{
-      feedback.textContent = "Import JSON couldn't be parsed. Paste valid JSON into AI JSON box first.";
-      return;
-    }
-    if (!Array.isArray(arr) || !arr.length){
-      feedback.textContent = "Import JSON is empty.";
-      return;
-    }
-    // basic validation
-    const cleaned = arr
-      .filter(o => o && typeof o.word === "string" && o.word.trim().length)
-      .map(o => ({
-        word: o.word.trim(),
-        sentence: typeof o.sentence === "string" ? o.sentence : o.sentence,
-        segments: Array.isArray(o.segments) ? o.segments.map(s=>String(s)) : undefined,
-        choice: o.choice || undefined
-      }));
-
-    queue = buildQueueFromBank(cleaned);
-    current = 0;
-    score = 0;
-    render();
-    feedback.textContent = "Imported test JSON and loaded it.";
-  }
-
-  function escapeHtml(str){
-    return String(str)
-      .replaceAll("&","&amp;")
-      .replaceAll("<","&lt;")
-      .replaceAll(">","&gt;")
-      .replaceAll('"',"&quot;")
-      .replaceAll("'","&#039;");
-  }
-
-  // ---------- Events ----------
-  primaryBtn.addEventListener("click", check);
-  nextBtn.addEventListener("click", next);
-  resetBtn.addEventListener("click", reset);
-  showAnswerBtn.addEventListener("click", revealAnswer);
-  speakBtn.addEventListener("click", speakCurrent);
-
-  modeSelectEl.addEventListener("change", ()=> render());
-  sessionTypeEl.addEventListener("change", ()=> render());
-  revealPolicyEl.addEventListener("change", ()=> {
-    // do nothing special; reveal shows when allowed
-    setButtonsForState({canNext:false, canShowAnswer:false});
-    clearFeedback();
+}
+
+function showLogin() {
+  document.getElementById("auth").innerHTML = `
+    <button class="primary" onclick="login()">Sign in with Google</button>
+  `;
+}
+
+async function login() {
+  await supabase.auth.signInWithOAuth({
+    provider: 'google'
   });
+}
 
-  showAnswerBtn.addEventListener("click", ()=> {
-    if (revealAllowedNow()) revealAnswer();
-  });
+async function loadApp() {
 
-  // Teacher builder
-  loadFromPasteBtn.addEventListener("click", loadFromPaste);
-  saveTestBtn.addEventListener("click", saveToBrowser);
-  clearSavedBtn.addEventListener("click", clearSaved);
-  buildAiPromptBtn.addEventListener("click", buildAiPrompt);
-  applyAiJsonBtn.addEventListener("click", applyAiJson);
-  exportJsonBtn.addEventListener("click", exportJson);
-  importJsonBtn.addEventListener("click", importJson);
+  document.getElementById("auth").style.display = "none";
+  document.getElementById("app").style.display = "block";
 
-  // ---------- Init ----------
-  const startingBank = loadSavedOrDefault();
-  queue = buildQueueFromBank(startingBank);
-  render();
+  const { data } = await supabase
+    .from("words")
+    .select("*");
 
-  // If reveal policy is "always" because teach mode selected, keep it aligned
-  if (sessionTypeEl.value === "teach") revealPolicyEl.value = "always";
+  words = data || [];
+
+  displayWord();
+}
+
+function displayWord() {
+  if (!words.length) {
+    document.getElementById("wordDisplay").innerText = "No words found.";
+    return;
+  }
+
+  document.getElementById("wordDisplay").innerText = words[currentIndex].word;
+  document.getElementById("answerInput").value = "";
+  document.getElementById("feedback").innerText = "";
+}
+
+function checkAnswer() {
+  const input = document.getElementById("answerInput").value.trim().toLowerCase();
+  const correct = words[currentIndex].word.toLowerCase();
+
+  if (input === correct) {
+    document.getElementById("feedback").innerHTML =
+      `<p class="correct">Correct ✔</p>`;
+  } else {
+    document.getElementById("feedback").innerHTML =
+      `<p class="wrong">Try again</p>`;
+  }
+}
+
+function nextWord() {
+  currentIndex++;
+  if (currentIndex >= words.length) currentIndex = 0;
+  displayWord();
+}
+
+function speakWord() {
+  const utterance = new SpeechSynthesisUtterance(words[currentIndex].word);
+  speechSynthesis.speak(utterance);
+}
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (session) loadApp();
+});
 </script>
+
 </body>
 </html>
