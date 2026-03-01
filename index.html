@@ -521,8 +521,15 @@ function isLight(hex){
 }
 
 function applyTheme(bg, text){
+  // Prevent identical or near-identical colours
+  if (bg.toLowerCase() === text.toLowerCase()){
+    bg = "#ffffff";
+    text = "#111827";
+  }
+
   document.documentElement.style.setProperty("--bg", bg);
   document.documentElement.style.setProperty("--text", text);
+
   const muted = (isLight(text) ? "#d1d5db" : "#6b7280");
   document.documentElement.style.setProperty("--muted", muted);
 }
