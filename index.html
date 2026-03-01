@@ -1,189 +1,914 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Phoneme Spelling App</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Phoneme Spelling App</title>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<style>
-body {
-  font-family: system-ui;
-  text-align: center;
-  padding: 40px;
-  transition: background 0.3s, color 0.3s;
-}
+  <style>
+    :root{
+      --bg:#ffffff;
+      --text:#111827;
+      --muted:#6b7280;
+      --line:#e5e7eb;
+      --soft:#f3f4f6;
+      --accent:#4f46e5;
+      --ok:#16a34a;
+      --bad:#ef4444;
+      --btn:#111827;
+      --btnText:#ffffff;
+      --shadow: 0 10px 30px rgba(17,24,39,.08);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      --radius: 12px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:28px 16px;
+      transition: background .15s ease, color .15s ease;
+    }
+    .wrap{ width:min(980px, 100%); }
 
-h1 { font-weight: 600; }
+    .card{
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      background:#fff;
+      padding:18px;
+      box-shadow: var(--shadow);
+    }
 
-.word-box {
-  font-size: 32px;
-  letter-spacing: 8px;
-  margin: 30px 0;
-}
+    .top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:16px;
+      color:var(--muted);
+      font-size:14px;
+    }
+    .top b{color:var(--text); font-weight:650}
 
-input {
-  font-size: 20px;
-  padding: 10px;
-  width: 260px;
-  text-align: center;
-}
+    .chips{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+    .chip{
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:7px 10px;
+      background:#fff;
+      display:flex;
+      gap:8px;
+      align-items:center;
+      font-size:13px;
+      color:var(--muted);
+    }
+    .chip select{
+      border:none;
+      outline:none;
+      font-size:13px;
+      background:transparent;
+      color:var(--text);
+      font-weight:650;
+      cursor:pointer;
+    }
+    .chip input[type="color"]{
+      width:28px;
+      height:22px;
+      padding:0;
+      border:none;
+      background:transparent;
+      cursor:pointer;
+    }
 
-button {
-  padding: 12px 20px;
-  margin: 10px;
-  font-size: 16px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-}
+    .center{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:12px;
+    }
 
-.primary {
-  background: #0f172a;
-  color: white;
-}
+    .btnRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:center;
+      align-items:center;
+      margin-top:6px;
+    }
+    .btn{
+      height:56px;
+      border-radius: var(--radius);
+      border:none;
+      background: var(--btn);
+      color: var(--btnText);
+      font-size:16px;
+      font-weight:650;
+      cursor:pointer;
+      box-shadow: var(--shadow);
+      padding:0 18px;
+      transition: transform .05s ease, opacity .15s ease;
+    }
+    .btn:active{transform: translateY(1px)}
+    .btn.secondary{
+      background:#fff;
+      color: var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+      height:44px;
+      font-size:14px;
+      font-weight:600;
+    }
+    .btn.secondary:hover{background:var(--soft)}
 
-.secondary {
-  background: #e2e8f0;
-}
+    .feedback{
+      min-height:22px;
+      color: var(--muted);
+      font-size:15px;
+      text-align:center;
+    }
+    .feedback strong{color:var(--text)}
 
-.correct { color: #15803d; }
-.wrong { color: #b91c1c; }
+    .sentence{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      padding:10px 12px;
+      background:#fff;
+      color: var(--text);
+      font-size:15px;
+      line-height:1.45;
+      display:none;
+    }
+    .sentence small{color:var(--muted)}
 
-.controls {
-  margin-top: 40px;
-  padding: 20px;
-  border-top: 1px solid #ddd;
-}
-</style>
+    /* Guided segmented inputs */
+    .inputs{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:10px;
+      width:100%;
+    }
+    .labelRow{
+      width:100%;
+      text-align:center;
+      color: var(--muted);
+      font-size:14px;
+      padding: 0 6px;
+      line-height:1.35;
+    }
+    .segRow{
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .segInput{
+      width:112px;
+      height:56px;
+      border-radius: var(--radius);
+      border:2px solid var(--line);
+      background:#fff;
+      font-family: var(--mono);
+      font-size:20px;
+      text-align:center;
+      letter-spacing:.06em;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .segInput:focus{
+      outline:none;
+      border-color: rgba(79,70,229,.55);
+      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
+    }
+    .segInput.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
+    .segInput.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+    .slash{
+      font-family: var(--mono);
+      color:#9ca3af;
+      font-size:20px;
+      user-select:none;
+    }
+
+    /* Recall input */
+    .recallBox{
+      width:min(520px, 92%);
+      height:56px;
+      border-radius: var(--radius);
+      border:2px solid var(--line);
+      background:#fff;
+      font-family: var(--mono);
+      font-size:22px;
+      text-align:center;
+      letter-spacing:.08em;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .recallBox:focus{
+      outline:none;
+      border-color: rgba(79,70,229,.55);
+      box-shadow: 0 0 0 6px rgba(79,70,229,.10);
+    }
+    .recallBox.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
+    .recallBox.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+
+    .tiny{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.35;
+      text-align:center;
+    }
+    .shake{ animation: shake .18s linear 0s 2; }
+    @keyframes shake{
+      0%{transform: translateX(0)}
+      25%{transform: translateX(-4px)}
+      50%{transform: translateX(4px)}
+      75%{transform: translateX(-3px)}
+      100%{transform: translateX(0)}
+    }
+
+    .err{
+      border:1px solid rgba(239,68,68,.4);
+      background: rgba(239,68,68,.06);
+      padding:10px 12px;
+      border-radius: var(--radius);
+      color: var(--text);
+      width:100%;
+      display:none;
+    }
+    code{font-family:var(--mono); font-size:12px}
+
+    @media (max-width:520px){
+      .segInput{width:92px}
+    }
+  </style>
 </head>
 
 <body>
+  <div class="wrap">
 
-<h1>Phoneme Spelling App</h1>
+    <!-- AUTH VIEW (B) -->
+    <div id="authView" class="card" style="display:none; max-width:520px; margin: 0 auto;">
+      <div style="font-size:22px;font-weight:700; margin-bottom:6px;">Phoneme Spelling</div>
+      <div style="color:var(--muted); line-height:1.45; margin-bottom:14px;">
+        Continue with Google to create tests, assign them to classes, and view results.
+      </div>
 
-<div id="auth"></div>
+      <button class="btn" id="googleBtn" type="button" style="width:100%;">Continue with Google</button>
 
-<div id="app" style="display:none">
+      <div class="tiny" style="margin-top:12px;">
+        For now this is teacher login only. Pupil logins (class code + pupil code) come next.
+      </div>
 
-<div>
-  <button onclick="speakWord()">🔊 Listen</button>
-</div>
+      <div id="authError" class="err" style="margin-top:12px;"></div>
+    </div>
 
-<div class="word-box" id="wordDisplay"></div>
+    <!-- APP VIEW -->
+    <div id="appView" style="display:none;">
+      <div class="top">
+        <div>
+          Word <b id="wordNum">1</b> of <b id="wordTotal">0</b> · Score: <b id="score">0</b>
+        </div>
 
-<input id="answerInput" placeholder="Type spelling..." />
+        <div class="chips">
+          <div class="chip">
+            <span>Mode</span>
+            <select id="modeSelect">
+              <option value="guided" selected>Guided encoding</option>
+              <option value="recall">Full recall</option>
+              <option value="dictation">Dictation sentence</option>
+            </select>
+          </div>
 
-<div>
-  <button class="primary" onclick="checkAnswer()">Check</button>
-  <button class="secondary" onclick="nextWord()">Next</button>
-</div>
+          <div class="chip">
+            <span>Reveal</span>
+            <select id="revealPolicy">
+              <option value="never" selected>Never</option>
+              <option value="after2">After 2 wrong</option>
+              <option value="always">Always (teach)</option>
+            </select>
+          </div>
 
-<div id="feedback"></div>
+          <div class="chip">
+            <span>BG</span>
+            <input id="bgColor" type="color" value="#ffffff" aria-label="Background colour">
+          </div>
 
-<div class="controls">
-  <h3>Accessibility</h3>
-  Background:
-  <input type="color" onchange="document.body.style.background=this.value">
-  Text:
-  <input type="color" onchange="document.body.style.color=this.value">
-</div>
+          <div class="chip">
+            <span>Text</span>
+            <input id="textColor" type="color" value="#111827" aria-label="Text colour">
+          </div>
 
-</div>
+          <button class="btn secondary" id="resetTheme" type="button">Reset theme</button>
+          <button class="btn secondary" id="signOutBtn" type="button">Sign out</button>
+        </div>
+      </div>
+
+      <div class="center">
+        <div id="appError" class="err"></div>
+
+        <div id="sentenceBox" class="sentence"></div>
+
+        <div id="mainArea"></div>
+
+        <div class="btnRow">
+          <button class="btn secondary" id="speakBtn" type="button">🔊 Listen</button>
+        </div>
+
+        <div class="feedback" id="feedback" aria-live="polite"></div>
+
+        <div class="btnRow">
+          <button class="btn" id="primaryBtn" type="button">Check</button>
+          <button class="btn secondary" id="resetBtn" type="button">Reset</button>
+          <button class="btn secondary" id="nextBtn" type="button" style="display:none;">Next</button>
+          <button class="btn secondary" id="showAnswerBtn" type="button" style="display:none;">Show answer</button>
+        </div>
+
+        <div class="tiny">
+          Data source: <b>tests/test_words</b> in Supabase. If you haven’t created a test yet, it will fall back to demo words.
+        </div>
+      </div>
+    </div>
+
+  </div>
 
 <script>
-/* ================================
-   🔐 PASTE YOUR SUPABASE DETAILS HERE
-   ================================ */
-
+/* =========================================================
+   1) SUPABASE CONFIG  (PASTE YOUR DETAILS HERE)
+   ========================================================= */
 const SUPABASE_URL = "https://hkorcwsbuwreaupdbkaf.supabase.co";
-const SUPABASE_KEY = "sb_publishable_3Qz-fLYy9x5dEPvFVu2dlw_WBlczkBW";
 
-/* ================================= */
+/* Paste your sb_publishable_... key from:
+   Supabase Dashboard → Settings → API Keys → Publishable key */
+const SUPABASE_KEY = "PASTE_YOUR_PUBLISHABLE_KEY_HERE";
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+/* IMPORTANT FIX:
+   The CDN creates a global called `supabase`, so we do NOT
+   declare `const supabase = ...` (that causes the crash).
+   Use `supabaseClient` instead. */
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let words = [];
-let currentIndex = 0;
+/* =========================================================
+   2) DOM HELPERS
+   ========================================================= */
+const el = (id)=>document.getElementById(id);
 
-init();
+const authView = el("authView");
+const appView  = el("appView");
+const googleBtn = el("googleBtn");
+const signOutBtn = el("signOutBtn");
 
-async function init() {
+const authError = el("authError");
+const appError  = el("appError");
 
-  const { data: { session } } = await supabase.auth.getSession();
+const modeSelectEl = el("modeSelect");
+const revealPolicyEl = el("revealPolicy");
 
-  if (!session) {
-    showLogin();
-  } else {
-    loadApp();
+const sentenceBox = el("sentenceBox");
+const mainArea = el("mainArea");
+const feedback = el("feedback");
+
+const primaryBtn = el("primaryBtn");
+const nextBtn = el("nextBtn");
+const resetBtn = el("resetBtn");
+const showAnswerBtn = el("showAnswerBtn");
+const speakBtn = el("speakBtn");
+
+const bgColorEl = el("bgColor");
+const textColorEl = el("textColor");
+const resetThemeBtn = el("resetTheme");
+
+const wordNumEl = el("wordNum");
+const wordTotalEl = el("wordTotal");
+const scoreEl = el("score");
+
+/* =========================================================
+   3) THEME (pupil accessibility)
+   ========================================================= */
+const THEME_KEY = "phoneme_theme_v1";
+
+function isLight(hex){
+  const h = String(hex).replace("#","").trim();
+  if (h.length !== 6) return false;
+  const r = parseInt(h.slice(0,2),16);
+  const g = parseInt(h.slice(2,4),16);
+  const b = parseInt(h.slice(4,6),16);
+  const brightness = (r*299 + g*587 + b*114) / 1000;
+  return brightness > 170;
+}
+
+function applyTheme(bg, text){
+  document.documentElement.style.setProperty("--bg", bg);
+  document.documentElement.style.setProperty("--text", text);
+  // Keep muted readable if user picks very bright text colours
+  const muted = (isLight(text) ? "#d1d5db" : "#6b7280");
+  document.documentElement.style.setProperty("--muted", muted);
+}
+
+function loadTheme(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(THEME_KEY) || "null");
+    if (saved?.bg && saved?.text){
+      bgColorEl.value = saved.bg;
+      textColorEl.value = saved.text;
+      applyTheme(saved.bg, saved.text);
+      return;
+    }
+  }catch{}
+  applyTheme(bgColorEl.value, textColorEl.value);
+}
+
+function saveTheme(){
+  const bg = bgColorEl.value;
+  const text = textColorEl.value;
+  localStorage.setItem(THEME_KEY, JSON.stringify({bg, text}));
+  applyTheme(bg, text);
+}
+
+function resetTheme(){
+  const bg = "#ffffff";
+  const text = "#111827";
+  bgColorEl.value = bg;
+  textColorEl.value = text;
+  localStorage.removeItem(THEME_KEY);
+  applyTheme(bg, text);
+}
+
+/* =========================================================
+   4) APP DATA
+   ========================================================= */
+const DEMO_WORDS = [
+  { word: "bright", sentence: "The light is bright.", segments: ["b","r","igh","t"] },
+  { word: "happy",  sentence: "She felt happy after the match.", segments: ["h","a","pp","y"] },
+  { word: "chief",  sentence: "The chief spoke first.", segments: ["ch","ie","f"] },
+  { word: "train",  sentence: "The train arrived late.", segments: ["t","r","ai","n"] },
+  { word: "spoil",  sentence: "Don’t spoil the surprise.", segments: ["s","p","oi","l"] }
+];
+
+let bank = [...DEMO_WORDS];     // loaded words
+let current = 0;
+let score = 0;
+let attempts = 0;
+
+/* =========================================================
+   5) UI UTILS
+   ========================================================= */
+function setTopBar(){
+  wordTotalEl.textContent = bank.length;
+  wordNumEl.textContent = String(current + 1);
+  scoreEl.textContent = String(score);
+}
+
+function clearFeedback(){ feedback.textContent = ""; }
+function showTryAgain(){ feedback.innerHTML = `Not quite. <strong>Try again.</strong>`; }
+function showCorrect(){ feedback.innerHTML = `<strong>Correct.</strong>`; }
+function showReveal(word){ feedback.innerHTML = `Correct spelling: <strong>${escapeHtml(word)}</strong>`; }
+
+function revealAllowedNow(){
+  const policy = revealPolicyEl.value; // never | after2 | always
+  if (policy === "always") return true;
+  if (policy === "after2") return attempts >= 2;
+  return false;
+}
+
+function setButtonsForState({canNext=false, canShowAnswer=false}){
+  nextBtn.style.display = canNext ? "inline-block" : "none";
+  showAnswerBtn.style.display = canShowAnswer ? "inline-block" : "none";
+}
+
+function setError(node, msg){
+  if (!msg){
+    node.style.display = "none";
+    node.textContent = "";
+    return;
   }
+  node.style.display = "block";
+  node.textContent = msg;
 }
 
-function showLogin() {
-  document.getElementById("auth").innerHTML = `
-    <button class="primary" onclick="login()">Sign in with Google</button>
-  `;
+/* =========================================================
+   6) SPEECH
+   ========================================================= */
+function speak(text){
+  if (!("speechSynthesis" in window)){
+    setError(appError, "Text-to-speech not supported in this browser.");
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 0.9;
+  u.pitch = 1.0;
+  u.volume = 1.0;
+
+  const voices = window.speechSynthesis.getVoices?.() || [];
+  const preferred = voices.find(v => /en-GB/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
+  if (preferred) u.voice = preferred;
+
+  window.speechSynthesis.speak(u);
 }
 
-async function login() {
-  await supabase.auth.signInWithOAuth({
-    provider: 'google'
-  });
+function speakCurrent(){
+  const item = bank[current];
+  const mode = modeSelectEl.value;
+  if (mode === "dictation" && item.sentence) speak(item.sentence);
+  else speak(item.word);
 }
 
-async function loadApp() {
+/* =========================================================
+   7) RENDER MODES
+   ========================================================= */
+function render(){
+  attempts = 0;
+  clearFeedback();
+  setButtonsForState({canNext:false, canShowAnswer:false});
+  setError(appError, null);
 
-  document.getElementById("auth").style.display = "none";
-  document.getElementById("app").style.display = "block";
+  setTopBar();
 
-  const { data } = await supabase
-    .from("words")
-    .select("*");
+  const item = bank[current];
+  const mode = modeSelectEl.value;
 
-  words = data || [];
+  if (mode === "dictation"){
+    sentenceBox.style.display = "block";
+    sentenceBox.innerHTML = `<small>Dictation sentence:</small><br>${escapeHtml(item.sentence || "(No sentence set)")}`;
+  } else {
+    sentenceBox.style.display = "none";
+    sentenceBox.textContent = "";
+  }
 
-  displayWord();
+  if (mode === "guided") renderGuided(item);
+  else renderRecall(item); // recall + dictation use same UI (single input)
 }
 
-function displayWord() {
-  if (!words.length) {
-    document.getElementById("wordDisplay").innerText = "No words found.";
+function renderGuided(item){
+  if (!Array.isArray(item.segments) || item.segments.length === 0){
+    renderRecall(item);
     return;
   }
 
-  document.getElementById("wordDisplay").innerText = words[currentIndex].word;
-  document.getElementById("answerInput").value = "";
-  document.getElementById("feedback").innerText = "";
+  const box = document.createElement("div");
+  box.className = "inputs";
+
+  const label = document.createElement("div");
+  label.className = "labelRow";
+  label.textContent = "Spell the word by filling each sound slot.";
+
+  const row = document.createElement("div");
+  row.className = "segRow";
+
+  for (let i=0;i<item.segments.length;i++){
+    const inp = document.createElement("input");
+    inp.className = "segInput";
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    inp.maxLength = 6;
+    inp.placeholder = "___";
+    inp.dataset.index = String(i);
+
+    inp.addEventListener("input", ()=>{
+      inp.classList.remove("bad","ok");
+      clearFeedback();
+      setButtonsForState({canNext:false, canShowAnswer:false});
+    });
+
+    inp.addEventListener("keydown", (e)=>{
+      if (e.key === "Enter"){ e.preventDefault(); check(); return; }
+      if (e.key === "/" || e.key === " "){
+        e.preventDefault();
+        focusSeg(i+1);
+      }
+      if (e.key === "Backspace" && inp.value === ""){
+        focusSeg(i-1);
+      }
+    });
+
+    row.appendChild(inp);
+
+    if (i < item.segments.length - 1){
+      const slash = document.createElement("span");
+      slash.className = "slash";
+      slash.textContent = "/";
+      row.appendChild(slash);
+    }
+  }
+
+  box.appendChild(label);
+  box.appendChild(row);
+
+  mainArea.innerHTML = "";
+  mainArea.appendChild(box);
+
+  setTimeout(()=> focusSeg(0), 40);
 }
 
-function checkAnswer() {
-  const input = document.getElementById("answerInput").value.trim().toLowerCase();
-  const correct = words[currentIndex].word.toLowerCase();
+function renderRecall(item){
+  const box = document.createElement("div");
+  box.className = "inputs";
 
-  if (input === correct) {
-    document.getElementById("feedback").innerHTML =
-      `<p class="correct">Correct ✔</p>`;
+  const label = document.createElement("div");
+  label.className = "labelRow";
+  label.textContent = (modeSelectEl.value === "dictation")
+    ? "Listen, then type the whole word."
+    : "Type the whole word (full recall).";
+
+  const input = document.createElement("input");
+  input.className = "recallBox";
+  input.id = "recallInput";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+
+  input.addEventListener("input", ()=>{
+    input.classList.remove("bad","ok","shake");
+    clearFeedback();
+    setButtonsForState({canNext:false, canShowAnswer:false});
+  });
+
+  input.addEventListener("keydown", (e)=>{
+    if (e.key === "Enter"){ e.preventDefault(); check(); }
+  });
+
+  box.appendChild(label);
+  box.appendChild(input);
+
+  mainArea.innerHTML = "";
+  mainArea.appendChild(box);
+
+  setTimeout(()=> input.focus(), 40);
+}
+
+function focusSeg(i){
+  const inputs = [...document.querySelectorAll(".segInput")];
+  if (i < 0 || i >= inputs.length) return;
+  inputs[i].focus();
+  inputs[i].select?.();
+}
+
+/* =========================================================
+   8) CHECKING + TRY AGAIN + OPTIONAL REVEAL
+   ========================================================= */
+function check(){
+  const item = bank[current];
+  const mode = modeSelectEl.value;
+
+  if (mode === "guided"){
+    const inputs = [...document.querySelectorAll(".segInput")];
+    const correctSegments = item.segments.map(s=>String(s).toLowerCase());
+    const typedSegments = inputs.map(i => (i.value || "").trim().toLowerCase());
+
+    const allMatch = typedSegments.length === correctSegments.length &&
+      typedSegments.every((v, i) => v === correctSegments[i]);
+
+    if (allMatch){
+      inputs.forEach(inp => { inp.classList.remove("bad","shake"); inp.classList.add("ok"); });
+      showCorrect();
+      if (attempts === 0) score += 1;
+      attempts = 0;
+      setTopBar();
+      setButtonsForState({canNext:true, canShowAnswer:false});
+      return;
+    }
+
+    attempts += 1;
+
+    inputs.forEach((inp, i)=>{
+      const v = (inp.value || "").trim().toLowerCase();
+      inp.classList.remove("ok");
+      if (v && v !== correctSegments[i]) inp.classList.add("bad");
+      if (!v) inp.classList.remove("bad");
+    });
+
+    showTryAgain();
+    const row = document.querySelector(".segRow");
+    if (row){
+      row.classList.add("shake");
+      setTimeout(()=> row.classList.remove("shake"), 250);
+    }
+
+    setButtonsForState({canNext:false, canShowAnswer: revealAllowedNow()});
+    return;
+  }
+
+  const input = el("recallInput");
+  if (!input) return;
+
+  const typed = (input.value || "").trim().toLowerCase();
+  const correct = (item.word || "").trim().toLowerCase();
+
+  if (typed === correct){
+    input.classList.remove("bad","shake");
+    input.classList.add("ok");
+    showCorrect();
+    if (attempts === 0) score += 1;
+    attempts = 0;
+    setTopBar();
+    setButtonsForState({canNext:true, canShowAnswer:false});
+    return;
+  }
+
+  attempts += 1;
+  input.classList.remove("ok");
+  input.classList.add("bad","shake");
+  showTryAgain();
+  setTimeout(()=> input.classList.remove("shake"), 250);
+
+  setButtonsForState({canNext:false, canShowAnswer: revealAllowedNow()});
+}
+
+function revealAnswer(){
+  if (!revealAllowedNow()) return;
+  showReveal(bank[current].word);
+}
+
+function next(){
+  current = (current + 1) % bank.length;
+  render();
+}
+
+function reset(){
+  render();
+}
+
+/* =========================================================
+   9) AUTH UI (B page)
+   ========================================================= */
+async function signInWithGoogle(){
+  setError(authError, null);
+  const redirectTo = window.location.origin + window.location.pathname;
+
+  const { error } = await supabaseClient.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo }
+  });
+
+  if (error) setError(authError, error.message);
+}
+
+async function signOut(){
+  await supabaseClient.auth.signOut();
+}
+
+async function refreshAuthUI(){
+  if (!SUPABASE_KEY || SUPABASE_KEY.includes("PASTE_YOUR_PUBLISHABLE_KEY_HERE")){
+    setError(authError, "Paste your Supabase publishable key into SUPABASE_KEY in index.html, then commit to GitHub.");
+    authView.style.display = "block";
+    appView.style.display = "none";
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error){
+    setError(authError, error.message);
+    authView.style.display = "block";
+    appView.style.display = "none";
+    return;
+  }
+
+  const session = data.session;
+
+  if (session?.user){
+    authView.style.display = "none";
+    appView.style.display = "block";
+
+    await ensureTeacherProfile(session.user);
+    await loadWordsFromDBOrFallback();
+
+    render();
   } else {
-    document.getElementById("feedback").innerHTML =
-      `<p class="wrong">Try again</p>`;
+    authView.style.display = "block";
+    appView.style.display = "none";
   }
 }
 
-function nextWord() {
-  currentIndex++;
-  if (currentIndex >= words.length) currentIndex = 0;
-  displayWord();
+/* =========================================================
+   10) DB LOAD (tests/test_words)
+   ========================================================= */
+async function loadWordsFromDBOrFallback(){
+  setError(appError, null);
+
+  try{
+    const { data: tests, error: tErr } = await supabaseClient
+      .from("tests")
+      .select("id,title,created_at")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (tErr) throw tErr;
+
+    if (!tests || tests.length === 0){
+      bank = [...DEMO_WORDS];
+      current = 0;
+      score = 0;
+      setError(appError, "No tests found in Supabase yet. Using demo words for now.");
+      return;
+    }
+
+    const testId = tests[0].id;
+
+    const { data: words, error: wErr } = await supabaseClient
+      .from("test_words")
+      .select("position,word,sentence,segments")
+      .eq("test_id", testId)
+      .order("position", { ascending: true });
+
+    if (wErr) throw wErr;
+
+    if (!words || words.length === 0){
+      bank = [...DEMO_WORDS];
+      current = 0;
+      score = 0;
+      setError(appError, "Test exists but has no words. Using demo words for now.");
+      return;
+    }
+
+    bank = words.map(w => ({
+      word: w.word,
+      sentence: w.sentence || "",
+      segments: Array.isArray(w.segments) ? w.segments : []
+    }));
+
+    current = 0;
+    score = 0;
+  }catch(err){
+    console.error(err);
+    bank = [...DEMO_WORDS];
+    current = 0;
+    score = 0;
+    setError(appError, "Couldn’t load words from Supabase yet. Using demo words for now.");
+  }
 }
 
-function speakWord() {
-  const utterance = new SpeechSynthesisUtterance(words[currentIndex].word);
-  speechSynthesis.speak(utterance);
+/* =========================================================
+   11) TEACHERS PROFILE (creates row if missing)
+   ========================================================= */
+async function ensureTeacherProfile(user){
+  try{
+    const { data: existing, error: selErr } = await supabaseClient
+      .from("teachers")
+      .select("id")
+      .eq("id", user.id)
+      .limit(1);
+
+    if (selErr) return;
+
+    if (!existing || existing.length === 0){
+      await supabaseClient.from("teachers").insert({
+        id: user.id,
+        display_name: user.user_metadata?.full_name || user.email || null
+      });
+    }
+  }catch{}
 }
 
-supabase.auth.onAuthStateChange((event, session) => {
-  if (session) loadApp();
+/* =========================================================
+   12) ESCAPE
+   ========================================================= */
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+/* =========================================================
+   13) EVENTS
+   ========================================================= */
+googleBtn.addEventListener("click", signInWithGoogle);
+signOutBtn.addEventListener("click", signOut);
+
+primaryBtn.addEventListener("click", check);
+nextBtn.addEventListener("click", next);
+resetBtn.addEventListener("click", reset);
+showAnswerBtn.addEventListener("click", revealAnswer);
+speakBtn.addEventListener("click", speakCurrent);
+
+modeSelectEl.addEventListener("change", ()=> render());
+revealPolicyEl.addEventListener("change", ()=> {
+  setButtonsForState({canNext:false, canShowAnswer:false});
+  clearFeedback();
 });
-</script>
 
+bgColorEl.addEventListener("input", saveTheme);
+textColorEl.addEventListener("input", saveTheme);
+resetThemeBtn.addEventListener("click", resetTheme);
+
+/* =========================================================
+   14) INIT
+   ========================================================= */
+loadTheme();
+refreshAuthUI();
+supabaseClient.auth.onAuthStateChange(()=> refreshAuthUI());
+</script>
 </body>
 </html>
