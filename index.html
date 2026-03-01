@@ -1,1 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Phoneme → Grapheme Spelling</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1b2e;
+      --card:#101c31;
+      --text:#e8eefc;
+      --muted:#9fb0d0;
+      --line:rgba(255,255,255,.10);
+      --focus:rgba(255,255,255,.18);
+      --ok:#2ecc71;
+      --bad:#ff5b5b;
+      --shadow: 0 20px 60px rgba(0,0,0,.45);
+      --radius: 16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(900px 500px at 15% 10%, rgba(110,168,255,.12), transparent 60%),
+        radial-gradient(900px 500px at 90% 25%, rgba(255,220,120,.10), transparent 60%),
+        radial-gradient(900px 500px at 50% 90%, rgba(120,255,200,.08), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 28px;
+    }
+    .wrap{
+      width:min(980px, 100%);
+    }
+    header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:16px;
+      margin-bottom:16px;
+    }
+    .title{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    h1{
+      margin:0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing:.2px;
+    }
+    .sub{
+      margin:0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+      max-width: 64ch;
+    }
+    .meta{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      color: var(--muted);
+      font-size: 13px;
+      white-space:nowrap;
+    }
+    .pill{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      padding:8px 10px;
+      border-radius: 999px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .pill b{color: var(--text); font-weight:650}
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .card-inner{
+      padding: 22px;
+    }
+    .row{
+      display:flex;
+      gap: 18px;
+      align-items:center;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    .wordline{
+      display:flex;
+      align-items:center;
+      gap: 14px;
+      flex-wrap:wrap;
+      padding: 18px 18px 8px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(0,0,0,.10);
+    }
+    .label{
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing:.6px;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .phoneme-rail{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap:wrap;
+    }
+    .slot{
+      min-width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      position:relative;
+      transition: border-color .15s ease, background .15s ease, transform .05s ease;
+      user-select:none;
+    }
+    .slot.fixed{
+      padding: 0 12px;
+      min-width: unset;
+      height: 54px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.02);
+    }
+    .slot .txt{
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing:.2px;
+    }
+    .slot.target{
+      cursor:pointer;
+      outline:none;
+    }
+    .slot.target:focus-visible{
+      box-shadow: 0 0 0 4px rgba(110,168,255,.25);
+      border-color: rgba(110,168,255,.55);
+    }
+    .slot.ok{ border-color: rgba(46,204,113,.8); }
+    .slot.bad{ border-color: rgba(255,91,91,.85); }
+    .slot.bad{ background: rgba(255,91,91,.06); }
+    .slot.ok{ background: rgba(46,204,113,.06); }
 
+    /* picker */
+    .picker{
+      width: 120px;
+      height: 110px;
+      border-radius: 14px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      overflow:auto;
+      scroll-snap-type: y mandatory;
+      position:relative;
+    }
+    .picker:focus-visible{
+      box-shadow: 0 0 0 4px rgba(110,168,255,.25);
+      border-color: rgba(110,168,255,.55);
+      outline:none;
+    }
+    .picker .item{
+      height: 38px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-family: var(--mono);
+      font-size: 16px;
+      color: var(--muted);
+      scroll-snap-align: center;
+    }
+    .picker .item.selected{
+      color: var(--text);
+      font-weight: 700;
+      letter-spacing:.3px;
+    }
+    .picker::before,
+    .picker::after{
+      content:"";
+      position:sticky;
+      left:0; right:0;
+      height: 36px;
+      display:block;
+      pointer-events:none;
+      z-index: 2;
+    }
+    .picker::before{
+      top:0;
+      background: linear-gradient(180deg, rgba(11,18,32,1), rgba(11,18,32,0));
+    }
+    .picker::after{
+      bottom:0;
+      background: linear-gradient(0deg, rgba(11,18,32,1), rgba(11,18,32,0));
+    }
+    .picker .centerline{
+      position:sticky;
+      top: 36px;
+      height: 38px;
+      border-top:1px solid var(--focus);
+      border-bottom:1px solid var(--focus);
+      pointer-events:none;
+      z-index: 3;
+    }
+
+    .controls{
+      padding: 18px;
+      display:flex;
+      gap:12px;
+      align-items:center;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    .btns{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    button{
+      border-radius: 12px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      padding: 10px 14px;
+      font-weight: 650;
+      font-size: 13px;
+      cursor:pointer;
+      transition: transform .05s ease, background .15s ease, border-color .15s ease;
+    }
+    button:hover{ background: rgba(255,255,255,.07); }
+    button:active{ transform: translateY(1px); }
+    button.primary{
+      border-color: rgba(110,168,255,.45);
+      background: rgba(110,168,255,.14);
+    }
+    button.primary:hover{ background: rgba(110,168,255,.18); }
+    button.ghost{
+      background: transparent;
+    }
+    .feedback{
+      padding: 0 18px 18px 18px;
+      color: var(--muted);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .answer{
+      font-family: var(--mono);
+      font-size: 18px;
+      color: var(--text);
+      letter-spacing:.3px;
+    }
+    .hint{
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .kbd{
+      font-family: var(--mono);
+      border:1px solid var(--line);
+      padding:2px 6px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    @media (max-width:560px){
+      .picker{ width: 100px; }
+      .slot .txt{ font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">
+        <h1>Phoneme → Grapheme Spelling</h1>
+        <p class="sub">Select the grapheme that matches the target sound position. Built to feel neutral and usable from KS2+ through adult learners.</p>
+      </div>
+      <div class="meta">
+        <div class="pill"><span>Word</span> <b id="wordName">bright</b></div>
+        <div class="pill"><span>Target</span> <b id="targetLabel">/ī/</b></div>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="wordline">
+        <span class="label">phonemes</span>
+        <div id="rail" class="phoneme-rail"></div>
+      </div>
+
+      <div class="card-inner">
+        <div class="row">
+          <div>
+            <div class="label" style="margin-bottom:10px;">choose grapheme</div>
+            <div id="pickerWrap"></div>
+          </div>
+
+          <div class="btns">
+            <button class="primary" id="checkBtn">Check</button>
+            <button class="ghost" id="resetBtn">Reset</button>
+            <button class="ghost" id="nextBtn" title="Loads another example (demo list)">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="feedback" id="feedback" aria-live="polite"></div>
+    </section>
+
+    <p class="hint" style="margin:14px 4px 0;color:var(--muted);">
+      Tip: scroll the picker. Keyboard: <span class="kbd">↑</span> <span class="kbd">↓</span> inside the picker, then <span class="kbd">Enter</span> to check.
+    </p>
+  </div>
+
+  <script>
+    // Demo dataset (no database required)
+    // Each word: phonemes array where consonants are fixed; targetIndex indicates the slot to choose for.
+    const WORDS = [
+      {
+        word: "bright",
+        targetPhonemeLabel: "/ī/",
+        phonemes: ["b","r","[TARGET]","t"],
+        targetIndex: 2,
+        options: ["igh","i-e","ie","y"],
+        answer: "igh"
+      },
+      {
+        word: "chief",
+        targetPhonemeLabel: "/ee/",
+        phonemes: ["ch","[TARGET]","f"],
+        targetIndex: 1,
+        options: ["ee","ea","e","y","ie"],
+        answer: "ie"
+      },
+      {
+        word: "train",
+        targetPhonemeLabel: "/ai/",
+        phonemes: ["t","r","[TARGET]","n"],
+        targetIndex: 2,
+        options: ["ai","ay","a-e","eigh","ea"],
+        answer: "ai"
+      },
+      {
+        word: "spoil",
+        targetPhonemeLabel: "/oi/",
+        phonemes: ["s","p","[TARGET]","l"],
+        targetIndex: 2,
+        options: ["oi","oy"],
+        answer: "oi"
+      }
+    ];
+
+    let idx = 0;
+    let selected = null;
+    let checked = false;
+
+    const railEl = document.getElementById("rail");
+    const pickerWrap = document.getElementById("pickerWrap");
+    const feedbackEl = document.getElementById("feedback");
+    const wordNameEl = document.getElementById("wordName");
+    const targetLabelEl = document.getElementById("targetLabel");
+
+    const checkBtn = document.getElementById("checkBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
+    function render(){
+      const w = WORDS[idx];
+      selected = w.options[0]; // default
+      checked = false;
+      feedbackEl.innerHTML = "";
+      wordNameEl.textContent = w.word;
+      targetLabelEl.textContent = w.targetPhonemeLabel;
+
+      // rail
+      railEl.innerHTML = "";
+      w.phonemes.forEach((p,i)=>{
+        const isTarget = i === w.targetIndex;
+        const d = document.createElement("div");
+        d.className = "slot " + (isTarget ? "target" : "fixed");
+        d.tabIndex = isTarget ? 0 : -1;
+        d.setAttribute("role", isTarget ? "button" : "text");
+        d.setAttribute("aria-label", isTarget ? "Target phoneme grapheme selector" : `Phoneme ${p}`);
+        const t = document.createElement("div");
+        t.className = "txt";
+        t.textContent = isTarget ? "—" : p;
+        d.appendChild(t);
+        railEl.appendChild(d);
+      });
+
+      // picker
+      pickerWrap.innerHTML = "";
+      const picker = document.createElement("div");
+      picker.className = "picker";
+      picker.tabIndex = 0;
+      picker.setAttribute("aria-label", "Grapheme options picker");
+      // padding items to let first/last snap to centre
+      const padTop = document.createElement("div"); padTop.className="item"; padTop.textContent=""; picker.appendChild(padTop);
+      const padTop2 = document.createElement("div"); padTop2.className="item"; padTop2.textContent=""; picker.appendChild(padTop2);
+
+      w.options.forEach((opt,i)=>{
+        const it = document.createElement("div");
+        it.className = "item" + (i===0 ? " selected":"");
+        it.textContent = opt;
+        it.dataset.value = opt;
+        picker.appendChild(it);
+      });
+
+      const padBot = document.createElement("div"); padBot.className="item"; padBot.textContent=""; picker.appendChild(padBot);
+      const padBot2 = document.createElement("div"); padBot2.className="item"; padBot2.textContent=""; picker.appendChild(padBot2);
+
+      const center = document.createElement("div");
+      center.className = "centerline";
+      picker.appendChild(center);
+
+      pickerWrap.appendChild(picker);
+
+      // set initial scroll so first option is centred
+      requestAnimationFrame(()=>{
+        snapToIndex(picker, 0);
+      });
+
+      picker.addEventListener("scroll", ()=>{
+        if (checked) return;
+        updateSelectedFromScroll(picker);
+      });
+
+      picker.addEventListener("click", (e)=>{
+        if (checked) return;
+        // If user clicks an item, centre it
+        const item = e.target.closest(".item[data-value]");
+        if (!item) return;
+        const items = [...picker.querySelectorAll(".item[data-value]")];
+        const i = items.indexOf(item);
+        if (i >= 0) snapToIndex(picker, i);
+      });
+
+      // keyboard support
+      picker.addEventListener("keydown", (e)=>{
+        if (checked) return;
+        const items = [...picker.querySelectorAll(".item[data-value]")];
+        const currentIndex = items.findIndex(x => x.classList.contains("selected"));
+        if (e.key === "ArrowDown"){
+          e.preventDefault();
+          snapToIndex(picker, Math.min(items.length-1, currentIndex+1));
+        }
+        if (e.key === "ArrowUp"){
+          e.preventDefault();
+          snapToIndex(picker, Math.max(0, currentIndex-1));
+        }
+        if (e.key === "Enter"){
+          e.preventDefault();
+          doCheck();
+        }
+      });
+
+      // allow clicking target slot to focus picker
+      const targetSlot = railEl.querySelector(".slot.target");
+      targetSlot.addEventListener("click", ()=> picker.focus());
+      targetSlot.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter" || e.key === " "){
+          e.preventDefault();
+          picker.focus();
+        }
+      });
+    }
+
+    function snapToIndex(picker, optionIndex){
+      const items = [...picker.querySelectorAll(".item[data-value]")];
+      const item = items[optionIndex];
+      if (!item) return;
+
+      // scroll so item is at centerline (approx)
+      const pickerRect = picker.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const currentTop = picker.scrollTop;
+      const delta = (itemRect.top - pickerRect.top) - 36; // 36px aligns to centerline top
+      picker.scrollTop = currentTop + delta;
+
+      updateSelected(items, optionIndex);
+    }
+
+    function updateSelectedFromScroll(picker){
+      const items = [...picker.querySelectorAll(".item[data-value]")];
+      const pickerRect = picker.getBoundingClientRect();
+      const centerY = pickerRect.top + 36 + 19; // middle of the centerline band
+      let bestI = 0;
+      let bestDist = Infinity;
+
+      items.forEach((it,i)=>{
+        const r = it.getBoundingClientRect();
+        const mid = r.top + r.height/2;
+        const d = Math.abs(mid - centerY);
+        if (d < bestDist){
+          bestDist = d;
+          bestI = i;
+        }
+      });
+
+      updateSelected(items, bestI);
+    }
+
+    function updateSelected(items, i){
+      items.forEach((it,idx)=> it.classList.toggle("selected", idx===i));
+      selected = items[i]?.dataset.value ?? selected;
+      // show selection in target slot rail
+      const t = railEl.querySelector(".slot.target .txt");
+      if (t) t.textContent = selected;
+    }
+
+    function doCheck(){
+      const w = WORDS[idx];
+      checked = true;
+
+      const targetSlot = railEl.querySelector(".slot.target");
+      targetSlot.classList.remove("ok","bad");
+      const isCorrect = selected === w.answer;
+      targetSlot.classList.add(isCorrect ? "ok":"bad");
+
+      const completed = w.phonemes.map((p,i)=> i===w.targetIndex ? w.answer : p).join("");
+      feedbackEl.innerHTML = `
+        <div class="hint">${isCorrect ? "Correct." : "Not quite."} Correct spelling:</div>
+        <div class="answer">${completed}</div>
+        <div class="hint">Selected: <span class="kbd">${selected}</span> · Answer: <span class="kbd">${w.answer}</span></div>
+      `;
+    }
+
+    function doReset(){
+      render();
+    }
+
+    function doNext(){
+      idx = (idx + 1) % WORDS.length;
+      render();
+    }
+
+    checkBtn.addEventListener("click", doCheck);
+    resetBtn.addEventListener("click", doReset);
+    nextBtn.addEventListener("click", doNext);
+
+    // keyboard shortcut for whole page
+    window.addEventListener("keydown", (e)=>{
+      if (e.key === "Enter" && (document.activeElement?.classList.contains("picker") === false)){
+        // if focus isn't in picker, Enter checks too
+        doCheck();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
