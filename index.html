@@ -11,7 +11,7 @@
       --muted:#6b7280;
       --line:#e5e7eb;
       --soft:#f3f4f6;
-      --accent:#4f46e5;  /* indigo */
+      --accent:#4f46e5;     /* controlled colour */
       --ok:#16a34a;
       --bad:#ef4444;
       --btn:#111827;
@@ -34,24 +34,23 @@
       justify-content:center;
       padding:32px 18px;
     }
-    .wrap{
-      width:min(980px, 100%);
-    }
+    .wrap{ width:min(980px, 100%); }
     .top{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      margin-bottom:28px;
+      margin-bottom:26px;
       color: var(--muted);
       font-size:18px;
     }
     .top b{color:var(--text); font-weight:650}
+
     .center{
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:26px;
-      margin-top:10px;
+      gap:22px;
+      margin-top:6px;
     }
 
     /* Word display row */
@@ -69,20 +68,22 @@
       letter-spacing: .02em;
       color:#1f2937;
     }
+
+    /* Choice slot (fixed width so no wobble) */
     .slot{
-      min-width:110px;
+      width:124px;              /* fixed */
       height:84px;
       border:2px solid var(--line);
       border-radius: 12px;
       display:flex;
       align-items:center;
       justify-content:center;
-      font-size:34px;
+      font-size:32px;           /* fits long graphemes */
       font-family: var(--mono);
       color:#111827;
       padding:0 10px;
-      position:relative;
       background:#fff;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
     }
     .slot.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
     .slot.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
@@ -95,19 +96,9 @@
       align-items:center;
       gap:10px;
     }
-    .arrows{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      color: var(--accent);
-      opacity:.9;
-      font-size:18px;
-      line-height:1;
-      user-select:none;
-    }
     .arrowBtn{
-      width:34px;
-      height:34px;
+      width:36px;
+      height:36px;
       border-radius:10px;
       border:1px solid var(--line);
       background:#fff;
@@ -116,6 +107,10 @@
       justify-content:center;
       cursor:pointer;
       transition: transform .05s ease, background .15s ease, border-color .15s ease;
+      color: var(--accent);
+      font-size:16px;
+      line-height:1;
+      user-select:none;
     }
     .arrowBtn:hover{background:var(--soft)}
     .arrowBtn:active{transform: translateY(1px)}
@@ -125,13 +120,13 @@
       box-shadow: 0 0 0 6px rgba(79,70,229,.10);
     }
 
-    /* Input */
+    /* Input area */
     .inputs{
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:10px;
-      width:min(560px, 100%);
+      gap:12px;
+      width:min(640px, 100%);
     }
     .inputLine{
       width:100%;
@@ -144,13 +139,13 @@
     .inputLine label{
       color: var(--muted);
       font-size:16px;
-      width:110px;
+      width:130px;
       text-align:right;
     }
     .typeBox{
       flex:1;
-      min-width:260px;
-      max-width:420px;
+      min-width:280px;
+      max-width:460px;
       height:54px;
       border-radius: 12px;
       border:1px solid var(--line);
@@ -165,6 +160,8 @@
       border-color: rgba(79,70,229,.55);
       box-shadow: 0 0 0 6px rgba(79,70,229,.10);
     }
+
+    /* Guide row (with / separators) */
     .guide{
       width:100%;
       display:flex;
@@ -176,13 +173,13 @@
       font-size:16px;
     }
     .guide label{
-      width:110px;
+      width:130px;
       text-align:right;
     }
     .guideRow{
       flex:1;
-      min-width:260px;
-      max-width:420px;
+      min-width:280px;
+      max-width:460px;
       display:flex;
       gap:10px;
       justify-content:flex-start;
@@ -195,11 +192,11 @@
       padding:0 4px 6px 4px;
       color:#374151;
     }
-    .slash{color:#c0c4cc}
+    .slash{color:#9ca3af}
 
     /* Buttons */
     .btn{
-      margin-top:10px;
+      margin-top:6px;
       width:min(360px, 92%);
       height:66px;
       border-radius: 12px;
@@ -213,6 +210,7 @@
       transition: transform .05s ease, opacity .15s ease;
     }
     .btn:active{transform: translateY(1px)}
+
     .btn.secondary{
       background:#fff;
       color: var(--text);
@@ -222,6 +220,7 @@
       font-size:16px;
       width:auto;
       padding:0 16px;
+      margin-top:0;
     }
     .btn.secondary:hover{background:var(--soft)}
     .btnRow{
@@ -234,16 +233,15 @@
 
     /* Feedback */
     .feedback{
-      margin-top:6px;
+      margin-top:2px;
       min-height:26px;
       color: var(--muted);
       font-size:18px;
       text-align:center;
     }
     .feedback strong{color:var(--text)}
-    .shake{
-      animation: shake .18s linear 0s 2;
-    }
+
+    .shake{ animation: shake .18s linear 0s 2; }
     @keyframes shake{
       0%{transform: translateX(0)}
       25%{transform: translateX(-4px)}
@@ -252,13 +250,14 @@
       100%{transform: translateX(0)}
     }
 
-    /* Teacher bar */
+    /* Teacher controls */
     details{
-      margin-top:18px;
+      margin-top:16px;
       border:1px solid var(--line);
       border-radius: 12px;
       padding:10px 12px;
       background:#fff;
+      width:min(720px, 100%);
     }
     summary{
       cursor:pointer;
@@ -285,6 +284,11 @@
       background:#fff;
     }
     .toggle input{accent-color: var(--accent);}
+
+    @media (max-width:520px){
+      .letter{font-size:64px}
+      .slot{height:74px; width:112px; font-size:28px}
+    }
   </style>
 </head>
 <body>
@@ -297,7 +301,13 @@
     <div class="center">
       <div id="mainArea"></div>
 
-      <div class="feedback" id="feedback"></div>
+      <div class="btnRow">
+        <button class="btn secondary" id="speakBtn" type="button" aria-label="Speak word" title="Listen">
+          🔊 Listen
+        </button>
+      </div>
+
+      <div class="feedback" id="feedback" aria-live="polite"></div>
 
       <div class="btnRow">
         <button class="btn" id="primaryBtn">Check Word</button>
@@ -331,260 +341,311 @@
   </div>
 
 <script>
-/**
- * Data model supports all three modes.
- * - word: correct spelling
- * - guide: phoneme guide segments (for guided mode)
- * - choice: describes a single target slot with selectable graphemes (choice mode)
- */
-const TEST = [
-  {
-    word: "bright",
-    guide: ["b","r","igh","t"],
-    choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" }
-  },
-  {
-    word: "happy",
-    guide: ["h","a","pp","y"],
-    // for choice mode we’ll target the /ee/ ending spellings as a demo
-    choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" }
-  },
-  {
-    word: "chief",
-    guide: ["ch","ie","f"],
-    choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" }
-  },
-  {
-    word: "train",
-    guide: ["t","r","ai","n"],
-    choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" }
-  },
-  {
-    word: "spoil",
-    guide: ["s","p","oi","l"],
-    choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" }
-  }
-];
+  const el = (id)=>document.getElementById(id);
 
-let queue = [];           // 10 items (cycled from TEST)
-let current = 0;
-let score = 0;
-let attempts = 0;         // attempts on current word
-let selectedIndex = 0;    // choice picker index
-let mode = "choice";      // choice | guided | recall
-
-const el = (id)=>document.getElementById(id);
-const mainArea = el("mainArea");
-const feedback = el("feedback");
-const primaryBtn = el("primaryBtn");
-const nextBtn = el("nextBtn");
-const resetBtn = el("resetBtn");
-const showAnswerBtn = el("showAnswerBtn");
-
-function buildQueue(){
-  // Make 10 words by cycling the demo list
-  queue = [];
-  for (let i=0;i<10;i++) queue.push(TEST[i % TEST.length]);
-}
-
-function getMode(){
-  const checked = document.querySelector('input[name="mode"]:checked');
-  return checked ? checked.value : "choice";
-}
-
-function setTopBar(){
-  el("wordTotal").textContent = queue.length;
-  el("wordNum").textContent = (current + 1);
-  el("score").textContent = score;
-}
-
-function clearFeedback(){
-  feedback.textContent = "";
-  feedback.style.color = "var(--muted)";
-}
-
-function showTryAgain(){
-  feedback.innerHTML = `Not quite. <strong>Try again.</strong>`;
-  feedback.style.color = "var(--muted)";
-}
-
-function showCorrect(){
-  feedback.innerHTML = `<strong>Correct.</strong>`;
-  feedback.style.color = "var(--muted)";
-}
-
-function showReveal(word){
-  feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`;
-  feedback.style.color = "var(--muted)";
-}
-
-function setButtonsForState({canNext=false, canShowAnswer=false}){
-  nextBtn.style.display = canNext ? "inline-block" : "none";
-  showAnswerBtn.style.display = canShowAnswer ? "inline-block" : "none";
-}
-
-function render(){
-  mode = getMode();
-  attempts = 0;
-  selectedIndex = 0;
-  clearFeedback();
-  setButtonsForState({canNext:false, canShowAnswer:false});
-  primaryBtn.textContent = "Check Word";
-
-  setTopBar();
-
-  const item = queue[current];
-
-  if (mode === "choice") renderChoice(item);
-  if (mode === "guided") renderGuided(item, true);
-  if (mode === "recall") renderGuided(item, false);
-}
-
-function renderChoice(item){
-  const { parts, targetIndex, options } = item.choice;
-
-  const wordRow = document.createElement("div");
-  wordRow.className = "wordRow";
-
-  parts.forEach((p, i) => {
-    if (i === targetIndex){
-      const pickerWrap = document.createElement("div");
-      pickerWrap.className = "picker";
-
-      const up = document.createElement("button");
-      up.className = "arrowBtn";
-      up.innerHTML = "˄";
-      up.addEventListener("click", ()=> moveChoice(-1));
-      up.setAttribute("aria-label","Previous option");
-
-      const slot = document.createElement("div");
-      slot.className = "slot active";
-      slot.id = "choiceSlot";
-      slot.textContent = options[selectedIndex];
-
-      const down = document.createElement("button");
-      down.className = "arrowBtn";
-      down.innerHTML = "˅";
-      down.addEventListener("click", ()=> moveChoice(1));
-      down.setAttribute("aria-label","Next option");
-
-      pickerWrap.appendChild(up);
-      pickerWrap.appendChild(slot);
-      pickerWrap.appendChild(down);
-
-      wordRow.appendChild(pickerWrap);
-    } else {
-      const span = document.createElement("div");
-      span.className = "letter";
-      span.textContent = p;
-      wordRow.appendChild(span);
+  /**
+   * Data model supports all three modes.
+   * - word: correct spelling
+   * - guide: grapheme/phoneme guide segments shown in guided mode
+   * - choice: one target slot with options (choice mode)
+   */
+  const TEST = [
+    {
+      word: "bright",
+      guide: ["b","r","igh","t"],
+      choice: { parts:["b","r",null,"t"], targetIndex:2, options:["igh","i-e","ie","y"], answer:"igh" }
+    },
+    {
+      word: "happy",
+      guide: ["h","a","pp","y"],
+      choice: { parts:["h","a","pp",null], targetIndex:3, options:["y","ee","ea","e","ie"], answer:"y" }
+    },
+    {
+      word: "chief",
+      guide: ["ch","ie","f"],
+      choice: { parts:["ch",null,"f"], targetIndex:1, options:["ee","ea","e","y","ie"], answer:"ie" }
+    },
+    {
+      word: "train",
+      guide: ["t","r","ai","n"],
+      choice: { parts:["t","r",null,"n"], targetIndex:2, options:["ai","ay","a-e","eigh","ea"], answer:"ai" }
+    },
+    {
+      word: "spoil",
+      guide: ["s","p","oi","l"],
+      choice: { parts:["s","p",null,"l"], targetIndex:2, options:["oi","oy"], answer:"oi" }
     }
-  });
+  ];
 
-  mainArea.innerHTML = "";
-  mainArea.appendChild(wordRow);
+  let queue = [];
+  let current = 0;
+  let score = 0;
+  let attempts = 0;          // attempts for current word
+  let selectedIndex = 0;     // choice picker option index
+  let mode = "choice";
 
-  // Keyboard for choice mode
-  window.onkeydown = (e)=>{
-    if (mode !== "choice") return;
-    if (e.key === "ArrowUp") moveChoice(-1);
-    if (e.key === "ArrowDown") moveChoice(1);
-    if (e.key === "Enter") check();
-  };
-}
+  const mainArea = el("mainArea");
+  const feedback = el("feedback");
+  const primaryBtn = el("primaryBtn");
+  const nextBtn = el("nextBtn");
+  const resetBtn = el("resetBtn");
+  const showAnswerBtn = el("showAnswerBtn");
+  const speakBtn = el("speakBtn");
 
-function moveChoice(delta){
-  const item = queue[current];
-  const opts = item.choice.options;
-  selectedIndex = (selectedIndex + delta + opts.length) % opts.length;
-  const slot = el("choiceSlot");
-  if (slot) slot.textContent = opts[selectedIndex];
-  // clear wrong styling when changing selection
-  if (slot){
-    slot.classList.remove("bad");
-    slot.classList.add("active");
+  function buildQueue(){
+    queue = [];
+    for (let i=0;i<10;i++) queue.push(TEST[i % TEST.length]);
   }
-  clearFeedback();
-  setButtonsForState({canNext:false, canShowAnswer:false});
-}
 
-function renderGuided(item, showGuide){
-  const inputs = document.createElement("div");
-  inputs.className = "inputs";
+  function getMode(){
+    const checked = document.querySelector('input[name="mode"]:checked');
+    return checked ? checked.value : "choice";
+  }
 
-  // Audio button placeholder (later)
-  // Keeping minimal: you can wire it when ready.
-  // const audio = document.createElement("button");
+  function setTopBar(){
+    el("wordTotal").textContent = queue.length;
+    el("wordNum").textContent = (current + 1);
+    el("score").textContent = score;
+  }
 
-  const line = document.createElement("div");
-  line.className = "inputLine";
-  const lab = document.createElement("label");
-  lab.textContent = "Type answer:";
-  const input = document.createElement("input");
-  input.className = "typeBox";
-  input.id = "typeInput";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  input.placeholder = "";
-  line.appendChild(lab);
-  line.appendChild(input);
+  function clearFeedback(){
+    feedback.textContent = "";
+    feedback.style.color = "var(--muted)";
+  }
 
-  inputs.appendChild(line);
+  function showTryAgain(){
+    feedback.innerHTML = `Not quite. <strong>Try again.</strong>`;
+  }
 
-  if (showGuide){
-    const guide = document.createElement("div");
-    guide.className = "guide";
-    const glab = document.createElement("label");
-    glab.textContent = "Looks like:";
-    const row = document.createElement("div");
-    row.className = "guideRow";
-    item.guide.forEach((seg, i)=>{
-      const s = document.createElement("span");
-      s.className = "guideSeg";
-      s.textContent = seg;
-      row.appendChild(s);
-      if (i < item.guide.length - 1){
-        const slash = document.createElement("span");
-        slash.className = "slash";
-        slash.textContent = "/";
-        row.appendChild(slash);
+  function showCorrect(){
+    feedback.innerHTML = `<strong>Correct.</strong>`;
+  }
+
+  function showReveal(word){
+    feedback.innerHTML = `Correct spelling: <strong>${word}</strong>`;
+  }
+
+  function setButtonsForState({canNext=false, canShowAnswer=false}){
+    nextBtn.style.display = canNext ? "inline-block" : "none";
+    showAnswerBtn.style.display = canShowAnswer ? "inline-block" : "none";
+  }
+
+  function speakCurrentWord(){
+    const item = queue[current];
+    const word = item.word;
+
+    if (!("speechSynthesis" in window)){
+      feedback.textContent = "Text-to-speech not supported in this browser.";
+      return;
+    }
+
+    // cancel anything already speaking
+    window.speechSynthesis.cancel();
+
+    const u = new SpeechSynthesisUtterance(word);
+    u.rate = 0.9;   // slightly slower for clarity
+    u.pitch = 1.0;
+    u.volume = 1.0;
+
+    // try to prefer English voice
+    const voices = window.speechSynthesis.getVoices?.() || [];
+    const preferred = voices.find(v => /en-GB/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
+    if (preferred) u.voice = preferred;
+
+    window.speechSynthesis.speak(u);
+  }
+
+  function render(){
+    mode = getMode();
+    attempts = 0;
+    selectedIndex = 0;
+
+    clearFeedback();
+    setButtonsForState({canNext:false, canShowAnswer:false});
+    primaryBtn.textContent = "Check Word";
+
+    setTopBar();
+
+    const item = queue[current];
+    if (mode === "choice") renderChoice(item);
+    if (mode === "guided") renderTyped(item, true);
+    if (mode === "recall") renderTyped(item, false);
+  }
+
+  function renderChoice(item){
+    const { parts, targetIndex, options } = item.choice;
+
+    const wordRow = document.createElement("div");
+    wordRow.className = "wordRow";
+
+    parts.forEach((p, i) => {
+      if (i === targetIndex){
+        const pickerWrap = document.createElement("div");
+        pickerWrap.className = "picker";
+
+        const up = document.createElement("button");
+        up.className = "arrowBtn";
+        up.textContent = "˄";
+        up.addEventListener("click", ()=> moveChoice(-1));
+        up.setAttribute("aria-label","Previous option");
+
+        const slot = document.createElement("div");
+        slot.className = "slot active";
+        slot.id = "choiceSlot";
+        slot.textContent = options[selectedIndex];
+
+        const down = document.createElement("button");
+        down.className = "arrowBtn";
+        down.textContent = "˅";
+        down.addEventListener("click", ()=> moveChoice(1));
+        down.setAttribute("aria-label","Next option");
+
+        pickerWrap.appendChild(up);
+        pickerWrap.appendChild(slot);
+        pickerWrap.appendChild(down);
+
+        wordRow.appendChild(pickerWrap);
+      } else {
+        const span = document.createElement("div");
+        span.className = "letter";
+        span.textContent = p;
+        wordRow.appendChild(span);
       }
     });
-    guide.appendChild(glab);
-    guide.appendChild(row);
-    inputs.appendChild(guide);
+
+    mainArea.innerHTML = "";
+    mainArea.appendChild(wordRow);
+
+    // keyboard support
+    window.onkeydown = (e)=>{
+      if (mode !== "choice") return;
+      if (e.key === "ArrowUp") moveChoice(-1);
+      if (e.key === "ArrowDown") moveChoice(1);
+      if (e.key === "Enter") check();
+    };
   }
 
-  mainArea.innerHTML = "";
-  mainArea.appendChild(inputs);
+  function moveChoice(delta){
+    const item = queue[current];
+    const opts = item.choice.options;
 
-  window.onkeydown = (e)=>{
-    if (mode === "guided" || mode === "recall"){
-      if (e.key === "Enter") check();
-    }
-  };
+    selectedIndex = (selectedIndex + delta + opts.length) % opts.length;
 
-  // focus
-  setTimeout(()=> input.focus(), 50);
-}
-
-function check(){
-  const item = queue[current];
-  const revealAfter2 = el("revealAfter2").checked;
-
-  // CHOICE MODE
-  if (mode === "choice"){
     const slot = el("choiceSlot");
-    const picked = item.choice.options[selectedIndex];
-    const correct = picked === item.choice.answer;
+    if (slot){
+      slot.textContent = opts[selectedIndex];
+      slot.classList.remove("bad","ok","shake");
+      slot.classList.add("active");
+    }
 
-    if (correct){
-      slot.classList.remove("bad","active");
-      slot.classList.add("ok");
+    clearFeedback();
+    setButtonsForState({canNext:false, canShowAnswer:false});
+  }
+
+  function renderTyped(item, showGuide){
+    const inputs = document.createElement("div");
+    inputs.className = "inputs";
+
+    const line = document.createElement("div");
+    line.className = "inputLine";
+
+    const lab = document.createElement("label");
+    lab.textContent = "Type answer:";
+
+    const input = document.createElement("input");
+    input.className = "typeBox";
+    input.id = "typeInput";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+
+    line.appendChild(lab);
+    line.appendChild(input);
+    inputs.appendChild(line);
+
+    if (showGuide){
+      const guide = document.createElement("div");
+      guide.className = "guide";
+
+      const glab = document.createElement("label");
+      glab.textContent = "Looks like:";
+
+      const row = document.createElement("div");
+      row.className = "guideRow";
+
+      item.guide.forEach((seg, i)=>{
+        const s = document.createElement("span");
+        s.className = "guideSeg";
+        s.textContent = seg;
+        row.appendChild(s);
+
+        if (i < item.guide.length - 1){
+          const slash = document.createElement("span");
+          slash.className = "slash";
+          slash.textContent = "/";
+          row.appendChild(slash);
+        }
+      });
+
+      guide.appendChild(glab);
+      guide.appendChild(row);
+      inputs.appendChild(guide);
+    }
+
+    mainArea.innerHTML = "";
+    mainArea.appendChild(inputs);
+
+    window.onkeydown = (e)=>{
+      if (mode === "guided" || mode === "recall"){
+        if (e.key === "Enter") check();
+      }
+    };
+
+    setTimeout(()=> input.focus(), 50);
+  }
+
+  function check(){
+    const item = queue[current];
+    const revealAfter2 = el("revealAfter2").checked;
+
+    // CHOICE MODE
+    if (mode === "choice"){
+      const slot = el("choiceSlot");
+      const picked = item.choice.options[selectedIndex];
+      const correct = picked === item.choice.answer;
+
+      if (correct){
+        slot.classList.remove("bad","active","shake");
+        slot.classList.add("ok");
+
+        showCorrect();
+
+        if (attempts === 0) score += 1; // first-try only
+        attempts = 0;
+
+        setTopBar();
+        setButtonsForState({canNext:true, canShowAnswer:false});
+        return;
+      }
+
+      // wrong
+      attempts += 1;
+      slot.classList.remove("ok");
+      slot.classList.add("bad","shake");
+      showTryAgain();
+
+      setButtonsForState({canNext:false, canShowAnswer: revealAfter2 && attempts >= 2});
+      setTimeout(()=> slot.classList.remove("shake"), 250);
+      return;
+    }
+
+    // GUIDED / RECALL MODE
+    const input = el("typeInput");
+    const typed = (input.value || "").trim().toLowerCase();
+    const correct = item.word.toLowerCase();
+
+    if (typed === correct){
       showCorrect();
-
-      // score only if correct on first attempt
-      if (attempts === 0) score += 1;
+      if (attempts === 0) score += 1; // first-try only
       attempts = 0;
 
       setTopBar();
@@ -592,74 +653,46 @@ function check(){
       return;
     }
 
-    // wrong
     attempts += 1;
-    slot.classList.remove("ok");
-    slot.classList.add("bad","shake");
     showTryAgain();
 
-    // allow reveal option after 2 wrong attempts (optional)
+    input.classList.add("shake");
+    setTimeout(()=> input.classList.remove("shake"), 250);
+
     setButtonsForState({canNext:false, canShowAnswer: revealAfter2 && attempts >= 2});
-
-    setTimeout(()=> slot.classList.remove("shake"), 250);
-    return;
   }
 
-  // GUIDED / RECALL MODE
-  const input = el("typeInput");
-  const typed = (input.value || "").trim().toLowerCase();
-  const correct = item.word.toLowerCase();
-
-  if (typed === correct){
-    showCorrect();
-    if (attempts === 0) score += 1; // first-try scoring
-    attempts = 0;
-    setTopBar();
-    setButtonsForState({canNext:true, canShowAnswer:false});
-    return;
+  function revealAnswer(){
+    const item = queue[current];
+    showReveal(item.word);
   }
 
-  attempts += 1;
-  showTryAgain();
+  function next(){
+    current = (current + 1) % queue.length;
+    render();
+  }
 
-  // subtle shake the input
-  input.classList.add("shake");
-  setTimeout(()=> input.classList.remove("shake"), 250);
+  function reset(){
+    render();
+  }
 
-  setButtonsForState({canNext:false, canShowAnswer: el("revealAfter2").checked && attempts >= 2});
-}
+  // events
+  primaryBtn.addEventListener("click", check);
+  nextBtn.addEventListener("click", next);
+  resetBtn.addEventListener("click", reset);
+  showAnswerBtn.addEventListener("click", revealAnswer);
+  speakBtn.addEventListener("click", speakCurrentWord);
 
-function revealAnswer(){
-  const item = queue[current];
-  showReveal(item.word);
-}
+  // Re-render on mode changes
+  document.querySelectorAll('input[name="mode"]').forEach(r=>{
+    r.addEventListener("change", ()=> render());
+  });
+  el("revealAfter2").addEventListener("change", ()=> {
+    setButtonsForState({canNext:false, canShowAnswer:false});
+  });
 
-function next(){
-  current = (current + 1) % queue.length;
+  buildQueue();
   render();
-}
-
-function reset(){
-  // reset current word attempts/visuals only
-  render();
-}
-
-primaryBtn.addEventListener("click", check);
-nextBtn.addEventListener("click", next);
-resetBtn.addEventListener("click", reset);
-showAnswerBtn.addEventListener("click", revealAnswer);
-
-// Teacher mode changes should rerender
-document.querySelectorAll('input[name="mode"]').forEach(r=>{
-  r.addEventListener("change", ()=> render());
-});
-el("revealAfter2").addEventListener("change", ()=> {
-  // doesn’t need rerender, but keeps state consistent
-  setButtonsForState({canNext:false, canShowAnswer:false});
-});
-
-buildQueue();
-render();
 </script>
 </body>
 </html>
