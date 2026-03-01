@@ -170,10 +170,16 @@
     .segRow{
       width:100%;
       display:flex;
-      align-items:center;
+      align-items:flex-end;
       justify-content:center;
       gap:10px;
       flex-wrap:wrap;
+    }
+    .segCol{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:8px;
     }
     .segInput{
       width:112px;
@@ -194,11 +200,25 @@
     }
     .segInput.ok{border-color: rgba(22,163,74,.7); background: rgba(22,163,74,.06)}
     .segInput.bad{border-color: rgba(239,68,68,.75); background: rgba(239,68,68,.06)}
+
+    .segPicker{
+      height:36px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      padding:0 10px;
+      font-family: var(--mono);
+      font-size:14px;
+      max-width:120px;
+      background:#fff;
+      color:var(--text);
+    }
+
     .slash{
       font-family: var(--mono);
       color:#9ca3af;
       font-size:20px;
       user-select:none;
+      padding-bottom: 44px; /* align with inputs+picker */
     }
 
     /* Recall input */
@@ -248,8 +268,55 @@
     }
     code{font-family:var(--mono); font-size:12px}
 
+    /* Teacher panel */
+    .tpRow{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+    .tpField{
+      flex:1;
+      min-width:220px;
+    }
+    .tpLabel{
+      font-weight:700;
+      margin-bottom:6px;
+    }
+    .tpInput, .tpSelect{
+      width:100%;
+      height:44px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      padding:0 12px;
+      font-family: var(--sans);
+      font-size:14px;
+      background:#fff;
+      color:var(--text);
+    }
+    .tpInput.mono{
+      font-family: var(--mono);
+    }
+    .draftList{
+      margin-top:12px;
+      font-size:14px;
+      color:var(--muted);
+    }
+    .draftItem{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding:8px 0;
+      border-top:1px solid var(--line);
+    }
+    .draftItem b{color:var(--text)}
+    .draftIdx{width:28px; color:var(--muted)}
+    .draftSeg{color:var(--muted)}
+    .draftSent{color:var(--muted); flex:1}
+
     @media (max-width:520px){
       .segInput{width:92px}
+      .slash{padding-bottom: 40px;}
     }
   </style>
 </head>
@@ -257,7 +324,7 @@
 <body>
   <div class="wrap">
 
-    <!-- AUTH VIEW (B) -->
+    <!-- AUTH VIEW -->
     <div id="authView" class="card" style="display:none; max-width:520px; margin: 0 auto;">
       <div style="font-size:22px;font-weight:700; margin-bottom:6px;">Phoneme Spelling</div>
       <div style="color:var(--muted); line-height:1.45; margin-bottom:14px;">
@@ -275,6 +342,37 @@
 
     <!-- APP VIEW -->
     <div id="appView" style="display:none;">
+
+      <!-- TEACHER PANEL -->
+      <div id="teacherPanel" class="card" style="margin-bottom:14px;">
+        <div class="tpRow">
+          <div class="tpField">
+            <div class="tpLabel">Create a new test</div>
+            <input id="testTitle" class="tpInput" placeholder="Test title (e.g. Week 3 – ay/ai)">
+          </div>
+          <button class="btn secondary" id="createTestBtn" type="button">Create test</button>
+
+          <div class="tpField" style="max-width:360px;">
+            <div class="tpLabel">Load existing</div>
+            <select id="testSelect" class="tpSelect"></select>
+          </div>
+          <button class="btn secondary" id="loadTestBtn" type="button">Load</button>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div class="tpRow" style="align-items:center;">
+          <input id="newWord" class="tpInput" style="max-width:180px;" placeholder="Word">
+          <input id="newSentence" class="tpInput" style="min-width:260px; flex:2;" placeholder="Sentence (optional)">
+          <input id="newSegments" class="tpInput mono" style="max-width:260px;" placeholder="Segments e.g. tr/ai/n">
+          <button class="btn secondary" id="addWordBtn" type="button">Add word</button>
+          <button class="btn" id="saveWordsBtn" type="button">Save to Supabase</button>
+        </div>
+
+        <div id="draftList" class="draftList"></div>
+      </div>
+
+      <!-- TOP BAR -->
       <div class="top">
         <div>
           Word <b id="wordNum">1</b> of <b id="wordTotal">0</b> · Score: <b id="score">0</b>
@@ -296,6 +394,14 @@
               <option value="never" selected>Never</option>
               <option value="after2">After 2 wrong</option>
               <option value="always">Always (teach)</option>
+            </select>
+          </div>
+
+          <div class="chip">
+            <span>Grapheme picker</span>
+            <select id="pickerSelect">
+              <option value="off" selected>Off</option>
+              <option value="on">On</option>
             </select>
           </div>
 
@@ -344,18 +450,11 @@
 
 <script>
 /* =========================================================
-   1) SUPABASE CONFIG  (PASTE YOUR DETAILS HERE)
+   1) SUPABASE CONFIG  (EDIT ONLY THESE TWO LINES)
    ========================================================= */
 const SUPABASE_URL = "https://hkorcwsbuwreaupdbkaf.supabase.co";
+const SUPABASE_KEY = "sb_publishable_3Qz-fLYy9x5dEPvFVu2dlw_WBlczkBW"; // or your anon public key
 
-/* Paste your sb_publishable_... key from:
-   Supabase Dashboard → Settings → API Keys → Publishable key */
-const SUPABASE_KEY = "sb_publishable_3Qz-fLYy9x5dEPvFVu2dlw_WBlczkBW";
-
-/* IMPORTANT FIX:
-   The CDN creates a global called `supabase`, so we do NOT
-   declare `const supabase = ...` (that causes the crash).
-   Use `supabaseClient` instead. */
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =========================================================
@@ -373,6 +472,7 @@ const appError  = el("appError");
 
 const modeSelectEl = el("modeSelect");
 const revealPolicyEl = el("revealPolicy");
+const pickerSelectEl = el("pickerSelect");
 
 const sentenceBox = el("sentenceBox");
 const mainArea = el("mainArea");
@@ -392,8 +492,21 @@ const wordNumEl = el("wordNum");
 const wordTotalEl = el("wordTotal");
 const scoreEl = el("score");
 
+/* Teacher UI */
+const testTitleEl = el("testTitle");
+const createTestBtn = el("createTestBtn");
+const testSelectEl = el("testSelect");
+const loadTestBtn = el("loadTestBtn");
+
+const newWordEl = el("newWord");
+const newSentenceEl = el("newSentence");
+const newSegmentsEl = el("newSegments");
+const addWordBtn = el("addWordBtn");
+const saveWordsBtn = el("saveWordsBtn");
+const draftListEl = el("draftList");
+
 /* =========================================================
-   3) THEME (pupil accessibility)
+   3) THEME
    ========================================================= */
 const THEME_KEY = "phoneme_theme_v1";
 
@@ -410,7 +523,6 @@ function isLight(hex){
 function applyTheme(bg, text){
   document.documentElement.style.setProperty("--bg", bg);
   document.documentElement.style.setProperty("--text", text);
-  // Keep muted readable if user picks very bright text colours
   const muted = (isLight(text) ? "#d1d5db" : "#6b7280");
   document.documentElement.style.setProperty("--muted", muted);
 }
@@ -445,7 +557,7 @@ function resetTheme(){
 }
 
 /* =========================================================
-   4) APP DATA
+   4) DATA
    ========================================================= */
 const DEMO_WORDS = [
   { word: "bright", sentence: "The light is bright.", segments: ["b","r","igh","t"] },
@@ -455,10 +567,25 @@ const DEMO_WORDS = [
   { word: "spoil",  sentence: "Don’t spoil the surprise.", segments: ["s","p","oi","l"] }
 ];
 
-let bank = [...DEMO_WORDS];     // loaded words
+const GRAPHEME_BANK = [
+  "a","e","i","o","u",
+  "ai","ay","a_e","ea","ee","ie","igh","i_e",
+  "oa","oe","oo","ou","ow","o_e","u_e",
+  "ar","or","ur","ir","er",
+  "ch","sh","th","ng","nk","ph","wh","wr","kn","qu",
+  "ck","ss","ll","ff","zz",
+  "tch","dge",
+  "tion","sion",
+  "b","c","d","f","g","h","j","k","l","m","n","p","r","s","t","v","w","x","y","z"
+];
+
+let bank = [...DEMO_WORDS];
 let current = 0;
 let score = 0;
 let attempts = 0;
+
+let activeTestId = null;
+let draftWords = []; // {word, sentence, segments[]}
 
 /* =========================================================
    5) UI UTILS
@@ -525,7 +652,7 @@ function speakCurrent(){
 }
 
 /* =========================================================
-   7) RENDER MODES
+   7) RENDER
    ========================================================= */
 function render(){
   attempts = 0;
@@ -547,7 +674,7 @@ function render(){
   }
 
   if (mode === "guided") renderGuided(item);
-  else renderRecall(item); // recall + dictation use same UI (single input)
+  else renderRecall(item);
 }
 
 function renderGuided(item){
@@ -566,12 +693,17 @@ function renderGuided(item){
   const row = document.createElement("div");
   row.className = "segRow";
 
+  const pickerOn = (pickerSelectEl.value === "on");
+
   for (let i=0;i<item.segments.length;i++){
+    const col = document.createElement("div");
+    col.className = "segCol";
+
     const inp = document.createElement("input");
     inp.className = "segInput";
     inp.autocomplete = "off";
     inp.spellcheck = false;
-    inp.maxLength = 6;
+    inp.maxLength = 12;
     inp.placeholder = "___";
     inp.dataset.index = String(i);
 
@@ -592,7 +724,49 @@ function renderGuided(item){
       }
     });
 
-    row.appendChild(inp);
+    col.appendChild(inp);
+
+    if (pickerOn){
+      const sel = document.createElement("select");
+      sel.className = "segPicker";
+
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "Pick…";
+      sel.appendChild(opt0);
+
+      for (const g of GRAPHEME_BANK){
+        const opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = g;
+        sel.appendChild(opt);
+      }
+
+      sel.addEventListener("change", ()=>{
+        if (sel.value){
+          inp.value = sel.value;
+          inp.dispatchEvent(new Event("input"));
+          inp.focus();
+        }
+      });
+
+      // Mouse wheel scroll cycles graphemes
+      inp.addEventListener("wheel", (e)=>{
+        e.preventDefault();
+        const currentVal = (inp.value || "").trim();
+        const idx = GRAPHEME_BANK.indexOf(currentVal);
+        const dir = Math.sign(e.deltaY); // +1 down, -1 up
+        const nextIdx = (idx === -1)
+          ? (dir > 0 ? 0 : GRAPHEME_BANK.length - 1)
+          : (idx + dir + GRAPHEME_BANK.length) % GRAPHEME_BANK.length;
+        inp.value = GRAPHEME_BANK[nextIdx];
+        inp.dispatchEvent(new Event("input"));
+      }, { passive:false });
+
+      col.appendChild(sel);
+    }
+
+    row.appendChild(col);
 
     if (i < item.segments.length - 1){
       const slash = document.createElement("span");
@@ -654,7 +828,7 @@ function focusSeg(i){
 }
 
 /* =========================================================
-   8) CHECKING + TRY AGAIN + OPTIONAL REVEAL
+   8) CHECKING
    ========================================================= */
 function check(){
   const item = bank[current];
@@ -739,11 +913,17 @@ function reset(){
 }
 
 /* =========================================================
-   9) AUTH UI (B page)
+   9) AUTH
    ========================================================= */
+function getReturnUrl(){
+  const url = new URL(window.location.href);
+  url.hash = "";
+  return url.toString();
+}
+
 async function signInWithGoogle(){
   setError(authError, null);
-  const redirectTo = window.location.origin + window.location.pathname;
+  const redirectTo = getReturnUrl();
 
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
@@ -757,98 +937,192 @@ async function signOut(){
   await supabaseClient.auth.signOut();
 }
 
-async function refreshAuthUI(){
-  if (!SUPABASE_KEY || SUPABASE_KEY.includes("PASTE_YOUR_PUBLISHABLE_KEY_HERE")){
-    setError(authError, "Paste your Supabase publishable key into SUPABASE_KEY in index.html, then commit to GitHub.");
-    authView.style.display = "block";
-    appView.style.display = "none";
+/* =========================================================
+   10) TEACHER UI + DB
+   ========================================================= */
+function parseSegments(str){
+  const s = (str || "").trim();
+  if (!s) return [];
+  return s.split("/").map(x => x.trim()).filter(Boolean);
+}
+
+function renderDraftList(){
+  if (!draftWords.length){
+    draftListEl.textContent = "No draft words yet.";
     return;
   }
+  draftListEl.innerHTML = draftWords.map((w, i) => `
+    <div class="draftItem">
+      <div class="draftIdx">${i+1}.</div>
+      <div><b>${escapeHtml(w.word)}</b> <span class="draftSeg">(${escapeHtml(w.segments.join("/"))})</span></div>
+      <div class="draftSent">${escapeHtml(w.sentence || "")}</div>
+      <button class="btn secondary" type="button" data-remove="${i}">Remove</button>
+    </div>
+  `).join("");
+}
 
-  const { data, error } = await supabaseClient.auth.getSession();
+draftListEl.addEventListener("click", (e)=>{
+  const btn = e.target.closest("[data-remove]");
+  if (!btn) return;
+  const i = Number(btn.getAttribute("data-remove"));
+  draftWords.splice(i, 1);
+  renderDraftList();
+});
+
+async function loadTestsIntoDropdown(){
+  const { data, error } = await supabaseClient
+    .from("tests")
+    .select("id,title,created_at")
+    .order("created_at", { ascending:false })
+    .limit(50);
+
   if (error){
-    setError(authError, error.message);
-    authView.style.display = "block";
-    appView.style.display = "none";
+    setError(appError, error.message);
     return;
   }
 
-  const session = data.session;
+  testSelectEl.innerHTML = "";
+  for (const t of (data || [])){
+    const opt = document.createElement("option");
+    opt.value = t.id;
+    opt.textContent = t.title || `Untitled (${t.id.slice(0,8)})`;
+    testSelectEl.appendChild(opt);
+  }
 
-  if (session?.user){
-    authView.style.display = "none";
-    appView.style.display = "block";
-
-    await ensureTeacherProfile(session.user);
-    await loadWordsFromDBOrFallback();
-
-    render();
-  } else {
-    authView.style.display = "block";
-    appView.style.display = "none";
+  if (!activeTestId && data?.length){
+    activeTestId = data[0].id;
+    testSelectEl.value = activeTestId;
   }
 }
 
-/* =========================================================
-   10) DB LOAD (tests/test_words)
-   ========================================================= */
-async function loadWordsFromDBOrFallback(){
+async function createTest(){
+  const title = (testTitleEl.value || "").trim() || "Untitled test";
+
+  const { data, error } = await supabaseClient
+    .from("tests")
+    .insert({ title })
+    .select("id")
+    .single();
+
+  if (error){
+    setError(appError, error.message);
+    return;
+  }
+
+  activeTestId = data.id;
+  draftWords = [];
+  renderDraftList();
+
+  await loadTestsIntoDropdown();
+  testSelectEl.value = activeTestId;
+
+  setError(appError, `Created test: ${title}`);
+}
+
+function addDraftWord(){
+  const word = (newWordEl.value || "").trim();
+  if (!word){
+    setError(appError, "Enter a word.");
+    return;
+  }
+  const sentence = (newSentenceEl.value || "").trim();
+  const segments = parseSegments(newSegmentsEl.value);
+
+  draftWords.push({ word, sentence, segments });
+
+  newWordEl.value = "";
+  newSentenceEl.value = "";
+  newSegmentsEl.value = "";
+
   setError(appError, null);
+  renderDraftList();
+}
 
-  try{
-    const { data: tests, error: tErr } = await supabaseClient
-      .from("tests")
-      .select("id,title,created_at")
-      .order("created_at", { ascending: false })
-      .limit(1);
+async function loadWordsForTest(testId){
+  activeTestId = testId;
 
-    if (tErr) throw tErr;
+  const { data: words, error } = await supabaseClient
+    .from("test_words")
+    .select("position,word,sentence,segments")
+    .eq("test_id", testId)
+    .order("position", { ascending:true });
 
-    if (!tests || tests.length === 0){
-      bank = [...DEMO_WORDS];
-      current = 0;
-      score = 0;
-      setError(appError, "No tests found in Supabase yet. Using demo words for now.");
-      return;
-    }
-
-    const testId = tests[0].id;
-
-    const { data: words, error: wErr } = await supabaseClient
-      .from("test_words")
-      .select("position,word,sentence,segments")
-      .eq("test_id", testId)
-      .order("position", { ascending: true });
-
-    if (wErr) throw wErr;
-
-    if (!words || words.length === 0){
-      bank = [...DEMO_WORDS];
-      current = 0;
-      score = 0;
-      setError(appError, "Test exists but has no words. Using demo words for now.");
-      return;
-    }
-
-    bank = words.map(w => ({
-      word: w.word,
-      sentence: w.sentence || "",
-      segments: Array.isArray(w.segments) ? w.segments : []
-    }));
-
-    current = 0;
-    score = 0;
-  }catch(err){
-    console.error(err);
+  if (error || !words?.length){
     bank = [...DEMO_WORDS];
     current = 0;
     score = 0;
-    setError(appError, "Couldn’t load words from Supabase yet. Using demo words for now.");
+    setError(appError, "No words found for that test. Using demo words.");
+    return;
   }
+
+  bank = words.map(w => ({
+    word: w.word,
+    sentence: w.sentence || "",
+    segments: Array.isArray(w.segments) ? w.segments : []
+  }));
+
+  current = 0;
+  score = 0;
+  setError(appError, null);
+}
+
+async function saveDraftToSupabase(){
+  if (!activeTestId){
+    setError(appError, "Create or load a test first.");
+    return;
+  }
+  if (!draftWords.length){
+    setError(appError, "Add at least one word before saving.");
+    return;
+  }
+
+  // Replace words for this test
+  const del = await supabaseClient.from("test_words").delete().eq("test_id", activeTestId);
+  if (del.error){
+    setError(appError, del.error.message);
+    return;
+  }
+
+  const payload = draftWords.map((w, idx) => ({
+    test_id: activeTestId,
+    position: idx + 1,
+    word: w.word,
+    sentence: w.sentence,
+    segments: w.segments
+  }));
+
+  const ins = await supabaseClient.from("test_words").insert(payload);
+  if (ins.error){
+    setError(appError, ins.error.message);
+    return;
+  }
+
+  setError(appError, "Saved! Loading test into the game…");
+  await loadWordsForTest(activeTestId);
+  render();
+}
+
+async function loadLatestTestOrFallback(){
+  const { data: tests, error: tErr } = await supabaseClient
+    .from("tests")
+    .select("id,title,created_at")
+    .order("created_at", { ascending:false })
+    .limit(1);
+
+  if (tErr || !tests?.length){
+    bank = [...DEMO_WORDS];
+    current = 0;
+    score = 0;
+    setError(appError, "No tests found yet. Using demo words.");
+    return;
+  }
+
+  activeTestId = tests[0].id;
+  await loadWordsForTest(activeTestId);
 }
 
 /* =========================================================
-   11) TEACHERS PROFILE (creates row if missing)
+   11) TEACHERS PROFILE (optional helper)
    ========================================================= */
 async function ensureTeacherProfile(user){
   try{
@@ -882,7 +1156,39 @@ function escapeHtml(str){
 }
 
 /* =========================================================
-   13) EVENTS
+   13) AUTH UI SWITCH
+   ========================================================= */
+async function refreshAuthUI(){
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error){
+    setError(authError, error.message);
+    authView.style.display = "block";
+    appView.style.display = "none";
+    return;
+  }
+
+  const session = data.session;
+
+  if (session?.user){
+    authView.style.display = "none";
+    appView.style.display = "block";
+    setError(authError, null);
+
+    await ensureTeacherProfile(session.user);
+
+    await loadTestsIntoDropdown();
+    await loadLatestTestOrFallback();
+
+    renderDraftList();
+    render();
+  } else {
+    authView.style.display = "block";
+    appView.style.display = "none";
+  }
+}
+
+/* =========================================================
+   14) EVENTS
    ========================================================= */
 googleBtn.addEventListener("click", signInWithGoogle);
 signOutBtn.addEventListener("click", signOut);
@@ -898,13 +1204,27 @@ revealPolicyEl.addEventListener("change", ()=> {
   setButtonsForState({canNext:false, canShowAnswer:false});
   clearFeedback();
 });
+pickerSelectEl.addEventListener("change", ()=> render());
 
 bgColorEl.addEventListener("input", saveTheme);
 textColorEl.addEventListener("input", saveTheme);
 resetThemeBtn.addEventListener("click", resetTheme);
 
+/* Teacher events */
+createTestBtn.addEventListener("click", createTest);
+loadTestBtn.addEventListener("click", async ()=>{
+  const id = testSelectEl.value;
+  if (!id) return;
+  draftWords = [];
+  renderDraftList();
+  await loadWordsForTest(id);
+  render();
+});
+addWordBtn.addEventListener("click", addDraftWord);
+saveWordsBtn.addEventListener("click", saveDraftToSupabase);
+
 /* =========================================================
-   14) INIT
+   15) INIT
    ========================================================= */
 loadTheme();
 refreshAuthUI();
