@@ -48,25 +48,16 @@ export async function renderTeacherDashboard(containerEl) {
             <option value="test">test</option>
             <option value="strict">strict</option>
           </select>
-          <div class="muted" style="font-size:12px; margin-top:6px;">
-            (Mode not saved yet — schema cache issue)
-          </div>
         </div>
 
         <div style="min-width:160px;">
           <label style="display:block; margin:0 0 6px;">Max attempts</label>
           <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
-          <div class="muted" style="font-size:12px; margin-top:6px;">
-            (Not saved yet — schema cache issue)
-          </div>
         </div>
 
         <div style="min-width:220px;">
           <label style="display:block; margin:0 0 6px;">Deadline</label>
           <input id="assignEndAt" class="input" type="datetime-local" />
-          <div class="muted" style="font-size:12px; margin-top:6px;">
-            (Not saved yet — schema cache issue)
-          </div>
         </div>
 
         <div style="align-self:end;">
