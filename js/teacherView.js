@@ -25,7 +25,10 @@ export async function renderTeacherDashboard(containerEl) {
     <div id="teacherNotice" class="notice" style="display:none;"></div>
 
     <h3 style="margin-top:18px;">Your classes</h3>
-    <div id="classesWrap" class="muted">Loading classes…</div>
+<div id="classesWrap" class="muted">Loading classes…</div>
+
+<h3 style="margin-top:18px;">Your tests</h3>
+<div id="testsWrap" class="muted">Loading tests…</div>
   `;
 
   const emailLine = containerEl.querySelector("#teacherEmailLine");
