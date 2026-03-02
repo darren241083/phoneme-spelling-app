@@ -136,8 +136,8 @@ btnSignOut?.addEventListener("click", async () => {
    AUTH LISTENER
 ---------------------------- */
 
-supabase.auth.onAuthStateChange(async () => {
-  await route();
+supabase.auth.onAuthStateChange(() => {
+  route().catch((e) => console.error("route() crashed after auth:", e));
 });
 
 /* ---------------------------
