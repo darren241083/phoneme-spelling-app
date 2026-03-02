@@ -1,3 +1,4 @@
+console.log("✅ app.js is running");
 import { STORAGE } from "./config.js";
 import { clearBanner, setNotice, showBanner } from "./ui.js";
 import { supabase, wireGlobalAuthErrorHandling } from "./supabaseClient.js";
