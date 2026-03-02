@@ -17,6 +17,11 @@ export async function renderTeacherDashboard(containerEl) {
       <div style="align-self:end;">
         <button id="btnCreateClass" class="btn" type="button">Create class</button>
       </div>
+
+      <div style="min-width:260px; flex:1;">
+        <label style="display:block; margin:0 0 6px;">Test title</label>
+        <input id="testTitle" class="input" placeholder="e.g. Phase 3 – Week 1" />
+      </div>
       <div style="align-self:end;">
         <button id="btnCreateTest" class="btn secondary" type="button">Create test</button>
       </div>
@@ -25,34 +30,40 @@ export async function renderTeacherDashboard(containerEl) {
     <div id="teacherNotice" class="notice" style="display:none;"></div>
 
     <h3 style="margin-top:18px;">Your classes</h3>
-<div id="classesWrap" class="muted">Loading classes…</div>
+    <div id="classesWrap" class="muted">Loading classes…</div>
 
-<h3 style="margin-top:18px;">Your tests</h3>
-<div id="testsWrap" class="muted">Loading tests…</div>
+    <h3 style="margin-top:18px;">Your tests</h3>
+    <div id="testsWrap" class="muted">Loading tests…</div>
   `;
 
   const emailLine = containerEl.querySelector("#teacherEmailLine");
   const noticeEl = containerEl.querySelector("#teacherNotice");
+
   const classNameEl = containerEl.querySelector("#className");
   const btnCreateClass = containerEl.querySelector("#btnCreateClass");
+
+  const testTitleEl = containerEl.querySelector("#testTitle");
   const btnCreateTest = containerEl.querySelector("#btnCreateTest");
+
   const classesWrap = containerEl.querySelector("#classesWrap");
   const testsWrap = containerEl.querySelector("#testsWrap");
 
+  // Get signed-in user
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userRes?.user) {
     showNotice(noticeEl, `Could not load signed-in user. ${userErr?.message || ""}`, true);
     emailLine.textContent = "Not signed in.";
     classesWrap.textContent = "";
+    testsWrap.textContent = "";
     return;
   }
 
   const user = userRes.user;
   emailLine.innerHTML = `Signed in as <strong>${escapeHtml(user.email || "(unknown)")}</strong>`;
 
-  // Load classes immediately
-  await refreshClasses();
-  await refreshTests();
+  // -------------------------
+  // Actions
+  // -------------------------
 
   // Create class
   btnCreateClass.addEventListener("click", async () => {
@@ -68,7 +79,7 @@ export async function renderTeacherDashboard(containerEl) {
 
     try {
       const created = await createClassRow({
-        teacherId: user.id, // matches schema: classes.teacher_id is the same UUID as teachers.id (auth.users.id)
+        teacherId: user.id,
         name,
       });
 
@@ -85,31 +96,63 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
- // Create test
-btnCreateTest.addEventListener("click", async () => {
-  const title = prompt("Test title?");
-  if (!title || !title.trim()) return;
+  // Create test
+  btnCreateTest.addEventListener("click", async () => {
+    const title = (testTitleEl.value || "").trim();
+    if (!title) {
+      showNotice(noticeEl, "Please enter a test title.", true);
+      testTitleEl.focus();
+      return;
+    }
 
-  btnCreateTest.disabled = true;
-  try {
-    const { error } = await supabase
-      .from("tests")
-      .insert([{ teacher_id: user.id, title: title.trim() }]);
+    btnCreateTest.disabled = true;
+    showNotice(noticeEl, "Creating test…");
 
-    if (error) throw error;
+    try {
+      const { error } = await supabase
+        .from("tests")
+        .insert([{ teacher_id: user.id, title }]);
 
-    showNotice(noticeEl, "Test created.");
-    await refreshTests();
-  } catch (e) {
-    showNotice(noticeEl, e?.message || "Could not create test.");
-  } finally {
-    btnCreateTest.disabled = false;
-  }
-});
+      if (error) throw error;
+
+      showNotice(noticeEl, `Test created: ${escapeHtml(title)}`);
+      testTitleEl.value = "";
+      await refreshTests();
+    } catch (e) {
+      showNotice(noticeEl, e?.message || String(e), true);
+    } finally {
+      btnCreateTest.disabled = false;
+    }
+  });
 
   // -------------------------
-  // Helpers
+  // Load data immediately
   // -------------------------
+  await refreshClasses();
+  await refreshTests();
+
+  // -------------------------
+  // Helpers (must be inside so they can see user/classesWrap/testsWrap)
+  // -------------------------
+
+  async function refreshClasses() {
+    classesWrap.textContent = "Loading classes…";
+
+    const { data, error } = await supabase
+      .from("classes")
+      .select("id, teacher_id, name, join_code, created_at")
+      .eq("teacher_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      classesWrap.innerHTML = `
+        <div class="notice">
+          Could not load classes.<br/>
+          <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+        </div>
+      `;
+      return;
+    }
 
     if (!data || data.length === 0) {
       classesWrap.innerHTML = `<div class="muted">No classes yet. Create one above.</div>`;
@@ -182,50 +225,50 @@ btnCreateTest.addEventListener("click", async () => {
       });
     });
   }
-}
 
-async function refreshTests() {
-  testsWrap.textContent = "Loading tests…";
+  async function refreshTests() {
+    testsWrap.textContent = "Loading tests…";
 
-  const { data, error } = await supabase
-    .from("tests")
-    .select("id, title, created_at")
-    .eq("teacher_id", user.id)
-    .order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("tests")
+      .select("id, title, created_at")
+      .eq("teacher_id", user.id)
+      .order("created_at", { ascending: false });
 
-  if (error) {
+    if (error) {
+      testsWrap.innerHTML = `
+        <div class="notice">
+          Could not load tests.<br/>
+          <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+        </div>
+      `;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      testsWrap.innerHTML = `<p class="muted">No tests yet.</p>`;
+      return;
+    }
+
     testsWrap.innerHTML = `
-      <div class="notice">
-        Could not load tests.<br/>
-        <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+      <div class="card" style="padding:12px;">
+        ${data
+          .map(
+            (t) => `
+              <div class="row" style="justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div>
+                  <div style="font-weight:600;">${escapeHtml(t.title)}</div>
+                  <div class="muted" style="font-size:12px;">${escapeHtml(
+                    new Date(t.created_at).toLocaleString()
+                  )}</div>
+                </div>
+              </div>
+            `
+          )
+          .join("")}
       </div>
     `;
-    return;
   }
-
-  if (!data || data.length === 0) {
-    testsWrap.innerHTML = `<p class="muted">No tests yet.</p>`;
-    return;
-  }
-
-  testsWrap.innerHTML = `
-    <div class="card" style="padding:12px;">
-      ${data
-        .map(
-          (t) => `
-            <div class="row" style="justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-              <div>
-                <div style="font-weight:600;">${escapeHtml(t.title)}</div>
-                <div class="muted" style="font-size:12px;">${escapeHtml(
-                  new Date(t.created_at).toLocaleString()
-                )}</div>
-              </div>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
 }
 
 export default renderTeacherDashboard;
@@ -276,8 +319,6 @@ function showNotice(el, msg, isError = false) {
   el.style.marginTop = "10px";
   el.innerHTML = msg;
 
-  // If your CSS styles .notice already, great.
-  // Otherwise just add a tiny hint via inline style:
   el.style.border = "1px solid";
   el.style.borderColor = isError ? "rgba(200,0,0,0.25)" : "rgba(0,0,0,0.08)";
   el.style.background = isError ? "rgba(200,0,0,0.06)" : "rgba(0,0,0,0.03)";
