@@ -2,6 +2,8 @@
 import { supabase } from "./supabaseClient.js";
 import { renderTeacherDashboard } from "./teacherView.js";
 
+window.supabase = supabase; // DEBUG: expose supabase in console
+
 /* ---------------------------
    DOM
 ---------------------------- */
