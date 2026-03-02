@@ -1,23 +1,20 @@
-import { supabase } from "./supabaseClient.js";
+const KEY = "ps_pupil_session";
 
-/**
- * Pupils sign in anonymously, then "claim" their pupil record
- * using class_code + pupil_code via RPC (security definer).
- */
-export async function pupilEnsureAnonymous(){
-  const { data } = await supabase.auth.getSession();
-  if (data?.session?.user) return data.session.user;
-  const { data: sign, error } = await supabase.auth.signInAnonymously();
-  if (error) throw error;
-  return sign.user;
+export async function pupilLogin(classCode, pupilCode) {
+  // Minimal placeholder logic — replace with real DB check later
+  if (classCode.length < 3 || pupilCode.length < 2) {
+    throw new Error("Invalid class or pupil code.");
+  }
+
+  localStorage.setItem(KEY, JSON.stringify({ classCode, pupilCode }));
 }
 
-export async function pupilClaim(classCode, pupilCode){
-  await pupilEnsureAnonymous();
-  const { data, error } = await supabase.rpc("claim_pupil", {
-    p_class_code: classCode.trim().toUpperCase(),
-    p_pupil_code: pupilCode.trim()
-  });
-  if (error) throw error;
-  return data; // { pupil_id, class_id }
+export async function getPupilSession() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+export async function pupilLogout() {
+  localStorage.removeItem(KEY);
 }
