@@ -111,8 +111,18 @@ btnBackFromPupil?.addEventListener("click", async () => {
 });
 
 btnGoogle?.addEventListener("click", async () => {
+  const origin = window.location.origin;       // https://darren241083.github.io
+  let path = window.location.pathname;         // /phoneme-spelling-app/ or /phoneme-spelling-app/index.html
+
+  if (path.endsWith("/index.html")) path = path.replace("/index.html", "/");
+  if (!path.endsWith("/")) path += "/";
+
+  const redirectTo = origin + path;
+  console.log("OAuth redirectTo =", redirectTo);
+
   await supabase.auth.signInWithOAuth({
-    provider: "google"
+    provider: "google",
+    options: { redirectTo }
   });
 });
 
