@@ -52,6 +52,7 @@ export async function renderTeacherDashboard(containerEl) {
 
   // Load classes immediately
   await refreshClasses();
+  await refreshTests();
 
   // Create class
   btnCreateClass.addEventListener("click", async () => {
