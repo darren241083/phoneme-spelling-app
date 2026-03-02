@@ -37,6 +37,7 @@ export async function renderTeacherDashboard(containerEl) {
   const btnCreateClass = containerEl.querySelector("#btnCreateClass");
   const btnCreateTest = containerEl.querySelector("#btnCreateTest");
   const classesWrap = containerEl.querySelector("#classesWrap");
+  const testsWrap = containerEl.querySelector("#testsWrap");
 
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userRes?.user) {
@@ -83,10 +84,27 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
-  // Create test (still placeholder)
-  btnCreateTest.addEventListener("click", async () => {
-    showNotice(noticeEl, "Create test clicked (wiring next).");
-  });
+ // Create test
+btnCreateTest.addEventListener("click", async () => {
+  const title = prompt("Test title?");
+  if (!title || !title.trim()) return;
+
+  btnCreateTest.disabled = true;
+  try {
+    const { error } = await supabase
+      .from("tests")
+      .insert([{ teacher_id: user.id, title: title.trim() }]);
+
+    if (error) throw error;
+
+    showNotice(noticeEl, "Test created.");
+    await refreshTests();
+  } catch (e) {
+    showNotice(noticeEl, e?.message || "Could not create test.");
+  } finally {
+    btnCreateTest.disabled = false;
+  }
+});
 
   // -------------------------
   // Helpers
@@ -110,6 +128,48 @@ export async function renderTeacherDashboard(containerEl) {
       `;
       return;
     }
+
+    async function refreshTests() {
+  testsWrap.textContent = "Loading tests…";
+
+  const { data, error } = await supabase
+    .from("tests")
+    .select("id, title, created_at")
+    .eq("teacher_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    testsWrap.innerHTML = `
+      <div class="notice">
+        Could not load tests.<br/>
+        <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+      </div>
+    `;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    testsWrap.innerHTML = `<p class="muted">No tests yet.</p>`;
+    return;
+  }
+
+  testsWrap.innerHTML = `
+    <div class="card" style="padding:12px;">
+      ${data
+        .map(
+          (t) => `
+            <div class="row" style="justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-weight:600;">${escapeHtml(t.title)}</div>
+                <div class="muted" style="font-size:12px;">${escapeHtml(new Date(t.created_at).toLocaleString())}</div>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
 
     if (!data || data.length === 0) {
       classesWrap.innerHTML = `<div class="muted">No classes yet. Create one above.</div>`;
