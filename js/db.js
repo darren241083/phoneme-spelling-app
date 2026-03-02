@@ -105,3 +105,42 @@ export async function listTests() {
   if (error) throw error;
   return data || [];
 }
+
+/* ---------------------------
+   Attempts (Pupil)
+---------------------------- */
+
+export async function pupilRecordAttempt({
+  pupilId,
+  testId,
+  testWordId,
+  mode,
+  typed,
+  correct
+}) {
+  // If you haven’t implemented pupil identity yet, quietly do nothing.
+  if (!pupilId) return null;
+
+  try {
+    const payload = {
+      pupil_id: pupilId,
+      test_id: testId,
+      test_word_id: testWordId,
+      mode,
+      typed,
+      correct
+    };
+
+    const { data, error } = await supabase
+      .from("attempts")
+      .insert([payload])
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.warn("pupilRecordAttempt failed:", e?.message || e);
+    return null;
+  }
+}
