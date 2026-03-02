@@ -1,147 +1,107 @@
+// /js/db.js
 import { supabase } from "./supabaseClient.js";
-import { randCode, randDigits } from "./ui.js";
 
-/* ---------------- TEACHER ---------------- */
+/* ---------------------------
+   Helpers
+---------------------------- */
 
-export async function upsertTeacherProfile(user){
-  // teachers table uses auth.uid as id
-  const display = user.user_metadata?.full_name || user.email || null;
-  await supabase.from("teachers").upsert({ id: user.id, display_name: display });
+function requireUserId(user) {
+  const id = user?.id;
+  if (!id) throw new Error("Not signed in.");
+  return id;
 }
 
-export async function teacherListTests(){
-  const { data, error } = await supabase
-    .from("tests")
-    .select("id,title,allowed_graphemes,created_at")
-    .order("created_at", { ascending:false });
-  if (error) throw error;
-  return data || [];
+function randomJoinCode(len = 6) {
+  // Friendly uppercase codes (no O/0, I/1 confusion)
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
 }
 
-export async function teacherCreateTest(title, allowedGraphemesArr){
-  const { data, error } = await supabase
-    .from("tests")
-    .insert({
-      title,
-      allowed_graphemes: allowedGraphemesArr?.length ? allowedGraphemesArr : null
-    })
-    .select("id")
-    .single();
-  if (error) throw error;
-  return data.id;
+/* ---------------------------
+   Classes
+---------------------------- */
+
+export async function createClass({ name }) {
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  const teacherId = requireUserId(userRes?.user);
+
+  const className = (name || "").trim() || "New class";
+
+  // Try a few times in case join_code clashes with UNIQUE constraint
+  let lastErr = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const join_code = randomJoinCode(6);
+
+    const { data, error } = await supabase
+      .from("classes")
+      .insert([{ teacher_id: teacherId, name: className, join_code }])
+      .select("*")
+      .single();
+
+    if (!error) return data;
+
+    lastErr = error;
+
+    // If it's a unique violation on join_code, retry
+    // (Postgres unique violation is 23505)
+    if (error.code === "23505") continue;
+
+    throw error;
+  }
+
+  throw lastErr || new Error("Failed to create class (unknown error).");
 }
 
-export async function teacherAddWords(testId, words){
-  // words: [{position, word, sentence, segments[]}]
-  const payload = words.map(w => ({
-    test_id: testId,
-    position: w.position,
-    word: w.word,
-    sentence: w.sentence || null,
-    segments: w.segments || []
-  }));
-  const { error } = await supabase.from("test_words").insert(payload);
-  if (error) throw error;
-}
+export async function listClasses() {
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  const teacherId = requireUserId(userRes?.user);
 
-export async function teacherGetTestWords(testId){
-  const { data, error } = await supabase
-    .from("test_words")
-    .select("id,position,word,sentence,segments")
-    .eq("test_id", testId)
-    .order("position", { ascending:true });
-  if (error) throw error;
-  return data || [];
-}
-
-export async function teacherListClasses(){
-  const { data, error } = await supabase
-    .from("classes")
-    .select("id,name,class_code,created_at")
-    .order("created_at", { ascending:false });
-  if (error) throw error;
-  return data || [];
-}
-
-export async function teacherCreateClass(name){
-  // Friendly class code like WGSF-7H2K
-  const code = `WGSF-${randCode(4)}`;
   const { data, error } = await supabase
     .from("classes")
-    .insert({ name, class_code: code })
-    .select("id,class_code")
+    .select("id, name, join_code, created_at")
+    .eq("teacher_id", teacherId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+/* ---------------------------
+   Tests
+---------------------------- */
+
+export async function createTest({ title }) {
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  const teacherId = requireUserId(userRes?.user);
+
+  const testTitle = (title || "").trim() || "New test";
+
+  const { data, error } = await supabase
+    .from("tests")
+    .insert([{ teacher_id: teacherId, title: testTitle }])
+    .select("*")
     .single();
+
   if (error) throw error;
   return data;
 }
 
-export async function teacherListPupils(classId){
+export async function listTests() {
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  const teacherId = requireUserId(userRes?.user);
+
   const { data, error } = await supabase
-    .from("pupils")
-    .select("id,name,pupil_code,created_at")
-    .eq("class_id", classId)
-    .order("created_at", { ascending:false });
+    .from("tests")
+    .select("id, title, created_at")
+    .eq("teacher_id", teacherId)
+    .order("created_at", { ascending: false });
+
   if (error) throw error;
   return data || [];
-}
-
-export async function teacherAddPupil(classId, name){
-  const code = randDigits(4);
-  const { data, error } = await supabase
-    .from("pupils")
-    .insert({ class_id: classId, name: name || null, pupil_code: code })
-    .select("id,pupil_code")
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function teacherAssignTestToClass(classId, testId){
-  const { error } = await supabase
-    .from("class_tests")
-    .insert({ class_id: classId, test_id: testId });
-  if (error) throw error;
-}
-
-export async function teacherListAssignments(classId){
-  const { data, error } = await supabase
-    .from("class_tests")
-    .select("test_id, tests(title)")
-    .eq("class_id", classId);
-  if (error) throw error;
-  return data || [];
-}
-
-/* ---------------- PUPIL ---------------- */
-
-export async function pupilGetAssignedTests(){
-  // RLS restricts to pupil’s class via pupil_accounts mapping
-  const { data, error } = await supabase
-    .from("assigned_tests_view")
-    .select("test_id,title,allowed_graphemes,created_at")
-    .order("created_at", { ascending:false });
-  if (error) throw error;
-  return data || [];
-}
-
-export async function pupilGetTestWords(testId){
-  const { data, error } = await supabase
-    .from("test_words")
-    .select("id,position,word,sentence,segments")
-    .eq("test_id", testId)
-    .order("position", { ascending:true });
-  if (error) throw error;
-  return data || [];
-}
-
-export async function pupilRecordAttempt({ pupilId, testId, testWordId, mode, typed, correct }){
-  const { error } = await supabase.from("attempts").insert({
-    pupil_id: pupilId,
-    test_id: testId,
-    test_word_id: testWordId,
-    mode,
-    typed,
-    correct
-  });
-  if (error) throw error;
 }
