@@ -1,173 +1,219 @@
-console.log("✅ app.js is running");
-import { STORAGE } from "./config.js";
-import { clearBanner, setNotice, showBanner } from "./ui.js";
-import { supabase, wireGlobalAuthErrorHandling } from "./supabaseClient.js";
-import { teacherSignInGoogle, signOut, getSession } from "./authTeacher.js";
-import { pupilClaim } from "./authPupil.js";
-import { upsertTeacherProfile } from "./db.js";
-import { mountTeacherDashboard } from "./teacherView.js";
-import { mountPupilApp } from "./pupilView.js";
+// ./js/app.js
+import { showBanner, hideBanner } from "./ui.js";
+import { getTeacherSession, teacherSignInGoogle, teacherSignOut } from "./authTeacher.js";
+import { pupilLogin, pupilLogout, getPupilSession } from "./authPupil.js";
+import { renderTeacherView } from "./teacherView.js";
+import { renderPupilView } from "./pupilView.js";
 
-wireGlobalAuthErrorHandling();
+/**
+ * IMPORTANT:
+ * We store the role using ONE key only.
+ * This fixes the "setRole works but getRole is null" bug.
+ */
+const ROLE_KEY = "ps_role"; // <- one source of truth
 
-const viewRole = document.getElementById("viewRole");
-const viewTeacherAuth = document.getElementById("viewTeacherAuth");
-const viewTeacher = document.getElementById("viewTeacher");
-const viewPupilAuth = document.getElementById("viewPupilAuth");
-const viewPupil = document.getElementById("viewPupil");
+// ---------- DOM ----------
+const $ = (id) => document.getElementById(id);
 
-const btnTeacher = document.getElementById("btnTeacher");
-const btnPupil = document.getElementById("btnPupil");
-const btnGoogle = document.getElementById("btnGoogle");
-const btnSignOut = document.getElementById("btnSignOut");
+// Views (match your index.html exactly)
+const viewRole = $("viewRole");
+const viewTeacherAuth = $("viewTeacherAuth");
+const viewTeacher = $("viewTeacher");
+const viewPupilAuth = $("viewPupilAuth");
+const viewPupil = $("viewPupil");
 
-const teacherAuthMsg = document.getElementById("teacherAuthMsg");
+// Buttons (match your index.html exactly)
+const btnTeacher = $("btnTeacher");
+const btnPupil = $("btnPupil");
+const btnGoogle = $("btnGoogle");
+const btnPupilLogin = $("btnPupilLogin");
+const btnBackFromPupil = $("btnBackFromPupil");
+const btnSignOut = $("btnSignOut");
 
-const pupilClassCode = document.getElementById("pupilClassCode");
-const pupilCode = document.getElementById("pupilCode");
-const btnPupilLogin = document.getElementById("btnPupilLogin");
-const btnBackFromPupil = document.getElementById("btnBackFromPupil");
-const pupilAuthMsg = document.getElementById("pupilAuthMsg");
+// Pupil inputs
+const pupilClassCode = $("pupilClassCode");
+const pupilCode = $("pupilCode");
 
-function hideAll(){
-  viewRole.style.display = "none";
-  viewTeacherAuth.style.display = "none";
-  viewTeacher.style.display = "none";
-  viewPupilAuth.style.display = "none";
-  viewPupil.style.display = "none";
+// Notices
+const teacherAuthMsg = $("teacherAuthMsg");
+const pupilAuthMsg = $("pupilAuthMsg");
+
+// Banner (optional)
+const banner = $("banner");
+
+// ---------- Helpers ----------
+function setRole(role) {
+  localStorage.setItem(ROLE_KEY, role);
 }
 
-function setRole(role){
-  localStorage.setItem(STORAGE.role, role);
+function getRole() {
+  return localStorage.getItem(ROLE_KEY) || "";
 }
 
-function getRole(){
-  return localStorage.getItem(STORAGE.role) || "";
+function clearRole() {
+  localStorage.removeItem(ROLE_KEY);
 }
 
-async function showRolePicker(){
-  clearBanner();
-  hideAll();
-  btnSignOut.style.display = "none";
-  viewRole.style.display = "block";
+function showOnly(viewEl) {
+  const all = [viewRole, viewTeacherAuth, viewTeacher, viewPupilAuth, viewPupil];
+  all.forEach((v) => (v.style.display = "none"));
+  viewEl.style.display = "block";
 }
 
-async function showTeacherAuth(){
-  clearBanner();
-  hideAll();
-  btnSignOut.style.display = "none";
-  viewTeacherAuth.style.display = "block";
+function setNotice(el, msg) {
+  if (!el) return;
+  if (!msg) {
+    el.style.display = "none";
+    el.textContent = "";
+    return;
+  }
+  el.style.display = "block";
+  el.textContent = msg;
 }
 
-async function showTeacherApp(session){
-  clearBanner();
-  hideAll();
-  btnSignOut.style.display = "inline-block";
-  viewTeacher.style.display = "block";
-
-  await upsertTeacherProfile(session.user);
-  await mountTeacherDashboard(viewTeacher);
+function setSignOutVisible(isVisible) {
+  btnSignOut.style.display = isVisible ? "inline-flex" : "none";
 }
 
-async function showPupilAuth(){
-  clearBanner();
-  hideAll();
-  btnSignOut.style.display = "none";
-  viewPupilAuth.style.display = "block";
-}
-
-async function showPupilApp(pupilState){
-  clearBanner();
-  hideAll();
-  btnSignOut.style.display = "inline-block"; // signs out anon too (fine)
-  viewPupil.style.display = "block";
-  await mountPupilApp(viewPupil, pupilState);
-}
-
-async function route(){
-  clearBanner();
+// ---------- Routing ----------
+async function route() {
+  // Always clear any inline notices on route
+  setNotice(teacherAuthMsg, null);
+  setNotice(pupilAuthMsg, null);
+  hideBanner?.();
 
   const role = getRole();
-  const savedPupil = JSON.parse(localStorage.getItem(STORAGE.pupil) || "null");
-  const session = await getSession().catch(()=>null);
 
-  if (!role){
-    return showRolePicker();
+  // If no role chosen yet -> show role picker
+  if (!role) {
+    setSignOutVisible(false);
+    showOnly(viewRole);
+    return;
   }
 
-  if (role === "teacher"){
-    if (!session?.user) return showTeacherAuth();
-    return showTeacherApp(session);
+  // TEACHER FLOW
+  if (role === "teacher") {
+    const session = await getTeacherSession().catch(() => null);
+
+    if (!session) {
+      setSignOutVisible(false);
+      showOnly(viewTeacherAuth);
+      return;
+    }
+
+    // Signed in teacher -> dashboard
+    setSignOutVisible(true);
+    showOnly(viewTeacher);
+
+    // Render teacher UI
+    await renderTeacherView({
+      mount: viewTeacher,
+      session,
+      onSignOut: async () => {
+        await teacherSignOut();
+        clearRole();
+        await route();
+      },
+      onToast: (msg) => showBanner?.(msg),
+    });
+
+    return;
   }
 
-  if (role === "pupil"){
-    if (!savedPupil?.pupil_id) return showPupilAuth();
-    return showPupilApp(savedPupil);
+  // PUPIL FLOW
+  if (role === "pupil") {
+    const pupilSession = await getPupilSession().catch(() => null);
+
+    if (!pupilSession) {
+      setSignOutVisible(false);
+      showOnly(viewPupilAuth);
+      return;
+    }
+
+    setSignOutVisible(true);
+    showOnly(viewPupil);
+
+    await renderPupilView({
+      mount: viewPupil,
+      pupil: pupilSession,
+      onSignOut: async () => {
+        await pupilLogout();
+        clearRole();
+        await route();
+      },
+      onToast: (msg) => showBanner?.(msg),
+    });
+
+    return;
   }
 
-  return showRolePicker();
+  // Unknown role -> reset
+  clearRole();
+  setSignOutVisible(false);
+  showOnly(viewRole);
 }
 
-/* -------- events -------- */
-
-btnTeacher.addEventListener("click", async () => {
-  console.log("CLICK teacher");
-
+// ---------- Events ----------
+btnTeacher?.addEventListener("click", async () => {
   setRole("teacher");
-
-  console.log("ROLE after setRole:",
-    localStorage.getItem("role"),
-    sessionStorage.getItem("role")
-  );
-
-  try {
-    await route();
-    console.log("ROUTE finished");
-  } catch (e) {
-    console.error("ROUTE crashed:", e);
-  }
+  await route();
 });
 
-btnPupil.addEventListener("click", async ()=>{
+btnPupil?.addEventListener("click", async () => {
   setRole("pupil");
   await route();
 });
 
-btnGoogle.addEventListener("click", async ()=>{
-  try{
+btnGoogle?.addEventListener("click", async () => {
+  try {
     setNotice(teacherAuthMsg, null);
     await teacherSignInGoogle();
-  }catch(e){
-    setNotice(teacherAuthMsg, e.message);
-  }
-});
-
-btnPupilLogin.addEventListener("click", async ()=>{
-  try{
-    setNotice(pupilAuthMsg, null);
-    const classCode = (pupilClassCode.value || "").trim();
-    const code = (pupilCode.value || "").trim();
-    if (!classCode || !code) return setNotice(pupilAuthMsg, "Enter both codes.");
-
-    const res = await pupilClaim(classCode, code);
-    localStorage.setItem(STORAGE.pupil, JSON.stringify(res));
+    // redirect happens; if not, route again
     await route();
-  }catch(e){
-    setNotice(pupilAuthMsg, e.message);
+  } catch (e) {
+    setNotice(teacherAuthMsg, e?.message || "Google sign-in failed.");
   }
 });
 
-btnBackFromPupil.addEventListener("click", async ()=>{
-  localStorage.removeItem(STORAGE.role);
+btnBackFromPupil?.addEventListener("click", async () => {
+  clearRole();
   await route();
 });
 
-btnSignOut.addEventListener("click", async ()=>{
-  await signOut();
-  localStorage.removeItem(STORAGE.pupil);
-  await route();
+btnPupilLogin?.addEventListener("click", async () => {
+  try {
+    setNotice(pupilAuthMsg, null);
+
+    const classCode = (pupilClassCode?.value || "").trim();
+    const code = (pupilCode?.value || "").trim();
+
+    if (!classCode || !code) {
+      setNotice(pupilAuthMsg, "Please enter both class code and pupil code.");
+      return;
+    }
+
+    await pupilLogin({ classCode, pupilCode: code });
+    await route();
+  } catch (e) {
+    setNotice(pupilAuthMsg, e?.message || "Pupil login failed.");
+  }
 });
 
-/* -------- init -------- */
-supabase.auth.onAuthStateChange(()=> route());
-route().catch(e => showBanner(e.message));
+// One sign-out button for whichever role is active
+btnSignOut?.addEventListener("click", async () => {
+  const role = getRole();
+  try {
+    if (role === "teacher") await teacherSignOut();
+    if (role === "pupil") await pupilLogout();
+  } finally {
+    clearRole();
+    await route();
+  }
+});
+
+// ---------- Init ----------
+console.log("app.js is running");
+
+window.addEventListener("load", () => {
+  route();
+});
