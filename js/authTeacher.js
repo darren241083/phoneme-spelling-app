@@ -1,6 +1,11 @@
 import { supabase } from "./supabaseClient.js";
 
-export async function teacherSignInGoogle(){
+export async function getTeacherSession() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session?.user || null;
+}
+
+export async function teacherSignInGoogle() {
   const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -9,12 +14,6 @@ export async function teacherSignInGoogle(){
   if (error) throw error;
 }
 
-export async function signOut(){
+export async function teacherSignOut() {
   await supabase.auth.signOut();
-}
-
-export async function getSession(){
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  return data.session;
 }
