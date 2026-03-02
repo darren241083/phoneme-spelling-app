@@ -111,67 +111,6 @@ btnCreateTest.addEventListener("click", async () => {
   // Helpers
   // -------------------------
 
-  async function refreshClasses() {
-    classesWrap.textContent = "Loading classes…";
-
-    const { data, error } = await supabase
-      .from("classes")
-      .select("id, teacher_id, name, join_code, created_at")
-      .eq("teacher_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      classesWrap.innerHTML = `
-        <div class="notice">
-          Could not load classes.<br/>
-          <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
-        </div>
-      `;
-      return;
-    }
-
-    async function refreshTests() {
-  testsWrap.textContent = "Loading tests…";
-
-  const { data, error } = await supabase
-    .from("tests")
-    .select("id, title, created_at")
-    .eq("teacher_id", user.id)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    testsWrap.innerHTML = `
-      <div class="notice">
-        Could not load tests.<br/>
-        <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
-      </div>
-    `;
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    testsWrap.innerHTML = `<p class="muted">No tests yet.</p>`;
-    return;
-  }
-
-  testsWrap.innerHTML = `
-    <div class="card" style="padding:12px;">
-      ${data
-        .map(
-          (t) => `
-            <div class="row" style="justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-              <div>
-                <div style="font-weight:600;">${escapeHtml(t.title)}</div>
-                <div class="muted" style="font-size:12px;">${escapeHtml(new Date(t.created_at).toLocaleString())}</div>
-              </div>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
     if (!data || data.length === 0) {
       classesWrap.innerHTML = `<div class="muted">No classes yet. Create one above.</div>`;
       return;
@@ -243,6 +182,50 @@ btnCreateTest.addEventListener("click", async () => {
       });
     });
   }
+}
+
+async function refreshTests() {
+  testsWrap.textContent = "Loading tests…";
+
+  const { data, error } = await supabase
+    .from("tests")
+    .select("id, title, created_at")
+    .eq("teacher_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    testsWrap.innerHTML = `
+      <div class="notice">
+        Could not load tests.<br/>
+        <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+      </div>
+    `;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    testsWrap.innerHTML = `<p class="muted">No tests yet.</p>`;
+    return;
+  }
+
+  testsWrap.innerHTML = `
+    <div class="card" style="padding:12px;">
+      ${data
+        .map(
+          (t) => `
+            <div class="row" style="justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-weight:600;">${escapeHtml(t.title)}</div>
+                <div class="muted" style="font-size:12px;">${escapeHtml(
+                  new Date(t.created_at).toLocaleString()
+                )}</div>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 export default renderTeacherDashboard;
