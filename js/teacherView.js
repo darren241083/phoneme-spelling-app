@@ -4,9 +4,6 @@ import { supabase } from "./supabaseClient.js";
 export async function renderTeacherDashboard(containerEl) {
   if (!containerEl) return;
 
-  // Try to preserve form state across accidental re-renders
-  const prevState = readFormState(containerEl);
-
   containerEl.innerHTML = `
     <h2>Teacher dashboard</h2>
     <p class="muted" id="teacherEmailLine">Loading user…</p>
@@ -51,18 +48,25 @@ export async function renderTeacherDashboard(containerEl) {
             <option value="test">test</option>
             <option value="strict">strict</option>
           </select>
+          <div class="muted" style="font-size:12px; margin-top:6px;">
+            (Mode not saved yet — schema cache issue)
+          </div>
         </div>
 
         <div style="min-width:160px;">
           <label style="display:block; margin:0 0 6px;">Max attempts</label>
           <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
-          <div class="muted" style="font-size:12px; margin-top:6px;">(Not saved yet — schema cache issue)</div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">
+            (Not saved yet — schema cache issue)
+          </div>
         </div>
 
         <div style="min-width:220px;">
           <label style="display:block; margin:0 0 6px;">Deadline</label>
           <input id="assignEndAt" class="input" type="datetime-local" />
-          <div class="muted" style="font-size:12px; margin-top:6px;">Optional. Uses your device time.</div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">
+            (Not saved yet — schema cache issue)
+          </div>
         </div>
 
         <div style="align-self:end;">
@@ -101,16 +105,6 @@ export async function renderTeacherDashboard(containerEl) {
   const assignEndAtEl = containerEl.querySelector("#assignEndAt");
   const btnAssign = containerEl.querySelector("#btnAssign");
 
-  // Restore previous input values if we had them
-  applyFormState({
-    classNameEl,
-    testTitleEl,
-    assignModeEl,
-    assignMaxAttemptsEl,
-    assignEndAtEl,
-    state: prevState,
-  });
-
   // Get signed-in user
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userRes?.user) {
@@ -124,10 +118,6 @@ export async function renderTeacherDashboard(containerEl) {
 
   const user = userRes.user;
   emailLine.innerHTML = `Signed in as <strong>${escapeHtml(user.email || "(unknown)")}</strong>`;
-
-  // -------------------------
-  // Actions
-  // -------------------------
 
   // Create class
   btnCreateClass.addEventListener("click", async () => {
@@ -169,10 +159,7 @@ export async function renderTeacherDashboard(containerEl) {
     showNotice(noticeEl, "Creating test…");
 
     try {
-      const { error } = await supabase
-        .from("tests")
-        .insert([{ teacher_id: user.id, title }]);
-
+      const { error } = await supabase.from("tests").insert([{ teacher_id: user.id, title }]);
       if (error) throw error;
 
       showNotice(noticeEl, `Test created: ${escapeHtml(title)}`);
@@ -185,14 +172,10 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
-  // Assign
+  // Assign (SAFE columns only)
   btnAssign.addEventListener("click", async () => {
     const classId = assignClassEl.value;
     const testId = assignTestEl.value;
-    const mode = assignModeEl.value;
-
-    const endAtRaw = (assignEndAtEl.value || "").trim();
-    const end_at = endAtRaw ? new Date(endAtRaw).toISOString() : null;
 
     if (!classId) {
       showNotice(noticeEl, "Choose a class to assign to.", true);
@@ -207,24 +190,23 @@ export async function renderTeacherDashboard(containerEl) {
     showNotice(noticeEl, "Assigning…");
 
     try {
-      // NOTE: We deliberately do NOT send max_attempts or deadline_enforced
-      // because PostgREST schema cache is currently stale on your project.
+      // IMPORTANT: only insert columns that PostgREST currently recognises
       const { error } = await supabase.from("assignments").insert([
         {
           teacher_id: user.id,
           class_id: classId,
           test_id: testId,
-          mode,
-          end_at,
         },
       ]);
 
       if (error) throw error;
 
-      showNotice(noticeEl, "Assigned.");
-      // keep dropdown selections, clear the optional fields
+      // Clear only optional inputs (we keep dropdown selection)
+      assignModeEl.value = "practice";
       assignMaxAttemptsEl.value = "";
       assignEndAtEl.value = "";
+
+      showNotice(noticeEl, "Assigned.");
       await refreshAssignments();
     } catch (e) {
       showNotice(noticeEl, e?.message || String(e), true);
@@ -233,15 +215,13 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
-  // -------------------------
-  // Initial load
-  // -------------------------
+  // Load everything
   await refreshAll();
 
   async function refreshAll() {
     await refreshClasses();
     await refreshTests();
-    await refreshAssignmentPickers();
+    await refreshPickers();
     await refreshAssignments();
   }
 
@@ -274,24 +254,24 @@ export async function renderTeacherDashboard(containerEl) {
         ${data
           .map(
             (c) => `
-          <div class="card" style="padding:14px; border-radius:14px;">
-            <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-              <div>
-                <div style="font-weight:700; font-size:16px;">${escapeHtml(c.name)}</div>
-                <div class="muted" style="margin-top:4px;">
-                  Join code: <strong>${escapeHtml(c.join_code || "")}</strong>
+              <div class="card" style="padding:14px; border-radius:14px;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                  <div>
+                    <div style="font-weight:700; font-size:16px;">${escapeHtml(c.name)}</div>
+                    <div class="muted" style="margin-top:4px;">
+                      Join code: <strong>${escapeHtml(c.join_code || "")}</strong>
+                    </div>
+                  </div>
+
+                  <div style="display:flex; gap:10px; align-items:center;">
+                    <button class="btn secondary" type="button" data-copy="${escapeHtml(
+                      c.join_code || ""
+                    )}">Copy code</button>
+                    <button class="btn secondary" type="button" data-del="${escapeHtml(c.id)}">Delete</button>
+                  </div>
                 </div>
               </div>
-
-              <div style="display:flex; gap:10px; align-items:center;">
-                <button class="btn secondary" type="button" data-copy="${escapeHtml(
-                  c.join_code || ""
-                )}">Copy code</button>
-                <button class="btn secondary" type="button" data-del="${escapeHtml(c.id)}">Delete</button>
-              </div>
-            </div>
-          </div>
-        `
+            `
           )
           .join("")}
       </div>
@@ -379,7 +359,7 @@ export async function renderTeacherDashboard(containerEl) {
     `;
   }
 
-  async function refreshAssignmentPickers() {
+  async function refreshPickers() {
     const [classesRes, testsRes] = await Promise.all([
       supabase
         .from("classes")
@@ -410,19 +390,15 @@ export async function renderTeacherDashboard(containerEl) {
         `<option value="">Select test…</option>` +
         items.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
     }
-
-    // Re-apply picker state if we had it
-    if (prevState?.assignClass) assignClassEl.value = prevState.assignClass;
-    if (prevState?.assignTest) assignTestEl.value = prevState.assignTest;
   }
 
   async function refreshAssignments() {
     assignmentsWrap.textContent = "Loading assignments…";
 
-    // NOTE: Deliberately not selecting max_attempts (schema cache issue)
+    // SAFE select only
     const { data, error } = await supabase
       .from("assignments")
-      .select("id, class_id, test_id, mode, end_at, created_at")
+      .select("id, class_id, test_id, created_at")
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -443,14 +419,12 @@ export async function renderTeacherDashboard(containerEl) {
     }
 
     const classOptions = Array.from(assignClassEl.querySelectorAll("option")).reduce((acc, o) => {
-      const v = o.value;
-      if (v) acc[v] = o.textContent || v;
+      if (o.value) acc[o.value] = o.textContent || o.value;
       return acc;
     }, {});
 
     const testOptions = Array.from(assignTestEl.querySelectorAll("option")).reduce((acc, o) => {
-      const v = o.value;
-      if (v) acc[v] = o.textContent || v;
+      if (o.value) acc[o.value] = o.textContent || o.value;
       return acc;
     }, {});
 
@@ -460,14 +434,12 @@ export async function renderTeacherDashboard(containerEl) {
           .map((a) => {
             const className = classOptions[a.class_id] || a.class_id;
             const testTitle = testOptions[a.test_id] || a.test_id;
-            const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
+            const when = a.created_at ? new Date(a.created_at).toLocaleString() : "";
 
             return `
               <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
                 <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
-                <div class="muted" style="margin-top:4px; font-size:12px;">
-                  Mode: ${escapeHtml(a.mode)} · Deadline: ${escapeHtml(deadline)}
-                </div>
+                <div class="muted" style="margin-top:4px; font-size:12px;">Assigned: ${escapeHtml(when)}</div>
               </div>
             `;
           })
@@ -480,8 +452,9 @@ export async function renderTeacherDashboard(containerEl) {
 export default renderTeacherDashboard;
 
 // --------------------------------------------------
-// DB insert with join_code generation + retry on conflict
+// Helpers
 // --------------------------------------------------
+
 async function createClassRow({ teacherId, name }) {
   const maxAttempts = 6;
 
@@ -535,37 +508,4 @@ function escapeHtml(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function readFormState(root) {
-  try {
-    const classNameEl = root.querySelector("#className");
-    const testTitleEl = root.querySelector("#testTitle");
-    const assignClassEl = root.querySelector("#assignClass");
-    const assignTestEl = root.querySelector("#assignTest");
-    const assignModeEl = root.querySelector("#assignMode");
-    const assignMaxAttemptsEl = root.querySelector("#assignMaxAttempts");
-    const assignEndAtEl = root.querySelector("#assignEndAt");
-
-    return {
-      className: classNameEl?.value || "",
-      testTitle: testTitleEl?.value || "",
-      assignClass: assignClassEl?.value || "",
-      assignTest: assignTestEl?.value || "",
-      assignMode: assignModeEl?.value || "practice",
-      assignMaxAttempts: assignMaxAttemptsEl?.value || "",
-      assignEndAt: assignEndAtEl?.value || "",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function applyFormState({ classNameEl, testTitleEl, assignModeEl, assignMaxAttemptsEl, assignEndAtEl, state }) {
-  if (!state) return;
-  if (classNameEl) classNameEl.value = state.className || "";
-  if (testTitleEl) testTitleEl.value = state.testTitle || "";
-  if (assignModeEl) assignModeEl.value = state.assignMode || "practice";
-  if (assignMaxAttemptsEl) assignMaxAttemptsEl.value = state.assignMaxAttempts || "";
-  if (assignEndAtEl) assignEndAtEl.value = state.assignEndAt || "";
 }
