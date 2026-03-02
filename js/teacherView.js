@@ -4,13 +4,12 @@ import { supabase } from "./supabaseClient.js";
 export async function renderTeacherDashboard(containerEl) {
   if (!containerEl) return;
 
-  // Basic skeleton (so the page never "goes blank" during async)
   containerEl.innerHTML = `
     <h2>Teacher dashboard</h2>
     <p class="muted" id="teacherEmailLine">Loading user…</p>
 
     <div class="row" style="gap:12px; flex-wrap:wrap; margin:14px 0;">
-      <div style="min-width:260px; flex:1;">
+      <div style="min-width:240px; flex:1;">
         <label style="display:block; margin:0 0 6px;">Class name</label>
         <input id="className" class="input" placeholder="e.g. 7H English" />
       </div>
@@ -18,7 +17,7 @@ export async function renderTeacherDashboard(containerEl) {
         <button id="btnCreateClass" class="btn" type="button">Create class</button>
       </div>
 
-      <div style="min-width:260px; flex:1;">
+      <div style="min-width:240px; flex:1;">
         <label style="display:block; margin:0 0 6px;">Test title</label>
         <input id="testTitle" class="input" placeholder="e.g. Phase 3 – Week 1" />
       </div>
@@ -29,11 +28,53 @@ export async function renderTeacherDashboard(containerEl) {
 
     <div id="teacherNotice" class="notice" style="display:none;"></div>
 
+    <h3 style="margin-top:18px;">Assign a test</h3>
+    <div class="card" style="padding:14px; border-radius:14px;">
+      <div class="row" style="gap:12px; flex-wrap:wrap;">
+        <div style="min-width:220px; flex:1;">
+          <label style="display:block; margin:0 0 6px;">Class</label>
+          <select id="assignClass" class="input"></select>
+        </div>
+
+        <div style="min-width:220px; flex:1;">
+          <label style="display:block; margin:0 0 6px;">Test</label>
+          <select id="assignTest" class="input"></select>
+        </div>
+
+        <div style="min-width:170px;">
+          <label style="display:block; margin:0 0 6px;">Mode</label>
+          <select id="assignMode" class="input">
+            <option value="practice">practice</option>
+            <option value="test">test</option>
+            <option value="strict">strict</option>
+          </select>
+        </div>
+
+        <div style="min-width:160px;">
+          <label style="display:block; margin:0 0 6px;">Max attempts</label>
+          <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
+        </div>
+
+        <div style="min-width:220px;">
+          <label style="display:block; margin:0 0 6px;">Deadline</label>
+          <input id="assignEndAt" class="input" type="datetime-local" />
+          <div class="muted" style="font-size:12px; margin-top:6px;">Optional. Uses your device time.</div>
+        </div>
+
+        <div style="align-self:end;">
+          <button id="btnAssign" class="btn" type="button">Assign</button>
+        </div>
+      </div>
+    </div>
+
     <h3 style="margin-top:18px;">Your classes</h3>
     <div id="classesWrap" class="muted">Loading classes…</div>
 
     <h3 style="margin-top:18px;">Your tests</h3>
     <div id="testsWrap" class="muted">Loading tests…</div>
+
+    <h3 style="margin-top:18px;">Recent assignments</h3>
+    <div id="assignmentsWrap" class="muted">Loading assignments…</div>
   `;
 
   const emailLine = containerEl.querySelector("#teacherEmailLine");
@@ -47,6 +88,14 @@ export async function renderTeacherDashboard(containerEl) {
 
   const classesWrap = containerEl.querySelector("#classesWrap");
   const testsWrap = containerEl.querySelector("#testsWrap");
+  const assignmentsWrap = containerEl.querySelector("#assignmentsWrap");
+
+  const assignClassEl = containerEl.querySelector("#assignClass");
+  const assignTestEl = containerEl.querySelector("#assignTest");
+  const assignModeEl = containerEl.querySelector("#assignMode");
+  const assignMaxAttemptsEl = containerEl.querySelector("#assignMaxAttempts");
+  const assignEndAtEl = containerEl.querySelector("#assignEndAt");
+  const btnAssign = containerEl.querySelector("#btnAssign");
 
   // Get signed-in user
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
@@ -55,15 +104,12 @@ export async function renderTeacherDashboard(containerEl) {
     emailLine.textContent = "Not signed in.";
     classesWrap.textContent = "";
     testsWrap.textContent = "";
+    assignmentsWrap.textContent = "";
     return;
   }
 
   const user = userRes.user;
   emailLine.innerHTML = `Signed in as <strong>${escapeHtml(user.email || "(unknown)")}</strong>`;
-
-  // -------------------------
-  // Actions
-  // -------------------------
 
   // Create class
   btnCreateClass.addEventListener("click", async () => {
@@ -78,17 +124,13 @@ export async function renderTeacherDashboard(containerEl) {
     showNotice(noticeEl, "Creating class…");
 
     try {
-      const created = await createClassRow({
-        teacherId: user.id,
-        name,
-      });
-
+      const created = await createClassRow({ teacherId: user.id, name });
       showNotice(
         noticeEl,
         `Class created: ${escapeHtml(created.name)} (Join code: ${escapeHtml(created.join_code)})`
       );
       classNameEl.value = "";
-      await refreshClasses();
+      await refreshAll();
     } catch (e) {
       showNotice(noticeEl, e?.message || String(e), true);
     } finally {
@@ -117,7 +159,7 @@ export async function renderTeacherDashboard(containerEl) {
 
       showNotice(noticeEl, `Test created: ${escapeHtml(title)}`);
       testTitleEl.value = "";
-      await refreshTests();
+      await refreshAll();
     } catch (e) {
       showNotice(noticeEl, e?.message || String(e), true);
     } finally {
@@ -125,22 +167,77 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
-  // -------------------------
-  // Load data immediately
-  // -------------------------
-  await refreshClasses();
-  await refreshTests();
+  // Assign
+  btnAssign.addEventListener("click", async () => {
+    const classId = assignClassEl.value;
+    const testId = assignTestEl.value;
+    const mode = assignModeEl.value;
 
-  // -------------------------
-  // Helpers (must be inside so they can see user/classesWrap/testsWrap)
-  // -------------------------
+    const maxAttemptsRaw = (assignMaxAttemptsEl.value || "").trim();
+    const max_attempts = maxAttemptsRaw === "" ? null : Number(maxAttemptsRaw);
+
+    const endAtRaw = (assignEndAtEl.value || "").trim();
+    // Convert datetime-local to ISO. If blank, null.
+    const end_at = endAtRaw ? new Date(endAtRaw).toISOString() : null;
+
+    if (!classId) {
+      showNotice(noticeEl, "Choose a class to assign to.", true);
+      return;
+    }
+    if (!testId) {
+      showNotice(noticeEl, "Choose a test to assign.", true);
+      return;
+    }
+    if (max_attempts !== null && (!Number.isInteger(max_attempts) || max_attempts < 1)) {
+      showNotice(noticeEl, "Max attempts must be blank or a whole number (1+).", true);
+      return;
+    }
+
+    btnAssign.disabled = true;
+    showNotice(noticeEl, "Assigning…");
+
+    try {
+      const { error } = await supabase.from("assignments").insert([
+        {
+          teacher_id: user.id,
+          class_id: classId,
+          test_id: testId,
+          mode,
+          max_attempts,
+          end_at,
+          deadline_enforced: true,
+        },
+      ]);
+
+      if (error) throw error;
+
+      showNotice(noticeEl, "Assigned.");
+      assignMaxAttemptsEl.value = "";
+      assignEndAtEl.value = "";
+      await refreshAssignments();
+    } catch (e) {
+      showNotice(noticeEl, e?.message || String(e), true);
+    } finally {
+      btnAssign.disabled = false;
+    }
+  });
+
+  // Initial load
+  await refreshAll();
+
+  async function refreshAll() {
+    await refreshClasses();
+    await refreshTests();
+    await refreshAssignmentPickers();
+    await refreshAssignments();
+  }
 
   async function refreshClasses() {
     classesWrap.textContent = "Loading classes…";
 
     const { data, error } = await supabase
       .from("classes")
-      .select("id, teacher_id, name, join_code, created_at")
+      .select("id, name, join_code, created_at")
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -187,7 +284,6 @@ export async function renderTeacherDashboard(containerEl) {
       </div>
     `;
 
-    // Wire buttons inside the list
     classesWrap.querySelectorAll("[data-copy]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const code = btn.getAttribute("data-copy") || "";
@@ -221,7 +317,7 @@ export async function renderTeacherDashboard(containerEl) {
         }
 
         showNotice(noticeEl, "Class deleted.");
-        await refreshClasses();
+        await refreshAll();
       });
     });
   }
@@ -269,6 +365,102 @@ export async function renderTeacherDashboard(containerEl) {
       </div>
     `;
   }
+
+  async function refreshAssignmentPickers() {
+    // Load classes + tests for dropdowns
+    const [classesRes, testsRes] = await Promise.all([
+      supabase
+        .from("classes")
+        .select("id, name")
+        .eq("teacher_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("tests")
+        .select("id, title")
+        .eq("teacher_id", user.id)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    // Classes
+    if (classesRes.error) {
+      assignClassEl.innerHTML = `<option value="">(Could not load classes)</option>`;
+    } else {
+      const items = classesRes.data || [];
+      assignClassEl.innerHTML =
+        `<option value="">Select class…</option>` +
+        items.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("");
+    }
+
+    // Tests
+    if (testsRes.error) {
+      assignTestEl.innerHTML = `<option value="">(Could not load tests)</option>`;
+    } else {
+      const items = testsRes.data || [];
+      assignTestEl.innerHTML =
+        `<option value="">Select test…</option>` +
+        items.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
+    }
+  }
+
+  async function refreshAssignments() {
+    assignmentsWrap.textContent = "Loading assignments…";
+
+    const { data, error } = await supabase
+      .from("assignments")
+      .select("id, class_id, test_id, mode, max_attempts, end_at, created_at")
+      .eq("teacher_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error) {
+      assignmentsWrap.innerHTML = `
+        <div class="notice">
+          Could not load assignments.<br/>
+          <pre style="white-space:pre-wrap; margin:10px 0 0;">${escapeHtml(error.message)}</pre>
+        </div>
+      `;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      assignmentsWrap.innerHTML = `<p class="muted">No assignments yet.</p>`;
+      return;
+    }
+
+    // For display names, build lookup maps from the dropdown data
+    const classOptions = Array.from(assignClassEl.querySelectorAll("option")).reduce((acc, o) => {
+      const v = o.value;
+      if (v) acc[v] = o.textContent || v;
+      return acc;
+    }, {});
+    const testOptions = Array.from(assignTestEl.querySelectorAll("option")).reduce((acc, o) => {
+      const v = o.value;
+      if (v) acc[v] = o.textContent || v;
+      return acc;
+    }, {});
+
+    assignmentsWrap.innerHTML = `
+      <div class="card" style="padding:12px;">
+        ${data
+          .map((a) => {
+            const className = classOptions[a.class_id] || a.class_id;
+            const testTitle = testOptions[a.test_id] || a.test_id;
+            const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
+            const attempts = a.max_attempts === null ? "∞" : String(a.max_attempts);
+
+            return `
+              <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
+                <div class="muted" style="margin-top:4px; font-size:12px;">
+                  Mode: ${escapeHtml(a.mode)} · Max attempts: ${escapeHtml(attempts)} · Deadline: ${escapeHtml(deadline)}
+                </div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
 }
 
 export default renderTeacherDashboard;
@@ -277,11 +469,10 @@ export default renderTeacherDashboard;
 // DB insert with join_code generation + retry on conflict
 // --------------------------------------------------
 async function createClassRow({ teacherId, name }) {
-  // join_code is UNIQUE, so retry if we collide
   const maxAttempts = 6;
 
   for (let i = 0; i < maxAttempts; i++) {
-    const join_code = generateJoinCode(); // e.g. WGSF-7H2K (or similar)
+    const join_code = generateJoinCode();
     const { data, error } = await supabase
       .from("classes")
       .insert([{ teacher_id: teacherId, name, join_code }])
@@ -290,9 +481,7 @@ async function createClassRow({ teacherId, name }) {
 
     if (!error) return data;
 
-    // 23505 = unique_violation (likely join_code collision)
     if (String(error.code) === "23505" && i < maxAttempts - 1) continue;
-
     throw error;
   }
 
@@ -300,8 +489,7 @@ async function createClassRow({ teacherId, name }) {
 }
 
 function generateJoinCode() {
-  // Simple readable format: ABCD-1234 style, but letters+numbers mixed
-  const letters = "ABCDEFGHJKMNPQRSTUVWXYZ"; // omit confusing I/L/O
+  const letters = "ABCDEFGHJKMNPQRSTUVWXYZ";
   const alnum = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
   const part1 = Array.from({ length: 4 }, () => letters[rand(letters.length)]).join("");
