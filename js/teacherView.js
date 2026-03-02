@@ -414,7 +414,7 @@ const { error } = await supabase
     // SAFE select only
     const { data, error } = await supabase
       .from("assignments_v2")
-      .select("id, class_id, test_id, created_at")
+      .select("id, class_id, test_id, mode, max_attempts, end_at, created_at")
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -452,12 +452,19 @@ const { error } = await supabase
             const testTitle = testOptions[a.test_id] || a.test_id;
             const when = a.created_at ? new Date(a.created_at).toLocaleString() : "";
 
-            return `
-              <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-                <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
-                <div class="muted" style="margin-top:4px; font-size:12px;">Assigned: ${escapeHtml(when)}</div>
-              </div>
-            `;
+const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
+const attempts = a.max_attempts == null ? "∞" : String(a.max_attempts);
+const mode = a.mode || "practice";
+
+return `
+  <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+    <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
+    <div class="muted" style="margin-top:4px; font-size:12px;">
+      Mode: ${escapeHtml(mode)} · Attempts: ${escapeHtml(attempts)} · Deadline: ${escapeHtml(deadline)}
+    </div>
+    <div class="muted" style="font-size:11px;">Assigned: ${escapeHtml(when)}</div>
+  </div>
+`;
           })
           .join("")}
       </div>
