@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { renderTeacherDashboard } from "./teacherView.js";
+import { STORAGE } from "./config.js";
 
 /* ---------------------------
    DOM
@@ -21,18 +22,26 @@ const banner = document.getElementById("banner");
 /* ---------------------------
    STORAGE
 ---------------------------- */
-const ROLE_KEY = "ps_role";
+/* ---------------------------
+   STORAGE
+---------------------------- */
+
+// One-time migration from old key to new key
+const oldRole = localStorage.getItem("ps_role");
+if (oldRole && !localStorage.getItem(STORAGE.role)) {
+  localStorage.setItem(STORAGE.role, oldRole);
+  localStorage.removeItem("ps_role");
+}
 
 function setRole(role) {
-  localStorage.setItem(ROLE_KEY, role);
+  localStorage.setItem(STORAGE.role, role);
 }
 function getRole() {
-  return localStorage.getItem(ROLE_KEY) || "";
+  return localStorage.getItem(STORAGE.role) || "";
 }
 function clearRole() {
-  localStorage.removeItem(ROLE_KEY);
+  localStorage.removeItem(STORAGE.role);
 }
-
 /* ---------------------------
    UI HELPERS
 ---------------------------- */
