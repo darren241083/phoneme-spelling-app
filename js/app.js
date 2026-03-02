@@ -1,8 +1,5 @@
-// /js/app.js
 import { supabase } from "./supabaseClient.js";
 import { renderTeacherDashboard } from "./teacherView.js";
-
-window.supabase = supabase; // DEBUG: expose supabase in console
 
 /* ---------------------------
    DOM
@@ -18,6 +15,8 @@ const btnPupil = document.getElementById("btnPupil");
 const btnGoogle = document.getElementById("btnGoogle");
 const btnSignOut = document.getElementById("btnSignOut");
 const btnBackFromPupil = document.getElementById("btnBackFromPupil");
+
+const banner = document.getElementById("banner");
 
 /* ---------------------------
    STORAGE
@@ -35,71 +34,146 @@ function clearRole() {
 }
 
 /* ---------------------------
-   VIEW HELPERS
+   UI HELPERS
 ---------------------------- */
+function setBanner(msg = "", kind = "info") {
+  if (!banner) return;
+  if (!msg) {
+    banner.style.display = "none";
+    banner.textContent = "";
+    banner.className = "banner";
+    return;
+  }
+  banner.style.display = "block";
+  banner.textContent = msg;
+  banner.className = `banner ${kind}`;
+}
+
 function hideAll() {
+  // We still hide views, but ONLY when we are ready to show the next one.
   viewRole.style.display = "none";
   viewTeacherAuth.style.display = "none";
   viewTeacher.style.display = "none";
   viewPupilAuth.style.display = "none";
   viewPupil.style.display = "none";
 }
+
 function show(el) {
   el.style.display = "block";
 }
 
-/* ---------------------------
-   ROUTER
----------------------------- */
-async function route() {
+function showRolePicker() {
   hideAll();
+  show(viewRole);
+  btnSignOut.style.display = "none";
+}
 
-  const role = getRole();
-  const { data: { user } } = await supabase.auth.getUser();
+function showTeacherAuth() {
+  hideAll();
+  show(viewTeacherAuth);
+  btnSignOut.style.display = "none";
+}
 
-  // No role chosen yet
-  if (!role) {
-    btnSignOut.style.display = "none";
-    show(viewRole);
-    return;
-  }
+function showTeacherView() {
+  hideAll();
+  show(viewTeacher);
+  btnSignOut.style.display = "inline-block";
+}
 
-  // Teacher flow
-  if (role === "teacher") {
-    if (!user) {
-      btnSignOut.style.display = "none";
-      show(viewTeacherAuth);
+function showPupilAuth() {
+  hideAll();
+  show(viewPupilAuth);
+  btnSignOut.style.display = "none";
+}
+
+/* ---------------------------
+   TIMEOUT WRAPPER
+---------------------------- */
+function withTimeout(promise, ms, label = "operation") {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
+/* ---------------------------
+   ROUTER (never leave UI blank)
+---------------------------- */
+let routing = false;
+
+async function route(reason = "route") {
+  if (routing) return;
+  routing = true;
+
+  try {
+    const role = getRole();
+
+    // Always keep something visible while we check auth
+    // If no role selected yet, just show role picker immediately.
+    if (!role) {
+      setBanner("");
+      showRolePicker();
       return;
     }
 
-    // IMPORTANT: show first, THEN render (so you never get "blank page")
-    btnSignOut.style.display = "inline-block";
-    show(viewTeacher);
+    // If pupil, we don't need Supabase auth at all.
+    if (role === "pupil") {
+      setBanner("");
+      showPupilAuth();
+      return;
+    }
 
-    try {
-      await renderTeacherDashboard(viewTeacher);
-    } catch (e) {
-      console.error("Teacher dashboard render failed:", e);
+    // Teacher path:
+    // Show a loading state (NOT a blank page) while we ask Supabase.
+    setBanner("Checking sign-in…", "info");
+
+    // Keep the role picker visible as a safe fallback while loading
+    // (prevents “flash then disappear” / blank screen).
+    showRolePicker();
+
+    const sessionRes = await withTimeout(
+      supabase.auth.getSession(),
+      2500,
+      "getSession"
+    ).catch((err) => ({ data: { session: null }, error: err }));
+
+    const session = sessionRes?.data?.session || null;
+
+    if (!session?.user) {
+      setBanner("");
+      showTeacherAuth();
+      return;
+    }
+
+    // Signed in -> show teacher dashboard FIRST, then render it.
+    setBanner("");
+    showTeacherView();
+
+    // Render dashboard content; if it fails, show the error inside the card.
+    await withTimeout(
+      renderTeacherDashboard(viewTeacher),
+      4000,
+      "renderTeacherDashboard"
+    ).catch((err) => {
       viewTeacher.innerHTML = `
         <h2>Teacher dashboard</h2>
-        <p class="muted">Dashboard failed to load.</p>
-        <pre>${escapeHtml(e?.message || String(e))}</pre>
+        <p class="muted">Loaded your session, but the dashboard failed to render.</p>
+        <pre style="white-space:pre-wrap;">${escapeHtml(err.message || String(err))}</pre>
       `;
-    }
-    return;
+    });
+  } finally {
+    routing = false;
   }
+}
 
-  // Pupil flow
-  if (role === "pupil") {
-    btnSignOut.style.display = "none";
-    show(viewPupilAuth);
-    return;
-  }
-
-  // Fallback
-  clearRole();
-  btnSignOut.style.display = "none";
-  show(viewRole);
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 /* ---------------------------
@@ -107,22 +181,23 @@ async function route() {
 ---------------------------- */
 btnTeacher?.addEventListener("click", async () => {
   setRole("teacher");
-  await route();
+  await route("click teacher");
 });
 
 btnPupil?.addEventListener("click", async () => {
   setRole("pupil");
-  await route();
+  await route("click pupil");
 });
 
 btnBackFromPupil?.addEventListener("click", async () => {
   clearRole();
-  await route();
+  await route("back from pupil");
 });
 
 btnGoogle?.addEventListener("click", async () => {
-  const origin = window.location.origin;
-  let path = window.location.pathname;
+  // IMPORTANT: include redirectTo for GitHub Pages project sites
+  const origin = window.location.origin; // https://darren241083.github.io
+  let path = window.location.pathname;   // /phoneme-spelling-app/ or /phoneme-spelling-app/index.html
   if (path.endsWith("/index.html")) path = path.replace("/index.html", "/");
   if (!path.endsWith("/")) path += "/";
 
@@ -137,24 +212,27 @@ btnGoogle?.addEventListener("click", async () => {
 btnSignOut?.addEventListener("click", async () => {
   await supabase.auth.signOut();
   clearRole();
-  await route();
+  setBanner("");
+  showRolePicker();
 });
 
 /* ---------------------------
-   AUTH LISTENER + INIT
+   AUTH + VISIBILITY LISTENERS
 ---------------------------- */
-supabase.auth.onAuthStateChange(async () => {
-  await route();
+supabase.auth.onAuthStateChange((event) => {
+  // Token refresh / resume events can happen when tab focus changes.
+  // Route again, but safely.
+  route(`auth:${event}`);
 });
 
-console.log("app.js loaded");
-route();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) route("visibilitychange");
+});
 
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+window.addEventListener("focus", () => route("focus"));
+
+/* ---------------------------
+   INIT
+---------------------------- */
+console.log("app.js loaded");
+route("init");
