@@ -191,7 +191,7 @@ export async function renderTeacherDashboard(containerEl) {
 
     try {
       // IMPORTANT: only insert columns that PostgREST currently recognises
-      const { error } = await supabase.from("assignments").insert([
+      const { error } = await supabase.from("assignments_v2").insert([
         {
           teacher_id: user.id,
           class_id: classId,
@@ -397,7 +397,7 @@ export async function renderTeacherDashboard(containerEl) {
 
     // SAFE select only
     const { data, error } = await supabase
-      .from("assignments")
+      .from("assignments_v2")
       .select("id, class_id, test_id, created_at")
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false })
