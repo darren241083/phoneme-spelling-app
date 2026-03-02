@@ -110,9 +110,22 @@ async function route(){
 
 /* -------- events -------- */
 
-btnTeacher.addEventListener("click", async ()=>{
+btnTeacher.addEventListener("click", async () => {
+  console.log("CLICK teacher");
+
   setRole("teacher");
-  await route();
+
+  console.log("ROLE after setRole:",
+    localStorage.getItem("role"),
+    sessionStorage.getItem("role")
+  );
+
+  try {
+    await route();
+    console.log("ROUTE finished");
+  } catch (e) {
+    console.error("ROUTE crashed:", e);
+  }
 });
 
 btnPupil.addEventListener("click", async ()=>{
