@@ -190,14 +190,39 @@ export async function renderTeacherDashboard(containerEl) {
     showNotice(noticeEl, "Assigning…");
 
     try {
-      // IMPORTANT: only insert columns that PostgREST currently recognises
-      const { error } = await supabase.from("assignments_v2").insert([
-        {
-          teacher_id: user.id,
-          class_id: classId,
-          test_id: testId,
-        },
-      ]);
+      const mode = assignModeEl.value;
+
+// Handle max attempts
+const maxAttemptsRaw = (assignMaxAttemptsEl.value || "").trim();
+const max_attempts =
+  maxAttemptsRaw === "" ? null : Number(maxAttemptsRaw);
+
+if (
+  max_attempts !== null &&
+  (!Number.isInteger(max_attempts) || max_attempts < 1)
+) {
+  showNotice(noticeEl, "Max attempts must be blank or a whole number (1+).", true);
+  return;
+}
+
+// Handle deadline
+const endAtRaw = (assignEndAtEl.value || "").trim();
+const end_at = endAtRaw
+  ? new Date(endAtRaw).toISOString()
+  : null;
+
+const { error } = await supabase
+  .from("assignments_v2")
+  .insert([
+    {
+      teacher_id: user.id,
+      class_id: classId,
+      test_id: testId,
+      mode,
+      max_attempts,
+      end_at
+    }
+  ]);
 
       if (error) throw error;
 
