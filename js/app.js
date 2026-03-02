@@ -145,4 +145,11 @@ supabase.auth.onAuthStateChange(async () => {
 ---------------------------- */
 
 console.log("app.js loaded");
-route();
+route().catch((e) => {
+  console.error("route() crashed:", e);
+  // safety fallback so you never get a blank screen
+  try {
+    viewRole.style.display = "block";
+    btnSignOut.style.display = "none";
+  } catch {}
+});
