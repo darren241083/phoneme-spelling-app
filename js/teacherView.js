@@ -4,6 +4,9 @@ import { supabase } from "./supabaseClient.js";
 export async function renderTeacherDashboard(containerEl) {
   if (!containerEl) return;
 
+  // Try to preserve form state across accidental re-renders
+  const prevState = readFormState(containerEl);
+
   containerEl.innerHTML = `
     <h2>Teacher dashboard</h2>
     <p class="muted" id="teacherEmailLine">Loading user…</p>
@@ -53,6 +56,7 @@ export async function renderTeacherDashboard(containerEl) {
         <div style="min-width:160px;">
           <label style="display:block; margin:0 0 6px;">Max attempts</label>
           <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
+          <div class="muted" style="font-size:12px; margin-top:6px;">(Not saved yet — schema cache issue)</div>
         </div>
 
         <div style="min-width:220px;">
@@ -97,6 +101,16 @@ export async function renderTeacherDashboard(containerEl) {
   const assignEndAtEl = containerEl.querySelector("#assignEndAt");
   const btnAssign = containerEl.querySelector("#btnAssign");
 
+  // Restore previous input values if we had them
+  applyFormState({
+    classNameEl,
+    testTitleEl,
+    assignModeEl,
+    assignMaxAttemptsEl,
+    assignEndAtEl,
+    state: prevState,
+  });
+
   // Get signed-in user
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userRes?.user) {
@@ -110,6 +124,10 @@ export async function renderTeacherDashboard(containerEl) {
 
   const user = userRes.user;
   emailLine.innerHTML = `Signed in as <strong>${escapeHtml(user.email || "(unknown)")}</strong>`;
+
+  // -------------------------
+  // Actions
+  // -------------------------
 
   // Create class
   btnCreateClass.addEventListener("click", async () => {
@@ -173,11 +191,7 @@ export async function renderTeacherDashboard(containerEl) {
     const testId = assignTestEl.value;
     const mode = assignModeEl.value;
 
-    const maxAttemptsRaw = (assignMaxAttemptsEl.value || "").trim();
-    const max_attempts = maxAttemptsRaw === "" ? null : Number(maxAttemptsRaw);
-
     const endAtRaw = (assignEndAtEl.value || "").trim();
-    // Convert datetime-local to ISO. If blank, null.
     const end_at = endAtRaw ? new Date(endAtRaw).toISOString() : null;
 
     if (!classId) {
@@ -188,30 +202,27 @@ export async function renderTeacherDashboard(containerEl) {
       showNotice(noticeEl, "Choose a test to assign.", true);
       return;
     }
-    if (max_attempts !== null && (!Number.isInteger(max_attempts) || max_attempts < 1)) {
-      showNotice(noticeEl, "Max attempts must be blank or a whole number (1+).", true);
-      return;
-    }
 
     btnAssign.disabled = true;
     showNotice(noticeEl, "Assigning…");
 
     try {
+      // NOTE: We deliberately do NOT send max_attempts or deadline_enforced
+      // because PostgREST schema cache is currently stale on your project.
       const { error } = await supabase.from("assignments").insert([
         {
           teacher_id: user.id,
           class_id: classId,
           test_id: testId,
           mode,
-          max_attempts,
           end_at,
-          deadline_enforced: true,
         },
       ]);
 
       if (error) throw error;
 
       showNotice(noticeEl, "Assigned.");
+      // keep dropdown selections, clear the optional fields
       assignMaxAttemptsEl.value = "";
       assignEndAtEl.value = "";
       await refreshAssignments();
@@ -222,7 +233,9 @@ export async function renderTeacherDashboard(containerEl) {
     }
   });
 
+  // -------------------------
   // Initial load
+  // -------------------------
   await refreshAll();
 
   async function refreshAll() {
@@ -367,7 +380,6 @@ export async function renderTeacherDashboard(containerEl) {
   }
 
   async function refreshAssignmentPickers() {
-    // Load classes + tests for dropdowns
     const [classesRes, testsRes] = await Promise.all([
       supabase
         .from("classes")
@@ -381,7 +393,6 @@ export async function renderTeacherDashboard(containerEl) {
         .order("created_at", { ascending: false }),
     ]);
 
-    // Classes
     if (classesRes.error) {
       assignClassEl.innerHTML = `<option value="">(Could not load classes)</option>`;
     } else {
@@ -391,7 +402,6 @@ export async function renderTeacherDashboard(containerEl) {
         items.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("");
     }
 
-    // Tests
     if (testsRes.error) {
       assignTestEl.innerHTML = `<option value="">(Could not load tests)</option>`;
     } else {
@@ -400,14 +410,19 @@ export async function renderTeacherDashboard(containerEl) {
         `<option value="">Select test…</option>` +
         items.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.title)}</option>`).join("");
     }
+
+    // Re-apply picker state if we had it
+    if (prevState?.assignClass) assignClassEl.value = prevState.assignClass;
+    if (prevState?.assignTest) assignTestEl.value = prevState.assignTest;
   }
 
   async function refreshAssignments() {
     assignmentsWrap.textContent = "Loading assignments…";
 
+    // NOTE: Deliberately not selecting max_attempts (schema cache issue)
     const { data, error } = await supabase
       .from("assignments")
-      .select("id, class_id, test_id, mode, max_attempts, end_at, created_at")
+      .select("id, class_id, test_id, mode, end_at, created_at")
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -427,12 +442,12 @@ export async function renderTeacherDashboard(containerEl) {
       return;
     }
 
-    // For display names, build lookup maps from the dropdown data
     const classOptions = Array.from(assignClassEl.querySelectorAll("option")).reduce((acc, o) => {
       const v = o.value;
       if (v) acc[v] = o.textContent || v;
       return acc;
     }, {});
+
     const testOptions = Array.from(assignTestEl.querySelectorAll("option")).reduce((acc, o) => {
       const v = o.value;
       if (v) acc[v] = o.textContent || v;
@@ -446,13 +461,12 @@ export async function renderTeacherDashboard(containerEl) {
             const className = classOptions[a.class_id] || a.class_id;
             const testTitle = testOptions[a.test_id] || a.test_id;
             const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
-            const attempts = a.max_attempts === null ? "∞" : String(a.max_attempts);
 
             return `
               <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
                 <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
                 <div class="muted" style="margin-top:4px; font-size:12px;">
-                  Mode: ${escapeHtml(a.mode)} · Max attempts: ${escapeHtml(attempts)} · Deadline: ${escapeHtml(deadline)}
+                  Mode: ${escapeHtml(a.mode)} · Deadline: ${escapeHtml(deadline)}
                 </div>
               </div>
             `;
@@ -521,4 +535,37 @@ function escapeHtml(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function readFormState(root) {
+  try {
+    const classNameEl = root.querySelector("#className");
+    const testTitleEl = root.querySelector("#testTitle");
+    const assignClassEl = root.querySelector("#assignClass");
+    const assignTestEl = root.querySelector("#assignTest");
+    const assignModeEl = root.querySelector("#assignMode");
+    const assignMaxAttemptsEl = root.querySelector("#assignMaxAttempts");
+    const assignEndAtEl = root.querySelector("#assignEndAt");
+
+    return {
+      className: classNameEl?.value || "",
+      testTitle: testTitleEl?.value || "",
+      assignClass: assignClassEl?.value || "",
+      assignTest: assignTestEl?.value || "",
+      assignMode: assignModeEl?.value || "practice",
+      assignMaxAttempts: assignMaxAttemptsEl?.value || "",
+      assignEndAt: assignEndAtEl?.value || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function applyFormState({ classNameEl, testTitleEl, assignModeEl, assignMaxAttemptsEl, assignEndAtEl, state }) {
+  if (!state) return;
+  if (classNameEl) classNameEl.value = state.className || "";
+  if (testTitleEl) testTitleEl.value = state.testTitle || "";
+  if (assignModeEl) assignModeEl.value = state.assignMode || "practice";
+  if (assignMaxAttemptsEl) assignMaxAttemptsEl.value = state.assignMaxAttempts || "";
+  if (assignEndAtEl) assignEndAtEl.value = state.assignEndAt || "";
 }
