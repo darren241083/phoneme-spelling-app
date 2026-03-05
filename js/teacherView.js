@@ -129,7 +129,8 @@ export async function renderTeacherDashboard(containerEl) {
         `Class created: ${escapeHtml(created.name)} (Join code: ${escapeHtml(created.join_code)})`
       );
       classNameEl.value = "";
-      await refreshAll();
+      await refreshClasses();
+      await refreshPickers();
     } catch (e) {
       showNotice(noticeEl, e?.message || String(e), true);
     } finally {
