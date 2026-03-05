@@ -6,76 +6,82 @@ export async function renderTeacherDashboard(containerEl) {
   if (!containerEl) return;
 
   containerEl.innerHTML = `
-    <h2>Teacher dashboard</h2>
-    <p class="muted" id="teacherEmailLine">Loading user…</p>
+<h2>Teacher dashboard</h2>
+<p class="muted" id="teacherEmailLine">Loading user…</p>
 
-    <div class="row" style="gap:12px; flex-wrap:wrap; margin:14px 0;">
-      <div style="min-width:240px; flex:1;">
-        <label style="display:block; margin:0 0 6px;">Class name</label>
-        <input id="className" class="input" placeholder="e.g. 7H English" />
-      </div>
-      <div style="align-self:end;">
-        <button id="btnCreateClass" class="btn" type="button">Create class</button>
-      </div>
+<div class="row" style="gap:12px; flex-wrap:wrap; margin:14px 0;">
+  <div style="min-width:240px; flex:1;">
+    <label style="display:block; margin:0 0 6px;">Class name</label>
+    <input id="className" class="input" placeholder="e.g. 7H English" />
+  </div>
 
-      <div style="min-width:240px; flex:1;">
-        <label style="display:block; margin:0 0 6px;">Test title</label>
-        <input id="testTitle" class="input" placeholder="e.g. Phase 3 – Week 1" />
-      </div>
-      <div style="align-self:end;">
-        <button id="btnCreateTest" class="btn secondary" type="button">Create test</button>
-      </div>
+  <div style="align-self:end;">
+    <button id="btnCreateClass" class="btn" type="button">Create class</button>
+  </div>
+
+  <div style="min-width:240px; flex:1;">
+    <label style="display:block; margin:0 0 6px;">Test title</label>
+    <input id="testTitle" class="input" placeholder="e.g. Phase 3 – Week 1" />
+  </div>
+
+  <div style="align-self:end;">
+    <button id="btnCreateTest" class="btn secondary" type="button">Create test</button>
+  </div>
+</div>
+
+<div id="teacherNotice" class="notice" style="display:none;"></div>
+
+<h3 style="margin-top:18px;">Assign a test</h3>
+
+<div class="card" style="padding:14px; border-radius:14px;">
+  <div class="row" style="gap:12px; flex-wrap:wrap;">
+
+    <div style="min-width:220px; flex:1;">
+      <label style="display:block; margin:0 0 6px;">Class</label>
+      <select id="assignClass" class="input"></select>
     </div>
 
-    <div id="teacherNotice" class="notice" style="display:none;"></div>
-
-    <h3 style="margin-top:18px;">Assign a test</h3>
-    <div class="card" style="padding:14px; border-radius:14px;">
-      <div class="row" style="gap:12px; flex-wrap:wrap;">
-        <div style="min-width:220px; flex:1;">
-          <label style="display:block; margin:0 0 6px;">Class</label>
-          <select id="assignClass" class="input"></select>
-        </div>
-
-        <div style="min-width:220px; flex:1;">
-          <label style="display:block; margin:0 0 6px;">Test</label>
-          <select id="assignTest" class="input"></select>
-        </div>
-
-        <div style="min-width:170px;">
-          <label style="display:block; margin:0 0 6px;">Mode</label>
-          <select id="assignMode" class="input">
-            <option value="practice">practice</option>
-            <option value="test">test</option>
-            <option value="strict">strict</option>
-          </select>
-        </div>
-
-        <div style="min-width:160px;">
-          <label style="display:block; margin:0 0 6px;">Max attempts</label>
-          <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
-        </div>
-
-        <div style="min-width:220px;">
-          <label style="display:block; margin:0 0 6px;">Deadline</label>
-          <input id="assignEndAt" class="input" type="datetime-local" />
-        </div>
-
-        <div style="align-self:end;">
-          <button id="btnAssign" class="btn" type="button">Assign</button>
-        </div>
-      </div>
+    <div style="min-width:220px; flex:1;">
+      <label style="display:block; margin:0 0 6px;">Test</label>
+      <select id="assignTest" class="input"></select>
     </div>
 
-    <h3 style="margin-top:18px;">Your classes</h3>
-    <div id="classesWrap" class="muted">Loading classes…</div>
+    <div style="min-width:170px;">
+      <label style="display:block; margin:0 0 6px;">Mode</label>
+      <select id="assignMode" class="input">
+        <option value="practice">practice</option>
+        <option value="test">test</option>
+        <option value="strict">strict</option>
+      </select>
+    </div>
 
-    <h3 style="margin-top:18px;">Your tests</h3>
-    <div id="testsWrap" class="muted">Loading tests…</div>
+    <div style="min-width:160px;">
+      <label style="display:block; margin:0 0 6px;">Max attempts</label>
+      <input id="assignMaxAttempts" class="input" inputmode="numeric" placeholder="(blank = unlimited)" />
+    </div>
 
-    <h3 style="margin-top:18px;">Recent assignments</h3>
-    <div id="assignmentsWrap" class="muted">Loading assignments…</div>
-  `;
+    <div style="min-width:220px;">
+      <label style="display:block; margin:0 0 6px;">Deadline</label>
+      <input id="assignEndAt" class="input" type="datetime-local" />
+    </div>
+
+    <div style="align-self:end;">
+      <button id="btnAssign" class="btn" type="button">Assign</button>
+    </div>
+
+  </div>
+</div>
+
+<h3 style="margin-top:18px;">Your classes</h3>
+<div id="classesWrap" class="muted">Loading classes…</div>
+
+<h3 style="margin-top:18px;">Your tests</h3>
+<div id="testsWrap" class="muted">Loading tests…</div>
+
+<h3 style="margin-top:18px;">Recent assignments</h3>
+<div id="assignmentsWrap" class="muted">Loading assignments…</div>
+`;
+}
 
   const emailLine = containerEl.querySelector("#teacherEmailLine");
   const noticeEl = containerEl.querySelector("#teacherNotice");
