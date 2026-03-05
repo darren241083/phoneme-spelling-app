@@ -156,7 +156,8 @@ export async function renderTeacherDashboard(containerEl) {
 
       showNotice(noticeEl, `Test created: ${escapeHtml(title)}`);
       testTitleEl.value = "";
-      await refreshAll();
+      await refreshTests();
+      await refreshPickers();
     } catch (e) {
       showNotice(noticeEl, e?.message || String(e), true);
     } finally {
@@ -327,7 +328,9 @@ const { error } = await supabase
         }
 
         showNotice(noticeEl, "Class deleted.");
-        await refreshAll();
+        await refreshClasses();
+        await refreshPickers();
+        await refreshAssignments();
       });
     });
   }
@@ -435,13 +438,25 @@ const { error } = await supabase
       return;
     }
 
-    const classOptions = Array.from(assignClassEl.querySelectorAll("option")).reduce((acc, o) => {
-      if (o.value) acc[o.value] = o.textContent || o.value;
+        // Build name maps from DB (more reliable than reading dropdown options)
+    const [classesRes, testsRes] = await Promise.all([
+      supabase
+        .from("classes")
+        .select("id, name")
+        .eq("teacher_id", user.id),
+      supabase
+        .from("tests")
+        .select("id, title")
+        .eq("teacher_id", user.id),
+    ]);
+
+    const classOptions = (classesRes.data || []).reduce((acc, c) => {
+      acc[c.id] = c.name;
       return acc;
     }, {});
 
-    const testOptions = Array.from(assignTestEl.querySelectorAll("option")).reduce((acc, o) => {
-      if (o.value) acc[o.value] = o.textContent || o.value;
+    const testOptions = (testsRes.data || []).reduce((acc, t) => {
+      acc[t.id] = t.title;
       return acc;
     }, {});
 
