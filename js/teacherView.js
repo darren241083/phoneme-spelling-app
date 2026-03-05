@@ -1,3 +1,4 @@
+```javascript
 // /js/teacherView.js
 import { supabase } from "./supabaseClient.js";
 
@@ -185,37 +186,29 @@ export async function renderTeacherDashboard(containerEl) {
     try {
       const mode = assignModeEl.value;
 
-// Handle max attempts
-const maxAttemptsRaw = (assignMaxAttemptsEl.value || "").trim();
-const max_attempts =
-  maxAttemptsRaw === "" ? null : Number(maxAttemptsRaw);
+      // Handle max attempts
+      const maxAttemptsRaw = (assignMaxAttemptsEl.value || "").trim();
+      const max_attempts = maxAttemptsRaw === "" ? null : Number(maxAttemptsRaw);
 
-if (
-  max_attempts !== null &&
-  (!Number.isInteger(max_attempts) || max_attempts < 1)
-) {
-  showNotice(noticeEl, "Max attempts must be blank or a whole number (1+).", true);
-  return;
-}
+      if (max_attempts !== null && (!Number.isInteger(max_attempts) || max_attempts < 1)) {
+        showNotice(noticeEl, "Max attempts must be blank or a whole number (1+).", true);
+        return;
+      }
 
-// Handle deadline
-const endAtRaw = (assignEndAtEl.value || "").trim();
-const end_at = endAtRaw
-  ? new Date(endAtRaw).toISOString()
-  : null;
+      // Handle deadline
+      const endAtRaw = (assignEndAtEl.value || "").trim();
+      const end_at = endAtRaw ? new Date(endAtRaw).toISOString() : null;
 
-const { error } = await supabase
-  .from("assignments_v2")
-  .insert([
-    {
-      teacher_id: user.id,
-      class_id: classId,
-      test_id: testId,
-      mode,
-      max_attempts,
-      end_at
-    }
-  ]);
+      const { error } = await supabase.from("assignments_v2").insert([
+        {
+          teacher_id: user.id,
+          class_id: classId,
+          test_id: testId,
+          mode,
+          max_attempts,
+          end_at,
+        },
+      ]);
 
       if (error) throw error;
 
@@ -233,7 +226,7 @@ const { error } = await supabase
     }
   });
 
-  // Load everything
+  // Load everything (keep this)
   await refreshAll();
 
   async function refreshAll() {
@@ -316,11 +309,7 @@ const { error } = await supabase
         if (!ok) return;
 
         showNotice(noticeEl, "Deleting…");
-        const { error } = await supabase
-          .from("classes")
-          .delete()
-          .eq("id", id)
-          .eq("teacher_id", user.id);
+        const { error } = await supabase.from("classes").delete().eq("id", id).eq("teacher_id", user.id);
 
         if (error) {
           showNotice(noticeEl, `Delete failed: ${error.message}`, true);
@@ -381,16 +370,8 @@ const { error } = await supabase
 
   async function refreshPickers() {
     const [classesRes, testsRes] = await Promise.all([
-      supabase
-        .from("classes")
-        .select("id, name")
-        .eq("teacher_id", user.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("tests")
-        .select("id, title")
-        .eq("teacher_id", user.id)
-        .order("created_at", { ascending: false }),
+      supabase.from("classes").select("id, name").eq("teacher_id", user.id).order("created_at", { ascending: false }),
+      supabase.from("tests").select("id, title").eq("teacher_id", user.id).order("created_at", { ascending: false }),
     ]);
 
     if (classesRes.error) {
@@ -415,7 +396,6 @@ const { error } = await supabase
   async function refreshAssignments() {
     assignmentsWrap.textContent = "Loading assignments…";
 
-    // SAFE select only
     const { data, error } = await supabase
       .from("assignments_v2")
       .select("id, class_id, test_id, mode, max_attempts, end_at, created_at")
@@ -438,16 +418,10 @@ const { error } = await supabase
       return;
     }
 
-        // Build name maps from DB (more reliable than reading dropdown options)
+    // Build name maps from DB (more reliable than reading dropdown options)
     const [classesRes, testsRes] = await Promise.all([
-      supabase
-        .from("classes")
-        .select("id, name")
-        .eq("teacher_id", user.id),
-      supabase
-        .from("tests")
-        .select("id, title")
-        .eq("teacher_id", user.id),
+      supabase.from("classes").select("id, name").eq("teacher_id", user.id),
+      supabase.from("tests").select("id, title").eq("teacher_id", user.id),
     ]);
 
     const classOptions = (classesRes.data || []).reduce((acc, c) => {
@@ -468,19 +442,31 @@ const { error } = await supabase
             const testTitle = testOptions[a.test_id] || a.test_id;
             const when = a.created_at ? new Date(a.created_at).toLocaleString() : "";
 
-const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
-const attempts = a.max_attempts == null ? "∞" : String(a.max_attempts);
-const mode = a.mode || "practice";
+            const deadline = a.end_at ? new Date(a.end_at).toLocaleString() : "—";
+            const attempts = a.max_attempts == null ? "∞" : String(a.max_attempts);
+            const mode = a.mode || "practice";
 
-return `
-  <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-    <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
-    <div class="muted" style="margin-top:4px; font-size:12px;">
-      Mode: ${escapeHtml(mode)} · Attempts: ${escapeHtml(attempts)} · Deadline: ${escapeHtml(deadline)}
-    </div>
-    <div class="muted" style="font-size:11px;">Assigned: ${escapeHtml(when)}</div>
-  </div>
-`;
+            const now = new Date();
+            const endDate = a.end_at ? new Date(a.end_at) : null;
+            const isExpired = !!(endDate && endDate < now);
+            const isDueSoon = !!(endDate && !isExpired && endDate - now <= 1000 * 60 * 60 * 24 * 2); // 48h
+
+            const badge = isExpired
+              ? `<div style="margin-top:6px; font-size:12px; font-weight:700;">⚠ Expired</div>`
+              : isDueSoon
+              ? `<div style="margin-top:6px; font-size:12px; font-weight:700;">⏳ Due soon</div>`
+              : ``;
+
+            return `
+              <div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="font-weight:700;">${escapeHtml(className)} → ${escapeHtml(testTitle)}</div>
+                <div class="muted" style="margin-top:4px; font-size:12px;">
+                  Mode: ${escapeHtml(mode)} · Attempts: ${escapeHtml(attempts)} · Deadline: ${escapeHtml(deadline)}
+                </div>
+                <div class="muted" style="font-size:11px;">Assigned: ${escapeHtml(when)}</div>
+                ${badge}
+              </div>
+            `;
           })
           .join("")}
       </div>
@@ -548,3 +534,4 @@ function escapeHtml(str) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+```
