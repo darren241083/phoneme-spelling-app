@@ -234,11 +234,7 @@ supabase.auth.onAuthStateChange((event) => {
   route(`auth:${event}`);
 });
 
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) route("visibilitychange");
-});
 
-window.addEventListener("focus", () => route("focus"));
 
 /* ---------------------------
    INIT
