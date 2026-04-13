@@ -1,20 +1,51 @@
-const KEY = "ps_pupil_session";
+import { supabase } from "./supabaseClient.js";
 
-export async function pupilLogin(classCode, pupilCode) {
-  // Minimal placeholder logic — replace with real DB check later
-  if (classCode.length < 3 || pupilCode.length < 2) {
-    throw new Error("Invalid class or pupil code.");
+const KEY = "ps_pupil_session_v2";
+
+export async function pupilLogin(username, pin) {
+  const u = String(username || "").trim().toLowerCase();
+  const p = String(pin || "").trim();
+
+  if (!u || !p) {
+    throw new Error("Enter your username and PIN.");
   }
 
-  localStorage.setItem(KEY, JSON.stringify({ classCode, pupilCode }));
+  const { data, error } = await supabase
+    .from("pupils")
+    .select("id, username, first_name, surname, must_reset_pin")
+    .eq("username", u)
+    .eq("pin", p)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || "Pupil login failed.");
+  }
+
+  if (!data) {
+    throw new Error("Invalid username or PIN.");
+  }
+
+  localStorage.setItem(KEY, JSON.stringify({
+    pupil_id: data.id,
+    username: data.username,
+    first_name: data.first_name || "",
+    surname: data.surname || "",
+    must_reset_pin: !!data.must_reset_pin
+  }));
+
+  return data;
 }
 
-export async function getPupilSession() {
+export function getPupilSession() {
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-export async function pupilLogout() {
+export function pupilLogout() {
   localStorage.removeItem(KEY);
 }

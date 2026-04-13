@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Phoneme Spelling</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=1.7" />
 </head>
 <body>
   <div class="wrap">
     <header class="topbar">
       <div class="brand">
         <div class="brandTitle">Phoneme Spelling</div>
-        <div class="brandSub">Teacher tests + pupil practice</div>
+        <div class="brandSub">Teacher tests, class presentation + pupil practice</div>
       </div>
       <div class="topbarRight">
         <button id="btnSignOut" class="btn secondary" type="button" style="display:none;">Sign out</button>
@@ -20,17 +20,17 @@
 
     <div id="banner" class="banner" style="display:none;"></div>
 
-    <!-- ROLE PICKER -->
     <section id="viewRole" class="card">
       <h2>Choose role</h2>
-      <p class="muted">Teachers create tests and assign to classes. Pupils log in with a class code + pupil code.</p>
+      <p class="muted">Teachers create tests, present them to the class, and assign them. Pupils log in with username and PIN.</p>
       <div class="row">
-        <button id="btnTeacher" class="btn" type="button">I’m a teacher</button>
-        <button id="btnPupil" class="btn secondary" type="button">I’m a pupil</button>
+        <button id="btnTeacher" class="btn" type="button">I&rsquo;m a teacher</button>
+        <button id="btnPupil" class="btn secondary" type="button">I&rsquo;m a pupil</button>
+        <button id="btnTryLesson" class="btn secondary" type="button">Try live test</button>
       </div>
+      <p class="muted">Open the live test builder without signing in.</p>
     </section>
 
-    <!-- TEACHER AUTH -->
     <section id="viewTeacherAuth" class="card" style="display:none;">
       <h2>Teacher sign in</h2>
       <p class="muted">Continue with Google to create tests, classes and assignments.</p>
@@ -38,33 +38,31 @@
       <div id="teacherAuthMsg" class="notice" style="display:none;"></div>
     </section>
 
-    <!-- TEACHER DASHBOARD -->
     <section id="viewTeacher" class="card" style="display:none;"></section>
 
-    <!-- PUPIL LOGIN -->
     <section id="viewPupilAuth" class="card" style="display:none;">
       <h2>Pupil login</h2>
-      <p class="muted">Enter the class code and your pupil code.</p>
+      <p class="muted">Enter your username and PIN.</p>
       <div class="grid2">
         <div>
-          <label>Class code</label>
-          <input id="pupilClassCode" class="input" placeholder="e.g. WGSF-7H2K" />
+          <label>Username</label>
+          <input id="pupilClassCode" class="input" placeholder="e.g. honeill1001" />
         </div>
         <div>
-          <label>Pupil code</label>
-          <input id="pupilCode" class="input" placeholder="e.g. 4829" />
+          <label>PIN</label>
+          <input id="pupilCode" class="input" type="password" placeholder="4 digit PIN" />
         </div>
       </div>
       <div class="row">
-        <button id="btnPupilLogin" class="btn" type="button">Start</button>
+        <button id="btnPupilLogin" class="btn" type="button">Login</button>
         <button id="btnBackFromPupil" class="btn secondary" type="button">Back</button>
       </div>
       <div id="pupilAuthMsg" class="notice" style="display:none;"></div>
     </section>
 
-    <!-- PUPIL APP -->
     <section id="viewPupil" class="card" style="display:none;"></section>
   </div>
 
-<script type="module" src="./js/app.js?v=1.9"></script></body>
+  <script type="module" src="./js/app.js?v=5.81"></script>
+</body>
 </html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Phonics Regression Checks</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:24px}
+    main{max-width:960px;margin:0 auto}
+    h1{margin-top:0}
+    .summary{padding:16px;border-radius:14px;background:#fff;border:1px solid #cbd5e1;margin-bottom:20px}
+    .summary.pass{border-color:#16a34a;background:#f0fdf4}
+    .summary.fail{border-color:#dc2626;background:#fef2f2}
+    .case{background:#fff;border:1px solid #cbd5e1;border-radius:14px;padding:16px;margin-bottom:16px}
+    .case.fail{border-color:#dc2626}
+    .case.pass{border-color:#16a34a}
+    .meta{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px}
+    .pill{padding:4px 10px;border-radius:999px;background:#e2e8f0;font-size:13px;font-weight:600}
+    ul{margin:0;padding-left:20px}
+    li{margin:4px 0}
+    .good{color:#15803d}
+    .bad{color:#b91c1c}
+    pre{background:#f8fafc;border-radius:10px;padding:12px;overflow:auto}
+  </style>
+</head>
+<body>
+  <main id="app">
+    <p>Running phonics regression checks...</p>
+  </main>
+  <script type="module" src="./phonics-regression.js"></script>
+</body>
+</html>

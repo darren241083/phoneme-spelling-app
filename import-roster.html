@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Import Class Roster</title>
+  <style>
+    body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#111827}
+    h1{margin-bottom:24px}
+    label{display:block;margin:18px 0 8px;font-weight:600}
+    input[type="text"],input[type="file"]{width:100%;max-width:520px;padding:12px;font-size:16px}
+    button{margin-top:20px;padding:12px 18px;font-size:16px;font-weight:600;cursor:pointer}
+    .help{color:#6b7280;font-size:14px;margin-top:6px}
+    .status{margin-top:20px;padding:14px;border-radius:10px;display:none}
+    .status.show{display:block}
+    .status.ok{background:#ecfdf5;border:1px solid #a7f3d0}
+    .status.err{background:#fef2f2;border:1px solid #fecaca}
+    code{background:#f3f4f6;padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <h1>Import Roster</h1>
+
+  <label for="classId">Class ID</label>
+  <input id="classId" type="text" placeholder="Paste the class UUID here" />
+  <div class="help">Use the actual class <strong>ID</strong> from Supabase, not a class name like <code>7y</code>.</div>
+
+  <label for="csvFile">Upload CSV</label>
+  <input id="csvFile" type="file" accept=".csv" />
+  <div class="help">CSV headings must be: <code>mis_id,first_name,surname</code></div>
+
+  <button id="importBtn" type="button">Import</button>
+
+  <div id="status" class="status"></div>
+
+  <script type="module">
+    import { importRoster } from "./js/importRoster.js";
+
+    const fileInput = document.getElementById("csvFile");
+    const classIdInput = document.getElementById("classId");
+    const importBtn = document.getElementById("importBtn");
+    const statusEl = document.getElementById("status");
+
+    function showStatus(message, type = "ok") {
+      statusEl.textContent = message;
+      statusEl.className = "status show " + type;
+    }
+
+    function parseCsv(text) {
+      const lines = text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+      if (lines.length < 2) return [];
+
+      const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+      const misIdx = headers.indexOf("mis_id");
+      const firstIdx = headers.indexOf("first_name");
+      const surIdx = headers.indexOf("surname");
+
+      if (misIdx === -1 || firstIdx === -1 || surIdx === -1) {
+        throw new Error("CSV must contain mis_id, first_name, surname headings.");
+      }
+
+      return lines.slice(1).map(line => {
+        const cols = line.split(",").map(c => c.trim());
+        return {
+          mis_id: cols[misIdx] || "",
+          first_name: cols[firstIdx] || "",
+          surname: cols[surIdx] || ""
+        };
+      }).filter(r => r.mis_id && r.first_name && r.surname);
+    }
+
+    importBtn.addEventListener("click", async () => {
+      try {
+        const file = fileInput.files[0];
+        const classId = classIdInput.value.trim();
+
+        if (!classId) {
+          showStatus("Paste the real class ID from Supabase first.", "err");
+          return;
+        }
+
+        if (!file) {
+          showStatus("Choose a CSV file first.", "err");
+          return;
+        }
+
+        importBtn.disabled = true;
+        importBtn.textContent = "Importing...";
+
+        const text = await file.text();
+        const rows = parseCsv(text);
+
+        if (!rows.length) {
+          showStatus("No valid pupil rows found in the CSV.", "err");
+          importBtn.disabled = false;
+          importBtn.textContent = "Import";
+          return;
+        }
+
+        await importRoster(rows, classId);
+        showStatus(`Import complete. Added/checked ${rows.length} pupil rows.`, "ok");
+      } catch (err) {
+        console.error(err);
+        showStatus(err.message || "Import failed.", "err");
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = "Import";
+      }
+    });
+  </script>
+</body>
+</html>
