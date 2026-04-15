@@ -42,6 +42,20 @@ function normalizeBooleanFlag(value) {
   return clean === "true" || clean === "1" || clean === "yes";
 }
 
+function normalizeChoiceObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  const clean = String(value || "").trim();
+  if (!clean) return {};
+  try {
+    const parsed = JSON.parse(clean);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function resolvePresetDefinition(preset) {
   const key = String(preset || "").trim().toLowerCase();
   return BASELINE_PRESET_BLUEPRINTS[key] || BASELINE_PRESET_BLUEPRINTS[BASELINE_DEFAULT_PRESET];
@@ -250,8 +264,9 @@ function getAssignmentMeta(assignmentMetaById, assignmentId) {
 }
 
 export function isBaselineWordRow(wordRow) {
-  return normalizeBooleanFlag(wordRow?.choice?.baseline_v1)
-    || normalizeToken(wordRow?.choice?.source) === BASELINE_WORD_SOURCE;
+  const choice = normalizeChoiceObject(wordRow?.choice);
+  return normalizeBooleanFlag(choice?.baseline_v1)
+    || normalizeToken(choice?.source) === BASELINE_WORD_SOURCE;
 }
 
 export function isBaselineAssignmentWordRows(wordRows) {
@@ -261,13 +276,18 @@ export function isBaselineAssignmentWordRows(wordRows) {
 
 export function resolveBaselinePresetFromWordRows(wordRows) {
   const rows = Array.isArray(wordRows) ? wordRows : [];
-  const preset = rows.find((row) => row?.choice?.baseline_preset)?.choice?.baseline_preset;
+  const preset = rows
+    .map((row) => normalizeChoiceObject(row?.choice))
+    .find((choice) => choice?.baseline_preset)?.baseline_preset;
   return resolvePresetKey(preset);
 }
 
 export function resolveBaselineStandardKeyFromWordRows(wordRows) {
   const rows = Array.isArray(wordRows) ? wordRows : [];
-  return normalizeBaselineStandardKey(rows.find((row) => row?.choice?.baseline_standard_key)?.choice?.baseline_standard_key);
+  const standardKey = rows
+    .map((row) => normalizeChoiceObject(row?.choice))
+    .find((choice) => choice?.baseline_standard_key)?.baseline_standard_key;
+  return normalizeBaselineStandardKey(standardKey);
 }
 
 export function buildBaselinePupilReason() {

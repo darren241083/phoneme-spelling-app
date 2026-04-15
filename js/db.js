@@ -10,7 +10,7 @@ import {
   isBaselineAssignmentWordRows,
   REQUIRED_BASELINE_STANDARD_KEY,
   resolveBaselineStandardKeyFromWordRows,
-} from "./baselinePlacement.js?v=1.3";
+} from "./baselinePlacement.js?v=1.4";
 import { syncAssignmentPupilTargetWords } from "./assignmentTargets.js";
 import {
   buildDefaultPersonalisedAutomationPolicy,
@@ -32,12 +32,15 @@ const PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE = "personalised_automation_pol
 const PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE = "personalised_automation_policy_events";
 const STAFF_PROFILES_TABLE = "staff_profiles";
 const STAFF_IMPORT_BATCH_TABLE = "staff_import_batches";
+const PUPIL_IMPORT_BATCH_TABLE = "pupil_import_batches";
 const STAFF_PENDING_ACCESS_APPROVALS_TABLE = "staff_pending_access_approvals";
 const STAFF_PENDING_ROLE_ASSIGNMENTS_TABLE = "staff_pending_role_assignments";
 const STAFF_PENDING_SCOPE_ASSIGNMENTS_TABLE = "staff_pending_scope_assignments";
 const STAFF_ACCESS_CONTEXT_FUNCTION = "get_my_access_context";
 const STAFF_PROFILE_UPSERT_FUNCTION = "upsert_my_staff_profile";
 const STAFF_IMPORT_FUNCTION = "import_staff_directory_csv";
+const PUPIL_IMPORT_FUNCTION = "import_pupil_roster_csv";
+const PUPIL_IMPORT_PREFLIGHT_FUNCTION = "pupil_directory_duplicate_preflight";
 const STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION = "staff_pending_access_duplicate_preflight";
 const STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION = "list_staff_pending_access_summaries";
 const STAFF_PENDING_ACCESS_DETAIL_FUNCTION = "read_staff_pending_access_detail";
@@ -378,6 +381,42 @@ function isMissingStaffImportSupportError(error) {
   return isMissingStaffImportBatchTableError(error) || isMissingStaffImportFunctionError(error);
 }
 
+function isMissingPupilImportBatchTableError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || (message.includes(PUPIL_IMPORT_BATCH_TABLE) && (
+      message.includes("does not exist")
+      || message.includes("schema cache")
+      || message.includes("could not find the table")
+      || message.includes("relation")
+    ));
+}
+
+function isMissingPupilImportFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_IMPORT_FUNCTION);
+}
+
+function isMissingPupilImportPreflightFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_IMPORT_PREFLIGHT_FUNCTION);
+}
+
+function isMissingPupilImportSupportError(error) {
+  return isMissingPupilImportBatchTableError(error)
+    || isMissingPupilImportFunctionError(error)
+    || isMissingPupilImportPreflightFunctionError(error);
+}
+
 function isMissingStaffPendingAccessSupportError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -653,6 +692,103 @@ function normalizeStaffPendingAccessDuplicatePreflight(value = {}) {
     external_id_conflicts: (Array.isArray(value?.external_id_conflicts) ? value.external_id_conflicts : [])
       .map((item) => normalizeStaffPendingDuplicateConflictRow(item))
       .filter((item) => item.kind),
+  };
+}
+
+function normalizePupilImportDuplicateConflictRow(row = {}) {
+  const conflictPupils = Array.isArray(row?.conflicting_pupils)
+    ? row.conflicting_pupils
+    : (Array.isArray(row?.pupils) ? row.pupils : []);
+  return {
+    kind: String(row?.kind || "").trim().toLowerCase(),
+    value: String(row?.value || "").trim(),
+    conflict_count: Math.max(0, Number(row?.conflict_count || 0)),
+    message: String(row?.message || "").trim(),
+    conflicting_pupils: conflictPupils
+      .map((item) => ({
+        id: String(item?.id || "").trim(),
+        mis_id: String(item?.mis_id || "").trim(),
+        username: String(item?.username || "").trim().toLowerCase(),
+        first_name: String(item?.first_name || "").trim(),
+        surname: String(item?.surname || "").trim(),
+      }))
+      .filter((item) => item.id),
+  };
+}
+
+function normalizePupilImportDuplicatePreflight(value = {}) {
+  return {
+    has_conflicts: !!value?.has_conflicts,
+    mis_id_conflict_count: Math.max(0, Number(value?.mis_id_conflict_count || 0)),
+    username_conflict_count: Math.max(0, Number(value?.username_conflict_count || 0)),
+    mis_id_conflicts: (Array.isArray(value?.mis_id_conflicts) ? value.mis_id_conflicts : [])
+      .map((item) => normalizePupilImportDuplicateConflictRow(item))
+      .filter((item) => item.kind),
+    username_conflicts: (Array.isArray(value?.username_conflicts) ? value.username_conflicts : [])
+      .map((item) => normalizePupilImportDuplicateConflictRow(item))
+      .filter((item) => item.kind),
+  };
+}
+
+function normalizePupilImportCredentialRow(row = {}) {
+  return {
+    pupil_id: String(row?.pupil_id || row?.id || "").trim(),
+    mis_id: String(row?.mis_id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    pin: String(row?.pin || "").trim(),
+    form_class_label: String(row?.form_class_label || "").trim(),
+  };
+}
+
+function normalizePupilImportCreatedClassRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    name: String(row?.name || "").trim(),
+    year_group: String(row?.year_group || "").trim(),
+    label: String(row?.label || "").trim(),
+  };
+}
+
+function normalizePupilImportResult(value = {}) {
+  return {
+    batch_id: String(value?.batch_id || "").trim(),
+    rows_processed: Math.max(0, Number(value?.rows_processed || 0)),
+    created_count: Math.max(0, Number(value?.created_count || 0)),
+    updated_count: Math.max(0, Number(value?.updated_count || 0)),
+    replaced_count: Math.max(0, Number(value?.replaced_count || 0)),
+    skipped_count: Math.max(0, Number(value?.skipped_count || 0)),
+    warning_count: Math.max(0, Number(value?.warning_count || 0)),
+    error_count: Math.max(0, Number(value?.error_count || 0)),
+    form_class_create_count: Math.max(0, Number(value?.form_class_create_count || 0)),
+    form_classes_created: (Array.isArray(value?.form_classes_created) ? value.form_classes_created : [])
+      .map((item) => normalizePupilImportCreatedClassRow(item))
+      .filter((item) => item.id || item.label || item.name),
+    late_errors: normalizeTextList(value?.late_errors),
+    created_credentials: (Array.isArray(value?.created_credentials) ? value.created_credentials : [])
+      .map((item) => normalizePupilImportCredentialRow(item))
+      .filter((item) => item.pupil_id && item.username && item.pin),
+  };
+}
+
+function normalizePupilImportReferencePupilRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    mis_id: String(row?.mis_id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    is_active: row?.is_active !== false,
+  };
+}
+
+function normalizePupilImportMembershipRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    pupil_id: String(row?.pupil_id || "").trim(),
+    class_id: String(row?.class_id || "").trim(),
+    active: row?.active !== false,
   };
 }
 
@@ -944,6 +1080,16 @@ async function requireCentralOwnerContext({
 } = {}) {
   const context = await getSignedInTeacherContext();
   if (!context?.accessContext?.capabilities?.can_manage_automation) {
+    throw new Error(message);
+  }
+  return context;
+}
+
+async function requireCsvImportContext({
+  message = "Admin access is required to import pupils.",
+} = {}) {
+  const context = await getSignedInTeacherContext();
+  if (!context?.accessContext?.capabilities?.can_import_csv) {
     throw new Error(message);
   }
   return context;
@@ -1293,11 +1439,188 @@ function resolveAssignmentTargetSourceWord(targetRow, wordRowsById = new Map()) 
   const joinedWord = Array.isArray(targetRow?.test_words)
     ? targetRow.test_words[0] || null
     : (targetRow?.test_words || null);
-  if (joinedWord?.id) return joinedWord;
+  if (joinedWord?.id) return normalizeLoadedWordRow(joinedWord);
 
   const testWordId = String(targetRow?.test_word_id || targetRow?.testWordId || "").trim();
   if (!testWordId) return null;
   return wordRowsById.get(testWordId) || null;
+}
+
+function normalizeLoadedChoice(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  const clean = String(value || "").trim();
+  if (!clean) return {};
+  try {
+    const parsed = JSON.parse(clean);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeLoadedSegments(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  const clean = String(value || "").trim();
+  if (!clean) return [];
+
+  try {
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    }
+  } catch {
+    // Ignore parse errors and fall through to lightweight text parsing.
+  }
+
+  if (clean.startsWith("{") && clean.endsWith("}")) {
+    return clean
+      .slice(1, -1)
+      .split(",")
+      .map((item) => String(item || "").trim().replace(/^"(.*)"$/, "$1"))
+      .filter(Boolean);
+  }
+
+  if (clean.includes("|")) {
+    return clean
+      .split("|")
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  return [clean];
+}
+
+function normalizeLoadedWordRow(wordRow) {
+  const row = wordRow && typeof wordRow === "object" ? wordRow : {};
+  return {
+    ...row,
+    segments: normalizeLoadedSegments(row?.segments),
+    choice: normalizeLoadedChoice(row?.choice),
+  };
+}
+
+function normalizeLoadedWordRows(wordRows) {
+  return (Array.isArray(wordRows) ? wordRows : []).map((row) => normalizeLoadedWordRow(row));
+}
+
+function normalizeBaselineGateAssignmentPayload(payload) {
+  const assignment = payload && typeof payload === "object" ? payload : null;
+  if (!assignment) return null;
+
+  const title = String(assignment?.title || assignment?.pupil_title || "Baseline Test").trim() || "Baseline Test";
+  return {
+    id: String(assignment?.id || "").trim(),
+    teacher_id: String(assignment?.teacher_id || "").trim() || null,
+    class_id: String(assignment?.class_id || "").trim() || null,
+    test_id: String(assignment?.test_id || "").trim() || null,
+    title,
+    question_type: normalizeStoredQuestionType(assignment?.question_type, { title }),
+    mode: String(assignment?.mode || "test").trim() || "test",
+    max_attempts: assignment?.max_attempts == null ? null : Number(assignment.max_attempts),
+    audio_enabled: assignment?.audio_enabled !== false,
+    hints_enabled: assignment?.hints_enabled !== false,
+    end_at: assignment?.end_at || null,
+    created_at: assignment?.created_at || null,
+    assignmentStatus: String(assignment?.assignment_status || assignment?.status || "").trim() || "assigned",
+    started_at: assignment?.started_at || null,
+    completed_at: assignment?.completed_at || null,
+    total_words: Math.max(0, Number(assignment?.total_words || 0)),
+    correct_words: Math.max(0, Number(assignment?.correct_words || 0)),
+    average_attempts: Number.isFinite(Number(assignment?.average_attempts)) ? Number(assignment.average_attempts) : 0,
+    score_rate: Number.isFinite(Number(assignment?.score_rate)) ? Number(assignment.score_rate) : 0,
+    result_json: Array.isArray(assignment?.result_json) ? assignment.result_json : [],
+    completed: !!assignment?.completed || !!assignment?.completed_at,
+    isLocked: !!assignment?.completed || !!assignment?.completed_at,
+    attempt_source: "baseline",
+    assignmentOrigin: "baseline",
+    isGenerated: false,
+    isBaseline: true,
+    pupilTitle: String(assignment?.pupil_title || "Baseline Test").trim() || "Baseline Test",
+    pupilReason: String(assignment?.pupil_reason || buildBaselinePupilReason()).trim() || buildBaselinePupilReason(),
+    words: normalizeLoadedWordRows(assignment?.words),
+  };
+}
+
+const BASELINE_GATE_STATUS_VALUES = new Set(["waiting", "start", "resume", "ready"]);
+const BASELINE_GATE_WAITING_REASON_VALUES = new Set([
+  "runtime_inactive",
+  "no_active_form_membership",
+  "no_baseline_assignment",
+]);
+
+function normalizeBaselineGateWaitingReason(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return BASELINE_GATE_WAITING_REASON_VALUES.has(normalized) ? normalized : null;
+}
+
+function normalizeBaselineGateStatePayload(payload, {
+  requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
+} = {}) {
+  const state = payload && typeof payload === "object" ? payload : {};
+  const normalizedStatus = String(state?.status || "waiting").trim().toLowerCase();
+  const status = BASELINE_GATE_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : "waiting";
+  const assignmentId = String(
+    state?.assignment_id
+    || state?.assignmentId
+    || state?.assignment?.id
+    || ""
+  ).trim();
+  const normalizedRequiredStandardKey = String(
+    state?.required_standard_key
+    || state?.requiredStandardKey
+    || requiredStandardKey
+  ).trim().toLowerCase() || requiredStandardKey;
+  const classIds = normalizeIdList(state?.class_ids ?? state?.classIds);
+  const rawFormClassIds = state?.form_class_ids ?? state?.formClassIds;
+  const formClassIds = normalizeIdList(
+    rawFormClassIds == null
+      ? classIds
+      : rawFormClassIds
+  );
+  const completedAssignmentId = String(
+    state?.completed_assignment_id
+    || state?.completedAssignmentId
+    || ""
+  ).trim();
+  const waitingReason = status === "waiting"
+    ? normalizeBaselineGateWaitingReason(state?.waiting_reason ?? state?.waitingReason)
+    : null;
+  const assignment = normalizeBaselineGateAssignmentPayload(state?.assignment);
+
+  return {
+    status,
+    waitingReason,
+    waiting_reason: waitingReason,
+    assignmentId,
+    requiredStandardKey: normalizedRequiredStandardKey,
+    classIds,
+    class_ids: classIds,
+    formClassIds,
+    form_class_ids: formClassIds,
+    completedAssignmentId,
+    assignment,
+  };
+}
+
+function isMissingPupilBaselineGateReadFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("read_pupil_baseline_gate_state");
+}
+
+function isMissingPupilRuntimeAccessFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("can_access_pupil_runtime");
 }
 
 async function readAssignmentStatusRows({ assignmentIds = [], pupilId = "" } = {}) {
@@ -2160,6 +2483,101 @@ export async function importStaffDirectoryCsv({
   return data || null;
 }
 
+export async function readPupilImportDuplicatePreflight() {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to review pupil import data health.",
+  });
+  void context;
+
+  const { data, error } = await supabase.rpc(PUPIL_IMPORT_PREFLIGHT_FUNCTION);
+  if (error) {
+    if (isMissingPupilImportSupportError(error)) {
+      return normalizePupilImportDuplicatePreflight({});
+    }
+    throw error;
+  }
+  return normalizePupilImportDuplicatePreflight(data || {});
+}
+
+export async function readPupilImportReferenceData({
+  formClassIds = [],
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to prepare pupil CSV import previews.",
+  });
+  void context;
+
+  const safeFormClassIds = normalizeIdList(formClassIds);
+  const pupils = [];
+  const pupilPageSize = 1000;
+
+  for (let from = 0; ; from += pupilPageSize) {
+    const to = from + pupilPageSize - 1;
+    const { data, error } = await supabase
+      .from("pupils")
+      .select("id, mis_id, first_name, surname, username, is_active")
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw error;
+    const normalizedRows = (data || [])
+      .map((row) => normalizePupilImportReferencePupilRow(row))
+      .filter((row) => row.id);
+    pupils.push(...normalizedRows);
+    if ((data || []).length < pupilPageSize) break;
+  }
+
+  const formMemberships = [];
+  if (safeFormClassIds.length) {
+    const membershipPageSize = 1000;
+    for (let from = 0; ; from += membershipPageSize) {
+      const to = from + membershipPageSize - 1;
+      const { data, error } = await supabase
+        .from("pupil_classes")
+        .select("id, pupil_id, class_id, active")
+        .in("class_id", safeFormClassIds)
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      const normalizedRows = (data || [])
+        .map((row) => normalizePupilImportMembershipRow(row))
+        .filter((row) => row.class_id && row.pupil_id);
+      formMemberships.push(...normalizedRows);
+      if ((data || []).length < membershipPageSize) break;
+    }
+  }
+
+  return {
+    pupils,
+    formMemberships,
+  };
+}
+
+export async function importPupilRosterCsv({
+  rows = [],
+  fileName = "",
+  previewSummary = {},
+} = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (!safeRows.length) {
+    throw new Error("Choose at least one safe CSV row before importing pupils.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_IMPORT_FUNCTION, {
+    import_rows: safeRows,
+    import_file_name: String(fileName || "").trim() || null,
+    preview_summary: previewSummary && typeof previewSummary === "object" ? previewSummary : {},
+  });
+
+  if (error) {
+    if (isMissingPupilImportSupportError(error)) {
+      throw new Error("Pupil CSV onboarding is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return normalizePupilImportResult(data || {});
+}
+
 function sortPersonalisedAutomationPolicies(rows = []) {
   return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
     const rankByState = {
@@ -2949,11 +3367,57 @@ export async function readPupilBaselineGateState({
   const safeRequiredKey = String(requiredStandardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase();
 
   if (!safePupilId) {
-    return {
+    return normalizeBaselineGateStatePayload({
       status: "waiting",
-      assignmentId: "",
       requiredStandardKey: safeRequiredKey,
-    };
+      waiting_reason: null,
+      class_ids: [],
+      form_class_ids: [],
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc("read_pupil_baseline_gate_state", {
+    requested_pupil_id: safePupilId,
+    requested_standard_key: safeRequiredKey,
+  });
+  if (!rpcError) {
+    if (rpcData && typeof rpcData === "object" && rpcData?.status) {
+      return normalizeBaselineGateStatePayload(rpcData, {
+        requiredStandardKey: safeRequiredKey,
+      });
+    }
+  } else if (!isMissingPupilBaselineGateReadFunctionError(rpcError)) {
+    throw rpcError;
+  }
+
+  let canAccessRuntime = null;
+  try {
+    const { data: runtimeData, error: runtimeError } = await supabase.rpc("can_access_pupil_runtime", {
+      requested_pupil_id: safePupilId,
+    });
+    if (runtimeError) {
+      if (!isMissingPupilRuntimeAccessFunctionError(runtimeError)) {
+        throw runtimeError;
+      }
+    } else {
+      canAccessRuntime = runtimeData === true;
+    }
+  } catch (error) {
+    if (!isMissingPupilRuntimeAccessFunctionError(error)) {
+      console.warn("Could not read pupil runtime access for baseline gate fallback:", error);
+    }
+  }
+
+  if (canAccessRuntime === false) {
+    return normalizeBaselineGateStatePayload({
+      status: "waiting",
+      waiting_reason: "runtime_inactive",
+      required_standard_key: safeRequiredKey,
+      class_ids: [],
+      form_class_ids: [],
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
   }
 
   const { data: memberships, error: membershipError } = await supabase
@@ -2963,17 +3427,41 @@ export async function readPupilBaselineGateState({
     .eq("active", true);
   if (membershipError) throw membershipError;
 
-  const classIds = [...new Set(
+  const classIds = normalizeIdList(
     (memberships || [])
       .map((row) => String(row?.class_id || "").trim())
       .filter(Boolean)
-  )];
-  if (!classIds.length) {
-    return {
+  );
+  let formClassIds = [];
+  if (classIds.length) {
+    try {
+      const { data: classRows, error: classError } = await supabase
+        .from("classes")
+        .select("id, class_type")
+        .in("id", classIds);
+      if (classError) {
+        throw classError;
+      }
+      formClassIds = normalizeIdList(
+        (classRows || [])
+          .filter((row) => normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
+          .map((row) => row?.id)
+      );
+    } catch (error) {
+      console.warn("Could not refine active form memberships for baseline gate fallback:", error);
+      formClassIds = [...classIds];
+    }
+  }
+
+  if (!formClassIds.length) {
+    return normalizeBaselineGateStatePayload({
       status: "waiting",
-      assignmentId: "",
-      requiredStandardKey: safeRequiredKey,
-    };
+      waiting_reason: "no_active_form_membership",
+      required_standard_key: safeRequiredKey,
+      class_ids: classIds,
+      form_class_ids: formClassIds,
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
   }
 
   const { data: assignmentRows, error: assignmentError } = await supabase
@@ -3002,11 +3490,9 @@ export async function readPupilBaselineGateState({
 
   const requiredBaselineAssignments = (assignmentRows || [])
     .map((assignment) => {
-      const wordRows = Array.isArray(assignment?.tests?.test_words)
-        ? [...assignment.tests.test_words]
-          .filter((row) => String(row?.word || "").trim())
-          .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0))
-        : [];
+      const wordRows = normalizeLoadedWordRows(assignment?.tests?.test_words)
+        .filter((row) => String(row?.word || "").trim())
+        .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
       if (!isBaselineAssignmentWordRows(wordRows)) return null;
       const standardKey = resolveBaselineStandardKeyFromWordRows(wordRows);
       if (standardKey !== safeRequiredKey) return null;
@@ -3021,12 +3507,14 @@ export async function readPupilBaselineGateState({
     .sort(compareBaselineGateAssignments);
 
   if (!requiredBaselineAssignments.length) {
-    return {
+    return normalizeBaselineGateStatePayload({
       status: "waiting",
-      assignmentId: "",
-      requiredStandardKey: safeRequiredKey,
-      classIds,
-    };
+      waiting_reason: "no_baseline_assignment",
+      required_standard_key: safeRequiredKey,
+      class_ids: classIds,
+      form_class_ids: formClassIds,
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
   }
 
   const statusRows = await readAssignmentStatusRows({
@@ -3042,13 +3530,15 @@ export async function readPupilBaselineGateState({
     return !!(statusRow?.completedAt || statusRow?.completed_at);
   });
   if (completedAssignment) {
-    return {
+    return normalizeBaselineGateStatePayload({
       status: "ready",
-      assignmentId: "",
-      requiredStandardKey: safeRequiredKey,
-      classIds,
-      completedAssignmentId: completedAssignment.id,
-    };
+      waiting_reason: null,
+      required_standard_key: safeRequiredKey,
+      class_ids: classIds,
+      form_class_ids: formClassIds,
+      completed_assignment_id: completedAssignment.id,
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
   }
 
   const resumableAssignment = requiredBaselineAssignments.find((assignment) => {
@@ -3056,20 +3546,26 @@ export async function readPupilBaselineGateState({
     return hasStartedAssignmentStatus(statusRow);
   });
   if (resumableAssignment) {
-    return {
+    return normalizeBaselineGateStatePayload({
       status: "resume",
-      assignmentId: resumableAssignment.id,
-      requiredStandardKey: safeRequiredKey,
-      classIds,
-    };
+      waiting_reason: null,
+      assignment_id: resumableAssignment.id,
+      required_standard_key: safeRequiredKey,
+      class_ids: classIds,
+      form_class_ids: formClassIds,
+      assignment: null,
+    }, { requiredStandardKey: safeRequiredKey });
   }
 
-  return {
+  return normalizeBaselineGateStatePayload({
     status: "start",
-    assignmentId: requiredBaselineAssignments[0]?.id || "",
-    requiredStandardKey: safeRequiredKey,
-    classIds,
-  };
+    waiting_reason: null,
+    assignment_id: requiredBaselineAssignments[0]?.id || "",
+    required_standard_key: safeRequiredKey,
+    class_ids: classIds,
+    form_class_ids: formClassIds,
+    assignment: null,
+  }, { requiredStandardKey: safeRequiredKey });
 }
 
 /* ---------------------------
@@ -3257,9 +3753,8 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
       const assignmentId = String(assignment?.id || "");
       if (!assignmentId) continue;
 
-      const baseWords = Array.isArray(assignment?.tests?.test_words)
-        ? [...assignment.tests.test_words].sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0))
-        : [];
+      const baseWords = normalizeLoadedWordRows(assignment?.tests?.test_words)
+        .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
       const isGenerated = isFullyGeneratedAssignmentWordRows(baseWords);
       const hasPupilTargets = (targetRowsByAssignment.get(assignmentId) || []).length > 0;
       const shouldEnsureTargets = !isGenerated
@@ -3289,11 +3784,9 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
 
   return (data || [])
     .map((item) => {
-      const baseWords = Array.isArray(item?.tests?.test_words)
-        ? [...item.tests.test_words]
-          .filter((wordRow) => String(wordRow?.word || "").trim())
-          .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
-        : [];
+      const baseWords = normalizeLoadedWordRows(item?.tests?.test_words)
+        .filter((wordRow) => String(wordRow?.word || "").trim())
+        .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
       const baseWordsById = new Map(baseWords.map((wordRow) => [String(wordRow?.id || ""), wordRow]));
       const isGenerated = isFullyGeneratedAssignmentWordRows(baseWords);
       const isBaseline = isBaselineAssignmentWordRows(baseWords);

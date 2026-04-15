@@ -68,6 +68,7 @@ import {
   deletePersonalisedAutomationPolicy,
   grantStaffRole,
   grantStaffScope,
+  importPupilRosterCsv,
   importStaffDirectoryCsv,
   listTeacherPupilDirectoryForInterventionGroups,
   listActiveAdminUserIds,
@@ -80,6 +81,8 @@ import {
   listPersonalisedAutomationPolicies,
   listClassAutoAssignPolicies,
   normalizeClassType,
+  readPupilImportDuplicatePreflight,
+  readPupilImportReferenceData,
   readPupilBaselineGateState,
   readStaffAccessContext,
   readStaffPendingAccessDetail,
@@ -94,14 +97,21 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.31";
+} from "./db.js?v=1.33";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
   getStaffImportOptionalColumns,
   getStaffImportRequiredColumns,
   parseStaffImportCsv,
-} from "./staffCsvImport.js?v=1.0";
+} from "./staffCsvImport.js?v=1.1";
+import {
+  buildPupilImportCommitPayload,
+  buildPupilImportPreview,
+  getPupilImportOptionalColumns,
+  getPupilImportRequiredColumns,
+  parsePupilImportCsv,
+} from "./pupilCsvImport.js?v=1.4";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -124,7 +134,7 @@ import {
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
-const DASHBOARD_SECTION_KEYS = ["staffAccess", "analytics", "upcoming", "classes", "tests"];
+const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "analytics", "upcoming", "classes", "tests"];
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
 const VISUAL_COMPARE_LIMIT = 3;
 const ASSIGNMENT_PUPIL_ROWS_STEP = 5;
@@ -133,6 +143,9 @@ const CLASS_RESULTS_RANGE_DEFAULT = "last_week";
 const STAFF_ACCESS_AUDIT_LIMIT = 10;
 const STAFF_ACCESS_MANAGED_ROLES = ["teacher", "admin", "hoy", "hod", "senco", "literacy_lead"];
 const STAFF_ACCESS_RECENT_IMPORT_WINDOW_DAYS = 14;
+const STAFF_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
+const PUPIL_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
+const CSV_IMPORT_PREVIEW_ISSUE_SAMPLE_LIMIT = 6;
 const CLASS_RESULTS_RANGE_OPTIONS = [
   { key: "this_week", label: "This week" },
   { key: "last_week", label: "Last week" },
@@ -311,6 +324,16 @@ function createDefaultStaffPendingDuplicatePreflight() {
   };
 }
 
+function createDefaultPupilImportDuplicatePreflight() {
+  return {
+    has_conflicts: false,
+    mis_id_conflict_count: 0,
+    username_conflict_count: 0,
+    mis_id_conflicts: [],
+    username_conflicts: [],
+  };
+}
+
 function createDefaultStaffAccessState() {
   return {
     profiles: [],
@@ -330,6 +353,8 @@ function createDefaultStaffAccessState() {
     importPreview: null,
     importPreviewError: "",
     importPreviewLoading: false,
+    importPreviewSearch: "",
+    previewExpandedSections: {},
     importResult: null,
     recentImportBatchId: "",
     pendingScopeSelections: {
@@ -348,6 +373,28 @@ function createDefaultStaffAccessState() {
     mutating: false,
     error: "",
     detailError: "",
+  };
+}
+
+function createDefaultPupilOnboardingState() {
+  return {
+    preflight: createDefaultPupilImportDuplicatePreflight(),
+    preflightLoading: false,
+    preflightError: "",
+    referenceLoaded: false,
+    referenceSignature: "",
+    referenceLoading: false,
+    existingPupils: [],
+    formMemberships: [],
+    importFileName: "",
+    importPreview: null,
+    importPreviewError: "",
+    importPreviewLoading: false,
+    importPreviewSearch: "",
+    previewExpandedSections: {},
+    importResult: null,
+    mutating: false,
+    error: "",
   };
 }
 
@@ -449,6 +496,7 @@ const state = {
   assignments: [],
   sections: {
     staffAccess: false,
+    pupilOnboarding: false,
     upcoming: false,
     classes: false,
     tests: false,
@@ -528,6 +576,7 @@ const state = {
   automationAction: createDefaultAutomationActionState(),
   interventionGroup: createDefaultInterventionGroupState(),
   staffAccess: createDefaultStaffAccessState(),
+  pupilOnboarding: createDefaultPupilOnboardingState(),
   demoData: {
     loading: false,
     action: "",
@@ -579,6 +628,10 @@ function getAccessCapabilities() {
 
 function canManageAutomation() {
   return !!getAccessCapabilities()?.can_manage_automation;
+}
+
+function canImportCsv() {
+  return !!getAccessCapabilities()?.can_import_csv;
 }
 
 function canManageInterventionGroups() {
@@ -780,6 +833,100 @@ function getStaffAccessState() {
   return state.staffAccess && typeof state.staffAccess === "object"
     ? state.staffAccess
     : createDefaultStaffAccessState();
+}
+
+function getPupilOnboardingState() {
+  return state.pupilOnboarding && typeof state.pupilOnboarding === "object"
+    ? state.pupilOnboarding
+    : createDefaultPupilOnboardingState();
+}
+
+function normalizeImportPreviewSearch(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildImportPreviewRowSearchText(row = null) {
+  const safeRow = row && typeof row === "object" ? row : {};
+  return [
+    safeRow?.display_name,
+    safeRow?.full_name,
+    safeRow?.email,
+    safeRow?.external_staff_id,
+    safeRow?.mis_id,
+    safeRow?.form_class,
+    safeRow?.year_group,
+    safeRow?.target_form_class_label,
+    ...(Array.isArray(safeRow?.safe_updates) ? safeRow.safe_updates : []),
+    ...(Array.isArray(safeRow?.warnings) ? safeRow.warnings : []),
+    ...(Array.isArray(safeRow?.errors) ? safeRow.errors : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function doesImportPreviewRowMatchSearch(row = null, search = "") {
+  const normalizedSearch = normalizeImportPreviewSearch(search);
+  if (!normalizedSearch) return true;
+  return buildImportPreviewRowSearchText(row).includes(normalizedSearch);
+}
+
+function isStaffAccessPreviewSectionExpanded(sectionKey = "") {
+  const safeKey = String(sectionKey || "").trim();
+  if (!safeKey) return false;
+  return !!getStaffAccessState()?.previewExpandedSections?.[safeKey];
+}
+
+function setStaffAccessPreviewSectionExpanded(sectionKey = "", expanded = false) {
+  const safeKey = String(sectionKey || "").trim();
+  if (!safeKey) return;
+  const nextExpandedSections = {
+    ...(getStaffAccessState()?.previewExpandedSections || {}),
+  };
+  if (expanded) {
+    nextExpandedSections[safeKey] = true;
+  } else {
+    delete nextExpandedSections[safeKey];
+  }
+  state.staffAccess.previewExpandedSections = nextExpandedSections;
+}
+
+function isPupilOnboardingPreviewSectionExpanded(sectionKey = "") {
+  const safeKey = String(sectionKey || "").trim();
+  if (!safeKey) return false;
+  return !!getPupilOnboardingState()?.previewExpandedSections?.[safeKey];
+}
+
+function setPupilOnboardingPreviewSectionExpanded(sectionKey = "", expanded = false) {
+  const safeKey = String(sectionKey || "").trim();
+  if (!safeKey) return;
+  const nextExpandedSections = {
+    ...(getPupilOnboardingState()?.previewExpandedSections || {}),
+  };
+  if (expanded) {
+    nextExpandedSections[safeKey] = true;
+  } else {
+    delete nextExpandedSections[safeKey];
+  }
+  state.pupilOnboarding.previewExpandedSections = nextExpandedSections;
+}
+
+function getPupilOnboardingFormClasses() {
+  return (state.classes || [])
+    .filter((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
+    .sort((a, b) => {
+      const yearDelta = String(a?.year_group || "").localeCompare(String(b?.year_group || ""));
+      if (yearDelta !== 0) return yearDelta;
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+}
+
+function getPupilOnboardingReferenceSignature() {
+  return getPupilOnboardingFormClasses()
+    .map((item) => String(item?.id || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+    .join("|");
 }
 
 function getStaffAccessSelectedProfileId() {
@@ -1543,6 +1690,8 @@ function buildStaffAccessImportPreviewFromText(text = "", fileName = "") {
   state.staffAccess.importFileName = String(fileName || "").trim();
   state.staffAccess.importPreview = preview;
   state.staffAccess.importPreviewError = "";
+  state.staffAccess.importPreviewSearch = "";
+  state.staffAccess.previewExpandedSections = {};
   state.staffAccess.importResult = null;
 
   if (Array.isArray(parsedCsv?.errors) && parsedCsv.errors.length && !preview.rows.length) {
@@ -1574,6 +1723,23 @@ function clearStaffAccessImportPreview() {
   state.staffAccess.importPreview = null;
   state.staffAccess.importPreviewError = "";
   state.staffAccess.importPreviewLoading = false;
+  state.staffAccess.importPreviewSearch = "";
+  state.staffAccess.previewExpandedSections = {};
+}
+
+function handleDownloadStaffImportRows(kind = "error") {
+  const preview = getStaffAccessState()?.importPreview;
+  const csvText = buildImportPreviewExportCsv(preview, kind);
+  if (!csvText) {
+    showNotice(`There are no ${kind === "warning" ? "warning" : "error"} rows to download.`, "error");
+    paint();
+    return;
+  }
+  downloadTextFile(
+    `${sanitizeImportPreviewFileStem(getStaffAccessState()?.importFileName || "staff-import")}-${kind}-rows.csv`,
+    csvText,
+    "text/csv;charset=utf-8"
+  );
 }
 
 async function handleCommitStaffAccessImport() {
@@ -1620,6 +1786,186 @@ async function handleCommitStaffAccessImport() {
     showNotice(error?.message || "Could not import that CSV.", "error");
   } finally {
     state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
+async function loadPupilOnboardingPreflight() {
+  state.pupilOnboarding.preflightLoading = true;
+  state.pupilOnboarding.preflightError = "";
+  if (rootEl?.isConnected) paint();
+
+  try {
+    state.pupilOnboarding.preflight = await readPupilImportDuplicatePreflight();
+  } catch (error) {
+    console.error("pupil import preflight error:", error);
+    state.pupilOnboarding.preflight = createDefaultPupilImportDuplicatePreflight();
+    state.pupilOnboarding.preflightError = error?.message || "Could not review pupil directory duplicates.";
+  } finally {
+    state.pupilOnboarding.preflightLoading = false;
+    if (rootEl?.isConnected) paint();
+  }
+}
+
+async function ensurePupilOnboardingReferenceDataLoaded({ force = false } = {}) {
+  const referenceSignature = getPupilOnboardingReferenceSignature();
+  if (
+    !force
+    && getPupilOnboardingState()?.referenceLoaded
+    && String(getPupilOnboardingState()?.referenceSignature || "") === referenceSignature
+  ) {
+    return;
+  }
+
+  state.pupilOnboarding.referenceLoading = true;
+  state.pupilOnboarding.error = "";
+  if (rootEl?.isConnected) paint();
+
+  try {
+    const { pupils, formMemberships } = await readPupilImportReferenceData({
+      formClassIds: getPupilOnboardingFormClasses().map((item) => String(item?.id || "").trim()).filter(Boolean),
+    });
+    state.pupilOnboarding.existingPupils = Array.isArray(pupils) ? pupils : [];
+    state.pupilOnboarding.formMemberships = Array.isArray(formMemberships) ? formMemberships : [];
+    state.pupilOnboarding.referenceLoaded = true;
+    state.pupilOnboarding.referenceSignature = referenceSignature;
+  } catch (error) {
+    console.error("pupil import reference load error:", error);
+    state.pupilOnboarding.existingPupils = [];
+    state.pupilOnboarding.formMemberships = [];
+    state.pupilOnboarding.referenceLoaded = false;
+    state.pupilOnboarding.referenceSignature = "";
+    state.pupilOnboarding.error = error?.message || "Could not load the pupil directory for CSV preview.";
+    throw error;
+  } finally {
+    state.pupilOnboarding.referenceLoading = false;
+    if (rootEl?.isConnected) paint();
+  }
+}
+
+async function buildPupilOnboardingImportPreviewFromText(text = "", fileName = "") {
+  const parsedCsv = parsePupilImportCsv(text);
+  await ensurePupilOnboardingReferenceDataLoaded();
+
+  const preview = buildPupilImportPreview({
+    parsedCsv,
+    existingPupils: getPupilOnboardingState()?.existingPupils || [],
+    formMemberships: getPupilOnboardingState()?.formMemberships || [],
+    classRecords: getPupilOnboardingFormClasses(),
+  });
+
+  state.pupilOnboarding.importFileName = String(fileName || "").trim();
+  state.pupilOnboarding.importPreview = preview;
+  state.pupilOnboarding.importPreviewError = "";
+  state.pupilOnboarding.importPreviewSearch = "";
+  state.pupilOnboarding.importResult = null;
+  state.pupilOnboarding.previewExpandedSections = {};
+
+  if (Array.isArray(parsedCsv?.errors) && parsedCsv.errors.length && !preview.rows.length) {
+    state.pupilOnboarding.importPreviewError = parsedCsv.errors.join(" ");
+  }
+}
+
+async function handlePupilOnboardingCsvFileSelection(file = null) {
+  if (!(file instanceof File)) return;
+  state.pupilOnboarding.importPreviewLoading = true;
+  state.pupilOnboarding.importPreviewError = "";
+  paint();
+
+  try {
+    const text = await file.text();
+    await buildPupilOnboardingImportPreviewFromText(text, file.name || "");
+  } catch (error) {
+    console.error("pupil csv preview error:", error);
+    state.pupilOnboarding.importPreview = null;
+    state.pupilOnboarding.importPreviewError = error?.message || "Could not read that CSV file.";
+  } finally {
+    state.pupilOnboarding.importPreviewLoading = false;
+    paint();
+  }
+}
+
+function clearPupilOnboardingImportPreview() {
+  state.pupilOnboarding.importFileName = "";
+  state.pupilOnboarding.importPreview = null;
+  state.pupilOnboarding.importPreviewError = "";
+  state.pupilOnboarding.importPreviewLoading = false;
+  state.pupilOnboarding.importPreviewSearch = "";
+  state.pupilOnboarding.previewExpandedSections = {};
+}
+
+function handleDownloadPupilImportRows(kind = "error") {
+  const preview = getPupilOnboardingState()?.importPreview;
+  const csvText = buildImportPreviewExportCsv(preview, kind);
+  if (!csvText) {
+    showNotice(`There are no ${kind === "warning" ? "warning" : "error"} rows to download.`, "error");
+    paint();
+    return;
+  }
+  downloadTextFile(
+    `${sanitizeImportPreviewFileStem(getPupilOnboardingState()?.importFileName || "pupil-import")}-${kind}-rows.csv`,
+    csvText,
+    "text/csv;charset=utf-8"
+  );
+}
+
+function dismissPupilOnboardingImportResult() {
+  state.pupilOnboarding.importResult = null;
+}
+
+async function handleCommitPupilOnboardingImport() {
+  const preview = getPupilOnboardingState()?.importPreview;
+  if (!preview) {
+    showNotice("Choose a CSV file and review the preview first.", "error");
+    paint();
+    return;
+  }
+
+  const importRows = buildPupilImportCommitPayload(preview);
+  if (!importRows.length || !preview.canCommit) {
+    showNotice("There are no safe CSV rows ready to import.", "error");
+    paint();
+    return;
+  }
+
+  state.pupilOnboarding.mutating = true;
+  paint();
+
+  try {
+    const result = await importPupilRosterCsv({
+      rows: importRows,
+      fileName: getPupilOnboardingState()?.importFileName || "",
+      previewSummary: preview.summary || {},
+    });
+    state.pupilOnboarding.importResult = result || null;
+    clearPupilOnboardingImportPreview();
+
+    try {
+      state.classes = await loadClasses();
+      await ensurePupilOnboardingReferenceDataLoaded({ force: true });
+      await loadPupilOnboardingPreflight();
+    } catch (refreshError) {
+      console.error("pupil import refresh error:", refreshError);
+    }
+
+    const createdPupilCount = Number(result?.created_count || 0);
+    const createdFormClassCount = Number(result?.form_class_create_count || 0);
+
+    if (createdPupilCount > 0 || createdFormClassCount > 0) {
+      const summaryParts = [];
+      if (createdPupilCount > 0) summaryParts.push(formatCountLabel(createdPupilCount, "new pupil"));
+      if (createdFormClassCount > 0) summaryParts.push(formatCountLabel(createdFormClassCount, "form class", "form classes"));
+      showNotice(`Import complete. ${summaryParts.join(" and ")} created.`, "success");
+    } else if (Number(result?.replaced_count || 0) > 0) {
+      showNotice(`Import complete. ${formatCountLabel(result?.replaced_count || 0, "form move")} applied.`, "success");
+    } else {
+      showNotice("Import complete. Pupil records were updated.", "success");
+    }
+  } catch (error) {
+    console.error("pupil csv import commit error:", error);
+    showNotice(error?.message || "Could not import that CSV.", "error");
+  } finally {
+    state.pupilOnboarding.mutating = false;
     paint();
   }
 }
@@ -2911,6 +3257,13 @@ async function loadDashboardData() {
   } else {
     state.staffAccess = createDefaultStaffAccessState();
     state.sections.staffAccess = false;
+  }
+
+  if (canImportCsv()) {
+    await loadPupilOnboardingPreflight();
+  } else {
+    state.pupilOnboarding = createDefaultPupilOnboardingState();
+    state.sections.pupilOnboarding = false;
   }
 }
 
@@ -6916,6 +7269,25 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="staff-import-preview-search"]')) {
+    const nextValue = target.value || "";
+    const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
+    const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
+    state.staffAccess.importPreviewSearch = nextValue;
+    paint();
+    requestAnimationFrame(() => {
+      const input = rootEl?.querySelector('[data-field="staff-import-preview-search"]');
+      if (!(input instanceof HTMLInputElement)) return;
+      input.focus();
+      try {
+        input.setSelectionRange(selectionStart, selectionEnd);
+      } catch {
+        // ignore browsers that do not support selection restore here
+      }
+    });
+    return;
+  }
+
   if (target.matches('[data-field="analytics-question"]')) {
     state.analyticsAssistant.questionDraft = target.value || "";
     syncAnalyticsComposerHeight(target);
@@ -6961,6 +7333,25 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="pupil-import-preview-search"]')) {
+    const nextValue = target.value || "";
+    const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
+    const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
+    state.pupilOnboarding.importPreviewSearch = nextValue;
+    paint();
+    requestAnimationFrame(() => {
+      const input = rootEl?.querySelector('[data-field="pupil-import-preview-search"]');
+      if (!(input instanceof HTMLInputElement)) return;
+      input.focus();
+      try {
+        input.setSelectionRange(selectionStart, selectionEnd);
+      } catch {
+        // ignore browsers that do not support selection restore here
+      }
+    });
+    return;
+  }
+
   if (target.matches('[data-field="automation-policy-name"]')) {
     setAutomationRunPolicy({ name: target.value || "" });
     return;
@@ -6979,6 +7370,13 @@ function onRootChange(event) {
     const input = target instanceof HTMLInputElement ? target : null;
     const file = input?.files?.[0] || null;
     void handleStaffAccessCsvFileSelection(file);
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-import-csv-file"]')) {
+    const input = target instanceof HTMLInputElement ? target : null;
+    const file = input?.files?.[0] || null;
+    void handlePupilOnboardingCsvFileSelection(file);
     return;
   }
 
@@ -7564,8 +7962,51 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "toggle-staff-import-section") {
+    const sectionKey = String(button.dataset.sectionKey || "").trim();
+    const nextExpanded = String(button.dataset.expanded || "").trim() !== "true";
+    setStaffAccessPreviewSectionExpanded(sectionKey, nextExpanded);
+    paint();
+    return;
+  }
+
+  if (action === "download-staff-import-rows") {
+    handleDownloadStaffImportRows(button.dataset.kind || "error");
+    return;
+  }
+
   if (action === "commit-staff-import") {
     await handleCommitStaffAccessImport();
+    return;
+  }
+
+  if (action === "clear-pupil-import-preview") {
+    clearPupilOnboardingImportPreview();
+    paint();
+    return;
+  }
+
+  if (action === "commit-pupil-import") {
+    await handleCommitPupilOnboardingImport();
+    return;
+  }
+
+  if (action === "dismiss-pupil-import-result") {
+    dismissPupilOnboardingImportResult();
+    paint();
+    return;
+  }
+
+  if (action === "download-pupil-import-rows") {
+    handleDownloadPupilImportRows(button.dataset.kind || "error");
+    return;
+  }
+
+  if (action === "toggle-pupil-import-section") {
+    const sectionKey = String(button.dataset.sectionKey || "").trim();
+    const nextExpanded = String(button.dataset.expanded || "").trim() !== "true";
+    setPupilOnboardingPreviewSectionExpanded(sectionKey, nextExpanded);
+    paint();
     return;
   }
 
@@ -11019,6 +11460,7 @@ function paint() {
       ${renderNotice()}
       ${renderCreateBar()}
       ${renderSectionStaffAccess()}
+      ${renderSectionPupilOnboarding()}
       ${renderAnalyticsBar()}
       ${renderSectionUpcomingAssignments()}
       ${renderSectionClasses()}
@@ -16659,6 +17101,155 @@ function renderStaffAccessFilterBar() {
   `;
 }
 
+function sanitizeImportPreviewFileStem(fileName = "", fallback = "import-preview") {
+  const safeName = String(fileName || "").trim().replace(/\.[^.]+$/, "");
+  const normalized = safeName.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function escapeCsvCell(value = "") {
+  const safeValue = String(value ?? "");
+  if (/[",\r\n]/.test(safeValue)) {
+    return `"${safeValue.replaceAll('"', '""')}"`;
+  }
+  return safeValue;
+}
+
+function downloadTextFile(filename = "export.csv", text = "", mimeType = "text/plain;charset=utf-8") {
+  const blob = new Blob([String(text || "")], { type: mimeType });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+}
+
+function getImportPreviewExportRows(preview = null, kind = "error") {
+  const safeRows = Array.isArray(preview?.rows) ? preview.rows : [];
+  if (kind === "warning") {
+    return safeRows.filter((row) => Array.isArray(row?.warnings) && row.warnings.length > 0);
+  }
+  return safeRows.filter((row) => Array.isArray(row?.errors) && row.errors.length > 0);
+}
+
+function buildImportPreviewExportCsv(preview = null, kind = "error") {
+  const rows = getImportPreviewExportRows(preview, kind);
+  if (!rows.length) return "";
+
+  const columns = Array.isArray(preview?.columns) ? preview.columns.filter(Boolean) : [];
+  const header = ["row_number", ...columns, "reason"];
+  const csvRows = [header.map((item) => escapeCsvCell(item)).join(",")];
+
+  for (const row of rows) {
+    const rawRow = row?.raw_row && typeof row.raw_row === "object" ? row.raw_row : {};
+    const rowNumber = row?.row_number || row?.rowNumber || "";
+    const reason = kind === "warning"
+      ? (Array.isArray(row?.warnings) ? row.warnings.join(" | ") : "")
+      : (Array.isArray(row?.errors) ? row.errors.join(" | ") : "");
+    const values = [rowNumber, ...columns.map((column) => rawRow?.[column] || ""), reason];
+    csvRows.push(values.map((item) => escapeCsvCell(item)).join(","));
+  }
+
+  return csvRows.join("\r\n");
+}
+
+function getImportPreviewStatus(row = null) {
+  if (Array.isArray(row?.errors) && row.errors.length) return "Error";
+  if (Array.isArray(row?.warnings) && row.warnings.length) return "Warning";
+  if (row?.can_commit) return "Ready";
+  return "Review";
+}
+
+function renderImportPreviewIssueGroups(preview = null) {
+  const issueGroups = Array.isArray(preview?.preflight?.issue_groups) ? preview.preflight.issue_groups : [];
+  if (!issueGroups.length) return "";
+
+  return `
+    <div class="td-staff-access-warning-list">
+      ${issueGroups.map((group) => {
+        const items = Array.isArray(group?.items) ? group.items : [];
+        const previewItems = items.slice(0, CSV_IMPORT_PREVIEW_ISSUE_SAMPLE_LIMIT);
+        const hiddenCount = Math.max(0, items.length - previewItems.length);
+        return `
+          <div class="td-staff-access-warning ${group?.severity === "error" ? "is-error" : ""}">
+            <strong>${escapeHtml(`${group?.title || "Review needed"} (${String(group?.count || previewItems.length)})`)}</strong>
+            <div class="td-staff-access-warning-points">
+              ${previewItems.map((item) => `<span>${escapeHtml(String(item || ""))}</span>`).join("")}
+            </div>
+            ${hiddenCount > 0 ? `<p>${escapeHtml(`${hiddenCount} more item${hiddenCount === 1 ? "" : "s"} in this group.`)}</p>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderCompactImportPreviewSection({
+  sectionKey = "",
+  title = "",
+  rows = [],
+  columns = [],
+  defaultVisibleRows = 15,
+  isExpanded = false,
+  toggleAction = "",
+} = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (!safeRows.length) return "";
+
+  const visibleRows = isExpanded ? safeRows : safeRows.slice(0, defaultVisibleRows);
+  const hiddenCount = Math.max(0, safeRows.length - visibleRows.length);
+
+  return `
+    <div class="td-staff-access-import-preview-group">
+      <div class="td-staff-access-import-preview-head">
+        <strong>${escapeHtml(title || "Preview rows")}</strong>
+        <div class="td-staff-access-import-preview-head-meta">
+          <span>${escapeHtml(String(safeRows.length))}</span>
+          ${
+            hiddenCount > 0 || isExpanded
+              ? `
+                <button
+                  class="td-btn td-btn--ghost td-btn--compact"
+                  type="button"
+                  data-action="${escapeAttr(toggleAction)}"
+                  data-section-key="${escapeAttr(sectionKey)}"
+                  data-expanded="${isExpanded ? "true" : "false"}"
+                >
+                  ${escapeHtml(isExpanded ? "Show less" : `Show first ${defaultVisibleRows}`)}
+                </button>
+              `
+              : ""
+          }
+        </div>
+      </div>
+      ${
+        hiddenCount > 0 && !isExpanded
+          ? `<p class="td-staff-access-note td-staff-access-note--compact">Showing ${escapeHtml(String(visibleRows.length))} of ${escapeHtml(String(safeRows.length))} rows in this section.</p>`
+          : ""
+      }
+      <div class="td-import-preview-table-shell">
+        <table class="td-import-preview-table">
+          <thead>
+            <tr>
+              ${columns.map((column) => `<th>${escapeHtml(column?.label || "")}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${visibleRows.map((row) => `
+              <tr>
+                ${columns.map((column) => `<td>${column?.render ? column.render(row) : ""}</td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function renderStaffAccessImportResultCard() {
   const result = getStaffAccessState()?.importResult;
   if (!result) return "";
@@ -16746,13 +17337,75 @@ function renderStaffAccessImportPreviewCard() {
       </div>
     `;
   }
-
+  const search = getStaffAccessState()?.importPreviewSearch || "";
+  const filteredRows = (Array.isArray(preview?.rows) ? preview.rows : [])
+    .filter((row) => doesImportPreviewRowMatchSearch(row, search));
+  const errorRows = filteredRows.filter((row) => row.action === "error");
+  const warningRows = filteredRows.filter((row) => row.action !== "error" && Array.isArray(row?.warnings) && row.warnings.length > 0);
+  const readyCreateRows = filteredRows.filter((row) => row.action === "create" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const readyUpdateRows = filteredRows.filter((row) => row.action === "update" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const skippedRows = filteredRows.filter((row) => row.action === "skip" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
   const sections = [
-    { key: "error", title: "Rows with errors", rows: preview.rows.filter((row) => row.action === "error") },
-    { key: "create", title: "New staff to create", rows: preview.rows.filter((row) => row.action === "create") },
-    { key: "update", title: "Existing staff to update", rows: preview.rows.filter((row) => row.action === "update") },
-    { key: "skip", title: "Rows skipped", rows: preview.rows.filter((row) => row.action === "skip") },
+    { key: "staff-errors", title: "Rows with errors", rows: errorRows },
+    { key: "staff-warnings", title: "Rows with warnings", rows: warningRows },
+    { key: "staff-create", title: "Ready creates", rows: readyCreateRows },
+    { key: "staff-update", title: "Ready updates", rows: readyUpdateRows },
+    { key: "staff-skip", title: "Rows skipped", rows: skippedRows },
   ].filter((section) => section.rows.length);
+  const errorExportCount = getImportPreviewExportRows(preview, "error").length;
+  const warningExportCount = getImportPreviewExportRows(preview, "warning").length;
+  const staffColumns = [
+    {
+      label: "Name",
+      render: (row) => `
+        <div class="td-import-preview-cell-primary">
+          <strong>${escapeHtml(row?.display_name || "Unnamed staff member")}</strong>
+          <span>${escapeHtml(`Row ${row?.rowNumber || "?"}`)}</span>
+        </div>
+      `,
+    },
+    {
+      label: "Email / ID",
+      render: (row) => `
+        <div class="td-import-preview-cell-primary">
+          <strong>${escapeHtml(row?.email || "No email")}</strong>
+          <span>${escapeHtml(row?.external_staff_id ? `ID ${row.external_staff_id}` : "No external ID")}</span>
+        </div>
+      `,
+    },
+    {
+      label: "Action",
+      render: (row) => escapeHtml(row?.action_label || "Review row"),
+    },
+    {
+      label: "Suggestions",
+      render: (row) => {
+        const parts = [
+          row?.role_suggestion ? `Role: ${row.role_suggestion}` : "",
+          row?.department_suggestion_values?.length ? `Department: ${row.department_suggestion_values.join(", ")}` : "",
+          row?.year_group_suggestion_values?.length ? `Year: ${row.year_group_suggestion_values.join(", ")}` : "",
+          row?.class_scope_suggestion_values?.length ? `Class: ${row.class_scope_suggestion_values.join(", ")}` : "",
+        ].filter(Boolean);
+        return escapeHtml(parts.join(" | ") || "None");
+      },
+    },
+    {
+      label: "Status",
+      render: (row) => escapeHtml(getImportPreviewStatus(row)),
+    },
+    {
+      label: "Reason / notes",
+      render: (row) => {
+        const parts = [
+          row?.matched_profile_id
+            ? `Matched existing record${row?.matched_by ? ` by ${String(row.matched_by || "").replaceAll("_", " ")}` : ""}.`
+            : "No existing staff record matched.",
+          ...(row?.action === "error" ? (row?.errors || []) : row?.warnings?.length ? row.warnings : row?.safe_updates || []),
+        ].filter(Boolean);
+        return escapeHtml(parts.join(" | "));
+      },
+    },
+  ];
 
   return `
     <div class="td-staff-access-import-card">
@@ -16770,61 +17423,67 @@ function renderStaffAccessImportPreviewCard() {
           ? `<div class="td-staff-access-warning-list">${preview.errors.map((item) => `<div class="td-staff-access-warning"><strong>Import error</strong><p>${escapeHtml(item)}</p></div>`).join("")}</div>`
           : ""
       }
-      ${
-        preview.unknownColumns.length
-          ? `<p class="td-staff-access-note td-staff-access-note--compact">Ignored extra columns: ${escapeHtml(preview.unknownColumns.join(", "))}</p>`
-          : ""
-      }
+      ${renderImportPreviewIssueGroups(preview)}
       <div class="td-staff-access-import-summary">
+        <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.safe_count || 0, "safe row", "safe rows"))}</span>
         <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.created_count || 0, "new row"))}</span>
         <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.updated_count || 0, "update"))}</span>
         <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.skipped_count || 0, "skip"))}</span>
         <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.warning_count || 0, "warning"))}</span>
         <span>${escapeHtml(formatStaffAccessCountLabel(preview.summary?.error_count || 0, "error"))}</span>
       </div>
+      <div class="td-import-preview-toolbar">
+        <label class="td-import-preview-search">
+          <span>Search preview</span>
+          <input
+            class="td-input"
+            type="search"
+            placeholder="Search name, email, ID, notes, or suggestions"
+            data-field="staff-import-preview-search"
+            value="${escapeAttr(search)}"
+            ${getStaffAccessState()?.mutating ? "disabled" : ""}
+          />
+        </label>
+        <div class="td-import-preview-toolbar-actions">
+          <button
+            class="td-btn td-btn--ghost td-btn--compact"
+            type="button"
+            data-action="download-staff-import-rows"
+            data-kind="error"
+            ${errorExportCount ? "" : "disabled"}
+          >
+            ${escapeHtml(`Download errors (${errorExportCount})`)}
+          </button>
+          <button
+            class="td-btn td-btn--ghost td-btn--compact"
+            type="button"
+            data-action="download-staff-import-rows"
+            data-kind="warning"
+            ${warningExportCount ? "" : "disabled"}
+          >
+            ${escapeHtml(`Download warnings (${warningExportCount})`)}
+          </button>
+        </div>
+      </div>
       <div class="td-staff-access-import-preview-list">
-        ${sections.map((section) => `
-          <div class="td-staff-access-import-preview-group">
-            <div class="td-staff-access-import-preview-head">
-              <strong>${escapeHtml(section.title)}</strong>
-              <span>${escapeHtml(String(section.rows.length))}</span>
-            </div>
-            ${section.rows.map((row) => `
-              <div class="td-staff-access-import-row">
-                <div class="td-staff-access-import-row-head">
-                  <div>
-                    <strong>${escapeHtml(row?.full_name || "Unnamed staff member")}</strong>
-                    <span>${escapeHtml(row?.email || "No email")}</span>
-                  </div>
-                  <span class="td-pill ${row?.action === "error" ? "td-pill--muted" : ""}">${escapeHtml(row?.action_label || "Review row")}</span>
-                </div>
-                <div class="td-staff-access-import-row-copy">
-                  <p>${escapeHtml(row?.matched_profile_id ? `Matched existing record${row?.matched_by ? ` by ${row.matched_by.replaceAll("_", " ")}` : ""}.` : "No existing staff record matched.")}</p>
-                  ${
-                    row?.role_suggestion
-                      || row?.department_suggestion_values?.length
-                      || row?.year_group_suggestion_values?.length
-                      || row?.class_scope_suggestion_values?.length
-                      ? `
-                        <p>
-                          ${escapeHtml([
-                            row?.role_suggestion ? `Role: ${row.role_suggestion}` : "",
-                            row?.department_suggestion_values?.length ? `Department: ${row.department_suggestion_values.join(", ")}` : "",
-                            row?.year_group_suggestion_values?.length ? `Year group: ${row.year_group_suggestion_values.join(", ")}` : "",
-                            row?.class_scope_suggestion_values?.length ? `Class: ${row.class_scope_suggestion_values.join(", ")}` : "",
-                          ].filter(Boolean).join(" | "))}
-                        </p>
-                      `
-                      : ""
-                  }
-                  ${row?.safe_updates?.length ? `<p>${escapeHtml(row.safe_updates.join(" | "))}</p>` : ""}
-                  ${row?.warnings?.length ? `<div class="td-staff-access-import-row-messages">${row.warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
-                  ${row?.errors?.length ? `<div class="td-staff-access-import-row-messages is-error">${row.errors.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-                </div>
+        ${
+          !filteredRows.length
+            ? `
+              <div class="td-empty td-empty--compact">
+                <strong>No rows match the current search.</strong>
+                <p>Clear the search box to review the full import again.</p>
               </div>
-            `).join("")}
-          </div>
-        `).join("")}
+            `
+            : sections.map((section) => renderCompactImportPreviewSection({
+              sectionKey: section.key,
+              title: section.title,
+              rows: section.rows,
+              columns: staffColumns,
+              defaultVisibleRows: STAFF_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS,
+              isExpanded: isStaffAccessPreviewSectionExpanded(section.key),
+              toggleAction: "toggle-staff-import-section",
+            })).join("")
+        }
       </div>
       <div class="td-staff-access-import-actions">
         <input
@@ -16840,7 +17499,7 @@ function renderStaffAccessImportPreviewCard() {
           data-action="clear-staff-import-preview"
           ${getStaffAccessState()?.mutating ? "disabled" : ""}
         >
-          Cancel preview
+          Remove file
         </button>
         <button
           class="td-btn"
@@ -16852,6 +17511,459 @@ function renderStaffAccessImportPreviewCard() {
         </button>
       </div>
     </div>
+  `;
+}
+
+function renderPupilOnboardingPreflightConflictList(conflicts = []) {
+  const safeConflicts = Array.isArray(conflicts) ? conflicts.filter((item) => item?.message || item?.value) : [];
+  if (!safeConflicts.length) return "";
+
+  return `
+    <div class="td-staff-access-warning-list">
+      ${safeConflicts.map((conflict) => {
+        const relatedPupils = Array.isArray(conflict?.conflicting_pupils) ? conflict.conflicting_pupils : [];
+        const relatedLabel = relatedPupils.length
+          ? relatedPupils
+            .map((item) => {
+              const displayName = [String(item?.first_name || "").trim(), String(item?.surname || "").trim()]
+                .filter(Boolean)
+                .join(" ")
+                .trim();
+              const username = String(item?.username || "").trim();
+              const misId = String(item?.mis_id || "").trim();
+              const lead = displayName || username || misId || "Pupil record";
+              const extras = [username ? `username ${username}` : "", misId ? `MIS ID ${misId}` : ""]
+                .filter(Boolean)
+                .join(", ");
+              return extras ? `${lead} (${extras})` : lead;
+            })
+            .join(", ")
+          : "";
+        return `
+          <div class="td-staff-access-warning">
+            <strong>${escapeHtml(String(conflict?.message || "Duplicate pupil records need review."))}</strong>
+            ${relatedLabel ? `<p>${escapeHtml(`Matching records: ${relatedLabel}`)}</p>` : ""}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPupilOnboardingPreflightCard() {
+  const preflight = getPupilOnboardingState()?.preflight || createDefaultPupilImportDuplicatePreflight();
+  const preflightError = String(getPupilOnboardingState()?.preflightError || "").trim();
+  const isLoading = !!getPupilOnboardingState()?.preflightLoading;
+
+  if (isLoading) {
+    return `
+      <div class="td-staff-access-import-card">
+        <div class="td-empty td-empty--compact">
+          <strong>Checking pupil directory duplicates...</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!preflight?.has_conflicts && !preflightError) return "";
+
+  if (preflightError && !preflight?.has_conflicts) {
+    return `
+      <div class="td-staff-access-warning-list">
+        <div class="td-staff-access-warning">
+          <strong>Could not finish the duplicate preflight.</strong>
+          <p>${escapeHtml(preflightError)}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const summaryParts = [];
+  if (Number(preflight?.mis_id_conflict_count || 0) > 0) {
+    summaryParts.push(formatCountLabel(preflight.mis_id_conflict_count, "MIS ID conflict"));
+  }
+  if (Number(preflight?.username_conflict_count || 0) > 0) {
+    summaryParts.push(formatCountLabel(preflight.username_conflict_count, "username conflict"));
+  }
+  const previewConflicts = [
+    ...(Array.isArray(preflight?.mis_id_conflicts) ? preflight.mis_id_conflicts : []),
+    ...(Array.isArray(preflight?.username_conflicts) ? preflight.username_conflicts : []),
+  ].slice(0, 6);
+
+  return `
+    <div class="td-staff-access-warning-list">
+      <div class="td-staff-access-warning">
+        <strong>Pupil directory review recommended before uniqueness hardening.</strong>
+        <p>${escapeHtml(summaryParts.join(" and ") || "Duplicate pupil records need review.")}</p>
+      </div>
+      ${
+        preflightError
+          ? `
+            <div class="td-staff-access-warning">
+              <strong>Preflight note</strong>
+              <p>${escapeHtml(preflightError)}</p>
+            </div>
+          `
+          : ""
+      }
+    </div>
+    ${renderPupilOnboardingPreflightConflictList(previewConflicts)}
+  `;
+}
+
+function renderPupilOnboardingResultCard() {
+  const result = getPupilOnboardingState()?.importResult;
+  if (!result) return "";
+
+  const createdCount = Number(result?.created_count || 0);
+  const replacedCount = Number(result?.replaced_count || 0);
+  const updatedCount = Number(result?.updated_count || 0);
+  const lateErrors = Array.isArray(result?.late_errors) ? result.late_errors : [];
+  const createdCredentials = Array.isArray(result?.created_credentials) ? result.created_credentials : [];
+  let headline = "No pupil directory changes were committed from this import.";
+  if (createdCount > 0) {
+    headline = `${formatCountLabel(createdCount, "new pupil")} created. Save the usernames and PINs below now. They are shown once only.`;
+  } else if (replacedCount > 0) {
+    headline = `${formatCountLabel(replacedCount, "form move")} applied.`;
+  } else if (updatedCount > 0) {
+    headline = `${formatCountLabel(updatedCount, "pupil record")} updated.`;
+  }
+
+  return `
+    <div class="td-staff-access-import-card td-staff-access-import-card--result">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Import complete</h4>
+          <p>${escapeHtml(headline)}</p>
+        </div>
+      </div>
+      <div class="td-staff-access-import-summary">
+        <span>${escapeHtml(formatCountLabel(result?.created_count || 0, "created row", "created rows"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.updated_count || 0, "updated row", "updated rows"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.replaced_count || 0, "form move"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.form_class_create_count || 0, "form class", "form classes"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.skipped_count || 0, "skipped row", "skipped rows"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.warning_count || 0, "warning"))}</span>
+        <span>${escapeHtml(formatCountLabel(result?.error_count || 0, "error"))}</span>
+      </div>
+      ${
+        Array.isArray(result?.form_classes_created) && result.form_classes_created.length
+          ? `<p class="td-staff-access-note td-staff-access-note--compact">Form groups created: ${escapeHtml(result.form_classes_created.map((item) => item?.label || item?.name || "Unnamed form class").filter(Boolean).join(", "))}</p>`
+          : ""
+      }
+      ${
+        lateErrors.length
+          ? `
+            <div class="td-staff-access-warning-list">
+              ${lateErrors.map((item) => `
+                <div class="td-staff-access-warning">
+                  <strong>Import row skipped at commit</strong>
+                  <p>${escapeHtml(item)}</p>
+                </div>
+              `).join("")}
+            </div>
+          `
+          : ""
+      }
+      ${
+        createdCredentials.length
+          ? `
+            <div class="td-pupil-import-guidance">
+              <strong>New pupil credentials</strong>
+              <span>Shown once. Save now.</span>
+            </div>
+            <div class="td-pupil-import-credentials">
+              ${createdCredentials.map((item) => `
+                <div class="td-pupil-import-credential-row">
+                  <div>
+                    <strong>${escapeHtml([item?.first_name, item?.surname].filter(Boolean).join(" ").trim() || item?.username || "New pupil")}</strong>
+                    <span>${escapeHtml(item?.form_class_label || "Form class pending")}</span>
+                  </div>
+                  <div class="td-pupil-import-credential-copy">
+                    <span>${escapeHtml(`Username: ${item?.username || ""}`)}</span>
+                    <span class="td-pupil-import-credential-secret">${escapeHtml(`PIN: ${item?.pin || ""}`)}</span>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          `
+          : ""
+      }
+      <div class="td-staff-access-import-actions">
+        <button
+          class="td-btn td-btn--ghost"
+          type="button"
+          data-action="dismiss-pupil-import-result"
+          ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+        >
+          Dismiss result
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPupilOnboardingPreviewCard() {
+  const preview = getPupilOnboardingState()?.importPreview;
+  const previewError = String(getPupilOnboardingState()?.importPreviewError || getPupilOnboardingState()?.error || "").trim();
+  const isLoading = !!getPupilOnboardingState()?.importPreviewLoading || !!getPupilOnboardingState()?.referenceLoading;
+  const formClasses = getPupilOnboardingFormClasses();
+
+  if (!preview && !previewError && !isLoading) {
+    return `
+      <div class="td-staff-access-import-card">
+        <div class="td-staff-access-import-head">
+          <div>
+            <h4>Pupil CSV onboarding</h4>
+            <p>Upload a CSV to create or update pupils and assign form memberships in one step.</p>
+            <p>Required columns: ${escapeHtml(getPupilImportRequiredColumns().join(", "))}. Optional columns: ${escapeHtml(getPupilImportOptionalColumns().join(", "))}.</p>
+            <p>${escapeHtml(formClasses.length ? `${formatCountLabel(formClasses.length, "existing form class")} available for matching. Valid new form groups with year_group can also be created from the CSV.` : "No form classes exist yet. Valid new form groups can still be created from the CSV when year_group is included.")}</p>
+          </div>
+        </div>
+        <div class="td-staff-access-import-actions">
+          <input
+            class="td-input td-input--file"
+            type="file"
+            accept=".csv,text/csv"
+            data-field="pupil-import-csv-file"
+            ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+          />
+        </div>
+      </div>
+    `;
+  }
+
+  if (isLoading) {
+    return `
+      <div class="td-staff-access-import-card">
+        <div class="td-empty td-empty--compact">
+          <strong>Preparing pupil CSV preview...</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!preview) {
+    return `
+      <div class="td-staff-access-import-card">
+        <div class="td-empty td-empty--compact">
+          <strong>Could not prepare the CSV preview.</strong>
+          <p>${escapeHtml(previewError || "Please choose a valid CSV file.")}</p>
+        </div>
+        <div class="td-staff-access-import-actions">
+          <input
+            class="td-input td-input--file"
+            type="file"
+            accept=".csv,text/csv"
+            data-field="pupil-import-csv-file"
+            ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+          />
+        </div>
+      </div>
+    `;
+  }
+  const search = getPupilOnboardingState()?.importPreviewSearch || "";
+  const filteredRows = (Array.isArray(preview?.rows) ? preview.rows : [])
+    .filter((row) => doesImportPreviewRowMatchSearch(row, search));
+  const errorRows = filteredRows.filter((row) => row.action === "error");
+  const warningRows = filteredRows.filter((row) => row.action !== "error" && Array.isArray(row?.warnings) && row.warnings.length > 0);
+  const readyCreateRows = filteredRows.filter((row) => row.action === "create" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const readyUpdateRows = filteredRows.filter((row) => row.action === "update" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const readyReplaceRows = filteredRows.filter((row) => row.action === "replace_form" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const skippedRows = filteredRows.filter((row) => row.action === "skip" && (!Array.isArray(row?.warnings) || row.warnings.length === 0));
+  const sections = [
+    { key: "pupil-errors", title: "Rows with errors", rows: errorRows },
+    { key: "pupil-warnings", title: "Rows with warnings", rows: warningRows },
+    { key: "pupil-create", title: "Ready creates", rows: readyCreateRows },
+    { key: "pupil-update", title: "Ready updates", rows: readyUpdateRows },
+    { key: "pupil-replace", title: "Ready form moves", rows: readyReplaceRows },
+    { key: "pupil-skip", title: "Rows skipped", rows: skippedRows },
+  ].filter((section) => section.rows.length);
+  const errorExportCount = getImportPreviewExportRows(preview, "error").length;
+  const warningExportCount = getImportPreviewExportRows(preview, "warning").length;
+  const pupilColumns = [
+    {
+      label: "Name",
+      render: (row) => `
+        <div class="td-import-preview-cell-primary">
+          <strong>${escapeHtml(row?.display_name || "Unnamed pupil")}</strong>
+          <span>${escapeHtml(`Row ${row?.row_number || "?"}`)}</span>
+        </div>
+      `,
+    },
+    {
+      label: "MIS ID",
+      render: (row) => `
+        <div class="td-import-preview-cell-primary">
+          <strong>${escapeHtml(row?.mis_id || "Missing MIS ID")}</strong>
+          <span>${escapeHtml(row?.matched_username ? `Username ${row.matched_username}` : "No existing pupil matched")}</span>
+        </div>
+      `,
+    },
+    {
+      label: "Action",
+      render: (row) => escapeHtml(row?.action_label || "Review row"),
+    },
+    {
+      label: "Target form",
+      render: (row) => escapeHtml(row?.target_form_class_label || row?.form_class || "Form unresolved"),
+    },
+    {
+      label: "Status",
+      render: (row) => escapeHtml(getImportPreviewStatus(row)),
+    },
+    {
+      label: "Reason / notes",
+      render: (row) => {
+        const parts = [
+          row?.matched_pupil_id
+            ? `Matched existing pupil${row?.matched_username ? ` (${row.matched_username})` : ""}.`
+            : "No existing pupil matched.",
+          row?.current_active_form_labels?.length ? `Current active form: ${row.current_active_form_labels.join(", ")}.` : "",
+          ...(row?.action === "error" ? (row?.errors || []) : row?.warnings?.length ? row.warnings : row?.safe_updates || []),
+        ].filter(Boolean);
+        return escapeHtml(parts.join(" | "));
+      },
+    },
+  ];
+
+  return `
+    <div class="td-staff-access-import-card">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Review pupils before import</h4>
+          <p>Only safe rows will import. Safe rows can also create missing form groups; ambiguous or invalid rows stay out until you fix them.</p>
+        </div>
+        <div class="td-staff-access-import-file">
+          <strong>${escapeHtml(getPupilOnboardingState()?.importFileName || "CSV preview")}</strong>
+        </div>
+      </div>
+      ${
+        preview.errors.length
+          ? `<div class="td-staff-access-warning-list">${preview.errors.map((item) => `<div class="td-staff-access-warning"><strong>Import error</strong><p>${escapeHtml(item)}</p></div>`).join("")}</div>`
+          : ""
+      }
+      ${renderImportPreviewIssueGroups(preview)}
+      <div class="td-staff-access-import-summary">
+        <span>${escapeHtml(formatCountLabel(preview.summary?.safe_count || 0, "safe row", "safe rows"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.created_count || 0, "new pupil"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.updated_count || 0, "update"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.replace_count || 0, "form move"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.form_class_create_count || 0, "form class", "form classes"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.skipped_count || 0, "skip"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.warning_count || 0, "warning"))}</span>
+        <span>${escapeHtml(formatCountLabel(preview.summary?.error_count || 0, "error"))}</span>
+      </div>
+      ${
+        Array.isArray(preview?.form_classes_to_create) && preview.form_classes_to_create.length
+          ? `<p class="td-staff-access-note td-staff-access-note--compact">Form groups to create: ${escapeHtml(preview.form_classes_to_create.map((item) => item?.label || item?.name || "Unnamed form class").filter(Boolean).join(", "))}</p>`
+          : ""
+      }
+      <div class="td-import-preview-toolbar">
+        <label class="td-import-preview-search">
+          <span>Search preview</span>
+          <input
+            class="td-input"
+            type="search"
+            placeholder="Search pupil, MIS ID, form, or issue text"
+            data-field="pupil-import-preview-search"
+            value="${escapeAttr(search)}"
+            ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+          />
+        </label>
+        <div class="td-import-preview-toolbar-actions">
+          <button
+            class="td-btn td-btn--ghost td-btn--compact"
+            type="button"
+            data-action="download-pupil-import-rows"
+            data-kind="error"
+            ${errorExportCount ? "" : "disabled"}
+          >
+            ${escapeHtml(`Download errors (${errorExportCount})`)}
+          </button>
+          <button
+            class="td-btn td-btn--ghost td-btn--compact"
+            type="button"
+            data-action="download-pupil-import-rows"
+            data-kind="warning"
+            ${warningExportCount ? "" : "disabled"}
+          >
+            ${escapeHtml(`Download warnings (${warningExportCount})`)}
+          </button>
+        </div>
+      </div>
+      <div class="td-staff-access-import-preview-list">
+        ${
+          !filteredRows.length
+            ? `
+              <div class="td-empty td-empty--compact">
+                <strong>No rows match the current search.</strong>
+                <p>Clear the search box to review the full import again.</p>
+              </div>
+            `
+            : sections.map((section) => renderCompactImportPreviewSection({
+              sectionKey: section.key,
+              title: section.title,
+              rows: section.rows,
+              columns: pupilColumns,
+              defaultVisibleRows: PUPIL_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS,
+              isExpanded: isPupilOnboardingPreviewSectionExpanded(section.key),
+              toggleAction: "toggle-pupil-import-section",
+            })).join("")
+        }
+      </div>
+      <div class="td-staff-access-import-actions">
+        <input
+          class="td-input td-input--file"
+          type="file"
+          accept=".csv,text/csv"
+          data-field="pupil-import-csv-file"
+          ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+        />
+        <button
+          class="td-btn td-btn--ghost"
+          type="button"
+          data-action="clear-pupil-import-preview"
+          ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+        >
+          Remove file
+        </button>
+        <button
+          class="td-btn"
+          type="button"
+          data-action="commit-pupil-import"
+          ${getPupilOnboardingState()?.mutating || !preview.canCommit ? "disabled" : ""}
+        >
+          Import pupils
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSectionPupilOnboarding() {
+  if (!canImportCsv()) return "";
+  const isOpen = !!state.sections.pupilOnboarding;
+
+  return `
+    <section class="td-section td-section--staff-access">
+      ${renderCollapsibleSectionHeader({
+        title: "Pupil onboarding",
+        section: "pupilOnboarding",
+        isOpen,
+      })}
+      ${
+        isOpen
+          ? `
+            <div class="td-section-body">
+              ${renderPupilOnboardingResultCard()}
+              ${renderPupilOnboardingPreflightCard()}
+              ${renderPupilOnboardingPreviewCard()}
+            </div>
+          `
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -22241,6 +23353,31 @@ function injectStyles() {
       font-size:0.84rem;
     }
 
+    .td-import-preview-toolbar{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .td-import-preview-search{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:min(100%, 320px);
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-import-preview-toolbar-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      justify-content:flex-end;
+    }
+
     .td-staff-access-import-actions{
       display:flex;
       flex-wrap:wrap;
@@ -22275,6 +23412,76 @@ function injectStyles() {
       gap:10px;
       color:#475569;
       font-size:0.84rem;
+    }
+
+    .td-staff-access-import-preview-head-meta{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .td-btn--compact{
+      min-height:34px;
+      padding:6px 12px;
+      font-size:0.8rem;
+    }
+
+    .td-import-preview-table-shell{
+      border:1px solid #e2e8f0;
+      border-radius:14px;
+      background:#fff;
+      overflow:auto;
+    }
+
+    .td-import-preview-table{
+      width:100%;
+      min-width:820px;
+      border-collapse:collapse;
+    }
+
+    .td-import-preview-table th,
+    .td-import-preview-table td{
+      padding:10px 12px;
+      border-bottom:1px solid #e2e8f0;
+      text-align:left;
+      vertical-align:top;
+      font-size:0.83rem;
+      line-height:1.45;
+      color:#475569;
+    }
+
+    .td-import-preview-table th{
+      position:sticky;
+      top:0;
+      z-index:1;
+      background:#f8fafc;
+      color:#0f172a;
+      font-size:0.78rem;
+      font-weight:700;
+    }
+
+    .td-import-preview-table tbody tr:last-child td{
+      border-bottom:none;
+    }
+
+    .td-import-preview-cell-primary{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+
+    .td-import-preview-cell-primary strong{
+      color:#0f172a;
+      font-size:0.88rem;
+      line-height:1.35;
+    }
+
+    .td-import-preview-cell-primary span{
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.35;
     }
 
     .td-staff-access-import-row{
@@ -22332,6 +23539,71 @@ function injectStyles() {
 
     .td-staff-access-import-row-messages.is-error{
       color:#991b1b;
+    }
+
+    .td-pupil-import-guidance{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      border:1px solid #dbeafe;
+      border-radius:14px;
+      background:#eff6ff;
+      padding:12px 14px;
+      color:#1e3a8a;
+      font-size:0.84rem;
+      line-height:1.45;
+    }
+
+    .td-pupil-import-guidance strong{
+      color:#0f172a;
+    }
+
+    .td-pupil-import-credentials{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-pupil-import-credential-row{
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#fff;
+      padding:12px 14px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .td-pupil-import-credential-row strong{
+      display:block;
+      color:#0f172a;
+      font-size:0.92rem;
+      line-height:1.35;
+    }
+
+    .td-pupil-import-credential-row span{
+      display:block;
+      color:#64748b;
+      font-size:0.82rem;
+      line-height:1.45;
+    }
+
+    .td-pupil-import-credential-copy{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      align-items:flex-end;
+      text-align:right;
+    }
+
+    .td-pupil-import-credential-secret{
+      color:#991b1b !important;
+      font-weight:800;
+      letter-spacing:0.02em;
     }
 
     .td-staff-access-filter-row{
@@ -22470,6 +23742,21 @@ function injectStyles() {
       display:flex;
       flex-direction:column;
       gap:10px;
+    }
+
+    .td-staff-access-warning.is-error{
+      border-color:#fecaca;
+      background:#fef2f2;
+    }
+
+    .td-staff-access-warning-points{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      margin-top:8px;
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
     }
 
     .td-staff-access-warning{

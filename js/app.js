@@ -31,6 +31,7 @@ let teacherDashboardPromise = null;
 let pupilViewPromise = null;
 let pupilAuthPromise = null;
 let accessibilityPromise = null;
+let gameRuntimePromise = null;
 let authListenerBound = false;
 let routing = false;
 
@@ -62,7 +63,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.67");
+      const module = await import("./teacherView.js?v=6.73");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -76,7 +77,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.38");
+      const module = await import("./pupilView.js?v=3.40");
       return module.renderPupilView;
     },
     () => {
@@ -89,12 +90,23 @@ function loadPupilView() {
 function loadPupilAuth() {
   pupilAuthPromise = getCachedImport(
     pupilAuthPromise,
-    () => import("./authPupil.js"),
+    () => import("./authPupil.js?v=1.1"),
     () => {
       pupilAuthPromise = null;
     },
   );
   return pupilAuthPromise;
+}
+
+function loadGameRuntime() {
+  gameRuntimePromise = getCachedImport(
+    gameRuntimePromise,
+    () => import("./game.js?v=1.30"),
+    () => {
+      gameRuntimePromise = null;
+    },
+  );
+  return gameRuntimePromise;
 }
 
 function loadAccessibility() {
@@ -114,6 +126,15 @@ async function applyAccessibilitySettingsSafely() {
     applyAccessibilitySettings();
   } catch (error) {
     console.warn("accessibility settings unavailable:", error);
+  }
+}
+
+async function stopPupilGameplayAudio() {
+  try {
+    const { cleanupActiveGameplayAudio } = await loadGameRuntime();
+    cleanupActiveGameplayAudio();
+  } catch (error) {
+    console.warn("gameplay audio cleanup unavailable:", error);
   }
 }
 
@@ -253,14 +274,22 @@ async function route() {
       showPupilAuth();
 
       try {
-        const { getPupilSession } = await loadPupilAuth();
+        const { getPupilSession, validatePupilSession, pupilLogout } = await loadPupilAuth();
         const session = getPupilSession();
         if (!session) return;
+        const validatedSession = await validatePupilSession(session);
+        if (!validatedSession) {
+          await stopPupilGameplayAudio();
+          pupilLogout();
+          showPupilAuth();
+          setNotice(pupilAuthMsg, "This pupil login is no longer active. Please ask a teacher for help.");
+          return;
+        }
 
         await applyAccessibilitySettingsSafely();
         showPupilDashboard();
         const renderPupilView = await withTimeout(loadPupilView(), 4000, "load pupil view");
-        await renderPupilView(viewPupil, session);
+        await renderPupilView(viewPupil, validatedSession);
         setNotice(pupilAuthMsg, "");
       } catch (error) {
         showPupilAuth();
@@ -328,6 +357,7 @@ btnTryLesson?.addEventListener("click", () => {
 });
 
 btnBackFromPupil?.addEventListener("click", async () => {
+  await stopPupilGameplayAudio();
   try {
     const { pupilLogout } = await loadPupilAuth();
     pupilLogout();
@@ -381,6 +411,7 @@ btnGoogle?.addEventListener("click", async () => {
 });
 
 btnSignOut?.addEventListener("click", async () => {
+  await stopPupilGameplayAudio();
   try {
     const supabase = await loadSupabase();
     await supabase.auth.signOut();

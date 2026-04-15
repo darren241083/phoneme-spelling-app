@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { mountGame } from "./game.js?v=1.29";
+import { mountGame } from "./game.js?v=1.30";
 import {
   DEFAULT_QUESTION_TYPE,
   getQuestionTypeDisplayLabel,

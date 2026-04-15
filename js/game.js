@@ -34,6 +34,38 @@ const KNOWN_LOOM_GRAPHEMES = [...new Set(
     .filter(Boolean)
 )];
 
+let activeGameplaySessionId = 0;
+let activeGameplayAudioCleanup = null;
+
+function stopTrackedGameplayAudioElement(audioElement) {
+  if (typeof HTMLAudioElement === "undefined" || !(audioElement instanceof HTMLAudioElement)) return null;
+  try {
+    audioElement.pause();
+  } catch {
+    // Ignore playback shutdown issues during teardown.
+  }
+  try {
+    audioElement.currentTime = 0;
+  } catch {
+    // Ignore reset issues during teardown.
+  }
+  return null;
+}
+
+export function cleanupActiveGameplayAudio() {
+  activeGameplaySessionId += 1;
+  const cleanup = activeGameplayAudioCleanup;
+  activeGameplayAudioCleanup = null;
+  try {
+    cleanup?.();
+  } catch (error) {
+    console.warn("active gameplay audio cleanup error:", error);
+  }
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+}
+
 export function mountGame({
   host,
   words,
@@ -47,6 +79,8 @@ export function mountGame({
   recordAttempts = true,
   presentationMode = false,
 }) {
+  cleanupActiveGameplayAudio();
+  const gameplaySessionId = ++activeGameplaySessionId;
   const hasUnlimitedAttempts = false;
   let idx = 0;
   let totalCorrect = 0;
@@ -72,6 +106,8 @@ export function mountGame({
   let autoPlayTimer = 0;
   let segmentedRefocusTimer = 0;
   let audioPlaybackVersion = 0;
+  let gameplaySessionActive = true;
+  let currentAudioElement = null;
 
   host.innerHTML = `
     <style>
@@ -775,6 +811,34 @@ export function mountGame({
   const btnLeaveContinue = $("btnLeaveContinue");
   const btnLeaveSave = $("btnLeaveSave");
 
+  function isGameplaySessionActive(expectedSessionId = gameplaySessionId) {
+    return gameplaySessionActive
+      && expectedSessionId === gameplaySessionId
+      && activeGameplaySessionId === gameplaySessionId;
+  }
+
+  function teardownGameplayAudio({ dispose = false } = {}) {
+    audioPlaybackVersion += 1;
+    clearAutoPlayTimer();
+    clearSegmentedRefocusTimer();
+    currentAudioElement = stopTrackedGameplayAudioElement(currentAudioElement);
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (dispose) {
+      gameplaySessionActive = false;
+      if (activeGameplayAudioCleanup === disposeGameplaySessionAudio) {
+        activeGameplayAudioCleanup = null;
+      }
+    }
+  }
+
+  function disposeGameplaySessionAudio() {
+    teardownGameplayAudio({ dispose: true });
+  }
+
+  activeGameplayAudioCleanup = disposeGameplaySessionAudio;
+
   wTot.textContent = String(words.length);
 
   function currentItem() {
@@ -1456,22 +1520,18 @@ export function mountGame({
   }
 
   function stopAudioPlayback() {
-    audioPlaybackVersion += 1;
-    clearAutoPlayTimer();
-    clearSegmentedRefocusTimer();
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
+    teardownGameplayAudio();
   }
 
   function scheduleAutoPlay(item = currentItem()) {
-    if (!item || !shouldAutoPlay(item)) return;
+    if (!item || !shouldAutoPlay(item) || !isGameplaySessionActive()) return;
     stopAudioPlayback();
     const scheduledVersion = audioPlaybackVersion;
     const scheduledItemKey = getItemStateKey(item);
+    const scheduledSessionId = gameplaySessionId;
     autoPlayTimer = window.setTimeout(() => {
       autoPlayTimer = 0;
-      playCurrentAudio({ scheduledVersion, scheduledItemKey });
+      playCurrentAudio({ scheduledVersion, scheduledItemKey, scheduledSessionId });
     }, 120);
   }
 
@@ -1511,6 +1571,7 @@ export function mountGame({
     hideLeaveConfirm({ restoreFocus: false });
     await flushProgressSync();
     progressClosed = true;
+    disposeGameplaySessionAudio();
     onExit?.();
   }
 
@@ -1621,7 +1682,7 @@ export function mountGame({
   }
 
   function speak(text) {
-    if (!("speechSynthesis" in window) || !text) return;
+    if (!isGameplaySessionActive() || !("speechSynthesis" in window) || !text) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.9;
@@ -1630,11 +1691,20 @@ export function mountGame({
       voices.find((v) => /en-GB/i.test(v.lang)) ||
       voices.find((v) => /^en/i.test(v.lang));
     if (preferred) u.voice = preferred;
+    u.onstart = () => {
+      if (!isGameplaySessionActive()) {
+        window.speechSynthesis.cancel();
+      }
+    };
     window.speechSynthesis.speak(u);
   }
 
-  function playCurrentAudio({ scheduledVersion = audioPlaybackVersion, scheduledItemKey = getItemStateKey(currentItem()) } = {}) {
-    if (progressClosed || completionInFlight) return;
+  function playCurrentAudio({
+    scheduledVersion = audioPlaybackVersion,
+    scheduledItemKey = getItemStateKey(currentItem()),
+    scheduledSessionId = gameplaySessionId,
+  } = {}) {
+    if (!isGameplaySessionActive(scheduledSessionId) || progressClosed || completionInFlight) return;
     if (scheduledVersion !== audioPlaybackVersion) return;
     const item = currentItem();
     if (!item) return;
@@ -1646,7 +1716,7 @@ export function mountGame({
       const refocusVersion = scheduledVersion;
       segmentedRefocusTimer = window.setTimeout(() => {
         segmentedRefocusTimer = 0;
-        if (progressClosed || completionInFlight) return;
+        if (!isGameplaySessionActive(scheduledSessionId) || progressClosed || completionInFlight) return;
         if (refocusVersion !== audioPlaybackVersion) return;
         if (scheduledItemKey && scheduledItemKey !== getItemStateKey(currentItem())) return;
         if (currentModeKind === "segmented_spelling") focusSegmentedController();
@@ -3917,6 +3987,7 @@ export function mountGame({
         }
         progressClosed = true;
         await onComplete?.(completionPayload);
+        disposeGameplaySessionAudio();
       } catch (error) {
         progressClosed = false;
         endFinishingState({ allowRetry: true });
@@ -4395,7 +4466,10 @@ export function mountGame({
 
   seedProgressFromResumeState();
 
-  if (!words.length) return;
+  if (!words.length) {
+    disposeGameplaySessionAudio();
+    return;
+  }
 
   const initialCompletionPayload = !hasPendingFinalWrongRevealInSession()
     ? buildCompletionPayload()
@@ -4403,6 +4477,7 @@ export function mountGame({
   if (initialCompletionPayload) {
     progressClosed = true;
     stopAudioPlayback();
+    disposeGameplaySessionAudio();
     btnCheck.disabled = true;
     btnNext.disabled = true;
     void onComplete?.(initialCompletionPayload);
