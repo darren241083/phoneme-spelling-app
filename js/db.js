@@ -41,6 +41,7 @@ const STAFF_PROFILE_UPSERT_FUNCTION = "upsert_my_staff_profile";
 const STAFF_IMPORT_FUNCTION = "import_staff_directory_csv";
 const PUPIL_IMPORT_FUNCTION = "import_pupil_roster_csv";
 const PUPIL_IMPORT_PREFLIGHT_FUNCTION = "pupil_directory_duplicate_preflight";
+const PUPIL_MOVE_FORM_FUNCTION = "move_pupil_form_membership";
 const STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION = "staff_pending_access_duplicate_preflight";
 const STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION = "list_staff_pending_access_summaries";
 const STAFF_PENDING_ACCESS_DETAIL_FUNCTION = "read_staff_pending_access_detail";
@@ -415,6 +416,14 @@ function isMissingPupilImportSupportError(error) {
   return isMissingPupilImportBatchTableError(error)
     || isMissingPupilImportFunctionError(error)
     || isMissingPupilImportPreflightFunctionError(error);
+}
+
+function isMissingPupilMoveFormFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_MOVE_FORM_FUNCTION);
 }
 
 function isMissingStaffPendingAccessSupportError(error) {
@@ -2576,6 +2585,43 @@ export async function importPupilRosterCsv({
   }
 
   return normalizePupilImportResult(data || {});
+}
+
+export async function movePupilFormMembership({
+  pupilId = "",
+  formClassId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to move a pupil into a form.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeFormClassId = String(formClassId || "").trim();
+  const safeReason = String(reason || "").trim();
+
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+  if (!safeFormClassId) {
+    throw new Error("Choose a target form class first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_MOVE_FORM_FUNCTION, {
+    target_pupil_id: safePupilId,
+    target_form_class_id: safeFormClassId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilMoveFormFunctionError(error)) {
+      throw new Error("Pupil form placement is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return data || null;
 }
 
 function sortPersonalisedAutomationPolicies(rows = []) {

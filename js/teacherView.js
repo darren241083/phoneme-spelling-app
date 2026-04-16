@@ -80,6 +80,7 @@ import {
   listStaffScopeAssignments,
   listPersonalisedAutomationPolicies,
   listClassAutoAssignPolicies,
+  movePupilFormMembership,
   normalizeClassType,
   readPupilImportDuplicatePreflight,
   readPupilImportReferenceData,
@@ -97,7 +98,7 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.33";
+} from "./db.js?v=1.34";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -386,6 +387,14 @@ function createDefaultPupilOnboardingState() {
     referenceLoading: false,
     existingPupils: [],
     formMemberships: [],
+    placementLoaded: false,
+    placementLoading: false,
+    placementSignature: "",
+    placementRows: [],
+    placementSelectedFormIds: {},
+    placementSavingPupilIds: {},
+    placementRowErrors: {},
+    placementError: "",
     importFileName: "",
     importPreview: null,
     importPreviewError: "",
@@ -927,6 +936,143 @@ function getPupilOnboardingReferenceSignature() {
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b))
     .join("|");
+}
+
+function getPupilPlacementFormClasses() {
+  return getPupilOnboardingFormClasses()
+    .filter((item) => String(item?.id || "").trim());
+}
+
+function formatPupilPlacementFormLabel(classRecord = null) {
+  const name = String(classRecord?.name || "").trim() || "Untitled form";
+  const yearGroup = String(classRecord?.year_group || "").trim();
+  return yearGroup ? `${name} - ${yearGroup}` : name;
+}
+
+function getPupilPlacementDisplayName(pupil = null) {
+  const firstName = String(pupil?.first_name || "").trim();
+  const surname = String(pupil?.surname || "").trim();
+  return `${firstName} ${surname}`.trim()
+    || String(pupil?.username || "").trim()
+    || "Unnamed pupil";
+}
+
+function getPupilPlacementMetaLabel(pupil = null) {
+  const parts = [
+    String(pupil?.mis_id || "").trim() ? `MIS ${String(pupil.mis_id).trim()}` : "",
+    String(pupil?.username || "").trim() ? `Username ${String(pupil.username).trim()}` : "",
+  ].filter(Boolean);
+  return parts.join(" | ") || "No MIS ID or username recorded";
+}
+
+function getPupilPlacementActiveFormPupilIds() {
+  const formClassIds = new Set(
+    getPupilPlacementFormClasses()
+      .map((item) => String(item?.id || "").trim())
+      .filter(Boolean)
+  );
+  return new Set(
+    (getPupilOnboardingState()?.formMemberships || [])
+      .filter((item) => item?.active !== false && formClassIds.has(String(item?.class_id || "").trim()))
+      .map((item) => String(item?.pupil_id || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function getPupilPlacementReferenceCandidates() {
+  const activeFormPupilIds = getPupilPlacementActiveFormPupilIds();
+  return (getPupilOnboardingState()?.existingPupils || [])
+    .filter((pupil) => {
+      const pupilId = String(pupil?.id || "").trim();
+      return pupilId && pupil?.is_active !== false && !activeFormPupilIds.has(pupilId);
+    })
+    .map((pupil) => ({
+      id: String(pupil?.id || "").trim(),
+      mis_id: String(pupil?.mis_id || "").trim(),
+      username: String(pupil?.username || "").trim(),
+      first_name: String(pupil?.first_name || "").trim(),
+      surname: String(pupil?.surname || "").trim(),
+      display_name: getPupilPlacementDisplayName(pupil),
+    }))
+    .sort((a, b) => {
+      const nameDelta = String(a?.display_name || "").localeCompare(String(b?.display_name || ""));
+      if (nameDelta !== 0) return nameDelta;
+      return String(a?.username || "").localeCompare(String(b?.username || ""));
+    });
+}
+
+function syncPupilPlacementDraftsWithRows(rows = []) {
+  const rowIds = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const selectedFormIds = {};
+  for (const [pupilId, formId] of Object.entries(getPupilOnboardingState()?.placementSelectedFormIds || {})) {
+    if (rowIds.has(pupilId)) selectedFormIds[pupilId] = formId;
+  }
+  const savingPupilIds = {};
+  for (const [pupilId, saving] of Object.entries(getPupilOnboardingState()?.placementSavingPupilIds || {})) {
+    if (rowIds.has(pupilId) && saving) savingPupilIds[pupilId] = true;
+  }
+  const rowErrors = {};
+  for (const [pupilId, message] of Object.entries(getPupilOnboardingState()?.placementRowErrors || {})) {
+    if (rowIds.has(pupilId) && message) rowErrors[pupilId] = message;
+  }
+  state.pupilOnboarding.placementSelectedFormIds = selectedFormIds;
+  state.pupilOnboarding.placementSavingPupilIds = savingPupilIds;
+  state.pupilOnboarding.placementRowErrors = rowErrors;
+}
+
+function setPupilPlacementRowError(pupilId = "", message = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.placementRowErrors = {
+    ...(getPupilOnboardingState()?.placementRowErrors || {}),
+    [safePupilId]: String(message || "").trim(),
+  };
+}
+
+function clearPupilPlacementRowError(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextErrors = {
+    ...(getPupilOnboardingState()?.placementRowErrors || {}),
+  };
+  delete nextErrors[safePupilId];
+  state.pupilOnboarding.placementRowErrors = nextErrors;
+}
+
+function setPupilPlacementSaving(pupilId = "", saving = false) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextSaving = {
+    ...(getPupilOnboardingState()?.placementSavingPupilIds || {}),
+  };
+  if (saving) {
+    nextSaving[safePupilId] = true;
+  } else {
+    delete nextSaving[safePupilId];
+  }
+  state.pupilOnboarding.placementSavingPupilIds = nextSaving;
+}
+
+function setPupilPlacementSelectedFormId(pupilId = "", formClassId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.placementSelectedFormIds = {
+    ...(getPupilOnboardingState()?.placementSelectedFormIds || {}),
+    [safePupilId]: String(formClassId || "").trim(),
+  };
+  clearPupilPlacementRowError(safePupilId);
+}
+
+function getPupilPlacementSelectedFormId(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return "";
+  const selectedFormId = String(getPupilOnboardingState()?.placementSelectedFormIds?.[safePupilId] || "").trim();
+  const validFormIds = new Set(getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  return validFormIds.has(selectedFormId) ? selectedFormId : "";
 }
 
 function getStaffAccessSelectedProfileId() {
@@ -1843,6 +1989,87 @@ async function ensurePupilOnboardingReferenceDataLoaded({ force = false } = {}) 
   }
 }
 
+async function loadPupilPlacementRows({ force = false } = {}) {
+  if (!canImportCsv()) return;
+
+  const placementSignature = getPupilOnboardingReferenceSignature();
+  if (
+    !force
+    && getPupilOnboardingState()?.placementLoaded
+    && String(getPupilOnboardingState()?.placementSignature || "") === placementSignature
+  ) {
+    return;
+  }
+
+  state.pupilOnboarding.placementLoading = true;
+  state.pupilOnboarding.placementError = "";
+  if (rootEl?.isConnected) paint();
+
+  try {
+    await ensurePupilOnboardingReferenceDataLoaded({ force });
+    const candidates = getPupilPlacementReferenceCandidates();
+    const rows = [];
+
+    for (const candidate of candidates) {
+      const gateState = await readPupilBaselineGateState({ pupilId: candidate.id });
+      const waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase();
+      if (gateState?.status === "waiting" && waitingReason === "no_active_form_membership") {
+        rows.push(candidate);
+      }
+    }
+
+    state.pupilOnboarding.placementRows = rows;
+    state.pupilOnboarding.placementLoaded = true;
+    state.pupilOnboarding.placementSignature = getPupilOnboardingReferenceSignature();
+    syncPupilPlacementDraftsWithRows(rows);
+  } catch (error) {
+    console.error("pupil placement load error:", error);
+    state.pupilOnboarding.placementRows = [];
+    state.pupilOnboarding.placementLoaded = false;
+    state.pupilOnboarding.placementSignature = "";
+    state.pupilOnboarding.placementError = error?.message || "Could not load pupils needing form placement.";
+  } finally {
+    state.pupilOnboarding.placementLoading = false;
+    if (rootEl?.isConnected) paint();
+  }
+}
+
+async function handleMovePupilToForm(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+
+  const targetFormClassId = getPupilPlacementSelectedFormId(safePupilId);
+  if (!targetFormClassId) {
+    setPupilPlacementRowError(safePupilId, "Choose a current form before moving this pupil.");
+    paint();
+    return;
+  }
+
+  clearPupilPlacementRowError(safePupilId);
+  setPupilPlacementSaving(safePupilId, true);
+  paint();
+
+  try {
+    await movePupilFormMembership({
+      pupilId: safePupilId,
+      formClassId: targetFormClassId,
+    });
+
+    state.pupilOnboarding.placementRows = (getPupilOnboardingState()?.placementRows || [])
+      .filter((row) => String(row?.id || "").trim() !== safePupilId);
+    syncPupilPlacementDraftsWithRows(state.pupilOnboarding.placementRows);
+    showNotice("Pupil moved to form.", "success");
+    paint();
+    await loadPupilPlacementRows({ force: true });
+  } catch (error) {
+    console.error("pupil form placement error:", error);
+    setPupilPlacementRowError(safePupilId, error?.message || "Could not move this pupil to that form.");
+  } finally {
+    setPupilPlacementSaving(safePupilId, false);
+    paint();
+  }
+}
+
 async function buildPupilOnboardingImportPreviewFromText(text = "", fileName = "") {
   const parsedCsv = parsePupilImportCsv(text);
   await ensurePupilOnboardingReferenceDataLoaded();
@@ -1944,6 +2171,7 @@ async function handleCommitPupilOnboardingImport() {
       state.classes = await loadClasses();
       await ensurePupilOnboardingReferenceDataLoaded({ force: true });
       await loadPupilOnboardingPreflight();
+      await loadPupilPlacementRows({ force: true });
     } catch (refreshError) {
       console.error("pupil import refresh error:", refreshError);
     }
@@ -7380,6 +7608,12 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="pupil-placement-form-select"]')) {
+    setPupilPlacementSelectedFormId(target.dataset.pupilId || "", target.value || "");
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="staff-access-pending-scope"]')) {
     const role = String(target.dataset.role || "").trim().toLowerCase();
     const scopeType = String(target.dataset.scopeType || "").trim().toLowerCase();
@@ -7922,6 +8156,9 @@ async function onRootClick(event) {
       state.analyticsAssistant.open = false;
     }
     paint();
+    if (key === "pupilOnboarding" && state.sections.pupilOnboarding) {
+      void loadPupilPlacementRows({ force: true });
+    }
     return;
   }
 
@@ -8007,6 +8244,11 @@ async function onRootClick(event) {
     const nextExpanded = String(button.dataset.expanded || "").trim() !== "true";
     setPupilOnboardingPreviewSectionExpanded(sectionKey, nextExpanded);
     paint();
+    return;
+  }
+
+  if (action === "move-pupil-to-form") {
+    await handleMovePupilToForm(button.dataset.pupilId || "");
     return;
   }
 
@@ -17703,6 +17945,130 @@ function renderPupilOnboardingResultCard() {
   `;
 }
 
+function renderPupilPlacementPanel() {
+  const onboarding = getPupilOnboardingState();
+  const rows = Array.isArray(onboarding?.placementRows) ? onboarding.placementRows : [];
+  const formClasses = getPupilPlacementFormClasses();
+  const error = String(onboarding?.placementError || "").trim();
+  const isLoading = !!onboarding?.placementLoading || !!onboarding?.referenceLoading || (!onboarding?.placementLoaded && !error);
+  const isImportMutating = !!onboarding?.mutating;
+
+  return `
+    <div class="td-staff-access-import-card">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Needs form placement</h4>
+          <p>Active pupils without a current form membership can be moved into one live form group here.</p>
+        </div>
+      </div>
+      ${
+        error
+          ? `
+            <div class="td-staff-access-warning-list">
+              <div class="td-staff-access-warning is-error">
+                <strong>Could not load form placement</strong>
+                <p>${escapeHtml(error)}</p>
+              </div>
+            </div>
+          `
+          : ""
+      }
+      ${
+        !formClasses.length
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>No live form groups are available.</strong>
+              <p>Create or import a form group before placing pupils.</p>
+            </div>
+          `
+          : ""
+      }
+      ${
+        error
+          ? ""
+          : isLoading
+            ? `
+              <div class="td-empty td-empty--compact">
+                <strong>Checking active pupils...</strong>
+              </div>
+            `
+            : rows.length
+              ? `
+                <div class="td-import-preview-table-shell">
+                  <table class="td-import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>Pupil</th>
+                        <th>Status</th>
+                        <th>Move to form</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rows.map((row) => {
+                        const pupilId = String(row?.id || "").trim();
+                        const selectedFormId = getPupilPlacementSelectedFormId(pupilId);
+                        const isSaving = !!onboarding?.placementSavingPupilIds?.[pupilId];
+                        const rowError = String(onboarding?.placementRowErrors?.[pupilId] || "").trim();
+                        const actionDisabled = isImportMutating || isSaving || !selectedFormId || !formClasses.length;
+                        return `
+                          <tr>
+                            <td>
+                              <div class="td-import-preview-cell-primary">
+                                <strong>${escapeHtml(row?.display_name || getPupilPlacementDisplayName(row))}</strong>
+                                <span>${escapeHtml(getPupilPlacementMetaLabel(row))}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <span class="td-staff-access-chip">Needs form placement</span>
+                            </td>
+                            <td>
+                              <select
+                                class="td-input"
+                                data-field="pupil-placement-form-select"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                ${isImportMutating || isSaving || !formClasses.length ? "disabled" : ""}
+                              >
+                                <option value="">Choose form</option>
+                                ${formClasses.map((formClass) => {
+                                  const formClassId = String(formClass?.id || "").trim();
+                                  return `
+                                    <option value="${escapeAttr(formClassId)}" ${formClassId === selectedFormId ? "selected" : ""}>
+                                      ${escapeHtml(formatPupilPlacementFormLabel(formClass))}
+                                    </option>
+                                  `;
+                                }).join("")}
+                              </select>
+                            </td>
+                            <td>
+                              <button
+                                class="td-btn td-btn--compact"
+                                type="button"
+                                data-action="move-pupil-to-form"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                ${actionDisabled ? "disabled" : ""}
+                              >
+                                ${escapeHtml(isSaving ? "Moving..." : "Move to form")}
+                              </button>
+                              ${rowError ? `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">${escapeHtml(rowError)}</p>` : ""}
+                            </td>
+                          </tr>
+                        `;
+                      }).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              `
+              : `
+                <div class="td-empty td-empty--compact">
+                  <strong>No active pupils need form placement.</strong>
+                </div>
+              `
+      }
+    </div>
+  `;
+}
+
 function renderPupilOnboardingPreviewCard() {
   const preview = getPupilOnboardingState()?.importPreview;
   const previewError = String(getPupilOnboardingState()?.importPreviewError || getPupilOnboardingState()?.error || "").trim();
@@ -17957,6 +18323,7 @@ function renderSectionPupilOnboarding() {
           ? `
             <div class="td-section-body">
               ${renderPupilOnboardingResultCard()}
+              ${renderPupilPlacementPanel()}
               ${renderPupilOnboardingPreflightCard()}
               ${renderPupilOnboardingPreviewCard()}
             </div>
