@@ -41,7 +41,10 @@ const STAFF_PROFILE_UPSERT_FUNCTION = "upsert_my_staff_profile";
 const STAFF_IMPORT_FUNCTION = "import_staff_directory_csv";
 const PUPIL_IMPORT_FUNCTION = "import_pupil_roster_csv";
 const PUPIL_IMPORT_PREFLIGHT_FUNCTION = "pupil_directory_duplicate_preflight";
+const PUPIL_ARCHIVE_FUNCTION = "archive_pupil_directory_record";
+const PUPIL_RESTORE_FUNCTION = "restore_pupil_directory_record";
 const PUPIL_MOVE_FORM_FUNCTION = "move_pupil_form_membership";
+const PUPIL_RESET_PIN_FUNCTION = "reset_pupil_login_pin";
 const STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION = "staff_pending_access_duplicate_preflight";
 const STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION = "list_staff_pending_access_summaries";
 const STAFF_PENDING_ACCESS_DETAIL_FUNCTION = "read_staff_pending_access_detail";
@@ -426,6 +429,23 @@ function isMissingPupilMoveFormFunctionError(error) {
     || message.includes(PUPIL_MOVE_FORM_FUNCTION);
 }
 
+function isMissingPupilLifecycleFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_ARCHIVE_FUNCTION)
+    || message.includes(PUPIL_RESTORE_FUNCTION);
+}
+
+function isMissingPupilResetPinFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_RESET_PIN_FUNCTION);
+}
+
 function isMissingStaffPendingAccessSupportError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -751,6 +771,18 @@ function normalizePupilImportCredentialRow(row = {}) {
   };
 }
 
+function normalizePupilPinResetResult(row = {}) {
+  return {
+    pupil_id: String(row?.pupil_id || row?.id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    pin: String(row?.pin || "").trim(),
+    issued_at: String(row?.issued_at || "").trim(),
+  };
+}
+
 function normalizePupilImportCreatedClassRow(row = {}) {
   return {
     id: String(row?.id || "").trim(),
@@ -789,6 +821,7 @@ function normalizePupilImportReferencePupilRow(row = {}) {
     surname: String(row?.surname || "").trim(),
     username: String(row?.username || "").trim().toLowerCase(),
     is_active: row?.is_active !== false,
+    archived_at: String(row?.archived_at || "").trim() || null,
   };
 }
 
@@ -2524,7 +2557,7 @@ export async function readPupilImportReferenceData({
     const to = from + pupilPageSize - 1;
     const { data, error } = await supabase
       .from("pupils")
-      .select("id, mis_id, first_name, surname, username, is_active")
+      .select("id, mis_id, first_name, surname, username, is_active, archived_at")
       .order("id", { ascending: true })
       .range(from, to);
     if (error) throw error;
@@ -2585,6 +2618,101 @@ export async function importPupilRosterCsv({
   }
 
   return normalizePupilImportResult(data || {});
+}
+
+export async function archivePupilDirectoryRecord({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to archive a pupil record.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_ARCHIVE_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilLifecycleFunctionError(error)) {
+      throw new Error("Pupil lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return data || null;
+}
+
+export async function restorePupilDirectoryRecord({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to restore a pupil record.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_RESTORE_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilLifecycleFunctionError(error)) {
+      throw new Error("Pupil lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return data || null;
+}
+
+export async function resetPupilLoginPin({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to reset a pupil PIN.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_RESET_PIN_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilResetPinFunctionError(error)) {
+      throw new Error("Pupil PIN reset is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  const result = normalizePupilPinResetResult(data || {});
+  if (!result.pupil_id || !result.username || !result.pin) {
+    throw new Error("Pupil PIN reset did not return one-time credential details.");
+  }
+
+  return result;
 }
 
 export async function movePupilFormMembership({

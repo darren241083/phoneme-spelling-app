@@ -61,6 +61,7 @@ import {
   CLASS_TYPE_FORM,
   CLASS_TYPE_INTERVENTION,
   CLASS_TYPE_SUBJECT,
+  archivePupilDirectoryRecord,
   createClass,
   createInterventionGroup,
   createPersonalisedGenerationRun,
@@ -89,8 +90,10 @@ import {
   readStaffPendingAccessDetail,
   readStaffPendingAccessDuplicatePreflight,
   readTeacherAppRole,
+  resetPupilLoginPin,
   revokeStaffRole,
   revokeStaffScope,
+  restorePupilDirectoryRecord,
   saveStaffPendingAccessApproval,
   seedAutomatedAssignmentPupilStatuses,
   setPersonalisedAutomationPolicyArchived,
@@ -98,7 +101,7 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.34";
+} from "./db.js?v=1.36";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -146,6 +149,10 @@ const STAFF_ACCESS_MANAGED_ROLES = ["teacher", "admin", "hoy", "hod", "senco", "
 const STAFF_ACCESS_RECENT_IMPORT_WINDOW_DAYS = 14;
 const STAFF_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
 const PUPIL_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
+const PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS = 25;
+const PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP = 25;
+const PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER = "needs_attention";
+const PUPIL_LIFECYCLE_NO_FORM_FILTER = "__no_live_form__";
 const CSV_IMPORT_PREVIEW_ISSUE_SAMPLE_LIMIT = 6;
 const CLASS_RESULTS_RANGE_OPTIONS = [
   { key: "this_week", label: "This week" },
@@ -395,6 +402,17 @@ function createDefaultPupilOnboardingState() {
     placementSavingPupilIds: {},
     placementRowErrors: {},
     placementError: "",
+    lifecycleStatusFilter: PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER,
+    lifecycleYearGroupFilter: "",
+    lifecycleFormFilter: "",
+    lifecycleSearch: "",
+    lifecycleVisibleRows: PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS,
+    lifecycleSelectedFormIds: {},
+    lifecycleSavingPupilIds: {},
+    lifecycleSavingActions: {},
+    lifecycleRowErrors: {},
+    lifecycleResetCredential: null,
+    lifecycleResetPinUnavailable: false,
     importFileName: "",
     importPreview: null,
     importPreviewError: "",
@@ -1001,6 +1019,314 @@ function getPupilPlacementReferenceCandidates() {
     });
 }
 
+function getPupilPlacementRowIds() {
+  return new Set(
+    (getPupilOnboardingState()?.placementRows || [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function getPupilLifecycleFormContext() {
+  const formClasses = getPupilPlacementFormClasses();
+  const formById = new Map(
+    formClasses
+      .map((item) => [String(item?.id || "").trim(), item])
+      .filter(([classId]) => !!classId)
+  );
+  const activeFormIdsByPupil = new Map();
+
+  for (const membership of getPupilOnboardingState()?.formMemberships || []) {
+    const pupilId = String(membership?.pupil_id || "").trim();
+    const classId = String(membership?.class_id || "").trim();
+    if (!pupilId || !classId || membership?.active === false || !formById.has(classId)) continue;
+    const next = activeFormIdsByPupil.get(pupilId) || [];
+    if (!next.includes(classId)) next.push(classId);
+    activeFormIdsByPupil.set(pupilId, next);
+  }
+
+  return {
+    formClasses,
+    placementRowIds: getPupilPlacementRowIds(),
+    activeFormIdsByPupil,
+  };
+}
+
+function getPupilLifecycleStatus(pupil = null, lifecycleContext = null) {
+  const context = lifecycleContext || getPupilLifecycleFormContext();
+  const pupilId = String(pupil?.id || "").trim();
+  const currentFormIds = context.activeFormIdsByPupil?.get(pupilId) || [];
+
+  if (String(pupil?.archived_at || "").trim()) {
+    return {
+      key: "archived",
+      label: "Archived",
+      rank: 3,
+    };
+  }
+  if (pupil?.is_active === false) {
+    return {
+      key: "inactive",
+      label: "Inactive",
+      rank: 2,
+    };
+  }
+  if (context.placementRowIds?.has(pupilId) || currentFormIds.length === 0) {
+    return {
+      key: "needs_form_placement",
+      label: "Needs form placement",
+      rank: 0,
+    };
+  }
+  if (currentFormIds.length > 1) {
+    return {
+      key: "multiple_live_forms",
+      label: "Multiple live forms",
+      rank: 1,
+    };
+  }
+  return {
+    key: "active",
+    label: "Active",
+    rank: 4,
+  };
+}
+
+function getPupilLifecycleRows() {
+  const lifecycleContext = getPupilLifecycleFormContext();
+  return (getPupilOnboardingState()?.existingPupils || [])
+    .filter((pupil) => String(pupil?.id || "").trim())
+    .map((pupil) => {
+      const pupilId = String(pupil?.id || "").trim();
+      const currentFormIds = lifecycleContext.activeFormIdsByPupil.get(pupilId) || [];
+      const currentFormRecords = lifecycleContext.formClasses
+        .filter((formClass) => currentFormIds.includes(String(formClass?.id || "").trim()));
+      const currentFormLabels = currentFormRecords.map((formClass) => formatPupilPlacementFormLabel(formClass));
+      const currentFormYearGroups = [...new Set(
+        currentFormRecords
+          .map((formClass) => String(formClass?.year_group || "").trim())
+          .filter(Boolean)
+      )];
+      return {
+        ...pupil,
+        display_name: getPupilPlacementDisplayName(pupil),
+        currentFormIds,
+        currentFormLabels,
+        currentFormYearGroups,
+        lifecycleStatus: getPupilLifecycleStatus(pupil, lifecycleContext),
+      };
+    })
+    .sort((a, b) => {
+      const statusDelta = Number(a?.lifecycleStatus?.rank ?? 9) - Number(b?.lifecycleStatus?.rank ?? 9);
+      if (statusDelta !== 0) return statusDelta;
+      const nameDelta = String(a?.display_name || "").localeCompare(String(b?.display_name || ""));
+      if (nameDelta !== 0) return nameDelta;
+      return String(a?.username || "").localeCompare(String(b?.username || ""));
+    });
+}
+
+function getPupilLifecycleCurrentFormLabel(row = null) {
+  const labels = Array.isArray(row?.currentFormLabels) ? row.currentFormLabels.filter(Boolean) : [];
+  return labels.length ? labels.join(", ") : "No live form";
+}
+
+function getPupilLifecycleStatusFilterOptions() {
+  return [
+    { value: "needs_attention", label: "Needs attention" },
+    { value: "active", label: "Active" },
+    { value: "archived", label: "Archived" },
+    { value: "all", label: "All" },
+  ];
+}
+
+function getPupilLifecycleStatusFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleStatusFilter || "").trim();
+  return getPupilLifecycleStatusFilterOptions().some((option) => option.value === saved)
+    ? saved
+    : PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER;
+}
+
+function getPupilLifecycleYearGroupFilterOptions() {
+  const yearGroups = [...new Set(
+    getPupilPlacementFormClasses()
+      .map((formClass) => String(formClass?.year_group || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+  return [
+    { value: "", label: "All year groups" },
+    ...yearGroups.map((yearGroup) => ({ value: yearGroup, label: yearGroup })),
+  ];
+}
+
+function getPupilLifecycleYearGroupFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleYearGroupFilter || "").trim();
+  return getPupilLifecycleYearGroupFilterOptions().some((option) => option.value === saved) ? saved : "";
+}
+
+function getPupilLifecycleClassFilterOptions(yearGroupFilter = getPupilLifecycleYearGroupFilter()) {
+  const safeYearGroup = String(yearGroupFilter || "").trim();
+  const formClasses = getPupilPlacementFormClasses()
+    .filter((formClass) => !safeYearGroup || String(formClass?.year_group || "").trim() === safeYearGroup);
+  return [
+    { value: "", label: "All classes" },
+    ...formClasses.map((formClass) => ({
+      value: String(formClass?.id || "").trim(),
+      label: formatPupilPlacementFormLabel(formClass),
+    })).filter((option) => option.value),
+    { value: PUPIL_LIFECYCLE_NO_FORM_FILTER, label: "No current class" },
+  ];
+}
+
+function getPupilLifecycleClassFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleFormFilter || "").trim();
+  return getPupilLifecycleClassFilterOptions().some((option) => option.value === saved) ? saved : "";
+}
+
+function getPupilLifecycleSearch() {
+  return String(getPupilOnboardingState()?.lifecycleSearch || "");
+}
+
+function resetPupilLifecycleVisibleRows() {
+  state.pupilOnboarding.lifecycleVisibleRows = PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS;
+}
+
+function getPupilLifecycleVisibleRowCount(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  if (!safeTotal) return 0;
+  const saved = Number(getPupilOnboardingState()?.lifecycleVisibleRows || PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS);
+  return Math.min(safeTotal, Math.max(PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS, saved));
+}
+
+function showMorePupilLifecycleRows(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  const current = getPupilLifecycleVisibleRowCount(safeTotal);
+  state.pupilOnboarding.lifecycleVisibleRows = Math.min(safeTotal, current + PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP);
+}
+
+function doesPupilLifecycleRowMatchStatusFilter(row = null, statusFilter = getPupilLifecycleStatusFilter()) {
+  const statusKey = String(row?.lifecycleStatus?.key || "").trim();
+  if (statusFilter === "needs_attention") {
+    return ["needs_form_placement", "multiple_live_forms", "inactive", "archived"].includes(statusKey);
+  }
+  if (statusFilter === "active") {
+    return statusKey !== "archived" && row?.is_active !== false;
+  }
+  if (statusFilter === "archived") {
+    return statusKey === "archived";
+  }
+  return true;
+}
+
+function doesPupilLifecycleRowMatchYearGroupFilter(row = null, yearGroupFilter = getPupilLifecycleYearGroupFilter()) {
+  const safeYearGroup = String(yearGroupFilter || "").trim();
+  if (!safeYearGroup) return true;
+  return (Array.isArray(row?.currentFormYearGroups) ? row.currentFormYearGroups : []).includes(safeYearGroup);
+}
+
+function doesPupilLifecycleRowMatchClassFilter(row = null, formFilter = getPupilLifecycleClassFilter()) {
+  const currentFormIds = Array.isArray(row?.currentFormIds) ? row.currentFormIds : [];
+  if (!formFilter) return true;
+  if (formFilter === PUPIL_LIFECYCLE_NO_FORM_FILTER) return currentFormIds.length === 0;
+  return currentFormIds.includes(formFilter);
+}
+
+function doesPupilLifecycleRowMatchSearch(row = null, search = getPupilLifecycleSearch()) {
+  const query = String(search || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    row?.display_name,
+    row?.first_name,
+    row?.surname,
+    row?.username,
+    row?.mis_id,
+    getPupilLifecycleCurrentFormLabel(row),
+  ].map((value) => String(value || "").toLowerCase());
+  return haystack.some((value) => value.includes(query));
+}
+
+function getFilteredPupilLifecycleRows(rows = getPupilLifecycleRows()) {
+  const statusFilter = getPupilLifecycleStatusFilter();
+  const yearGroupFilter = getPupilLifecycleYearGroupFilter();
+  const formFilter = getPupilLifecycleClassFilter();
+  const search = getPupilLifecycleSearch();
+  if (String(search || "").trim()) {
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => doesPupilLifecycleRowMatchSearch(row, search));
+  }
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => doesPupilLifecycleRowMatchStatusFilter(row, statusFilter))
+    .filter((row) => doesPupilLifecycleRowMatchYearGroupFilter(row, yearGroupFilter))
+    .filter((row) => doesPupilLifecycleRowMatchClassFilter(row, formFilter))
+    .filter((row) => doesPupilLifecycleRowMatchSearch(row, search));
+}
+
+function setPupilLifecycleSelectedFormId(pupilId = "", formClassId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.lifecycleSelectedFormIds = {
+    ...(getPupilOnboardingState()?.lifecycleSelectedFormIds || {}),
+    [safePupilId]: String(formClassId || "").trim(),
+  };
+  clearPupilLifecycleRowError(safePupilId);
+}
+
+function getPupilLifecycleSelectedFormId(pupilId = "", allowedFormIds = []) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return "";
+  const selectedFormId = String(getPupilOnboardingState()?.lifecycleSelectedFormIds?.[safePupilId] || "").trim();
+  const validFormIds = new Set(
+    (Array.isArray(allowedFormIds) && allowedFormIds.length
+      ? allowedFormIds
+      : getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim())
+    ).filter(Boolean)
+  );
+  return validFormIds.has(selectedFormId) ? selectedFormId : "";
+}
+
+function getPupilLifecycleMoveMeta(row = null) {
+  const statusKey = String(row?.lifecycleStatus?.key || "").trim();
+  const currentFormIds = Array.isArray(row?.currentFormIds) ? row.currentFormIds.filter(Boolean) : [];
+  const formClasses = getPupilPlacementFormClasses();
+
+  if (statusKey === "archived" || statusKey === "inactive" || row?.is_active === false) {
+    return {
+      canMove: false,
+      targetFormClasses: [],
+      actionLabel: "Move form",
+      busyLabel: "Moving...",
+      emptyTargetLabel: "Choose form",
+      disabledReason: "Move form is available for active pupils only.",
+    };
+  }
+
+  if (statusKey === "multiple_live_forms" || currentFormIds.length > 1) {
+    return {
+      canMove: false,
+      targetFormClasses: [],
+      actionLabel: "Move form",
+      busyLabel: "Moving...",
+      emptyTargetLabel: "Choose form",
+      disabledReason: "Multiple live forms need admin review before moving.",
+    };
+  }
+
+  const currentFormId = currentFormIds.length === 1 ? currentFormIds[0] : "";
+  const isPlacement = !currentFormId || statusKey === "needs_form_placement";
+  const targetFormClasses = formClasses.filter((formClass) => {
+    const formClassId = String(formClass?.id || "").trim();
+    return formClassId && formClassId !== currentFormId;
+  });
+
+  return {
+    canMove: targetFormClasses.length > 0,
+    targetFormClasses,
+    actionLabel: isPlacement ? "Place in form" : "Move form",
+    busyLabel: isPlacement ? "Placing..." : "Moving...",
+    emptyTargetLabel: isPlacement ? "Choose form" : "Choose new form",
+    disabledReason: targetFormClasses.length ? "" : (isPlacement ? "No live form groups are available." : "No other live form is available."),
+  };
+}
+
 function syncPupilPlacementDraftsWithRows(rows = []) {
   const rowIds = new Set(
     (Array.isArray(rows) ? rows : [])
@@ -1073,6 +1399,103 @@ function getPupilPlacementSelectedFormId(pupilId = "") {
   const selectedFormId = String(getPupilOnboardingState()?.placementSelectedFormIds?.[safePupilId] || "").trim();
   const validFormIds = new Set(getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
   return validFormIds.has(selectedFormId) ? selectedFormId : "";
+}
+
+function setPupilLifecycleRowError(pupilId = "", message = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.lifecycleRowErrors = {
+    ...(getPupilOnboardingState()?.lifecycleRowErrors || {}),
+    [safePupilId]: String(message || "").trim(),
+  };
+}
+
+function clearPupilLifecycleRowError(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextErrors = {
+    ...(getPupilOnboardingState()?.lifecycleRowErrors || {}),
+  };
+  delete nextErrors[safePupilId];
+  state.pupilOnboarding.lifecycleRowErrors = nextErrors;
+}
+
+function setPupilLifecycleSaving(pupilId = "", saving = false, action = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextSaving = {
+    ...(getPupilOnboardingState()?.lifecycleSavingPupilIds || {}),
+  };
+  const nextSavingActions = {
+    ...(getPupilOnboardingState()?.lifecycleSavingActions || {}),
+  };
+  if (saving) {
+    nextSaving[safePupilId] = true;
+    nextSavingActions[safePupilId] = String(action || "").trim();
+  } else {
+    delete nextSaving[safePupilId];
+    delete nextSavingActions[safePupilId];
+  }
+  state.pupilOnboarding.lifecycleSavingPupilIds = nextSaving;
+  state.pupilOnboarding.lifecycleSavingActions = nextSavingActions;
+}
+
+function clearPupilLifecycleResetCredential() {
+  state.pupilOnboarding.lifecycleResetCredential = null;
+}
+
+function setPupilLifecycleResetCredential(result = null) {
+  const row = result && typeof result === "object" ? result : null;
+  if (!row) {
+    clearPupilLifecycleResetCredential();
+    return;
+  }
+  const credential = {
+    pupil_id: String(row?.pupil_id || row?.id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    pin: String(row?.pin || "").trim(),
+  };
+  state.pupilOnboarding.lifecycleResetCredential = credential.pupil_id && credential.username && credential.pin
+    ? credential
+    : null;
+}
+
+function isPupilResetPinUnavailableMessage(message = "") {
+  return String(message || "").toLowerCase().includes("pupil pin reset is not available yet");
+}
+
+function syncPupilLifecycleDraftsWithRows(rows = []) {
+  const rowIds = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const validFormIds = new Set(getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectedFormIds = {};
+  for (const [pupilId, formId] of Object.entries(getPupilOnboardingState()?.lifecycleSelectedFormIds || {})) {
+    const safeFormId = String(formId || "").trim();
+    if (rowIds.has(pupilId) && validFormIds.has(safeFormId)) selectedFormIds[pupilId] = safeFormId;
+  }
+  const savingPupilIds = {};
+  const savingActions = {};
+  for (const [pupilId, saving] of Object.entries(getPupilOnboardingState()?.lifecycleSavingPupilIds || {})) {
+    if (rowIds.has(pupilId) && saving) {
+      savingPupilIds[pupilId] = true;
+      const action = String(getPupilOnboardingState()?.lifecycleSavingActions?.[pupilId] || "").trim();
+      if (action) savingActions[pupilId] = action;
+    }
+  }
+  const rowErrors = {};
+  for (const [pupilId, message] of Object.entries(getPupilOnboardingState()?.lifecycleRowErrors || {})) {
+    if (rowIds.has(pupilId) && message) rowErrors[pupilId] = message;
+  }
+  state.pupilOnboarding.lifecycleSelectedFormIds = selectedFormIds;
+  state.pupilOnboarding.lifecycleSavingPupilIds = savingPupilIds;
+  state.pupilOnboarding.lifecycleSavingActions = savingActions;
+  state.pupilOnboarding.lifecycleRowErrors = rowErrors;
 }
 
 function getStaffAccessSelectedProfileId() {
@@ -2022,6 +2445,7 @@ async function loadPupilPlacementRows({ force = false } = {}) {
     state.pupilOnboarding.placementLoaded = true;
     state.pupilOnboarding.placementSignature = getPupilOnboardingReferenceSignature();
     syncPupilPlacementDraftsWithRows(rows);
+    syncPupilLifecycleDraftsWithRows(getPupilLifecycleRows());
   } catch (error) {
     console.error("pupil placement load error:", error);
     state.pupilOnboarding.placementRows = [];
@@ -2066,6 +2490,157 @@ async function handleMovePupilToForm(pupilId = "") {
     setPupilPlacementRowError(safePupilId, error?.message || "Could not move this pupil to that form.");
   } finally {
     setPupilPlacementSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function handleMovePupilLifecycleForm(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+
+  const row = getPupilLifecycleRows().find((item) => String(item?.id || "").trim() === safePupilId);
+  const moveMeta = getPupilLifecycleMoveMeta(row);
+  const allowedFormIds = moveMeta.targetFormClasses.map((item) => String(item?.id || "").trim()).filter(Boolean);
+  const targetFormClassId = getPupilLifecycleSelectedFormId(safePupilId, allowedFormIds);
+  const isPlacement = moveMeta.actionLabel === "Place in form";
+
+  if (!row) {
+    setPupilLifecycleRowError(safePupilId, "Could not find this pupil in the current lifecycle list.");
+    paint();
+    return;
+  }
+  if (!moveMeta.canMove) {
+    setPupilLifecycleRowError(safePupilId, moveMeta.disabledReason || "This pupil cannot be moved from the lifecycle panel.");
+    paint();
+    return;
+  }
+  if (!targetFormClassId) {
+    setPupilLifecycleRowError(
+      safePupilId,
+      isPlacement ? "Choose a current form before placing this pupil." : "Choose a different current form before moving this pupil."
+    );
+    paint();
+    return;
+  }
+  if ((row?.currentFormIds || []).includes(targetFormClassId)) {
+    setPupilLifecycleRowError(safePupilId, "Choose a different current form before moving this pupil.");
+    paint();
+    return;
+  }
+
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, isPlacement ? "place" : "move");
+  paint();
+
+  try {
+    await movePupilFormMembership({
+      pupilId: safePupilId,
+      formClassId: targetFormClassId,
+    });
+
+    await refreshPupilLifecyclePanelsAfterAction();
+    showNotice(isPlacement ? "Pupil placed in form." : "Pupil moved to form.", "success");
+  } catch (error) {
+    console.error("pupil lifecycle form move error:", error);
+    setPupilLifecycleRowError(safePupilId, error?.message || "Could not move this pupil to that form.");
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function refreshPupilLifecyclePanelsAfterAction() {
+  await loadPupilPlacementRows({ force: true });
+  syncPupilLifecycleDraftsWithRows(getPupilLifecycleRows());
+}
+
+async function handlePupilLifecycleAction(pupilId = "", action = "") {
+  const safePupilId = String(pupilId || "").trim();
+  const safeAction = String(action || "").trim().toLowerCase();
+  if (!safePupilId || !["archive", "restore"].includes(safeAction)) return;
+
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, safeAction);
+  paint();
+
+  try {
+    if (safeAction === "archive") {
+      await archivePupilDirectoryRecord({ pupilId: safePupilId });
+    } else {
+      await restorePupilDirectoryRecord({ pupilId: safePupilId });
+    }
+
+    await refreshPupilLifecyclePanelsAfterAction();
+    showNotice(safeAction === "archive" ? "Pupil archived." : "Pupil restored.", "success");
+  } catch (error) {
+    console.error("pupil lifecycle action error:", error);
+    setPupilLifecycleRowError(
+      safePupilId,
+      error?.message || (safeAction === "archive" ? "Could not archive this pupil." : "Could not restore this pupil.")
+    );
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function handleResetPupilLoginPin(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+
+  const row = getPupilLifecycleRows().find((item) => String(item?.id || "").trim() === safePupilId);
+  const displayName = String(row?.display_name || getPupilPlacementDisplayName(row) || "this pupil").trim();
+  const isArchived = String(row?.archived_at || "").trim() || String(row?.lifecycleStatus?.key || "") === "archived";
+  const isInactive = row?.is_active === false;
+
+  if (getPupilOnboardingState()?.lifecycleResetPinUnavailable) {
+    setPupilLifecycleRowError(safePupilId, "Pupil PIN reset is not available yet. Run the latest Supabase migration.");
+    paint();
+    return;
+  }
+
+  if (!row) {
+    setPupilLifecycleRowError(safePupilId, "Could not find this pupil in the current lifecycle list.");
+    paint();
+    return;
+  }
+  if (isArchived) {
+    setPupilLifecycleRowError(safePupilId, "Restore this pupil before resetting their PIN.");
+    paint();
+    return;
+  }
+  if (isInactive) {
+    setPupilLifecycleRowError(safePupilId, "Only active pupils can have a PIN reset in this phase.");
+    paint();
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Reset PIN for ${displayName}? The username will stay the same and the new PIN will be shown once.`
+  );
+  if (!confirmed) return;
+
+  clearPupilLifecycleResetCredential();
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, "reset_pin");
+  paint();
+
+  try {
+    const result = await resetPupilLoginPin({
+      pupilId: safePupilId,
+      reason: "Forgotten PIN / access reissued by admin",
+    });
+    setPupilLifecycleResetCredential(result);
+    showNotice("Pupil PIN reset. Save the new PIN now.", "success");
+  } catch (error) {
+    console.error("pupil PIN reset error:", error);
+    const errorMessage = error?.message || "Could not reset this pupil PIN.";
+    if (isPupilResetPinUnavailableMessage(errorMessage)) {
+      state.pupilOnboarding.lifecycleResetPinUnavailable = true;
+    }
+    setPupilLifecycleRowError(safePupilId, errorMessage);
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
     paint();
   }
 }
@@ -7580,6 +8155,26 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="pupil-lifecycle-search"]')) {
+    const nextValue = target.value || "";
+    const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
+    const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
+    state.pupilOnboarding.lifecycleSearch = nextValue;
+    resetPupilLifecycleVisibleRows();
+    paint();
+    requestAnimationFrame(() => {
+      const input = rootEl?.querySelector('[data-field="pupil-lifecycle-search"]');
+      if (!(input instanceof HTMLInputElement)) return;
+      input.focus();
+      try {
+        input.setSelectionRange(selectionStart, selectionEnd);
+      } catch {
+        // ignore browsers that do not support selection restore here
+      }
+    });
+    return;
+  }
+
   if (target.matches('[data-field="automation-policy-name"]')) {
     setAutomationRunPolicy({ name: target.value || "" });
     return;
@@ -7610,6 +8205,45 @@ function onRootChange(event) {
 
   if (target.matches('[data-field="pupil-placement-form-select"]')) {
     setPupilPlacementSelectedFormId(target.dataset.pupilId || "", target.value || "");
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-status-filter"]')) {
+    state.pupilOnboarding.lifecycleStatusFilter = getPupilLifecycleStatusFilterOptions().some((option) => option.value === target.value)
+      ? target.value
+      : PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER;
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-year-group-filter"]')) {
+    const nextValue = String(target.value || "").trim();
+    state.pupilOnboarding.lifecycleYearGroupFilter = getPupilLifecycleYearGroupFilterOptions().some((option) => option.value === nextValue)
+      ? nextValue
+      : "";
+    const currentClassFilter = String(state.pupilOnboarding.lifecycleFormFilter || "").trim();
+    if (!getPupilLifecycleClassFilterOptions(state.pupilOnboarding.lifecycleYearGroupFilter).some((option) => option.value === currentClassFilter)) {
+      state.pupilOnboarding.lifecycleFormFilter = "";
+    }
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-class-filter"]')) {
+    const nextValue = String(target.value || "").trim();
+    state.pupilOnboarding.lifecycleFormFilter = getPupilLifecycleClassFilterOptions().some((option) => option.value === nextValue)
+      ? nextValue
+      : "";
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-form-select"]')) {
+    setPupilLifecycleSelectedFormId(target.dataset.pupilId || "", target.value || "");
     paint();
     return;
   }
@@ -8234,6 +8868,12 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "dismiss-pupil-reset-credential") {
+    clearPupilLifecycleResetCredential();
+    paint();
+    return;
+  }
+
   if (action === "download-pupil-import-rows") {
     handleDownloadPupilImportRows(button.dataset.kind || "error");
     return;
@@ -8249,6 +8889,27 @@ async function onRootClick(event) {
 
   if (action === "move-pupil-to-form") {
     await handleMovePupilToForm(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "move-pupil-lifecycle-form") {
+    await handleMovePupilLifecycleForm(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "pupil-lifecycle-action") {
+    await handlePupilLifecycleAction(button.dataset.pupilId || "", button.dataset.lifecycleAction || "");
+    return;
+  }
+
+  if (action === "reset-pupil-pin") {
+    await handleResetPupilLoginPin(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "show-more-pupil-lifecycle-rows") {
+    showMorePupilLifecycleRows(Number(button.dataset.totalRows || 0));
+    paint();
     return;
   }
 
@@ -17932,6 +18593,7 @@ function renderPupilOnboardingResultCard() {
           : ""
       }
       <div class="td-staff-access-import-actions">
+        <p class="td-staff-access-note td-staff-access-note--compact">This only hides the card. The PIN has already been reset.</p>
         <button
           class="td-btn td-btn--ghost"
           type="button"
@@ -17941,6 +18603,279 @@ function renderPupilOnboardingResultCard() {
           Dismiss result
         </button>
       </div>
+    </div>
+  `;
+}
+
+function renderPupilResetCredentialCard() {
+  const credential = getPupilOnboardingState()?.lifecycleResetCredential;
+  const pin = String(credential?.pin || "").trim();
+  const username = String(credential?.username || "").trim();
+  if (!pin || !username) return "";
+
+  const displayName = String(credential?.display_name || "").trim()
+    || [credential?.first_name, credential?.surname].map((value) => String(value || "").trim()).filter(Boolean).join(" ")
+    || username;
+
+  return `
+    <div class="td-staff-access-import-card td-staff-access-import-card--result">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Pupil PIN reset</h4>
+          <p>Shown once. Save this now. It will not be shown again.</p>
+        </div>
+      </div>
+      <div class="td-pupil-import-credentials">
+        <div class="td-pupil-import-credential-row">
+          <div>
+            <strong>${escapeHtml(displayName)}</strong>
+          </div>
+          <div class="td-pupil-import-credential-copy">
+            <span>${escapeHtml(`Username: ${username}`)}</span>
+            <span class="td-pupil-import-credential-secret">${escapeHtml(`PIN: ${pin}`)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="td-staff-access-import-actions">
+        <button
+          class="td-btn td-btn--ghost"
+          type="button"
+          data-action="dismiss-pupil-reset-credential"
+          ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+        >
+          Hide PIN
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPupilLifecyclePanel() {
+  const onboarding = getPupilOnboardingState();
+  const allRows = getPupilLifecycleRows();
+  const rows = getFilteredPupilLifecycleRows(allRows);
+  const visibleRowCount = getPupilLifecycleVisibleRowCount(rows.length);
+  const visibleRows = rows.slice(0, visibleRowCount);
+  const hiddenRowCount = Math.max(0, rows.length - visibleRows.length);
+  const isLoading = !!onboarding?.referenceLoading
+    || !!onboarding?.placementLoading
+    || !onboarding?.referenceLoaded
+    || !onboarding?.placementLoaded;
+  const resetPinUnavailable = !!onboarding?.lifecycleResetPinUnavailable;
+  const lifecycleSaving = onboarding?.lifecycleSavingPupilIds || {};
+  const lifecycleSavingActions = onboarding?.lifecycleSavingActions || {};
+  const lifecycleErrors = onboarding?.lifecycleRowErrors || {};
+  const statusFilter = getPupilLifecycleStatusFilter();
+  const yearGroupFilter = getPupilLifecycleYearGroupFilter();
+  const formFilter = getPupilLifecycleClassFilter();
+  const search = getPupilLifecycleSearch();
+  const countLabel = `${Number(visibleRows.length || 0).toLocaleString("en-GB")} of ${Number(rows.length || 0).toLocaleString("en-GB")} matching pupils`;
+
+  return `
+    <div class="td-staff-access-import-card">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Pupil lifecycle</h4>
+          <p>Review lifecycle attention items first, or deliberately filter into active pupils for one-row form moves.</p>
+        </div>
+      </div>
+      ${
+        isLoading
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>Checking pupil lifecycle...</strong>
+            </div>
+          `
+          : `
+            <div class="td-import-preview-toolbar">
+              <label class="td-import-preview-search">
+                <span>Search pupils</span>
+                <input
+                  class="td-input"
+                  type="search"
+                  placeholder="Search name, username, MIS ID, or form"
+                  data-field="pupil-lifecycle-search"
+                  value="${escapeAttr(search)}"
+                />
+              </label>
+            </div>
+            <div class="td-import-preview-toolbar">
+              <label class="td-import-preview-search">
+                <span>Year group</span>
+                <select class="td-input" data-field="pupil-lifecycle-year-group-filter">
+                  ${getPupilLifecycleYearGroupFilterOptions().map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === yearGroupFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+              <label class="td-import-preview-search">
+                <span>Class</span>
+                <select class="td-input" data-field="pupil-lifecycle-class-filter">
+                  ${getPupilLifecycleClassFilterOptions(yearGroupFilter).map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === formFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+              <label class="td-import-preview-search">
+                <span>Status</span>
+                <select class="td-input" data-field="pupil-lifecycle-status-filter">
+                  ${getPupilLifecycleStatusFilterOptions().map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === statusFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+            </div>
+            ${
+              rows.length
+                ? `<div class="td-staff-access-import-summary"><span>${escapeHtml(`Showing ${countLabel}`)}</span></div>`
+                : ""
+            }
+          `
+      }
+      ${
+        isLoading
+          ? ""
+          : visibleRows.length
+            ? `
+              <div class="td-import-preview-table-shell">
+                <table class="td-import-preview-table">
+                  <thead>
+                    <tr>
+                      <th>Pupil</th>
+                      <th>Current class</th>
+                      <th>Status</th>
+                      <th>Move form</th>
+                      <th>Lifecycle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${visibleRows.map((row) => {
+                      const pupilId = String(row?.id || "").trim();
+                      const status = row?.lifecycleStatus || getPupilLifecycleStatus(row);
+                      const isSaving = !!lifecycleSaving[pupilId];
+                      const savingAction = String(lifecycleSavingActions[pupilId] || "").trim();
+                      const rowError = String(lifecycleErrors[pupilId] || "").trim();
+                      const lifecycleAction = status.key === "archived" ? "restore" : "archive";
+                      const actionLabel = lifecycleAction === "restore" ? "Restore" : "Archive";
+                      const busyLabel = lifecycleAction === "restore" ? "Restoring..." : "Archiving...";
+                      const canResetPin = !resetPinUnavailable && row?.is_active !== false && !String(row?.archived_at || "").trim() && status.key !== "archived";
+                      const resetPinTitle = canResetPin
+                        ? "Reset PIN"
+                        : (
+                          resetPinUnavailable
+                            ? "Pupil PIN reset is not available yet. Run the latest Supabase migration."
+                            : (status.key === "archived" ? "Restore this pupil before resetting their PIN." : "Only active pupils can have a PIN reset in this phase.")
+                        );
+                      const moveMeta = getPupilLifecycleMoveMeta(row);
+                      const targetFormIds = moveMeta.targetFormClasses.map((item) => String(item?.id || "").trim()).filter(Boolean);
+                      const selectedFormId = getPupilLifecycleSelectedFormId(pupilId, targetFormIds);
+                      const moveDisabled = isSaving || !moveMeta.canMove || !selectedFormId;
+                      return `
+                        <tr>
+                          <td>
+                            <div class="td-import-preview-cell-primary">
+                              <strong>${escapeHtml(row?.display_name || getPupilPlacementDisplayName(row))}</strong>
+                              <span>${escapeHtml(getPupilPlacementMetaLabel(row))}</span>
+                            </div>
+                          </td>
+                          <td>${escapeHtml(getPupilLifecycleCurrentFormLabel(row))}</td>
+                          <td>
+                            <span class="td-staff-access-chip">${escapeHtml(status.label)}</span>
+                          </td>
+                          <td>
+                            ${
+                              moveMeta.canMove
+                                ? `
+                                  <select
+                                    class="td-input"
+                                    data-field="pupil-lifecycle-form-select"
+                                    data-pupil-id="${escapeAttr(pupilId)}"
+                                    ${isSaving ? "disabled" : ""}
+                                  >
+                                    <option value="">${escapeHtml(moveMeta.emptyTargetLabel)}</option>
+                                    ${moveMeta.targetFormClasses.map((formClass) => {
+                                      const formClassId = String(formClass?.id || "").trim();
+                                      return `
+                                        <option value="${escapeAttr(formClassId)}" ${formClassId === selectedFormId ? "selected" : ""}>
+                                          ${escapeHtml(formatPupilPlacementFormLabel(formClass))}
+                                        </option>
+                                      `;
+                                    }).join("")}
+                                  </select>
+                                  <button
+                                    class="td-btn td-btn--compact"
+                                    type="button"
+                                    data-action="move-pupil-lifecycle-form"
+                                    data-pupil-id="${escapeAttr(pupilId)}"
+                                    ${moveDisabled ? "disabled" : ""}
+                                  >
+                                    ${escapeHtml(["move", "place"].includes(savingAction) ? moveMeta.busyLabel : moveMeta.actionLabel)}
+                                  </button>
+                                `
+                                : `<p class="td-staff-access-note td-staff-access-note--compact">${escapeHtml(moveMeta.disabledReason || "No form move available.")}</p>`
+                            }
+                          </td>
+                          <td>
+                            <div class="td-pupil-lifecycle-actions">
+                              <button
+                                class="td-btn td-btn--compact"
+                                type="button"
+                                data-action="reset-pupil-pin"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                title="${escapeAttr(resetPinTitle)}"
+                                ${isSaving || !canResetPin ? "disabled" : ""}
+                              >
+                                ${escapeHtml(savingAction === "reset_pin" ? "Resetting..." : "Reset PIN")}
+                              </button>
+                              <button
+                                class="td-btn td-btn--compact ${lifecycleAction === "archive" ? "td-btn--ghost" : ""}"
+                                type="button"
+                                data-action="pupil-lifecycle-action"
+                                data-lifecycle-action="${escapeAttr(lifecycleAction)}"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                ${isSaving ? "disabled" : ""}
+                              >
+                                ${escapeHtml(savingAction === lifecycleAction ? busyLabel : actionLabel)}
+                              </button>
+                            </div>
+                            ${rowError ? `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">${escapeHtml(rowError)}</p>` : ""}
+                          </td>
+                        </tr>
+                      `;
+                    }).join("")}
+                  </tbody>
+                </table>
+              </div>
+              ${
+                hiddenRowCount > 0
+                  ? `
+                    <div class="td-staff-access-import-actions">
+                      <button
+                        class="td-btn td-btn--ghost td-btn--compact"
+                        type="button"
+                        data-action="show-more-pupil-lifecycle-rows"
+                        data-total-rows="${escapeAttr(String(rows.length))}"
+                      >
+                        ${escapeHtml(`Show ${Math.min(PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP, hiddenRowCount)} more`)}
+                      </button>
+                    </div>
+                  `
+                  : ""
+              }
+            `
+            : `
+              <div class="td-empty td-empty--compact">
+                <strong>${escapeHtml(allRows.length ? "No pupils match these lifecycle filters." : "No pupil records are visible yet.")}</strong>
+                ${allRows.length ? "<p>Change the filters or search to widen the action queue.</p>" : ""}
+              </div>
+            `
+      }
     </div>
   `;
 }
@@ -18323,6 +19258,8 @@ function renderSectionPupilOnboarding() {
           ? `
             <div class="td-section-body">
               ${renderPupilOnboardingResultCard()}
+              ${renderPupilResetCredentialCard()}
+              ${renderPupilLifecyclePanel()}
               ${renderPupilPlacementPanel()}
               ${renderPupilOnboardingPreflightCard()}
               ${renderPupilOnboardingPreviewCard()}
@@ -23793,6 +24730,13 @@ function injectStyles() {
       min-height:34px;
       padding:6px 12px;
       font-size:0.8rem;
+    }
+
+    .td-pupil-lifecycle-actions{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
     }
 
     .td-import-preview-table-shell{
