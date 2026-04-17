@@ -1,5 +1,5 @@
 import { escapeHtml } from "./ui.js";
-import { pupilRecordAttempt } from "./db.js?v=1.17";
+import { pupilRecordAttempt } from "./db.js?v=1.18";
 import { createScrollMode } from "./modes_scroll.js";
 import {
   createSegmentedSpellingModel,
@@ -1207,7 +1207,7 @@ export function mountGame({
       correctSpelling: resolvedWordText,
       questionType: String(questionType || resolveQuestionType(item) || "").trim() || null,
       modeKind: String(modeKind || resolveModeKind(item) || "").trim() || null,
-      wordSource: item?.is_target_word ? "targeted" : "base",
+      wordSource: item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       baseTestWordId: item?.base_test_word_id || item?.id || null,
       assignmentTargetId: item?.assignment_target_id || item?.assignmentTargetId || null,
       focusGrapheme: getResolvedFocusGrapheme(item),
@@ -1259,7 +1259,7 @@ export function mountGame({
         : getAttemptsAllowedForItem(item),
       correctSpelling: entry?.correctSpelling || String(item?.word || "").trim(),
       questionType: entry?.questionType || resolveQuestionType(item),
-      wordSource: entry?.wordSource || (item?.is_target_word ? "targeted" : "base"),
+      wordSource: entry?.wordSource || item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       baseTestWordId: entry?.baseTestWordId || item?.base_test_word_id || item?.id || null,
       assignmentTargetId: entry?.assignmentTargetId || item?.assignment_target_id || item?.assignmentTargetId || null,
       focusGrapheme: entry?.focusGrapheme || getResolvedFocusGrapheme(item),
@@ -3818,11 +3818,12 @@ export function mountGame({
     const resolvedFocusGrapheme = getResolvedFocusGrapheme(item);
     const resolvedWordText = String(item?.word || "").trim()
       || buildWordFromGraphemes(Array.isArray(item?.segments) ? item.segments : []);
+    const resolvedTestId = item?.test_id || item?.testId || testMeta?.id;
     const attemptsAllowed = getAttemptsAllowedForItem(item);
     await pupilRecordAttempt({
       pupilId,
       assignmentId,
-      testId: testMeta?.id,
+      testId: resolvedTestId,
       testWordId: item?.base_test_word_id || item?.id || null,
       assignmentTargetId: item?.assignment_target_id || item?.assignmentTargetId || null,
       mode: resolveQuestionType(item),
@@ -3831,7 +3832,7 @@ export function mountGame({
       attemptNumber: currentAttempt,
       attemptsAllowed: Number.isFinite(attemptsAllowed) ? attemptsAllowed : null,
       wordText: resolvedWordText || null,
-      wordSource: item?.is_target_word ? "targeted" : "base",
+      wordSource: item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       attemptSource: testMeta?.attempt_source || "test",
       targetGraphemes: Array.isArray(item?.segments) ? item.segments : null,
       focusGrapheme: resolvedFocusGrapheme,

@@ -6,14 +6,25 @@ import {
   readPupilBaselineGateState,
   readAssignmentAttemptRows,
   reconcileAssignmentResultAttempts,
+  listApprovedPracticeWordBankRows,
+  listPupilPracticeEvidenceAttempts,
   readAssignmentPupilStatus,
   saveAssignmentProgress,
-} from "./db.js?v=1.21";
-import { mountGame } from "./game.js?v=1.30";
+} from "./db.js?v=1.22";
+import { mountGame } from "./game.js?v=1.31";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
 import { renderIcon, renderIconLabel, renderInfoTip } from "./uiIcons.js?v=1.3";
+import {
+  PRACTICE_EVIDENCE_FETCH_LIMIT,
+  PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE,
+  PRACTICE_STATUS_NOT_ENOUGH_WORDS,
+  PRACTICE_STATUS_READY,
+  PRACTICE_WORD_COUNT,
+  buildPupilPracticePlan,
+  selectTopPracticeGrapheme,
+} from "./pupilPractice.js?v=1.0";
 import {
   buildDifficultyMapFromWordRows,
   estimateSpellingAttainmentIndicator,
@@ -494,14 +505,15 @@ async function loadPupilProgress(pupilId) {
   const cutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("attempts")
-    .select("assignment_target_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, target_graphemes")
+    .select("assignment_target_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, target_graphemes, attempt_source")
     .eq("pupil_id", pupilId)
     .gte("created_at", cutoff)
+    .or("attempt_source.is.null,attempt_source.neq.practice")
     .order("created_at", { ascending: true })
     .limit(600);
   if (error) return null;
 
-  const attempts = data || [];
+  const attempts = (data || []).filter((item) => String(item?.attempt_source || "").trim().toLowerCase() !== "practice");
   const testWordIds = [...new Set(
     attempts
       .map((item) => String(item?.test_word_id || "").trim())
@@ -626,22 +638,54 @@ function formatPracticeFocusLabel(focus) {
   return clean;
 }
 
-function buildPracticePackFromWords({ focus, words, id }) {
-  if (!Array.isArray(words) || !words.length) return null;
-  const focusLabel = formatPracticeFocusLabel(focus);
+function createEmptyPracticeModel(status = PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE, overrides = {}) {
   return {
-    id,
+    status,
+    focusGrapheme: "",
+    evidenceCount: 0,
+    wordCount: 0,
+    packs: [],
+    ...overrides,
+  };
+}
+
+function getPracticePacks(practiceModel = null) {
+  if (Array.isArray(practiceModel)) return practiceModel;
+  return Array.isArray(practiceModel?.packs) ? practiceModel.packs : [];
+}
+
+function normalizePracticeWordRow(row = {}, focus = "", index = 0) {
+  const choice = row?.choice && typeof row.choice === "object" ? row.choice : {};
+  const focusGrapheme = String(focus || "").trim().toLowerCase();
+  return {
+    ...row,
+    id: String(row?.id || "").trim(),
+    base_test_word_id: String(row?.id || "").trim(),
+    test_id: String(row?.test_id || "").trim(),
+    position: index + 1,
+    word_source: "approved_word_bank",
+    choice: {
+      ...choice,
+      question_type: "focus_sound",
+      focus_graphemes: focusGrapheme ? [focusGrapheme] : [],
+    },
+  };
+}
+
+function buildPracticePackFromPlan(plan = null) {
+  if (!plan || plan.status !== PRACTICE_STATUS_READY || !Array.isArray(plan.words) || plan.words.length !== PRACTICE_WORD_COUNT) {
+    return null;
+  }
+  const focus = String(plan.focusGrapheme || "").trim().toLowerCase();
+  const focusLabel = formatPracticeFocusLabel(focus);
+  const words = plan.words.map((row, index) => normalizePracticeWordRow(row, focus, index));
+  return {
+    id: `practice:${focus}`,
     title: `${focusLabel} practice`,
-    shortLabel: focusLabel === "Mixed" ? "Mixed practice" : `Practise ${focusLabel}`,
+    shortLabel: focusLabel === "Mixed" ? "Practice" : `Practise ${focusLabel}`,
     focus: focusLabel,
-    words: words.map((row) => ({
-      ...row,
-      choice: {
-        ...(row.choice || {}),
-        question_type: "focus_sound",
-      },
-    })),
-    test_id: words[0].test_id,
+    words,
+    test_id: words[0]?.test_id || null,
     attempt_source: "practice",
     max_attempts: 3,
     mode: "practice",
@@ -650,62 +694,48 @@ function buildPracticePackFromWords({ focus, words, id }) {
   };
 }
 
-async function loadPracticePacks(pupilId) {
-  const { data: attempts, error } = await supabase
-    .from("attempts")
-    .select("test_word_id, test_id, correct, pattern_type, focus_grapheme, created_at")
-    .eq("pupil_id", pupilId)
-    .eq("correct", false)
-    .order("created_at", { ascending: false })
-    .limit(20);
-  if (error) return [];
-  const latestWrong = attempts || [];
-  if (!latestWrong.length) return [];
+async function loadPracticeModel(pupilId) {
+  if (!pupilId) return createEmptyPracticeModel();
 
-  const focusGroups = new Map();
-  for (const item of latestWrong) {
-    const key = String(item.focus_grapheme || item.pattern_type || "general").trim().toLowerCase() || "general";
-    const next = focusGroups.get(key) || [];
-    next.push(item);
-    focusGroups.set(key, next);
-  }
-  const rankedFocuses = [...focusGroups.entries()]
-    .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, 3);
+  try {
+    const attempts = await listPupilPracticeEvidenceAttempts({
+      pupilId,
+      limit: PRACTICE_EVIDENCE_FETCH_LIMIT,
+    });
+    const topGrapheme = selectTopPracticeGrapheme(attempts);
+    if (!topGrapheme?.target) {
+      return createEmptyPracticeModel(PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE);
+    }
 
-  const testWordIds = [...new Set(
-    rankedFocuses.flatMap(([, items]) => items.map((item) => item.test_word_id).filter(Boolean))
-  )];
-  if (!testWordIds.length) return [];
+    const approvedWordRows = await listApprovedPracticeWordBankRows({
+      focusGrapheme: topGrapheme.target,
+      limit: 50,
+    });
+    const plan = buildPupilPracticePlan({
+      attempts,
+      approvedWordRows,
+      wordCount: PRACTICE_WORD_COUNT,
+    });
 
-  const { data: wordRows } = await supabase.from("test_words").select("id,test_id,word,sentence,segments,choice").in("id", testWordIds);
-  const wordsById = new Map((wordRows || []).map((row) => [String(row.id), row]));
-  const packs = rankedFocuses
-    .map(([focus, items], index) => {
-      const words = [...new Set(items.map((item) => item.test_word_id).filter(Boolean))]
-        .map((id) => wordsById.get(String(id)))
-        .filter(Boolean)
-        .slice(0, 6);
-      return buildPracticePackFromWords({
-        id: `focus:${focus}:${index}`,
-        focus,
-        words,
+    if (plan.status !== PRACTICE_STATUS_READY) {
+      return createEmptyPracticeModel(plan.status, {
+        focusGrapheme: plan.focusGrapheme,
+        evidenceCount: plan.evidenceCount,
+        wordCount: plan.wordCount,
       });
-    })
-    .filter(Boolean);
+    }
 
-  if (packs.length) return packs;
-
-  const fallbackWords = [...new Set(latestWrong.map((item) => item.test_word_id).filter(Boolean))]
-    .map((id) => wordsById.get(String(id)))
-    .filter(Boolean)
-    .slice(0, 6);
-  const fallbackPack = buildPracticePackFromWords({
-    id: "focus:mixed:0",
-    focus: "general",
-    words: fallbackWords,
-  });
-  return fallbackPack ? [fallbackPack] : [];
+    const pack = buildPracticePackFromPlan(plan);
+    return createEmptyPracticeModel(PRACTICE_STATUS_READY, {
+      focusGrapheme: plan.focusGrapheme,
+      evidenceCount: plan.evidenceCount,
+      wordCount: plan.wordCount,
+      packs: pack ? [pack] : [],
+    });
+  } catch (error) {
+    console.warn("load practice model error:", error);
+    return createEmptyPracticeModel(PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE);
+  }
 }
 
 function renderSummaryCard(name) {
@@ -800,7 +830,7 @@ function buildVisibleBaselineGate(assignments, preferredAssignmentId = "") {
   };
 }
 
-function buildPupilHeroModel(assignments, practicePacks, progress) {
+function buildPupilHeroModel(assignments, practiceModel, progress) {
   const pendingAssignments = (assignments || []).filter((item) => !item?.completed);
   const completedAssignments = (assignments || []).filter((item) => !!item?.completed);
   const wordsChecked = Number(progress?.wordsChecked || 0);
@@ -808,7 +838,7 @@ function buildPupilHeroModel(assignments, practicePacks, progress) {
   const growingSounds = progress?.growing || [];
   const nextStretch = progress?.practiseNext || [];
   const recentWins = progress?.recentWins || [];
-  const practiceCount = Array.isArray(practicePacks) ? practicePacks.length : 0;
+  const practiceCount = getPracticePacks(practiceModel).length;
   let summary = "You are all caught up.";
 
   if (pendingAssignments.length) {
@@ -873,8 +903,8 @@ function renderPupilHeroGroup(group) {
   `;
 }
 
-function renderPupilAnalyticsHero(name, assignments, practicePacks, progress) {
-  const hero = buildPupilHeroModel(assignments, practicePacks, progress);
+function renderPupilAnalyticsHero(name, assignments, practiceModel, progress) {
+  const hero = buildPupilHeroModel(assignments, practiceModel, progress);
 
   return `
     <section class="card pupilHeroCard">
@@ -1213,8 +1243,14 @@ function renderAssignmentsEmptyState() {
   `;
 }
 
-function renderPracticeSection(practicePacks) {
-  if (!practicePacks?.length) return "";
+function getPracticeEmptyText(practiceModel = null) {
+  const status = String(practiceModel?.status || PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE).trim();
+  if (status === PRACTICE_STATUS_NOT_ENOUGH_WORDS) return "Practice words are not ready yet.";
+  return "Finish a few more words first.";
+}
+
+function renderPracticeSection(practiceModel) {
+  const practicePacks = getPracticePacks(practiceModel);
 
   return `
     <section class="card pupilSectionCard pupilPracticeSection">
@@ -1223,9 +1259,15 @@ function renderPracticeSection(practicePacks) {
           <h3>${renderIconLabel("spark", "Extra practice")}</h3>
         </div>
       </div>
-      <div class="pupilPracticeOptions">
-        ${practicePacks.map((pack, index) => renderPracticeOption(pack, index)).join("")}
-      </div>
+      ${
+        practicePacks.length
+          ? `
+            <div class="pupilPracticeOptions">
+              ${practicePacks.map((pack, index) => renderPracticeOption(pack, index)).join("")}
+            </div>
+          `
+          : `<p class="pupilEmptyText">${escapeHtml(getPracticeEmptyText(practiceModel))}</p>`
+      }
     </section>
   `;
 }
@@ -1305,7 +1347,8 @@ function renderCompletionSummary(item, result) {
   `;
 }
 
-function attachDashboardEvents(containerEl, session, assignments, practicePacks, progress) {
+function attachDashboardEvents(containerEl, session, assignments, practiceModel, progress) {
+  const practicePacks = getPracticePacks(practiceModel);
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
     button.addEventListener("click", () => {
       const assignmentId = button.getAttribute("data-assignment");
@@ -1329,7 +1372,7 @@ function attachDashboardEvents(containerEl, session, assignments, practicePacks,
       const key = String(button.getAttribute("data-section") || "");
       if (!Object.prototype.hasOwnProperty.call(pupilDashboardState.expandedSections, key)) return;
       pupilDashboardState.expandedSections[key] = !pupilDashboardState.expandedSections[key];
-      renderDashboard(containerEl, session, assignments, practicePacks, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress);
     });
   });
 
@@ -1406,11 +1449,11 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
 
   const loadedAssignments = await ensureAssignments();
 
-  const [practicePacks, progress] = await Promise.all([
-    loadPracticePacks(pupilId),
+  const [practiceModel, progress] = await Promise.all([
+    loadPracticeModel(pupilId),
     loadPupilProgress(pupilId),
   ]);
-  renderDashboard(containerEl, session, loadedAssignments, practicePacks, progress);
+  renderDashboard(containerEl, session, loadedAssignments, practiceModel, progress);
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
@@ -1507,7 +1550,7 @@ async function openSession(containerEl, session, item, assignments, practicePack
       hints_enabled: item.hints_enabled !== false,
     },
     pupilId: session?.pupil_id,
-    assignmentId: item.id || null,
+    assignmentId: isAssignedTask ? item.id : null,
     resumeState,
     onProgress: isAssignedTask && item?.id && session?.pupil_id
       ? async (progress) => {
@@ -1577,18 +1620,18 @@ async function openSession(containerEl, session, item, assignments, practicePack
   });
 }
 
-function renderDashboard(containerEl, session, assignments, practicePacks, progress) {
+function renderDashboard(containerEl, session, assignments, practiceModel, progress) {
   const name = session?.first_name || session?.username || "Pupil";
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
-      ${renderPupilAnalyticsHero(name, assignments, practicePacks, progress)}
+      ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress)}
       ${renderProgressSection(progress)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
-      ${renderPracticeSection(practicePacks)}
+      ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}
     </div>
   `;
-  attachDashboardEvents(containerEl, session, assignments, practicePacks, progress);
+  attachDashboardEvents(containerEl, session, assignments, practiceModel, progress);
 }
 
 export async function renderPupilView(containerEl, session) {

@@ -4206,6 +4206,64 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
     .filter(Boolean);
 }
 
+function normalizePracticeEvidenceAttemptRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    test_word_id: String(row?.test_word_id || "").trim(),
+    test_id: String(row?.test_id || "").trim(),
+    correct: row?.correct === true,
+    typed: String(row?.typed ?? "").trim(),
+    mode: String(row?.mode || "").trim(),
+    pattern_type: String(row?.pattern_type || "").trim().toLowerCase(),
+    focus_grapheme: String(row?.focus_grapheme || "").trim().toLowerCase(),
+    target_graphemes: normalizeLoadedSegments(row?.target_graphemes),
+    word_text: String(row?.word_text || row?.word || "").trim(),
+    attempt_source: String(row?.attempt_source || "").trim().toLowerCase(),
+    created_at: String(row?.created_at || "").trim(),
+  };
+}
+
+export async function listPupilPracticeEvidenceAttempts({
+  pupilId = "",
+  limit = 80,
+} = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return [];
+
+  const safeLimit = Math.max(20, Math.min(100, Number(limit) || 80));
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("id, test_word_id, test_id, correct, typed, mode, pattern_type, focus_grapheme, target_graphemes, word_text, word, attempt_source, created_at")
+    .eq("pupil_id", safePupilId)
+    .eq("correct", false)
+    .not("attempt_source", "in", '("practice","baseline")')
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) throw error;
+  return (data || []).map((row) => normalizePracticeEvidenceAttemptRow(row));
+}
+
+export async function listApprovedPracticeWordBankRows({
+  focusGrapheme = "",
+  limit = 50,
+} = {}) {
+  const safeFocus = String(focusGrapheme || "").trim().toLowerCase().replace(/[^a-z-]/g, "");
+  if (!safeFocus) return [];
+
+  const safeLimit = Math.max(5, Math.min(100, Number(limit) || 50));
+  const { data, error } = await supabase
+    .from("test_words")
+    .select("id, test_id, word, sentence, segments, choice")
+    .contains("choice", { source: "teacher", focus_graphemes: [safeFocus] })
+    .order("word", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(safeLimit);
+
+  if (error) throw error;
+  return normalizeLoadedWordRows(data || []);
+}
+
 export async function pupilRecordAttempt({
   pupilId,
   assignmentId,

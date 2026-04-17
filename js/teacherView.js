@@ -10539,6 +10539,10 @@ function isBaselineAttemptRow(attempt, baselineAssignmentMetaById) {
   return !!assignmentId && baselineAssignmentMetaById instanceof Map && baselineAssignmentMetaById.has(assignmentId);
 }
 
+function isPracticeAttemptRow(attempt) {
+  return String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase() === "practice";
+}
+
 function getIndependentAttemptRows(attempts) {
   return (Array.isArray(attempts) ? attempts : [])
     .filter((attempt) => getQuestionEvidenceTier(attempt?.mode) === "independent");
@@ -10586,7 +10590,7 @@ function buildPlacementCurrentProfiles({
     if (!placementProfile) continue;
 
     const pupilAttempts = (attempts || []).filter((attempt) => String(attempt?.pupil_id || "") === safePupilId);
-    const liveAttempts = pupilAttempts.filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById));
+    const liveAttempts = pupilAttempts.filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt));
     const liveIndependentAttempts = getIndependentAttemptRows(liveAttempts);
     if (liveIndependentAttempts.length >= BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS) continue;
 
@@ -10758,6 +10762,7 @@ async function buildPersonalisedPlanForClass({
     .from("attempts")
     .select("pupil_id, assignment_id, test_word_id, assignment_target_id, mode, attempt_source, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
     .in("pupil_id", safePupilIds)
+    .or("attempt_source.is.null,attempt_source.neq.practice")
     .order("created_at", { ascending: false })
     .limit(historyLimit);
   if (attemptError) throw attemptError;
@@ -10785,7 +10790,7 @@ async function buildPersonalisedPlanForClass({
     resolvedWordMap,
   });
   const nonBaselineAttempts = (attemptRows || []).filter(
-    (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
+    (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt)
   );
   let plan = buildGeneratedAssignmentPlan({
     pupilIds: safePupilIds,

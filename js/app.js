@@ -63,7 +63,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.77");
+      const module = await import("./teacherView.js?v=6.78");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -77,7 +77,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.40");
+      const module = await import("./pupilView.js?v=3.41");
       return module.renderPupilView;
     },
     () => {
@@ -101,7 +101,7 @@ function loadPupilAuth() {
 function loadGameRuntime() {
   gameRuntimePromise = getCachedImport(
     gameRuntimePromise,
-    () => import("./game.js?v=1.30"),
+    () => import("./game.js?v=1.31"),
     () => {
       gameRuntimePromise = null;
     },
