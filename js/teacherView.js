@@ -62,6 +62,7 @@ import {
   CLASS_TYPE_INTERVENTION,
   CLASS_TYPE_SUBJECT,
   archivePupilDirectoryRecord,
+  archiveStaffDirectoryRecord,
   createClass,
   createInterventionGroup,
   createPersonalisedGenerationRun,
@@ -75,6 +76,7 @@ import {
   listActiveAdminUserIds,
   listActiveStaffRoleAssignments,
   listStaffAccessAuditEntries,
+  listStaffDirectoryAuditEntries,
   listStaffPendingAccessSummaries,
   listStaffProfiles,
   listStaffRoleAssignments,
@@ -91,9 +93,11 @@ import {
   readStaffPendingAccessDuplicatePreflight,
   readTeacherAppRole,
   resetPupilLoginPin,
+  revokeAllStaffLiveAccess,
   revokeStaffRole,
   revokeStaffScope,
   restorePupilDirectoryRecord,
+  restoreStaffDirectoryRecord,
   saveStaffPendingAccessApproval,
   seedAutomatedAssignmentPupilStatuses,
   setPersonalisedAutomationPolicyArchived,
@@ -101,7 +105,7 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.36";
+} from "./db.js?v=1.37";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -147,6 +151,9 @@ const CLASS_RESULTS_RANGE_DEFAULT = "last_week";
 const STAFF_ACCESS_AUDIT_LIMIT = 10;
 const STAFF_ACCESS_MANAGED_ROLES = ["teacher", "admin", "hoy", "hod", "senco", "literacy_lead"];
 const STAFF_ACCESS_RECENT_IMPORT_WINDOW_DAYS = 14;
+const STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER = "needs_attention";
+const STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS = 25;
+const STAFF_LIFECYCLE_VISIBLE_ROWS_STEP = 25;
 const STAFF_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
 const PUPIL_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
 const PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS = 25;
@@ -357,6 +364,13 @@ function createDefaultStaffAccessState() {
     selectedRoles: [],
     selectedScopes: [],
     selectedAuditEntries: [],
+    selectedDirectoryAuditEntries: [],
+    lifecycleStatusFilter: STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER,
+    lifecycleSearch: "",
+    lifecycleVisibleRows: STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS,
+    lifecycleSavingProfileIds: {},
+    lifecycleSavingActions: {},
+    lifecycleRowErrors: {},
     importFileName: "",
     importPreview: null,
     importPreviewError: "",
@@ -1536,6 +1550,10 @@ function isStaffAccessProfileLinked(profile = null) {
   return !!String(profile?.user_id || "").trim();
 }
 
+function isStaffAccessProfileArchived(profile = null) {
+  return !!String(profile?.archived_at || "").trim();
+}
+
 function getStaffAccessSelectedProfile() {
   const selectedProfileId = getStaffAccessSelectedProfileId();
   if (!selectedProfileId) return null;
@@ -1549,7 +1567,7 @@ function getSelectedStaffPendingApproval() {
 
 function canManageSelectedStaffPendingApproval() {
   const selectedProfile = getStaffAccessSelectedProfile();
-  if (!selectedProfile || isStaffAccessProfileLinked(selectedProfile)) return false;
+  if (!selectedProfile || isStaffAccessProfileArchived(selectedProfile) || isStaffAccessProfileLinked(selectedProfile)) return false;
   return !!getSelectedStaffPendingApproval()?.can_approve;
 }
 
@@ -1585,14 +1603,51 @@ function doesStaffAccessProfileHaveActiveAccess(profile = null) {
   return getStaffAccessProfileActiveRoles(profile).length > 0;
 }
 
+function doesSelectedStaffAccessHaveLiveAccess() {
+  return (Array.isArray(getStaffAccessState()?.selectedRoles) && getStaffAccessState().selectedRoles.length > 0)
+    || (Array.isArray(getStaffAccessState()?.selectedScopes) && getStaffAccessState().selectedScopes.length > 0);
+}
+
 function doesStaffAccessProfileHaveNoRoleAssigned(profile = null) {
   return !doesStaffAccessProfileHaveActiveAccess(profile);
 }
 
 function doesStaffAccessProfileHavePendingAccess(profile = null) {
+  if (isStaffAccessProfileArchived(profile)) return false;
   return !isStaffAccessProfileLinked(profile)
     && doesStaffAccessProfileHaveNoRoleAssigned(profile)
     && (!!String(profile?.last_imported_at || "").trim() || String(profile?.profile_source || "") === "csv_import");
+}
+
+function doesStaffPendingApprovalNeedReview(profile = null) {
+  if (isStaffAccessProfileArchived(profile) || doesStaffAccessProfileHaveActiveAccess(profile)) return false;
+  const pendingSummary = getStaffPendingApprovalSummary(profile);
+  if (!pendingSummary) return false;
+  return !!pendingSummary?.has_duplicate_conflicts
+    || !!pendingSummary?.is_stale
+    || !!String(pendingSummary?.last_failure_reason || "").trim()
+    || !!String(pendingSummary?.invalidated_reason || "").trim();
+}
+
+function doesStaffAccessProfileHavePendingApproval(profile = null) {
+  if (isStaffAccessProfileArchived(profile) || doesStaffAccessProfileHaveActiveAccess(profile)) return false;
+  const pendingSummary = getStaffPendingApprovalSummary(profile);
+  return (!isStaffAccessProfileLinked(profile) && pendingSummary?.status === "approved")
+    || doesStaffPendingApprovalNeedReview(profile)
+    || doesStaffAccessProfileHavePendingAccess(profile);
+}
+
+function getStaffAccessProfileAttentionRank(profile = null) {
+  if (isStaffAccessProfileArchived(profile)) return 0;
+  if (doesStaffPendingApprovalNeedReview(profile)) return 1;
+  if (doesStaffAccessProfileHavePendingAccess(profile)) return 2;
+  if (isStaffAccessProfileLinked(profile) && !doesStaffAccessProfileHaveActiveAccess(profile)) return 3;
+  if (doesStaffAccessProfileHaveActiveAccess(profile)) return 4;
+  return 5;
+}
+
+function doesStaffAccessProfileNeedAttention(profile = null) {
+  return getStaffAccessProfileAttentionRank(profile) < 4;
 }
 
 function isStaffAccessProfileRecentlyImported(profile = null) {
@@ -1609,6 +1664,9 @@ function isStaffAccessProfileRecentlyImported(profile = null) {
 function getStaffAccessProfileStatusPills(profile = null) {
   const pills = [];
   if (!profile) return pills;
+  if (isStaffAccessProfileArchived(profile)) {
+    pills.push({ label: "Archived record", muted: false });
+  }
   const pendingSummary = getStaffPendingApprovalSummary(profile);
   if (pendingSummary?.status === "approved") {
     pills.push({ label: "Approved pending sign-in", muted: false });
@@ -1626,23 +1684,142 @@ function getStaffAccessProfileStatusPills(profile = null) {
   return pills;
 }
 
+function getStaffLifecycleStatusFilter() {
+  const saved = String(getStaffAccessState()?.lifecycleStatusFilter || "").trim().toLowerCase();
+  return getStaffAccessFilterOptions().some((option) => option.value === saved)
+    ? saved
+    : STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER;
+}
+
+function getStaffLifecycleSearch() {
+  return String(getStaffAccessState()?.lifecycleSearch || "");
+}
+
+function resetStaffLifecycleVisibleRows() {
+  state.staffAccess.lifecycleVisibleRows = STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS;
+}
+
+function getStaffLifecycleVisibleRowCount(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  if (!safeTotal) return 0;
+  const saved = Number(getStaffAccessState()?.lifecycleVisibleRows || STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS);
+  return Math.min(safeTotal, Math.max(STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS, saved));
+}
+
+function showMoreStaffLifecycleRows(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  const current = getStaffLifecycleVisibleRowCount(safeTotal);
+  state.staffAccess.lifecycleVisibleRows = Math.min(safeTotal, current + STAFF_LIFECYCLE_VISIBLE_ROWS_STEP);
+}
+
+function setStaffLifecycleRowError(profileId = "", message = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  state.staffAccess.lifecycleRowErrors = {
+    ...(getStaffAccessState()?.lifecycleRowErrors || {}),
+    [safeProfileId]: String(message || "").trim(),
+  };
+}
+
+function clearStaffLifecycleRowError(profileId = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  const nextErrors = {
+    ...(getStaffAccessState()?.lifecycleRowErrors || {}),
+  };
+  delete nextErrors[safeProfileId];
+  state.staffAccess.lifecycleRowErrors = nextErrors;
+}
+
+function setStaffLifecycleSaving(profileId = "", saving = false, action = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  const nextSaving = {
+    ...(getStaffAccessState()?.lifecycleSavingProfileIds || {}),
+  };
+  const nextActions = {
+    ...(getStaffAccessState()?.lifecycleSavingActions || {}),
+  };
+  if (saving) {
+    nextSaving[safeProfileId] = true;
+    nextActions[safeProfileId] = String(action || "").trim();
+  } else {
+    delete nextSaving[safeProfileId];
+    delete nextActions[safeProfileId];
+  }
+  state.staffAccess.lifecycleSavingProfileIds = nextSaving;
+  state.staffAccess.lifecycleSavingActions = nextActions;
+}
+
+function syncStaffLifecycleStateWithProfiles(profiles = []) {
+  const profileIds = new Set(
+    (Array.isArray(profiles) ? profiles : [])
+      .map((profile) => String(profile?.id || "").trim())
+      .filter(Boolean)
+  );
+  const rowErrors = {};
+  for (const [profileId, message] of Object.entries(getStaffAccessState()?.lifecycleRowErrors || {})) {
+    if (profileIds.has(profileId) && message) rowErrors[profileId] = message;
+  }
+  const savingProfileIds = {};
+  const savingActions = {};
+  for (const [profileId, saving] of Object.entries(getStaffAccessState()?.lifecycleSavingProfileIds || {})) {
+    if (profileIds.has(profileId) && saving) {
+      savingProfileIds[profileId] = true;
+      const action = String(getStaffAccessState()?.lifecycleSavingActions?.[profileId] || "").trim();
+      if (action) savingActions[profileId] = action;
+    }
+  }
+  state.staffAccess.lifecycleRowErrors = rowErrors;
+  state.staffAccess.lifecycleSavingProfileIds = savingProfileIds;
+  state.staffAccess.lifecycleSavingActions = savingActions;
+}
+
+function doesStaffAccessProfileMatchLifecycleFilter(profile = null, statusFilter = getStaffLifecycleStatusFilter()) {
+  if (statusFilter === "needs_attention") return doesStaffAccessProfileNeedAttention(profile);
+  if (statusFilter === "live_access") return !isStaffAccessProfileArchived(profile) && doesStaffAccessProfileHaveActiveAccess(profile);
+  if (statusFilter === "pending_approval") return doesStaffAccessProfileHavePendingApproval(profile);
+  if (statusFilter === "no_live_access") {
+    return !isStaffAccessProfileArchived(profile)
+      && !doesStaffAccessProfileHaveActiveAccess(profile)
+      && !doesStaffAccessProfileHavePendingApproval(profile);
+  }
+  if (statusFilter === "archived") return isStaffAccessProfileArchived(profile);
+  return true;
+}
+
+function doesStaffAccessProfileMatchSearch(profile = null, search = getStaffLifecycleSearch()) {
+  const query = String(search || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    String(profile?.display_name || ""),
+    String(profile?.email || ""),
+    String(profile?.external_staff_id || ""),
+    isStaffAccessProfileArchived(profile) ? "archived active record" : "active record",
+    isStaffAccessProfileLinked(profile) ? "linked account" : "not linked",
+    getStaffAccessProfileAccessStatus(profile).label,
+  ].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function sortStaffAccessProfilesByLifecycle(a = null, b = null) {
+  const rankDelta = getStaffAccessProfileAttentionRank(a) - getStaffAccessProfileAttentionRank(b);
+  if (rankDelta !== 0) return rankDelta;
+  const nameDelta = String(a?.display_name || "").localeCompare(String(b?.display_name || ""));
+  if (nameDelta !== 0) return nameDelta;
+  const emailDelta = String(a?.email || "").localeCompare(String(b?.email || ""));
+  if (emailDelta !== 0) return emailDelta;
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
 function getStaffAccessFilteredProfiles() {
-  const safeSearch = String(getStaffAccessState()?.search || "").trim().toLowerCase();
-  const safeFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
+  const safeSearch = getStaffLifecycleSearch();
+  const safeFilter = getStaffLifecycleStatusFilter();
   const profiles = Array.isArray(getStaffAccessState()?.profiles) ? getStaffAccessState().profiles : [];
-  return profiles.filter((profile) => {
-    if (safeFilter === "pending_access" && !doesStaffAccessProfileHavePendingAccess(profile)) return false;
-    if (safeFilter === "active_access" && !doesStaffAccessProfileHaveActiveAccess(profile)) return false;
-    if (safeFilter === "no_role_assigned" && !doesStaffAccessProfileHaveNoRoleAssigned(profile)) return false;
-    if (safeFilter === "recently_imported" && !isStaffAccessProfileRecentlyImported(profile)) return false;
-    if (!safeSearch) return true;
-    const haystack = [
-      String(profile?.display_name || ""),
-      String(profile?.email || ""),
-      String(profile?.external_staff_id || ""),
-    ].join(" ").toLowerCase();
-    return haystack.includes(safeSearch);
-  });
+  const sourceRows = String(safeSearch || "").trim()
+    ? profiles.filter((profile) => doesStaffAccessProfileMatchSearch(profile, safeSearch))
+    : profiles.filter((profile) => doesStaffAccessProfileMatchLifecycleFilter(profile, safeFilter));
+  return [...sourceRows].sort(sortStaffAccessProfilesByLifecycle);
 }
 
 function getStaffAccessSelectedRoleSet() {
@@ -2118,7 +2295,6 @@ function syncStaffAccessSelectedProfileId() {
   const visibleProfiles = getStaffAccessFilteredProfiles();
   const selectedProfileId = getStaffAccessSelectedProfileId();
   const currentUserId = getCurrentTeacherId();
-  const currentFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
 
   if (selectedProfileId && visibleProfiles.some((profile) => String(profile?.id || "").trim() === selectedProfileId)) {
     return selectedProfileId;
@@ -2130,7 +2306,7 @@ function syncStaffAccessSelectedProfileId() {
     return state.staffAccess.selectedProfileId;
   }
 
-  if (currentFilter === "recently_imported" && visibleProfiles.length) {
+  if (visibleProfiles.length) {
     state.staffAccess.selectedProfileId = String(visibleProfiles[0]?.id || "").trim();
     return state.staffAccess.selectedProfileId;
   }
@@ -2154,6 +2330,10 @@ function getStaffAccessSetupWarnings() {
 
   if (roleSet.has("hod") && Number(getAccessContext()?.data_health?.unmapped_subject_class_count || 0) > 0) {
     warnings.push("Some subject classes still need department mapping before HOD coverage will be complete.");
+  }
+
+  if (selectedProfile && isStaffAccessProfileArchived(selectedProfile)) {
+    warnings.push("This staff directory record is archived. Restore it before changing live access.");
   }
 
   if (selectedProfile && !getSelectedStaffAccessTargetUserId()) {
@@ -2192,17 +2372,78 @@ function getStaffAccessDisplayName(identityValue = "") {
 }
 
 function canManageSelectedStaffAccessLiveAccess() {
-  return !!getSelectedStaffAccessTargetUserId();
+  const selectedProfile = getStaffAccessSelectedProfile();
+  return !!getSelectedStaffAccessTargetUserId() && !isStaffAccessProfileArchived(selectedProfile);
 }
 
 function getStaffAccessFilterOptions() {
   return [
-    { value: "all", label: "All staff" },
-    { value: "pending_access", label: "Pending access" },
-    { value: "active_access", label: "Active access" },
-    { value: "no_role_assigned", label: "No role assigned" },
-    { value: "recently_imported", label: "Recently imported" },
+    { value: "needs_attention", label: "Needs attention" },
+    { value: "live_access", label: "Live access" },
+    { value: "pending_approval", label: "Pending approval" },
+    { value: "no_live_access", label: "No live access" },
+    { value: "archived", label: "Archived" },
+    { value: "all", label: "All" },
   ];
+}
+
+function getStaffAccessProfileDirectoryStatus(profile = null) {
+  return isStaffAccessProfileArchived(profile)
+    ? { label: "Archived record", muted: false }
+    : { label: "Active record", muted: true };
+}
+
+function getStaffAccessProfileLinkStatus(profile = null) {
+  return isStaffAccessProfileLinked(profile)
+    ? { label: "Linked account", muted: true }
+    : { label: "Not linked", muted: false };
+}
+
+function getStaffAccessProfileAccessStatus(profile = null) {
+  if (doesStaffAccessProfileHaveActiveAccess(profile)) {
+    return { label: "Live access", muted: false };
+  }
+  if (doesStaffAccessProfileHavePendingApproval(profile)) {
+    return { label: "Pending approval", muted: false };
+  }
+  return { label: "No live access", muted: true };
+}
+
+function renderStaffAccessStatusTriplet(profile = null, { compact = false } = {}) {
+  const statuses = [
+    { name: "Directory", ...getStaffAccessProfileDirectoryStatus(profile) },
+    { name: "Link", ...getStaffAccessProfileLinkStatus(profile) },
+    { name: "Access", ...getStaffAccessProfileAccessStatus(profile) },
+  ];
+
+  return `
+    <div class="td-staff-lifecycle-status ${compact ? "td-staff-lifecycle-status--compact" : ""}">
+      ${statuses.map((status) => `
+        <span class="td-staff-lifecycle-status-item">
+          <strong>${escapeHtml(status.name)}</strong>
+          <span class="td-pill ${status.muted ? "td-pill--muted" : ""}">${escapeHtml(status.label)}</span>
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStaffAccessStatusRows(profile = null) {
+  const statuses = [
+    { name: "Directory", ...getStaffAccessProfileDirectoryStatus(profile) },
+    { name: "Link", ...getStaffAccessProfileLinkStatus(profile) },
+    { name: "Access", ...getStaffAccessProfileAccessStatus(profile) },
+  ];
+  return `
+    <div class="td-staff-lifecycle-status-grid">
+      ${statuses.map((status) => `
+        <div class="td-staff-lifecycle-status-card">
+          <span>${escapeHtml(status.name)}</span>
+          <strong>${escapeHtml(status.label)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function getStaffAccessImportSuggestionRows(profile = null) {
@@ -2337,8 +2578,9 @@ async function handleCommitStaffAccessImport() {
     });
     state.staffAccess.importResult = result || null;
     state.staffAccess.recentImportBatchId = String(result?.batch_id || "").trim();
-    state.staffAccess.filter = "recently_imported";
-    state.staffAccess.search = "";
+    state.staffAccess.lifecycleStatusFilter = "pending_approval";
+    state.staffAccess.lifecycleSearch = "";
+    resetStaffLifecycleVisibleRows();
     clearStaffAccessImportPreview();
     await loadStaffAccessDirectory({ preserveSelection: false });
     await syncStaffAccessSelectionForVisibleDirectory();
@@ -4093,6 +4335,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
       if (nameDelta !== 0) return nameDelta;
       return String(a?.email || "").localeCompare(String(b?.email || ""));
     });
+    syncStaffLifecycleStateWithProfiles(state.staffAccess.profiles);
     state.staffAccess.directoryRoleAssignments = directoryRoleAssignments;
     state.staffAccess.activeAdminUserIds = activeAdminUserIds;
     state.staffAccess.pendingApprovalSummaries = pendingApprovalSummaries;
@@ -4106,6 +4349,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
       state.staffAccess.selectedRoles = [];
       state.staffAccess.selectedScopes = [];
       state.staffAccess.selectedAuditEntries = [];
+      state.staffAccess.selectedDirectoryAuditEntries = [];
       state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
       state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
       state.staffAccess.detailError = "";
@@ -4122,6 +4366,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -4142,6 +4387,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -4165,8 +4411,9 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
       isLinkedProfile && safeTargetUserId
         ? listStaffAccessAuditEntries(safeTargetUserId, { limit: STAFF_ACCESS_AUDIT_LIMIT })
         : Promise.resolve([]),
+      listStaffDirectoryAuditEntries(safeProfileId, { limit: STAFF_ACCESS_AUDIT_LIMIT }),
     ];
-    const [pendingApprovalDetail, roles, scopes, auditEntries] = await Promise.all(requestParts);
+    const [pendingApprovalDetail, roles, scopes, auditEntries, directoryAuditEntries] = await Promise.all(requestParts);
     if (requestId !== staffAccessDetailsRequestId) return;
     state.staffAccess.selectedPendingApproval = pendingApprovalDetail || createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = isLinkedProfile
@@ -4175,6 +4422,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = roles;
     state.staffAccess.selectedScopes = scopes;
     state.staffAccess.selectedAuditEntries = auditEntries;
+    state.staffAccess.selectedDirectoryAuditEntries = directoryAuditEntries;
     syncStaffAccessPendingScopeSelections();
   } catch (error) {
     if (requestId !== staffAccessDetailsRequestId) return;
@@ -4183,6 +4431,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
   } finally {
@@ -4208,6 +4457,7 @@ async function syncStaffAccessSelectionForVisibleDirectory() {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -4290,6 +4540,67 @@ function buildStaffPendingAccessApprovalConfirmation() {
   };
 }
 
+function buildStaffLifecycleConfirmation({ mode = "", blocked = false } = {}) {
+  const selectedProfile = getStaffAccessSelectedProfile();
+  const selectedProfileId = String(selectedProfile?.id || "").trim();
+  const selectedUserId = String(selectedProfile?.user_id || "").trim();
+  const displayName = getStaffAccessDisplayName(selectedProfileId);
+
+  if (blocked) {
+    return {
+      title: "Cannot remove the last active Admin",
+      body: [
+        `${displayName} is currently the last active Admin.`,
+        "Archive and revoke-live-access both remove live access, so another active Admin must be in place first.",
+      ],
+      confirmLabel: "Close",
+      dismissLabel: "",
+      action: null,
+      tone: "danger",
+    };
+  }
+
+  if (mode === "archive") {
+    return {
+      title: `Archive ${displayName}?`,
+      body: [
+        "The staff directory record will be archived.",
+        "Any live access will be revoked and pending approvals will be invalidated by the server workflow.",
+      ],
+      confirmLabel: "Archive record",
+      dismissLabel: "Cancel",
+      action: { type: "archive-staff-record", profileId: selectedProfileId, userId: selectedUserId },
+      tone: "danger",
+    };
+  }
+
+  if (mode === "restore") {
+    return {
+      title: `Restore ${displayName}?`,
+      body: [
+        "The staff directory record will become active again.",
+        "Live access, pending approvals, and previous active role or scope assignments will not be recreated.",
+      ],
+      confirmLabel: "Restore record",
+      dismissLabel: "Cancel",
+      action: { type: "restore-staff-record", profileId: selectedProfileId, userId: selectedUserId },
+      tone: "",
+    };
+  }
+
+  return {
+    title: `Revoke live access for ${displayName}?`,
+    body: [
+      "All active roles and scopes for this linked account will be removed.",
+      "The staff directory record will remain active.",
+    ],
+    confirmLabel: "Revoke live access",
+    dismissLabel: "Cancel",
+    action: { type: "revoke-all-live-access", profileId: selectedProfileId, userId: selectedUserId },
+    tone: "danger",
+  };
+}
+
 function openStaffAccessConfirmation(config = null) {
   state.staffAccess.confirmation = config && typeof config === "object" ? config : null;
 }
@@ -4316,6 +4627,18 @@ async function handleConfirmStaffAccessAction() {
   }
   if (action.type === "approve-pending-access") {
     await handleSaveStaffPendingAccessApproval({ skipConfirmation: true });
+    return;
+  }
+  if (action.type === "revoke-all-live-access") {
+    await handleRevokeAllStaffLiveAccessFromDashboard({ skipConfirmation: true, profileId: action.profileId, userId: action.userId });
+    return;
+  }
+  if (action.type === "archive-staff-record") {
+    await handleArchiveStaffDirectoryRecordFromDashboard({ skipConfirmation: true, profileId: action.profileId });
+    return;
+  }
+  if (action.type === "restore-staff-record") {
+    await handleRestoreStaffDirectoryRecordFromDashboard({ skipConfirmation: true, profileId: action.profileId });
   }
 }
 
@@ -8057,7 +8380,8 @@ function onRootInput(event) {
     const nextValue = target.value || "";
     const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
     const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
-    state.staffAccess.search = nextValue;
+    state.staffAccess.lifecycleSearch = nextValue;
+    resetStaffLifecycleVisibleRows();
     void syncStaffAccessSelectionForVisibleDirectory();
     requestAnimationFrame(() => {
       const input = rootEl?.querySelector('[data-field="staff-access-search"]');
@@ -8682,6 +9006,165 @@ async function handleRevokeStaffRoleFromDashboard(role = "", { skipConfirmation 
   }
 }
 
+function getStaffLifecycleActionProfile(profileId = "") {
+  const safeProfileId = String(profileId || "").trim() || getStaffAccessSelectedProfileId();
+  return safeProfileId ? (getStaffAccessProfileMap().get(safeProfileId) || null) : null;
+}
+
+async function handleRevokeAllStaffLiveAccessFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+  userId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(userId || profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId || !safeUserId) {
+    showNotice("Choose a linked staff account before revoking live access.", "error");
+    paint();
+    return;
+  }
+  if (isStaffAccessProfileArchived(profile)) {
+    showNotice("Restore this staff record before changing live access.", "error");
+    paint();
+    return;
+  }
+  if (!doesSelectedStaffAccessHaveLiveAccess() && safeProfileId === getStaffAccessSelectedProfileId()) {
+    showNotice("This staff member has no live access to revoke.", "error");
+    paint();
+    return;
+  }
+  if (isSelectedStaffAccessAdminLastActiveAdmin()) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "revoke", blocked: true }));
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "revoke" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "revoke");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await revokeAllStaffLiveAccess({
+      userId: safeUserId,
+      reason: "Live staff access revoked by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Live staff access revoked.", "success");
+  } catch (error) {
+    console.error("revoke all staff live access error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not revoke live access for this staff member.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
+async function handleArchiveStaffDirectoryRecordFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId) {
+    showNotice("Choose a staff record before archiving.", "error");
+    paint();
+    return;
+  }
+  if (isStaffAccessProfileArchived(profile)) {
+    showNotice("This staff record is already archived.", "error");
+    paint();
+    return;
+  }
+  if (safeUserId && isSelectedStaffAccessAdminLastActiveAdmin()) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "archive", blocked: true }));
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "archive" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "archive");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await archiveStaffDirectoryRecord({
+      profileId: safeProfileId,
+      reason: "Staff directory record archived by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Staff record archived.", "success");
+  } catch (error) {
+    console.error("archive staff directory record error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not archive this staff record.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
+async function handleRestoreStaffDirectoryRecordFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId) {
+    showNotice("Choose a staff record before restoring.", "error");
+    paint();
+    return;
+  }
+  if (!isStaffAccessProfileArchived(profile)) {
+    showNotice("This staff record is already active.", "error");
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "restore" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "restore");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await restoreStaffDirectoryRecord({
+      profileId: safeProfileId,
+      reason: "Staff directory record restored by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Staff record restored.", "success");
+  } catch (error) {
+    console.error("restore staff directory record error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not restore this staff record.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
 async function handleAddStaffScopeFromDashboard(role = "", scopeType = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   const safeScopeType = String(scopeType || "").trim().toLowerCase();
@@ -8822,7 +9305,10 @@ async function onRootClick(event) {
   }
 
   if (action === "set-staff-access-filter") {
-    state.staffAccess.filter = String(button.dataset.filter || "all").trim().toLowerCase() || "all";
+    state.staffAccess.lifecycleStatusFilter = getStaffAccessFilterOptions().some((option) => option.value === String(button.dataset.filter || "").trim().toLowerCase())
+      ? String(button.dataset.filter || "").trim().toLowerCase()
+      : STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER;
+    resetStaffLifecycleVisibleRows();
     await syncStaffAccessSelectionForVisibleDirectory();
     return;
   }
@@ -8913,6 +9399,12 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "show-more-staff-lifecycle-rows") {
+    showMoreStaffLifecycleRows(Number(button.dataset.totalRows || 0));
+    paint();
+    return;
+  }
+
   if (action === "select-staff-profile") {
     await handleSelectStaffProfile(button.dataset.profileId || "");
     return;
@@ -8940,6 +9432,21 @@ async function onRootClick(event) {
 
   if (action === "revoke-staff-role") {
     await handleRevokeStaffRoleFromDashboard(button.dataset.role || "");
+    return;
+  }
+
+  if (action === "revoke-all-staff-live-access") {
+    await handleRevokeAllStaffLiveAccessFromDashboard();
+    return;
+  }
+
+  if (action === "archive-staff-record") {
+    await handleArchiveStaffDirectoryRecordFromDashboard();
+    return;
+  }
+
+  if (action === "restore-staff-record") {
+    await handleRestoreStaffDirectoryRecordFromDashboard();
     return;
   }
 
@@ -17803,10 +18310,12 @@ function renderStaffAccessRoleCard(role = "") {
   const roleIsActive = selectedRoleSet.has(safeRole);
   const roleLabel = getStaffAccessRoleLabel(safeRole);
   const mutating = !!getStaffAccessState()?.mutating;
+  const selectedProfile = getStaffAccessSelectedProfile();
+  const archivedRecord = isStaffAccessProfileArchived(selectedProfile);
   const hasLiveAccessTarget = canManageSelectedStaffAccessLiveAccess();
-  const waitingForSignInLink = !hasLiveAccessTarget;
+  const waitingForSignInLink = !archivedRecord && !hasLiveAccessTarget;
   const revokeDisabled = safeRole === "admin" && roleIsActive && !canRevokeSelectedAdminRole();
-  const actionDisabled = mutating || revokeDisabled;
+  const actionDisabled = mutating || revokeDisabled || archivedRecord;
   const scopedRoleConfig = getStaffAccessScopedRoleConfig(safeRole);
   const scopedRolePlan = getStaffAccessScopedRolePendingPlan(safeRole);
   let primaryActionLabel = scopedRoleConfig
@@ -17824,6 +18333,11 @@ function renderStaffAccessRoleCard(role = "") {
 
   if (waitingForSignInLink) {
     primaryActionLabel = "Waiting for sign-in";
+    primaryActionDisabled = true;
+    primaryAction = "";
+  }
+  if (archivedRecord) {
+    primaryActionLabel = "Archived";
     primaryActionDisabled = true;
     primaryAction = "";
   }
@@ -17865,6 +18379,11 @@ function renderStaffAccessRoleCard(role = "") {
       ${
         waitingForSignInLink
           ? `<p class="td-staff-access-note td-staff-access-note--warning">This imported staff record is pending sign-in linkage, so live access cannot be granted yet.</p>`
+          : ""
+      }
+      ${
+        archivedRecord
+          ? `<p class="td-staff-access-note td-staff-access-note--warning">Restore this directory record before changing live access.</p>`
           : ""
       }
       ${
@@ -17913,10 +18432,12 @@ function renderStaffAccessRoleCard(role = "") {
           : ""
       }
       ${
-        scopedRoleConfig && waitingForSignInLink
+        scopedRoleConfig && (waitingForSignInLink || archivedRecord)
           ? `
             <p class="td-staff-access-note td-staff-access-note--compact">
-              Scope setup will become available after the staff member signs in and links this directory record.
+              ${escapeHtml(archivedRecord
+                ? "Scope setup will become available after this directory record is restored."
+                : "Scope setup will become available after the staff member signs in and links this directory record.")}
             </p>
           `
           : ""
@@ -17974,6 +18495,134 @@ function renderStaffAccessAuditList() {
   `;
 }
 
+function getStaffDirectoryAuditActionLabel(action = "") {
+  const safeAction = String(action || "").trim().toLowerCase();
+  if (safeAction === "archive") return "Archived record";
+  if (safeAction === "restore") return "Restored record";
+  if (safeAction === "revoke_all_live_access") return "Revoked live access";
+  return "Updated record";
+}
+
+function renderStaffDirectoryAuditList() {
+  const auditEntries = Array.isArray(getStaffAccessState()?.selectedDirectoryAuditEntries)
+    ? getStaffAccessState().selectedDirectoryAuditEntries
+    : [];
+  const profileMap = getStaffAccessProfileByUserIdMap();
+
+  if (!auditEntries.length) {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>No recent directory lifecycle changes yet.</strong>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="td-staff-access-audit-list">
+      ${auditEntries.map((entry) => {
+        const actorUserId = String(entry?.actor_user_id || "").trim();
+        const actorLabel = actorUserId === getCurrentTeacherId()
+          ? "You"
+          : (profileMap.get(actorUserId)?.display_name || actorUserId || "Unknown");
+        const reason = String(entry?.reason || "").trim();
+        return `
+          <div class="td-staff-access-audit-item">
+            <div class="td-staff-access-audit-copy">
+              <strong>${escapeHtml(getStaffDirectoryAuditActionLabel(entry?.action))}</strong>
+              <span>${escapeHtml(reason || "Directory lifecycle change")}</span>
+            </div>
+            <div class="td-staff-access-audit-meta">
+              <span>${escapeHtml(actorLabel)}</span>
+              <span>${escapeHtml(formatStaffAccessDateTime(entry?.created_at))}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderStaffDirectoryAuditCard() {
+  return `
+    <div class="td-staff-access-audit-card">
+      <div class="td-staff-access-audit-head">
+        <h4>Recent directory lifecycle changes</h4>
+        <span>Latest ${escapeHtml(String(STAFF_ACCESS_AUDIT_LIMIT))}</span>
+      </div>
+      ${renderStaffDirectoryAuditList()}
+    </div>
+  `;
+}
+
+function renderStaffLifecycleRecordPanel(profile = null) {
+  if (!profile) return "";
+  const profileId = String(profile?.id || "").trim();
+  const archived = isStaffAccessProfileArchived(profile);
+  const linked = isStaffAccessProfileLinked(profile);
+  const hasLiveAccess = doesSelectedStaffAccessHaveLiveAccess();
+  const saving = !!getStaffAccessState()?.lifecycleSavingProfileIds?.[profileId];
+  const savingAction = String(getStaffAccessState()?.lifecycleSavingActions?.[profileId] || "").trim();
+  const rowError = String(getStaffAccessState()?.lifecycleRowErrors?.[profileId] || "").trim();
+  const mutating = !!getStaffAccessState()?.mutating;
+  const archiveNote = archived
+    ? [
+        String(profile?.archived_at || "").trim() ? `Archived ${formatStaffAccessDateTime(profile.archived_at)}` : "Archived",
+        String(profile?.archive_reason || "").trim(),
+      ].filter(Boolean).join(" - ")
+    : "";
+
+  return `
+    <div class="td-staff-access-summary-card td-staff-lifecycle-record-card">
+      <span class="td-staff-access-head-inline">
+        <span>Staff lifecycle</span>
+        ${renderStaffAccessInlineTip("Directory record state, account link state, and live access state are tracked separately.", "Staff lifecycle help")}
+      </span>
+      ${renderStaffAccessStatusRows(profile)}
+      ${archiveNote ? `<p class="td-staff-access-note td-staff-access-note--compact">${escapeHtml(archiveNote)}</p>` : ""}
+      <div class="td-staff-lifecycle-actions">
+        ${
+          !archived && linked && hasLiveAccess
+            ? `
+              <button
+                class="td-btn td-btn--ghost td-btn--small td-staff-access-btn--danger"
+                type="button"
+                data-action="revoke-all-staff-live-access"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "revoke" ? "Revoking..." : "Revoke live access")}
+              </button>
+            `
+            : ""
+        }
+        ${
+          archived
+            ? `
+              <button
+                class="td-btn td-btn--small"
+                type="button"
+                data-action="restore-staff-record"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "restore" ? "Restoring..." : "Restore record")}
+              </button>
+            `
+            : `
+              <button
+                class="td-btn td-btn--ghost td-btn--small td-staff-access-btn--danger"
+                type="button"
+                data-action="archive-staff-record"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "archive" ? "Archiving..." : "Archive record")}
+              </button>
+            `
+        }
+      </div>
+      ${rowError ? `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">${escapeHtml(rowError)}</p>` : ""}
+    </div>
+  `;
+}
+
 function renderStaffAccessProfileBadges(profile = null, { includeCurrentUser = false } = {}) {
   const pills = [...getStaffAccessProfileStatusPills(profile)];
   if (includeCurrentUser && String(profile?.user_id || "").trim() === getCurrentTeacherId()) {
@@ -17986,7 +18635,7 @@ function renderStaffAccessProfileBadges(profile = null, { includeCurrentUser = f
 }
 
 function renderStaffAccessFilterBar() {
-  const currentFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
+  const currentFilter = getStaffLifecycleStatusFilter();
   return `
     <div class="td-staff-access-filter-row">
       ${getStaffAccessFilterOptions().map((option) => `
@@ -19578,6 +20227,7 @@ function renderStaffPendingAccessDetail(profile = null) {
 
   return `
     ${renderStaffAccessWarnings()}
+    ${renderStaffLifecycleRecordPanel(profile)}
     ${
       failureMessage
         ? `
@@ -19659,12 +20309,14 @@ function renderStaffPendingAccessDetail(profile = null) {
         Linked profile -> live access workflow. Unlinked profile -> pending approval workflow.
       </p>
     </div>
+    ${renderStaffDirectoryAuditCard()}
   `;
 }
 
 function renderStaffAccessLiveDetail(selectedProfile = null) {
   return `
     ${renderStaffAccessWarnings()}
+    ${renderStaffLifecycleRecordPanel(selectedProfile)}
     <div class="td-staff-access-summary-grid">
       <div class="td-staff-access-summary-card">
         <span class="td-staff-access-head-inline">
@@ -19692,6 +20344,7 @@ function renderStaffAccessLiveDetail(selectedProfile = null) {
       </div>
       ${renderStaffAccessAuditList()}
     </div>
+    ${renderStaffDirectoryAuditCard()}
   `;
 }
 
@@ -19701,7 +20354,10 @@ function renderSectionStaffAccess() {
   const selectedProfile = getStaffAccessSelectedProfile();
   const selectedProfileLinked = isStaffAccessProfileLinked(selectedProfile);
   const filteredProfiles = getStaffAccessFilteredProfiles();
-  const hasDirectorySearch = !!String(getStaffAccessState()?.search || "").trim();
+  const visibleRowCount = getStaffLifecycleVisibleRowCount(filteredProfiles.length);
+  const visibleProfiles = filteredProfiles.slice(0, visibleRowCount);
+  const hiddenRowCount = Math.max(0, filteredProfiles.length - visibleRowCount);
+  const hasDirectorySearch = !!String(getStaffLifecycleSearch() || "").trim();
   const directoryEmptyMessage = "Only staff who have signed in and opened the staff dashboard appear here yet. Imported CSV staff will also appear here in Pending access.";
 
   return `
@@ -19726,7 +20382,7 @@ function renderSectionStaffAccess() {
                       class="td-input"
                       type="text"
                       data-field="staff-access-search"
-                      value="${escapeAttr(String(getStaffAccessState()?.search || ""))}"
+                      value="${escapeAttr(getStaffLifecycleSearch())}"
                       placeholder="Search staff by name or email..."
                       autocomplete="off"
                     />
@@ -19747,8 +20403,11 @@ function renderSectionStaffAccess() {
                         `
                         : filteredProfiles.length
                           ? `
+                            <div class="td-staff-access-list-summary">
+                              <span>${escapeHtml(`Showing ${visibleProfiles.length} of ${filteredProfiles.length}`)}</span>
+                            </div>
                             <div class="td-staff-access-directory">
-                              ${filteredProfiles.map((profile) => {
+                              ${visibleProfiles.map((profile) => {
                                 const isSelected = String(profile?.id || "") === getStaffAccessSelectedProfileId();
                                 const isCurrentUser = String(profile?.user_id || "") === getCurrentTeacherId();
                                 return `
@@ -19762,6 +20421,7 @@ function renderSectionStaffAccess() {
                                     <span class="td-staff-access-person-copy">
                                       <strong>${escapeHtml(profile.display_name)}</strong>
                                       <span>${escapeHtml(profile.email)}</span>
+                                      ${renderStaffAccessStatusTriplet(profile, { compact: true })}
                                     </span>
                                     <span class="td-staff-access-person-badges">
                                       ${renderStaffAccessProfileBadges(profile, { includeCurrentUser: isCurrentUser })}
@@ -19770,6 +20430,23 @@ function renderSectionStaffAccess() {
                                 `;
                               }).join("")}
                             </div>
+                            ${
+                              hiddenRowCount
+                                ? `
+                                  <div class="td-staff-access-import-actions">
+                                    <button
+                                      class="td-btn td-btn--ghost td-btn--small"
+                                      type="button"
+                                      data-action="show-more-staff-lifecycle-rows"
+                                      data-total-rows="${escapeAttr(String(filteredProfiles.length))}"
+                                      ${getStaffAccessState()?.mutating ? "disabled" : ""}
+                                    >
+                                      ${escapeHtml(`Show ${Math.min(STAFF_LIFECYCLE_VISIBLE_ROWS_STEP, hiddenRowCount)} more`)}
+                                    </button>
+                                  </div>
+                                `
+                                : ""
+                            }
                           `
                           : `
                             <div class="td-empty td-empty--compact">
@@ -19795,6 +20472,7 @@ function renderSectionStaffAccess() {
                             <div>
                               <h3>${escapeHtml(selectedProfile.display_name)}</h3>
                               <p>${escapeHtml(selectedProfile.email)}</p>
+                              ${renderStaffAccessStatusTriplet(selectedProfile)}
                             </div>
                             <div class="td-staff-access-header-pills">
                               ${renderStaffAccessProfileBadges(selectedProfile, { includeCurrentUser: true })}
@@ -24930,6 +25608,13 @@ function injectStyles() {
       color:#1d4ed8;
     }
 
+    .td-staff-access-list-summary{
+      margin:-2px 0 10px;
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+    }
+
     .td-staff-access-directory{
       display:flex;
       flex-direction:column;
@@ -25004,6 +25689,42 @@ function injectStyles() {
       gap:6px;
       width:100%;
       min-width:0;
+    }
+
+    .td-staff-lifecycle-status{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
+      margin-top:8px;
+    }
+
+    .td-staff-lifecycle-status--compact{
+      gap:6px;
+      margin-top:4px;
+    }
+
+    .td-staff-lifecycle-status-item{
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      min-width:0;
+      color:#64748b;
+      font-size:0.74rem;
+      line-height:1.25;
+    }
+
+    .td-staff-lifecycle-status-item strong{
+      color:#475569;
+      font-size:0.72rem;
+      font-weight:800;
+      line-height:1.25;
+    }
+
+    .td-staff-lifecycle-status--compact .td-pill{
+      padding:4px 7px;
+      font-size:0.68rem;
+      line-height:1.1;
     }
 
     .td-staff-access-main{
@@ -25113,6 +25834,48 @@ function injectStyles() {
       font-weight:800;
       letter-spacing:.05em;
       text-transform:uppercase;
+    }
+
+    .td-staff-lifecycle-record-card{
+      background:#fff;
+    }
+
+    .td-staff-lifecycle-status-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+    }
+
+    .td-staff-lifecycle-status-card{
+      border:1px solid #e2e8f0;
+      border-radius:10px;
+      background:#f8fafc;
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+    }
+
+    .td-staff-lifecycle-status-card span{
+      color:#64748b;
+      font-size:0.72rem;
+      font-weight:800;
+      line-height:1.25;
+      text-transform:uppercase;
+    }
+
+    .td-staff-lifecycle-status-card strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.3;
+    }
+
+    .td-staff-lifecycle-actions{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
     }
 
     .td-staff-access-import-detail-list{
@@ -30127,7 +30890,8 @@ function injectStyles() {
 
       .td-staff-access-layout,
       .td-staff-access-summary-grid,
-      .td-staff-access-scope-grid{
+      .td-staff-access-scope-grid,
+      .td-staff-lifecycle-status-grid{
         grid-template-columns:1fr;
       }
 

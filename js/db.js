@@ -50,6 +50,9 @@ const STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION = "list_staff_pending_access_summa
 const STAFF_PENDING_ACCESS_DETAIL_FUNCTION = "read_staff_pending_access_detail";
 const STAFF_PENDING_ACCESS_SAVE_FUNCTION = "save_staff_pending_access_approval";
 const STAFF_PENDING_ACCESS_CANCEL_FUNCTION = "cancel_staff_pending_access_approval";
+const STAFF_ARCHIVE_FUNCTION = "archive_staff_directory_record";
+const STAFF_RESTORE_FUNCTION = "restore_staff_directory_record";
+const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
@@ -464,6 +467,20 @@ function isMissingStaffPendingAccessSupportError(error) {
     || message.includes(STAFF_PENDING_ACCESS_CANCEL_FUNCTION);
 }
 
+function isMissingStaffLifecycleSupportError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "42883"
+    || code === "PGRST202"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || message.includes(STAFF_ARCHIVE_FUNCTION)
+    || message.includes(STAFF_RESTORE_FUNCTION)
+    || message.includes(STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION)
+    || message.includes("staff_directory_audit_log");
+}
+
 function setLatestStaffProfileSyncNotice(value = null) {
   const payload = value && typeof value === "object" ? value : null;
   const profileSyncMessage = String(payload?.profile_sync_message || "").trim();
@@ -591,6 +608,9 @@ function normalizeStaffProfileRow(row = {}) {
     last_import_batch_id: String(row?.last_import_batch_id || "").trim(),
     last_imported_at: String(row?.last_imported_at || "").trim(),
     last_imported_by: String(row?.last_imported_by || "").trim(),
+    archived_at: String(row?.archived_at || "").trim(),
+    archived_by: String(row?.archived_by || "").trim(),
+    archive_reason: String(row?.archive_reason || "").trim(),
     created_at: String(row?.created_at || "").trim(),
     updated_at: String(row?.updated_at || "").trim(),
   };
@@ -631,6 +651,19 @@ function normalizeStaffAccessAuditRow(row = {}) {
     role: String(row?.role || "").trim().toLowerCase(),
     scope_type: String(row?.scope_type || "").trim().toLowerCase(),
     scope_value: String(row?.scope_value || "").trim(),
+    metadata: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
+    created_at: String(row?.created_at || "").trim(),
+  };
+}
+
+function normalizeStaffDirectoryAuditRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    actor_user_id: String(row?.actor_user_id || "").trim(),
+    target_profile_id: String(row?.target_profile_id || "").trim(),
+    target_user_id: String(row?.target_user_id || "").trim(),
+    action: String(row?.action || "").trim().toLowerCase(),
+    reason: String(row?.reason || "").trim(),
     metadata: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
     created_at: String(row?.created_at || "").trim(),
   };
@@ -2203,7 +2236,7 @@ export function consumeLatestStaffProfileSyncNotice() {
 export async function listStaffProfiles() {
   const { data, error } = await supabase
     .from(STAFF_PROFILES_TABLE)
-    .select("id, user_id, email, display_name, external_staff_id, notes, profile_source, import_metadata, last_import_batch_id, last_imported_at, last_imported_by, created_at, updated_at")
+    .select("id, user_id, email, display_name, external_staff_id, notes, profile_source, import_metadata, last_import_batch_id, last_imported_at, last_imported_by, archived_at, archived_by, archive_reason, created_at, updated_at")
     .order("display_name", { ascending: true })
     .order("email", { ascending: true });
 
@@ -2309,6 +2342,30 @@ export async function listStaffAccessAuditEntries(targetUserId = "", { limit = 1
   return (data || [])
     .map((row) => normalizeStaffAccessAuditRow(row))
     .filter((row) => row.target_user_id);
+}
+
+export async function listStaffDirectoryAuditEntries(profileId = "", { limit = 10 } = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
+  const { data, error } = await supabase
+    .from("staff_directory_audit_log")
+    .select("id, actor_user_id, target_profile_id, target_user_id, action, reason, metadata, created_at")
+    .eq("target_profile_id", safeProfileId)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle audit history is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return (data || [])
+    .map((row) => normalizeStaffDirectoryAuditRow(row))
+    .filter((row) => row.target_profile_id);
 }
 
 export async function listActiveAdminUserIds() {
@@ -2445,6 +2502,69 @@ export async function revokeStaffRole(targetUserId = "", role = "") {
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
       throw new Error("Staff role changes are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function revokeAllStaffLiveAccess({
+  userId = "",
+  reason = "",
+} = {}) {
+  const safeUserId = String(userId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeUserId) throw new Error("Choose a linked staff account first.");
+
+  const { data, error } = await supabase.rpc(STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION, {
+    target_user_id: safeUserId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function archiveStaffDirectoryRecord({
+  profileId = "",
+  reason = "",
+} = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const { data, error } = await supabase.rpc(STAFF_ARCHIVE_FUNCTION, {
+    target_profile_id: safeProfileId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function restoreStaffDirectoryRecord({
+  profileId = "",
+  reason = "",
+} = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const { data, error } = await supabase.rpc(STAFF_RESTORE_FUNCTION, {
+    target_profile_id: safeProfileId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
     }
     throw error;
   }
