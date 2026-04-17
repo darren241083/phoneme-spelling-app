@@ -10,8 +10,8 @@ import {
   listPupilPracticeEvidenceAttempts,
   readAssignmentPupilStatus,
   saveAssignmentProgress,
-} from "./db.js?v=1.22";
-import { mountGame } from "./game.js?v=1.31";
+} from "./db.js?v=1.23";
+import { mountGame } from "./game.js?v=1.32";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
@@ -29,6 +29,7 @@ import {
   buildDifficultyMapFromWordRows,
   estimateSpellingAttainmentIndicator,
 } from "./spellingIndicator.js?v=1.5";
+import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -405,7 +406,7 @@ function buildPupilAttainmentCardBodyHtml(progress) {
   `;
 }
 
-function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map()) {
+function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map(), wordRowsById = new Map()) {
   const latestByWord = new Map();
   for (const attempt of attempts || []) {
     const key = String(attempt?.assignment_target_id || attempt?.test_word_id || attempt?.word_text || "");
@@ -423,17 +424,32 @@ function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map()) {
   const averageAttempts = wordsChecked
     ? latestRows.reduce((sum, item) => sum + Math.max(1, Number(item?.attempt_number || 1)), 0) / wordsChecked
     : 0;
+  const headlineRows = latestRows.filter((item) =>
+    shouldIncludeBaselineResponseInHeadlineAttainment(
+      item,
+      wordRowsById.get(String(item?.test_word_id || ""))
+    )
+  );
+  const headlineChecked = headlineRows.length;
+  const headlineCorrect = headlineRows.filter((item) => item?.correct).length;
+  const headlineAccuracy = headlineChecked ? headlineCorrect / headlineChecked : 0;
+  const headlineFirstTrySuccessRate = headlineChecked
+    ? headlineRows.filter((item) => item?.correct && Math.max(1, Number(item?.attempt_number || 1)) === 1).length / headlineChecked
+    : 0;
+  const headlineAverageAttempts = headlineChecked
+    ? headlineRows.reduce((sum, item) => sum + Math.max(1, Number(item?.attempt_number || 1)), 0) / headlineChecked
+    : 0;
   const attainmentIndicator = estimateSpellingAttainmentIndicator({
-    responses: latestRows.map((item) => ({
+    responses: headlineRows.map((item) => ({
       correct: !!item?.correct,
       difficultyScore: difficultyByWordId.get(String(item?.test_word_id || ""))?.coreScore
         ?? difficultyByWordId.get(String(item?.test_word_id || ""))?.score
         ?? 50,
     })),
-    checkedAccuracy: accuracy,
-    firstTimeCorrectRate: firstTrySuccessRate,
+    checkedAccuracy: headlineChecked ? headlineAccuracy : null,
+    firstTimeCorrectRate: headlineChecked ? headlineFirstTrySuccessRate : null,
     completionRate: null,
-    averageAttempts,
+    averageAttempts: headlineChecked ? headlineAverageAttempts : null,
   });
 
   const graphemeStats = new Map();
@@ -520,6 +536,7 @@ async function loadPupilProgress(pupilId) {
       .filter(Boolean)
   )];
   let difficultyByWordId = new Map();
+  let wordRowsById = new Map();
 
   if (testWordIds.length) {
     const { data: wordRows } = await supabase
@@ -527,9 +544,10 @@ async function loadPupilProgress(pupilId) {
       .select("id,word,segments,choice")
       .in("id", testWordIds);
     difficultyByWordId = buildDifficultyMapFromWordRows(wordRows || []);
+    wordRowsById = new Map((wordRows || []).map((row) => [String(row?.id || ""), row]).filter(([id]) => !!id));
   }
 
-  return buildPupilProgressSnapshot(attempts, difficultyByWordId);
+  return buildPupilProgressSnapshot(attempts, difficultyByWordId, wordRowsById);
 }
 
 async function loadAssignments(pupilId) {

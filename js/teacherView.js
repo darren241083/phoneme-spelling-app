@@ -51,7 +51,8 @@ import {
   isBaselineAssignmentWordRows,
   mergePlacementWithLiveProfiles,
   resolveBaselinePresetFromWordRows,
-} from "./baselinePlacement.js?v=1.3";
+  shouldIncludeBaselineResponseInHeadlineAttainment,
+} from "./baselinePlacement.js?v=1.5";
 import { buildResolvedWordMap } from "./phonicsResolution.js?v=1.0";
 import {
   cancelStaffPendingAccessApproval,
@@ -105,7 +106,7 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.37";
+} from "./db.js?v=1.38";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -6358,6 +6359,23 @@ function buildAssignmentAnalyticsSnapshot({ assignmentId, classId, className, ro
       .sort((a, b) => b - a)[0] || null;
     const completedByStatus = !!pupilStatus?.completedAt || (!pupilStatus && totalWords > 0 && attemptedWords >= totalWords);
     const startedByStatus = !!(pupilStatus?.startedAt || pupilStatus?.lastOpenedAt || pupilStatus?.lastActivityAt);
+    const headlineWordResults = visibleWordResults
+      .filter((item) => item?.latestAttempt)
+      .filter((item) =>
+        shouldIncludeBaselineResponseInHeadlineAttainment(
+          item,
+          wordRowsById.get(String(item?.baseTestWordId || item?.wordId || ""))
+        )
+      );
+    const headlineAttemptedWords = headlineWordResults.length;
+    const headlineCorrectWords = headlineWordResults.filter((item) => item?.correct).length;
+    const headlineCheckedAccuracy = headlineAttemptedWords ? headlineCorrectWords / headlineAttemptedWords : null;
+    const headlineFirstTimeCorrectRate = headlineAttemptedWords
+      ? headlineWordResults.filter((item) => item?.correct && Math.max(1, Number(item?.attemptsUsed || 1)) === 1).length / headlineAttemptedWords
+      : null;
+    const headlineAverageAttempts = headlineAttemptedWords
+      ? headlineWordResults.reduce((sum, item) => sum + Math.max(1, Number(item?.attemptsUsed || 1)), 0) / headlineAttemptedWords
+      : null;
     console.log("Teacher completion source row:", {
       assignmentId,
       pupilId,
@@ -6374,18 +6392,17 @@ function buildAssignmentAnalyticsSnapshot({ assignmentId, classId, className, ro
       averageAttempts,
     });
     const attainmentIndicator = estimateSpellingAttainmentIndicator({
-      responses: visibleWordResults
-        .filter((item) => item?.latestAttempt)
+      responses: headlineWordResults
         .map((item) => ({
           correct: !!item?.correct,
           difficultyScore: difficultyByWordId.get(String(item?.baseTestWordId || item?.wordId || ""))?.coreScore
             ?? difficultyByWordId.get(String(item?.baseTestWordId || item?.wordId || ""))?.score
             ?? 50,
         })),
-      checkedAccuracy,
-      firstTimeCorrectRate,
+      checkedAccuracy: headlineCheckedAccuracy,
+      firstTimeCorrectRate: headlineFirstTimeCorrectRate,
       completionRate,
-      averageAttempts,
+      averageAttempts: headlineAverageAttempts,
     });
     const generatedSections = isGeneratedAssignment ? buildGeneratedAssignmentSections(generatedWordResults) : [];
     const resolvedStatus = completedByStatus ? "Complete" : (startedByStatus || attemptedWords > 0 ? "In progress" : "Not started");

@@ -10,15 +10,33 @@ import { buildPersistedDifficultyPayload } from "./researchDifficulty.js?v=2.4";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
 
 const BASELINE_TITLE = "Baseline Test";
-const BASELINE_WORD_SOURCE = "baseline_v1";
+export const BASELINE_V1_WORD_SOURCE = "baseline_v1";
+export const BASELINE_V2_WORD_SOURCE = "baseline_v2";
+const BASELINE_WORD_SOURCE = BASELINE_V2_WORD_SOURCE;
 const BASELINE_STARTER_SOURCE = "baseline_catalog";
-export const REQUIRED_BASELINE_STANDARD_KEY = "core_v1";
+export const BASELINE_V1_STANDARD_KEY = "core_v1";
+export const BASELINE_V2_STANDARD_KEY = "core_v2";
+export const REQUIRED_BASELINE_STANDARD_KEY = BASELINE_V2_STANDARD_KEY;
+export const BASELINE_V2_FLOOR_CORE_STAGE = "floor_core";
+export const BASELINE_V2_DIAGNOSTIC_STAGE = "diagnostic";
+export const BASELINE_V2_CEILING_STAGE = "ceiling_challenge";
+export const BASELINE_V2_INDEPENDENT_SIGNAL = "independent";
+export const BASELINE_V2_DIAGNOSTIC_SIGNAL = "diagnostic";
+export const BASELINE_V2_CEILING_SIGNAL = "ceiling";
+const BASELINE_V2_FLOOR_WORD_COUNT = 6;
 
 function normalizeToken(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
     .replace(/[^a-z-]/g, "");
+}
+
+function normalizeMetadataKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
 }
 
 function normalizeBaselineStandardKey(value) {
@@ -118,7 +136,8 @@ function buildBaselineChoicePayload({
     source: BASELINE_WORD_SOURCE,
     question_type: questionType,
     max_attempts: 1,
-    baseline_v1: true,
+    baseline_v2: true,
+    baseline_version: "v2",
     baseline_stage: stage,
     baseline_role: "placement",
     baseline_signal: signal,
@@ -210,6 +229,142 @@ function getLatestAttemptSummary(attempts) {
   };
 }
 
+function hasCompletedCorrectFlag(attempt) {
+  if (!attempt || attempt.correct == null) return false;
+  if (typeof attempt.correct === "boolean") return true;
+  const clean = String(attempt.correct).trim().toLowerCase();
+  return ["true", "false", "1", "0"].includes(clean);
+}
+
+function isCorrectAttempt(attempt) {
+  if (attempt?.correct === true) return true;
+  const clean = String(attempt?.correct ?? "").trim().toLowerCase();
+  return clean === "true" || clean === "1";
+}
+
+function getBaselineRowKey(row) {
+  const id = String(row?.id || "").trim();
+  if (id) return `id:${id}`;
+  const word = normalizeWord(row?.word || "");
+  return word ? `word:${word}` : "";
+}
+
+function getAttemptRowKeyCandidates(attempt) {
+  const testWordId = String(attempt?.test_word_id || attempt?.testWordId || "").trim();
+  if (testWordId) return [`id:${testWordId}`];
+  const keys = [];
+  const word = normalizeWord(attempt?.word_text || attempt?.word || "");
+  if (word) keys.push(`word:${word}`);
+  return keys;
+}
+
+function sortBaselineRowsByPosition(rows) {
+  return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const aPosition = Number(a?.position || 0);
+    const bPosition = Number(b?.position || 0);
+    if (Number.isFinite(aPosition) && Number.isFinite(bPosition) && aPosition !== bPosition) {
+      return aPosition - bPosition;
+    }
+    return normalizeWord(a?.word || "").localeCompare(normalizeWord(b?.word || ""));
+  });
+}
+
+export function buildBaselineV2Inference({ attempts = [], wordRows = [] } = {}) {
+  const baselineRows = sortBaselineRowsByPosition((wordRows || []).filter((row) => isBaselineV2WordRow(row)));
+  const rowByAttemptKey = new Map();
+  for (const row of baselineRows) {
+    const idKey = String(row?.id || "").trim() ? `id:${String(row.id).trim()}` : "";
+    const wordKey = normalizeWord(row?.word || "") ? `word:${normalizeWord(row.word)}` : "";
+    if (idKey) rowByAttemptKey.set(idKey, row);
+    if (wordKey) rowByAttemptKey.set(wordKey, row);
+  }
+
+  const latestByRowKey = new Map();
+  const orderedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
+    .filter((attempt) => hasCompletedCorrectFlag(attempt))
+    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+
+  for (const attempt of orderedAttempts) {
+    const row = getAttemptRowKeyCandidates(attempt)
+      .map((key) => rowByAttemptKey.get(key))
+      .find(Boolean);
+    if (!row || !isBaselineV2WordRow(row)) continue;
+    const rowKey = getBaselineRowKey(row);
+    if (!rowKey) continue;
+    latestByRowKey.set(rowKey, attempt);
+  }
+
+  const floorCoreRows = baselineRows.filter((row) => getBaselineWordStage(row) === BASELINE_V2_FLOOR_CORE_STAGE);
+  const floorRows = floorCoreRows.slice(0, BASELINE_V2_FLOOR_WORD_COUNT);
+  const diagnosticRows = baselineRows.filter((row) => getBaselineWordStage(row) === BASELINE_V2_DIAGNOSTIC_STAGE);
+  const challengeRows = baselineRows.filter((row) => getBaselineWordStage(row) === BASELINE_V2_CEILING_STAGE);
+
+  const getAttempt = (row) => latestByRowKey.get(getBaselineRowKey(row)) || null;
+  const countAttempted = (rows) => rows.filter((row) => !!getAttempt(row)).length;
+  const countCorrect = (rows) => rows.filter((row) => isCorrectAttempt(getAttempt(row))).length;
+
+  const floorCoreAttempted = countAttempted(floorCoreRows);
+  const floorCoreCorrect = countCorrect(floorCoreRows);
+  const floorAttempted = countAttempted(floorRows);
+  const floorCorrect = countCorrect(floorRows);
+  const challengeAttempted = countAttempted(challengeRows);
+  const challengeCorrect = countCorrect(challengeRows);
+
+  let placementKey = "baseline_incomplete";
+  if (floorCoreAttempted >= floorCoreRows.length && floorCoreRows.length > 0) {
+    if (floorCoreCorrect <= 5 || floorCorrect <= 3) {
+      placementKey = "needs_support";
+    } else if (floorCoreCorrect >= 8 && challengeCorrect >= 2) {
+      placementKey = "early_stretch";
+    } else if (floorCoreCorrect >= 7) {
+      placementKey = "secure_expected";
+    } else {
+      placementKey = "core_developing";
+    }
+  }
+
+  const missedFloorCoreFocuses = new Set(
+    floorCoreRows
+      .filter((row) => {
+        const attempt = getAttempt(row);
+        return attempt && !isCorrectAttempt(attempt);
+      })
+      .map((row) => getBaselineFocusGrapheme(row))
+      .filter(Boolean)
+  );
+  const diagnosticConcerns = diagnosticRows
+    .filter((row) => {
+      const attempt = getAttempt(row);
+      return attempt && !isCorrectAttempt(attempt);
+    })
+    .map((row) => {
+      const focusGrapheme = getBaselineFocusGrapheme(row);
+      return {
+        word: normalizeWord(row?.word || ""),
+        focusGrapheme,
+        matchedFloorCoreMiss: !!focusGrapheme && missedFloorCoreFocuses.has(focusGrapheme),
+      };
+    });
+
+  return {
+    placementKey,
+    headlinePlacement: placementKey,
+    floorCoreTotal: floorCoreRows.length,
+    floorCoreAttempted,
+    floorCoreCorrect,
+    floorTotal: floorRows.length,
+    floorAttempted,
+    floorCorrect,
+    diagnosticTotal: diagnosticRows.length,
+    diagnosticAttempted: countAttempted(diagnosticRows),
+    diagnosticMissCount: diagnosticConcerns.length,
+    diagnosticConcerns,
+    challengeTotal: challengeRows.length,
+    challengeAttempted,
+    challengeCorrect,
+  };
+}
+
 function buildPlacementBand(independentAttempts) {
   const summary = getLatestAttemptSummary(independentAttempts);
   if (summary.total >= 9 && summary.accuracy >= 0.8) return "extension";
@@ -263,10 +418,57 @@ function getAssignmentMeta(assignmentMetaById, assignmentId) {
   return assignmentMetaById?.[assignmentId] || assignmentMetaById?.[String(assignmentId || "")] || null;
 }
 
-export function isBaselineWordRow(wordRow) {
-  const choice = normalizeChoiceObject(wordRow?.choice);
+function isBaselineV1Choice(choice) {
   return normalizeBooleanFlag(choice?.baseline_v1)
-    || normalizeToken(choice?.source) === BASELINE_WORD_SOURCE;
+    || normalizeMetadataKey(choice?.source) === BASELINE_V1_WORD_SOURCE;
+}
+
+function isBaselineV2Choice(choice) {
+  return normalizeBooleanFlag(choice?.baseline_v2)
+    || normalizeMetadataKey(choice?.source) === BASELINE_V2_WORD_SOURCE
+    || normalizeBaselineStandardKey(choice?.baseline_standard_key) === BASELINE_V2_STANDARD_KEY;
+}
+
+function getBaselineChoice(wordRow) {
+  return normalizeChoiceObject(wordRow?.choice);
+}
+
+export function isBaselineV2WordRow(wordRow) {
+  return isBaselineV2Choice(getBaselineChoice(wordRow));
+}
+
+export function isBaselineWordRow(wordRow) {
+  const choice = getBaselineChoice(wordRow);
+  return isBaselineV1Choice(choice) || isBaselineV2Choice(choice);
+}
+
+export function getBaselineWordStage(wordRow) {
+  return normalizeMetadataKey(getBaselineChoice(wordRow)?.baseline_stage);
+}
+
+export function getBaselineWordSignal(wordRow) {
+  return normalizeMetadataKey(getBaselineChoice(wordRow)?.baseline_signal);
+}
+
+function getBaselineFocusGrapheme(wordRow) {
+  const choice = getBaselineChoice(wordRow);
+  const focusChoices = Array.isArray(choice?.focus_graphemes)
+    ? choice.focus_graphemes.map((item) => normalizeToken(item)).filter(Boolean)
+    : [];
+  if (focusChoices[0]) return focusChoices[0];
+  const segments = Array.isArray(wordRow?.segments)
+    ? wordRow.segments.map((item) => normalizeToken(item)).filter(Boolean)
+    : [];
+  return normalizeToken(chooseBestFocusGrapheme(segments));
+}
+
+export function shouldIncludeBaselineResponseInHeadlineAttainment(response, wordRow) {
+  if (!isBaselineV2WordRow(wordRow)) return true;
+
+  const stage = getBaselineWordStage(wordRow);
+  if (stage === BASELINE_V2_DIAGNOSTIC_STAGE) return false;
+  if (stage === BASELINE_V2_CEILING_STAGE) return !!response?.correct;
+  return true;
 }
 
 export function isBaselineAssignmentWordRows(wordRows) {
@@ -305,7 +507,10 @@ export function buildBaselineAssignmentDefinition({
   const words = definition.items.map((item, index) => {
     const catalogEntry = catalogByWord.get(normalizeWord(item?.word || ""));
     const cleanWord = normalizeWord(item?.word || catalogEntry?.word || "");
-    const segments = buildSegments(catalogEntry, cleanWord);
+    const segments = buildSegments({
+      ...(catalogEntry || {}),
+      segments: Array.isArray(item?.segments) ? item.segments : catalogEntry?.segments,
+    }, cleanWord);
     const focusGrapheme = resolveFocusGrapheme(
       { focusGrapheme: item?.focusGrapheme || catalogEntry?.focusGrapheme },
       segments,

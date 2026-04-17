@@ -864,7 +864,12 @@ export function mountGame({
 
   function isBaselineDiagnosticItem(item) {
     const choice = getChoice(item);
-    return normalizeChoiceFlag(choice?.baseline_v1)
+    const source = String(choice?.source || "").trim().toLowerCase();
+    const isBaseline = normalizeChoiceFlag(choice?.baseline_v1)
+      || normalizeChoiceFlag(choice?.baseline_v2)
+      || source === "baseline_v1"
+      || source === "baseline_v2";
+    return isBaseline
       && String(choice?.baseline_signal || "").trim().toLowerCase() === "diagnostic";
   }
 

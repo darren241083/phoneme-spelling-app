@@ -10,7 +10,7 @@ import {
   isBaselineAssignmentWordRows,
   REQUIRED_BASELINE_STANDARD_KEY,
   resolveBaselineStandardKeyFromWordRows,
-} from "./baselinePlacement.js?v=1.4";
+} from "./baselinePlacement.js?v=1.5";
 import { syncAssignmentPupilTargetWords } from "./assignmentTargets.js";
 import {
   buildDefaultPersonalisedAutomationPolicy,
