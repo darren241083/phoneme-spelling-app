@@ -18,6 +18,18 @@ import {
 export const ASSIGNMENT_ENGINE_WORD_SOURCE = "assignment_engine_pool";
 export const ASSIGNMENT_ENGINE_TARGET_SOURCE = "assignment_engine_v1";
 export const ASSIGNMENT_ENGINE_DEFAULT_LENGTH = AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length;
+export const APPROVED_TARGET_SELECTOR_STATUS_READY = "ready";
+export const APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS = "not_enough_approved_words";
+export const APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL = "secure_expected";
+
+const APPROVED_TARGET_SOURCE = "teacher";
+const APPROVED_TARGET_WIDENING_DELTA = 10;
+const APPROVED_TARGET_CHALLENGE_WINDOWS = {
+  needs_support: { min: 15, max: 45, center: 30, hardMax: 50 },
+  core_developing: { min: 25, max: 55, center: 40, hardMax: 60 },
+  secure_expected: { min: 35, max: 60, center: 48, hardMax: 65 },
+  early_stretch: { min: 55, max: 75, center: 65, hardMax: 80 },
+};
 
 const SECTION_RATIOS = {
   review: 0.4,
@@ -37,6 +49,13 @@ function normalizeToken(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z-]/g, "");
+}
+
+function normalizeMetadataKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
 }
 
 function normalizeWord(value) {
@@ -579,9 +598,273 @@ function getCandidateCoverage(candidate, grapheme) {
   return 0;
 }
 
+function getCandidateChoice(candidate = {}) {
+  const choice = candidate?.rawChoice || candidate?.choice || {};
+  return choice && typeof choice === "object" && !Array.isArray(choice) ? choice : {};
+}
+
 function getCandidateDifficultyScore(candidate) {
   const score = Number(candidate?.difficulty?.coreScore ?? candidate?.difficulty?.score ?? 0);
   return Number.isFinite(score) ? score : 0;
+}
+
+function getSelectorDifficulty(candidate) {
+  const choiceDifficulty = getCandidateChoice(candidate)?.difficulty;
+  const choiceCoreScore = Number(choiceDifficulty?.coreScore ?? choiceDifficulty?.score);
+  if (Number.isFinite(choiceCoreScore)) {
+    const cachedDifficulty = candidate?.difficulty && typeof candidate.difficulty === "object"
+      ? candidate.difficulty
+      : {};
+    return {
+      ...cachedDifficulty,
+      ...(choiceDifficulty || {}),
+      coreScore: choiceCoreScore,
+      score: Number.isFinite(Number(choiceDifficulty?.score)) ? Number(choiceDifficulty.score) : choiceCoreScore,
+    };
+  }
+  if (candidate?.difficulty && typeof candidate.difficulty === "object") return candidate.difficulty;
+  return getStoredDifficultyModelForWord({
+    word: candidate?.word || "",
+    segments: Array.isArray(candidate?.segments) ? candidate.segments : [],
+    choice: getCandidateChoice(candidate),
+  });
+}
+
+function getCandidateSuitability(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const value = normalizeMetadataKey(
+    choice?.selection_suitability
+    || choice?.selectionSuitability
+    || choice?.suitability
+    || ""
+  );
+  if (value === "exclude" || value === "caution" || value === "standard") return value;
+  return normalizeMetadataKey(choice?.source) === APPROVED_TARGET_SOURCE ? "standard" : "";
+}
+
+function getSelectorDifficultyBandKey(difficulty = {}) {
+  return normalizeMetadataKey(
+    difficulty?.band?.key
+    || difficulty?.band
+    || difficulty?.coreBand?.key
+    || difficulty?.coreBand
+    || ""
+  );
+}
+
+function resolveSelectorChallengeWindow(challengeLevel = "") {
+  const key = normalizeMetadataKey(challengeLevel);
+  return {
+    key: APPROVED_TARGET_CHALLENGE_WINDOWS[key] ? key : APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+    ...(APPROVED_TARGET_CHALLENGE_WINDOWS[key] || APPROVED_TARGET_CHALLENGE_WINDOWS[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL]),
+  };
+}
+
+function resolveProfileChallengeLevel(profile = null) {
+  const meta = profile?.placementMeta || {};
+  const explicit = normalizeMetadataKey(
+    profile?.selectorChallengeLevel
+    || profile?.challengeLevel
+    || meta.selectorChallengeLevel
+    || meta.targetChallengeLevel
+    || meta.baselinePlacement
+    || meta.headlinePlacement
+    || ""
+  );
+  if (APPROVED_TARGET_CHALLENGE_WINDOWS[explicit]) return explicit;
+
+  const provisional = normalizeMetadataKey(meta.provisionalPlacementBand || "");
+  if (provisional === "foundation") return "needs_support";
+  if (provisional === "extension") return "early_stretch";
+  if (provisional === "core") return "secure_expected";
+
+  return APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL;
+}
+
+function normalizeSelectorCandidate(candidate = {}, focusGrapheme = "") {
+  const word = normalizeWord(candidate?.word || "");
+  if (!word) return null;
+  const choice = getCandidateChoice(candidate);
+  if (normalizeMetadataKey(choice?.source) !== APPROVED_TARGET_SOURCE) return null;
+
+  const segments = normalizeSegments(word, candidate?.segments);
+  const focus = normalizeToken(focusGrapheme);
+  if (!focus) return null;
+
+  const focusGraphemes = normalizeFocusList([
+    ...(Array.isArray(candidate?.focusGraphemes) ? candidate.focusGraphemes : []),
+    ...(Array.isArray(choice?.focus_graphemes) ? choice.focus_graphemes : []),
+    choice?.engine_focus_grapheme || choice?.engineFocusGrapheme || "",
+  ]);
+  const focusMatch = focusGraphemes.includes(focus);
+  const segmentMatch = segments.includes(focus);
+  if (!focusMatch && !segmentMatch) return null;
+
+  const suitability = getCandidateSuitability(candidate);
+  if (suitability !== "standard") return null;
+
+  const difficulty = getSelectorDifficulty({
+    ...candidate,
+    word,
+    segments,
+  });
+  const difficultyScore = Number(difficulty?.coreScore ?? difficulty?.score);
+  if (!Number.isFinite(difficultyScore)) return null;
+
+  return {
+    source: candidate,
+    word,
+    id: String(candidate?.id || candidate?.originTestWordId || "").trim(),
+    segments,
+    sentence: String(candidate?.sentence || "").trim(),
+    coverage: focusMatch ? 2 : 1,
+    difficulty,
+    bandKey: getSelectorDifficultyBandKey(difficulty),
+    difficultyScore,
+  };
+}
+
+function buildSelectorWindow(window, { widened = false } = {}) {
+  if (!widened) {
+    return {
+      min: window.min,
+      max: Math.min(window.max, window.hardMax),
+      center: window.center,
+      hardMax: window.hardMax,
+      widened: false,
+    };
+  }
+  return {
+    min: Math.max(0, window.min - APPROVED_TARGET_WIDENING_DELTA),
+    max: Math.min(window.hardMax, window.max + APPROVED_TARGET_WIDENING_DELTA),
+    center: window.center,
+    hardMax: window.hardMax,
+    widened: true,
+  };
+}
+
+function isWithinSelectorWindow(candidate, window) {
+  const score = Number(candidate?.difficultyScore);
+  return Number.isFinite(score)
+    && score >= window.min
+    && score <= window.max
+    && score <= window.hardMax;
+}
+
+function rankApprovedTargetCandidates(items, {
+  center = 50,
+  idealWords = new Set(),
+  usageByWord = new Map(),
+} = {}) {
+  return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
+    if (b.coverage !== a.coverage) return b.coverage - a.coverage;
+
+    const distanceA = Math.abs(Number(a.difficultyScore || 0) - center);
+    const distanceB = Math.abs(Number(b.difficultyScore || 0) - center);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+
+    const aIdeal = idealWords.has(a.word);
+    const bIdeal = idealWords.has(b.word);
+    if (Number(bIdeal) !== Number(aIdeal)) return Number(bIdeal) - Number(aIdeal);
+
+    const usageA = getUsageMeta(a, usageByWord);
+    const usageB = getUsageMeta(b, usageByWord);
+    if (usageA.count !== usageB.count) return usageA.count - usageB.count;
+    if (usageA.lastSeenAt !== usageB.lastSeenAt) return usageA.lastSeenAt - usageB.lastSeenAt;
+
+    const sentenceDiff = Number(!!b.sentence) - Number(!!a.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = a.word.localeCompare(b.word);
+    if (wordDiff) return wordDiff;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+}
+
+function uniqueSelectorSources(rankedItems, count) {
+  const selected = [];
+  const seenWords = new Set();
+  for (const item of rankedItems || []) {
+    if (!item?.source || seenWords.has(item.word)) continue;
+    selected.push(item.source);
+    seenWords.add(item.word);
+    if (selected.length >= count) break;
+  }
+  return selected;
+}
+
+export function selectApprovedTargetWords({
+  focusGrapheme = "",
+  candidates = [],
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  count = 1,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+} = {}) {
+  const focus = normalizeToken(focusGrapheme);
+  const safeCount = Math.max(1, Number(count) || 1);
+  const blockedWords = new Set(
+    usedWords instanceof Set
+      ? Array.from(usedWords).map((item) => normalizeWord(item)).filter(Boolean)
+      : (Array.isArray(usedWords) ? usedWords.map((item) => normalizeWord(item)).filter(Boolean) : [])
+  );
+  const challengeWindow = resolveSelectorChallengeWindow(challengeLevel);
+  const idealWindow = buildSelectorWindow(challengeWindow);
+  const widenedWindow = buildSelectorWindow(challengeWindow, { widened: true });
+
+  const eligible = (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => normalizeSelectorCandidate(candidate, focus))
+    .filter(Boolean)
+    .filter((candidate) => !blockedWords.has(candidate.word))
+    .filter((candidate) => challengeWindow.key === "early_stretch" || candidate.bandKey !== "challenge")
+    .filter((candidate) => candidate.difficultyScore <= challengeWindow.hardMax);
+
+  const idealItems = eligible.filter((candidate) => isWithinSelectorWindow(candidate, idealWindow));
+  const idealWords = new Set(idealItems.map((candidate) => candidate.word));
+  const idealRanked = rankApprovedTargetCandidates(idealItems, {
+    center: challengeWindow.center,
+    idealWords,
+    usageByWord,
+  });
+  const idealSelected = uniqueSelectorSources(idealRanked, safeCount);
+  if (idealSelected.length >= safeCount) {
+    return {
+      status: APPROVED_TARGET_SELECTOR_STATUS_READY,
+      focusGrapheme: focus,
+      challengeLevel: challengeWindow.key,
+      words: idealSelected,
+      window: idealWindow,
+      widened: false,
+    };
+  }
+
+  const widenedItems = eligible.filter((candidate) => isWithinSelectorWindow(candidate, widenedWindow));
+  const widenedRanked = rankApprovedTargetCandidates(widenedItems, {
+    center: challengeWindow.center,
+    idealWords,
+    usageByWord,
+  });
+  const widenedSelected = uniqueSelectorSources(widenedRanked, safeCount);
+  if (widenedSelected.length >= safeCount) {
+    return {
+      status: APPROVED_TARGET_SELECTOR_STATUS_READY,
+      focusGrapheme: focus,
+      challengeLevel: challengeWindow.key,
+      words: widenedSelected,
+      window: widenedWindow,
+      widened: true,
+    };
+  }
+
+  return {
+    status: APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS,
+    focusGrapheme: focus,
+    challengeLevel: challengeWindow.key,
+    words: [],
+    availableCount: widenedSelected.length,
+    window: widenedWindow,
+    widened: true,
+  };
 }
 
 function getUsageMeta(candidate, usageByWord) {
@@ -679,6 +962,42 @@ function pickCandidatesByGraphemeOrder({
     usedWords.add(candidate.word);
     selected.push(candidate);
     if (selected.length >= count) break;
+  }
+
+  return selected;
+}
+
+function pickApprovedTargetCandidatesByGraphemeOrder({
+  count,
+  graphemeOrder,
+  candidates,
+  challengeLevel,
+  usageByWord,
+  usedWords,
+}) {
+  const selected = [];
+  const order = Array.isArray(graphemeOrder) ? graphemeOrder.map((item) => normalizeToken(item)).filter(Boolean) : [];
+  if (!order.length || count <= 0) return selected;
+
+  for (let pass = 0; pass < Math.max(1, count * 2) && selected.length < count; pass += 1) {
+    let addedOnPass = false;
+    for (const grapheme of order) {
+      const result = selectApprovedTargetWords({
+        focusGrapheme: grapheme,
+        candidates,
+        challengeLevel,
+        count: 1,
+        usageByWord,
+        usedWords,
+      });
+      const next = result.status === APPROVED_TARGET_SELECTOR_STATUS_READY ? result.words[0] : null;
+      if (!next) continue;
+      usedWords.add(normalizeWord(next.word || ""));
+      selected.push(next);
+      addedOnPass = true;
+      if (selected.length >= count) break;
+    }
+    if (!addedOnPass) break;
   }
 
   return selected;
@@ -799,16 +1118,22 @@ function buildPupilPlan({
 
   const baseNonIndependentLimit = composition.target >= 4 ? 2 : 1;
   const reservedPrimarySlots = Math.min(composition.target, Math.max(2, composition.target - 1));
-  const primaryCoverage = filterCandidatesForGrapheme(candidates, primaryTarget, new Set())
-    .map((candidate) => candidate.word)
-    .filter((word, index, list) => list.indexOf(word) === index);
+  const targetChallengeLevel = resolveProfileChallengeLevel(profile || fallbackProfile);
+  const primaryCoverage = selectApprovedTargetWords({
+    focusGrapheme: primaryTarget,
+    candidates,
+    challengeLevel: targetChallengeLevel,
+    count: reservedPrimarySlots,
+    usageByWord,
+    usedWords: new Set(),
+  });
 
-  if (primaryCoverage.length < reservedPrimarySlots) {
+  if (primaryCoverage.status !== APPROVED_TARGET_SELECTOR_STATUS_READY) {
     return {
       pupilId,
       missingGraphemes: [primaryTarget],
       words: [],
-      error: `Not enough words are available for ${primaryTarget}.`,
+      error: `Not enough approved words are available for ${primaryTarget}.`,
     };
   }
 
@@ -855,23 +1180,34 @@ function buildPupilPlan({
     };
   }
 
-  const primaryTargetCandidates = pickCandidatesByGraphemeOrder({
-    count: reservedPrimarySlots,
-    graphemeOrder: [primaryTarget],
-    role: "target",
+  const primaryTargetSelection = selectApprovedTargetWords({
+    focusGrapheme: primaryTarget,
     candidates,
+    challengeLevel: targetChallengeLevel,
+    count: reservedPrimarySlots,
     usageByWord,
     usedWords,
   });
+  if (primaryTargetSelection.status !== APPROVED_TARGET_SELECTOR_STATUS_READY) {
+    return {
+      pupilId,
+      missingGraphemes: [primaryTarget],
+      words: [],
+      error: `Not enough approved words are available for ${primaryTarget}.`,
+    };
+  }
+  const primaryTargetCandidates = primaryTargetSelection.words;
+  for (const candidate of primaryTargetCandidates) {
+    usedWords.add(normalizeWord(candidate?.word || ""));
+  }
 
-  const remainingTargetCandidates = pickCandidatesByGraphemeOrder({
+  const remainingTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
     count: Math.max(0, composition.target - primaryTargetCandidates.length),
     graphemeOrder: [primaryTarget, ...secondaryTargetList],
-    role: "target",
     candidates,
+    challengeLevel: targetChallengeLevel,
     usageByWord,
     usedWords,
-    fallbackFilter: () => true,
   });
 
   const targetCandidates = [...primaryTargetCandidates, ...remainingTargetCandidates].slice(0, composition.target);
@@ -880,7 +1216,7 @@ function buildPupilPlan({
       pupilId,
       missingGraphemes: [],
       words: [],
-      error: "Not enough candidate words are available to build the target section.",
+      error: "Not enough approved words are available to build the target section.",
     };
   }
 
