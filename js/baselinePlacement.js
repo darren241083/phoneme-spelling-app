@@ -24,6 +24,12 @@ export const BASELINE_V2_INDEPENDENT_SIGNAL = "independent";
 export const BASELINE_V2_DIAGNOSTIC_SIGNAL = "diagnostic";
 export const BASELINE_V2_CEILING_SIGNAL = "ceiling";
 const BASELINE_V2_FLOOR_WORD_COUNT = 6;
+const BASELINE_V2_SELECTOR_PLACEMENTS = new Set([
+  "needs_support",
+  "core_developing",
+  "secure_expected",
+  "early_stretch",
+]);
 
 function normalizeToken(value) {
   return String(value || "")
@@ -414,8 +420,30 @@ function sanitizeDiagnosticRow(row) {
 }
 
 function getAssignmentMeta(assignmentMetaById, assignmentId) {
-  if (assignmentMetaById instanceof Map) return assignmentMetaById.get(String(assignmentId || "")) || null;
+  if (assignmentMetaById && typeof assignmentMetaById.get === "function") {
+    return assignmentMetaById.get(String(assignmentId || "")) || null;
+  }
   return assignmentMetaById?.[assignmentId] || assignmentMetaById?.[String(assignmentId || "")] || null;
+}
+
+function buildBaselineV2PlacementMeta({ attempts = [], wordRows = [] } = {}) {
+  const baselineRows = (Array.isArray(wordRows) ? wordRows : []).filter((row) => isBaselineV2WordRow(row));
+  if (!baselineRows.length) return null;
+
+  const inference = buildBaselineV2Inference({ attempts, wordRows: baselineRows });
+  const placement = normalizeMetadataKey(inference?.placementKey);
+  if (!BASELINE_V2_SELECTOR_PLACEMENTS.has(placement)) return null;
+
+  const headlinePlacement = normalizeMetadataKey(inference?.headlinePlacement) || placement;
+  return {
+    baselinePlacement: placement,
+    headlinePlacement,
+    targetChallengeLevel: placement,
+    floorCoreCorrect: Math.max(0, Number(inference?.floorCoreCorrect || 0)),
+    floorCorrect: Math.max(0, Number(inference?.floorCorrect || 0)),
+    challengeCorrect: Math.max(0, Number(inference?.challengeCorrect || 0)),
+    diagnosticMissCount: Math.max(0, Number(inference?.diagnosticMissCount || 0)),
+  };
 }
 
 function isBaselineV1Choice(choice) {
@@ -600,6 +628,7 @@ export function buildPlacementSeedProfiles({
         completedAt: completedAt || null,
         completedMs: Number.isFinite(completedMs) ? completedMs : 0,
         preset: resolvePresetKey(assignmentMeta?.preset),
+        wordRows: Array.isArray(assignmentMeta?.wordRows) ? assignmentMeta.wordRows : [],
       });
     }
   }
@@ -615,6 +644,10 @@ export function buildPlacementSeedProfiles({
     const independentAttempts = relevantAttempts.filter((attempt) => getQuestionEvidenceTier(attempt?.mode) === "independent");
     if (!independentAttempts.length) continue;
     const diagnosticAttempts = relevantAttempts.filter((attempt) => getQuestionEvidenceTier(attempt?.mode) === "diagnostic");
+    const exactPlacementMeta = buildBaselineV2PlacementMeta({
+      attempts: relevantAttempts,
+      wordRows: status.wordRows,
+    });
 
     const independentProfile = rebuildProfileCollections(
       buildProfileFromAttempts(independentAttempts, resolvedWordMap)
@@ -640,7 +673,8 @@ export function buildPlacementSeedProfiles({
       confusionByTarget: mergeConfusionMaps(independentProfile.confusionByTarget, diagnosticProfile.confusionByTarget),
       placementMeta: {
         presetUsed: status.preset,
-        provisionalPlacementBand: buildPlacementBand(independentAttempts),
+        ...(!exactPlacementMeta ? { provisionalPlacementBand: buildPlacementBand(independentAttempts) } : {}),
+        ...(exactPlacementMeta || {}),
         independentAttemptCount: independentAttempts.length,
         diagnosticAttemptCount: diagnosticAttempts.length,
         comparableUnsupportedCount: independentAttempts.length,

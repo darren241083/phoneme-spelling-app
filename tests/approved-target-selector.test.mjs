@@ -7,6 +7,10 @@ const {
   buildGeneratedAssignmentPlan,
   selectApprovedTargetWords,
 } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
+const {
+  buildBaselineAssignmentDefinition,
+  buildPlacementSeedProfiles,
+} = await loadBrowserModule("../js/baselinePlacement.js", import.meta.url);
 
 const TESTS = [];
 
@@ -49,6 +53,31 @@ function words(result) {
 
 function assertJsonEqual(actual, expected) {
   assert.equal(JSON.stringify(actual), JSON.stringify(expected));
+}
+
+function makeBaselineRows() {
+  return buildBaselineAssignmentDefinition({ date: new Date("2026-04-17T09:00:00Z") })
+    .wordRows
+    .map((row, index) => ({
+      ...row,
+      id: `baseline-word-${index + 1}`,
+    }));
+}
+
+function makeBaselineAttempts(rows, correctWords = new Set()) {
+  return rows.map((row, index) => ({
+    pupil_id: "pupil-1",
+    assignment_id: "baseline-1",
+    test_word_id: row.id,
+    word_text: row.word,
+    correct: correctWords.has(row.word),
+    attempt_number: 1,
+    mode: row?.choice?.question_type || "segmented_spelling",
+    focus_grapheme: row?.choice?.focus_graphemes?.[0] || "",
+    target_graphemes: Array.isArray(row?.segments) ? row.segments : [],
+    attempt_source: "baseline",
+    created_at: new Date(Date.UTC(2026, 3, 17, 10, index)).toISOString(),
+  }));
 }
 
 test("same grapheme selects different difficulty-fit words for support, secure, and stretch", () => {
@@ -212,7 +241,7 @@ test("insufficient approved words returns not_enough_approved_words without fall
   assert.equal(result.availableCount, 1);
 });
 
-test("ordering is stable by normalized word then id when ranking factors tie", () => {
+test("ordering is stable by normalised word then id when ranking factors tie", () => {
   const result = selectApprovedTargetWords({
     focusGrapheme: "ph",
     challengeLevel: "needs_support",
@@ -257,6 +286,68 @@ test("generated assignment target section uses approved selector and skips non-a
     .filter((item) => item.assignmentRole === "target")
     .map((item) => item.word);
   assertJsonEqual(targetWords, ["phone"]);
+});
+
+test("early_stretch baseline seed drives advanced approved target choice in first generated plan", () => {
+  const baselineRows = makeBaselineRows();
+  const correctWords = new Set([
+    "boat",
+    "seed",
+    "train",
+    "light",
+    "sharp",
+    "storm",
+    "enough",
+    "special",
+    "paint",
+    "point",
+    "fair",
+    "nurse",
+    "daughter",
+    "description",
+  ]);
+  const currentProfiles = buildPlacementSeedProfiles({
+    attempts: makeBaselineAttempts(baselineRows, correctWords),
+    completedStatuses: [{
+      pupil_id: "pupil-1",
+      assignment_id: "baseline-1",
+      status: "completed",
+      completed_at: "2026-04-17T11:00:00.000Z",
+    }],
+    assignmentMetaById: new Map([[
+      "baseline-1",
+      {
+        preset: "core",
+        wordRows: baselineRows,
+      },
+    ]]),
+  });
+
+  assert.equal(currentProfiles["pupil-1"]?.placementMeta?.targetChallengeLevel, "early_stretch");
+  assert.equal(currentProfiles["pupil-1"]?.concernRows?.[0]?.target, "ie");
+
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-1", word: "boat", score: 24, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-2", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "stretch-1", word: "storm", score: 36, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        wordRow({ id: "target-low", word: "field", score: 32, focus: ["ie"], segments: ["f", "ie", "l", "d"] }),
+        wordRow({ id: "target-mid", word: "brief", score: 48, focus: ["ie"], segments: ["b", "r", "ie", "f"] }),
+        wordRow({ id: "target-high", word: "chiefly", score: 64, focus: ["ie"], segments: ["ch", "ie", "f", "l", "y"], band: "challenge" }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 2,
+    currentProfiles,
+  });
+
+  assert.equal(plan.error, "");
+  const targetWords = plan.pupilPlans[0].words
+    .filter((item) => item.assignmentRole === "target")
+    .map((item) => item.word);
+  assertJsonEqual(targetWords, ["chiefly"]);
 });
 
 test("generated assignment does not fall back when approved target bank is insufficient", () => {
