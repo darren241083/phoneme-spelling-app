@@ -45,6 +45,14 @@ import {
   isFullyGeneratedAssignmentWordRows,
 } from "./assignmentEngine.js?v=1.5";
 import {
+  buildExportFilename,
+  buildScopedAnalyticsExportModel,
+  EXCEL_UNAVAILABLE_MESSAGE,
+  exportModelHasRows,
+  serializeExportCsv,
+  writeExportWorkbook,
+} from "./analyticsExport.js?v=1.0";
+import {
   buildBaselineAssignmentDefinition,
   buildPlacementSeedProfiles,
   buildStarterCatalogVirtualTests,
@@ -145,6 +153,9 @@ const DEMO_TEST_PREFIX = "[Demo]";
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "analytics", "upcoming", "classes", "tests"];
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
+const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
+const ALL_CLASSES_EXPORT_SCOPE_VALUE = "__all_classes__";
+const ALL_YEARS_EXPORT_SCOPE_VALUE = "__all_years__";
 const VISUAL_COMPARE_LIMIT = 3;
 const ASSIGNMENT_PUPIL_ROWS_STEP = 5;
 const CLASS_RESULTS_RECENT_LIMIT = 5;
@@ -192,6 +203,19 @@ const VISUAL_PUPIL_RANK_OPTIONS = [
   { value: "fewest_attempts", label: "Fewest tries" },
   { value: "review", label: "Most review needed" },
   { value: "checked_words", label: "Most checked words" },
+];
+const ANALYTICS_EXPORT_VIEW_OPTIONS = [
+  { value: "pupil", label: "Pupil" },
+  { value: "class", label: "Class" },
+  { value: "year", label: "Year" },
+];
+const ANALYTICS_EXPORT_DATASET_OPTIONS = [
+  { value: "attempts", label: "Attempts" },
+  { value: "summary", label: "Summary" },
+];
+const ANALYTICS_EXPORT_FORMAT_OPTIONS = [
+  { value: "csv", label: "CSV" },
+  { value: "xlsx", label: "Excel" },
 ];
 const VISUAL_RANK_ROWS_STEP = 6;
 const COMMON_CONFUSION_TEST_WORD_LIMIT = 8;
@@ -295,6 +319,19 @@ function createDefaultAnalyticsAssistantMessages() {
       text: ANALYTICS_ASSISTANT_INTRO,
     },
   ];
+}
+
+function createDefaultAnalyticsExportState() {
+  return {
+    initialized: false,
+    view: "class",
+    focusId: ALL_CLASSES_EXPORT_SCOPE_VALUE,
+    grapheme: "",
+    dataset: "summary",
+    format: "csv",
+    message: "",
+    messageType: "info",
+  };
 }
 
 function createDefaultInterventionGroupState() {
@@ -584,6 +621,7 @@ const state = {
     pupilStatusFilter: "all",
     compareSelections: [],
   },
+  analyticsExport: createDefaultAnalyticsExportState(),
   groupComparison: createDefaultGroupComparisonState(),
   analyticsAssistant: {
     open: false,
@@ -8772,6 +8810,36 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="analytics-export-view"]')) {
+    updateAnalyticsExportState({ view: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-focus"]')) {
+    updateAnalyticsExportState({ focusId: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-grapheme"]')) {
+    updateAnalyticsExportState({ grapheme: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-dataset"]')) {
+    updateAnalyticsExportState({ dataset: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-format"]')) {
+    updateAnalyticsExportState({ format: target.value });
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="group-comparison-scope-type"]')) {
     state.groupComparison.filters.scopeType = normalizeGroupComparisonScopeType(target.value);
     state.groupComparison.filters.scopeValue = "";
@@ -9500,6 +9568,11 @@ async function onRootClick(event) {
     state.visualAnalytics.pupilStatusFilter =
       state.visualAnalytics.pupilStatusFilter === nextFilter ? "all" : nextFilter;
     paint();
+    return;
+  }
+
+  if (action === "download-analytics-export-data") {
+    handleAnalyticsExportDownload();
     return;
   }
 
@@ -13921,6 +13994,7 @@ function renderAnalyticsBar() {
 
           ${showAttainmentGuide ? "" : renderGroupComparisonPanel()}
           ${showAttainmentGuide ? "" : renderInlineAnalyticsAssistant()}
+          ${renderAnalyticsExportCard()}
         </div>
         </div>
       `
@@ -18699,6 +18773,544 @@ function downloadTextFile(filename = "export.csv", text = "", mimeType = "text/p
   link.click();
   link.remove();
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+}
+
+function normalizeAnalyticsExportView(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_VIEW_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "class";
+}
+
+function normalizeAnalyticsExportDataset(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_DATASET_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "summary";
+}
+
+function normalizeAnalyticsExportFormat(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_FORMAT_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "csv";
+}
+
+function getAnalyticsExportDefaultFocusId(view = "class") {
+  if (view === "pupil") return ALL_PUPILS_EXPORT_SCOPE_VALUE;
+  if (view === "year") return ALL_YEARS_EXPORT_SCOPE_VALUE;
+  return ALL_CLASSES_EXPORT_SCOPE_VALUE;
+}
+
+function getAnalyticsExportFocusOptions(view = "class") {
+  const safeView = normalizeAnalyticsExportView(view);
+  if (safeView === "pupil") {
+    return [
+      { value: ALL_PUPILS_EXPORT_SCOPE_VALUE, label: "All pupils" },
+      ...getAnalyticsPupilOptions(),
+    ];
+  }
+  if (safeView === "year") {
+    return [
+      { value: ALL_YEARS_EXPORT_SCOPE_VALUE, label: "All years" },
+      ...getAnalyticsYearGroupOptions().map((item) => ({ value: item, label: item })),
+    ];
+  }
+  return [
+    { value: ALL_CLASSES_EXPORT_SCOPE_VALUE, label: "All classes" },
+    ...getAnalyticsClassOptions(),
+  ];
+}
+
+function syncAnalyticsExportFocusId(view = "class", preferredId = "") {
+  const options = getAnalyticsExportFocusOptions(view);
+  const safePreferred = String(preferredId || "").trim();
+  if (options.some((option) => String(option.value) === safePreferred)) return safePreferred;
+  if (safePreferred && state.visualAnalytics.status !== "ready") return safePreferred;
+  return getAnalyticsExportDefaultFocusId(normalizeAnalyticsExportView(view));
+}
+
+function prefillAnalyticsExportState() {
+  const scopeType = String(state.analyticsAssistant.scopeType || "overview");
+  const scopeId = String(state.analyticsAssistant.scopeId || "");
+  let view = "class";
+  let focusId = ALL_CLASSES_EXPORT_SCOPE_VALUE;
+
+  if (scopeType === "pupil") {
+    view = "pupil";
+    focusId = scopeId || ALL_PUPILS_EXPORT_SCOPE_VALUE;
+  } else if (scopeType === "year_group") {
+    view = "year";
+    focusId = scopeId || ALL_YEARS_EXPORT_SCOPE_VALUE;
+  } else if (scopeType === "class") {
+    view = "class";
+    focusId = scopeId || ALL_CLASSES_EXPORT_SCOPE_VALUE;
+  }
+
+  return {
+    ...createDefaultAnalyticsExportState(),
+    initialized: true,
+    view,
+    focusId: syncAnalyticsExportFocusId(view, focusId),
+    grapheme: normalizeAnalyticsGrapheme(state.visualAnalytics.selectedGrapheme),
+  };
+}
+
+function ensureAnalyticsExportStateInitialized() {
+  if (!state.analyticsExport || typeof state.analyticsExport !== "object") {
+    state.analyticsExport = createDefaultAnalyticsExportState();
+  }
+  if (state.analyticsExport.initialized === true) return state.analyticsExport;
+  state.analyticsExport = prefillAnalyticsExportState();
+  return state.analyticsExport;
+}
+
+function setAnalyticsExportMessage(message = "", type = "info") {
+  ensureAnalyticsExportStateInitialized();
+  state.analyticsExport.message = String(message || "");
+  state.analyticsExport.messageType = type === "error" ? "error" : type === "success" ? "success" : "info";
+}
+
+function updateAnalyticsExportState(patch = {}) {
+  const current = ensureAnalyticsExportStateInitialized();
+  const nextView = Object.prototype.hasOwnProperty.call(patch, "view")
+    ? normalizeAnalyticsExportView(patch.view)
+    : normalizeAnalyticsExportView(current.view);
+  const viewChanged = nextView !== current.view;
+  const nextFocusId = Object.prototype.hasOwnProperty.call(patch, "focusId")
+    ? syncAnalyticsExportFocusId(nextView, patch.focusId)
+    : viewChanged
+      ? getAnalyticsExportDefaultFocusId(nextView)
+      : syncAnalyticsExportFocusId(nextView, current.focusId);
+
+  state.analyticsExport = {
+    ...current,
+    ...patch,
+    initialized: true,
+    view: nextView,
+    focusId: nextFocusId,
+    grapheme: Object.prototype.hasOwnProperty.call(patch, "grapheme")
+      ? normalizeAnalyticsGrapheme(patch.grapheme)
+      : normalizeAnalyticsGrapheme(current.grapheme),
+    dataset: Object.prototype.hasOwnProperty.call(patch, "dataset")
+      ? normalizeAnalyticsExportDataset(patch.dataset)
+      : normalizeAnalyticsExportDataset(current.dataset),
+    format: Object.prototype.hasOwnProperty.call(patch, "format")
+      ? normalizeAnalyticsExportFormat(patch.format)
+      : normalizeAnalyticsExportFormat(current.format),
+    message: "",
+    messageType: "info",
+  };
+}
+
+function getAnalyticsExportOptionLabel(options = [], value = "") {
+  return (options || []).find((option) => String(option?.value || "") === String(value || ""))?.label || String(value || "");
+}
+
+function renderAnalyticsExportSelect({ label, fieldName, value, options = [], disabled = false } = {}) {
+  return `
+    <label class="td-field td-field--compact td-field--toolbar">
+      <span>${escapeHtml(label || "")}</span>
+      <select class="td-input" data-field="${escapeAttr(fieldName || "")}" ${disabled ? "disabled" : ""}>
+        ${options.map((option) => `
+          <option value="${escapeAttr(option.value)}" ${String(option.value) === String(value) ? "selected" : ""}>
+            ${escapeHtml(option.label)}
+          </option>
+        `).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderAnalyticsExportCard() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  const isReady = state.visualAnalytics.status === "ready" && !!state.visualAnalytics.sourceData;
+  const focusOptions = getAnalyticsExportFocusOptions(exportState.view);
+  const graphemeOptions = [
+    { value: "", label: "All graphemes" },
+    ...((getVisualAnalyticsViewModel().graphemeOptions || []).map((item) => ({
+      value: item.value,
+      label: `${item.label} (${item.count})`,
+    }))),
+  ];
+  const messageClass = exportState.messageType === "error"
+    ? "is-error"
+    : exportState.messageType === "success"
+      ? "is-success"
+      : "";
+
+  return `
+    <div class="td-analytics-bar-card td-analytics-export-card">
+      <div class="td-analytics-export-card-head">
+        <div>
+          <h4>Export data</h4>
+          <p>Choose exactly what data to download.</p>
+        </div>
+      </div>
+      <div class="td-analytics-export-grid">
+        ${renderAnalyticsExportSelect({
+          label: "View",
+          fieldName: "analytics-export-view",
+          value: exportState.view,
+          options: ANALYTICS_EXPORT_VIEW_OPTIONS,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Focus",
+          fieldName: "analytics-export-focus",
+          value: syncAnalyticsExportFocusId(exportState.view, exportState.focusId),
+          options: focusOptions,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Grapheme",
+          fieldName: "analytics-export-grapheme",
+          value: exportState.grapheme,
+          options: graphemeOptions,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Dataset",
+          fieldName: "analytics-export-dataset",
+          value: exportState.dataset,
+          options: ANALYTICS_EXPORT_DATASET_OPTIONS,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Format",
+          fieldName: "analytics-export-format",
+          value: exportState.format,
+          options: ANALYTICS_EXPORT_FORMAT_OPTIONS,
+          disabled: !isReady,
+        })}
+        <div class="td-analytics-export-action">
+          <span aria-hidden="true">&nbsp;</span>
+          <button
+            type="button"
+            class="td-btn td-btn--primary"
+            data-action="download-analytics-export-data"
+            ${isReady ? "" : "disabled"}
+          >
+            Download
+          </button>
+        </div>
+      </div>
+      ${
+        exportState.message
+          ? `<div class="td-analytics-export-message ${messageClass}" role="status">${escapeHtml(exportState.message)}</div>`
+          : !isReady
+            ? `<div class="td-analytics-export-message" role="status">Analytics need to finish loading before export.</div>`
+            : ""
+      }
+    </div>
+  `;
+}
+
+function getAnalyticsExportWordRowById(data = null) {
+  return new Map((data?.wordRows || []).map((row) => [String(row?.id || ""), row]));
+}
+
+function resolveAnalyticsExportScope(exportState = state.analyticsExport, data = state.visualAnalytics.sourceData) {
+  const view = normalizeAnalyticsExportView(exportState?.view);
+  const focusId = syncAnalyticsExportFocusId(view, exportState?.focusId);
+  const classes = data?.classes || [];
+  const allClassIds = classes.map((item) => String(item?.id || "")).filter(Boolean);
+  const classIdSet = new Set();
+  const pupilIdSet = new Set();
+  let scopeLabel = "All classes";
+
+  if (view === "pupil") {
+    if (focusId === ALL_PUPILS_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All pupils";
+      for (const pupil of data?.pupils || []) {
+        const pupilId = String(pupil?.id || "");
+        if (pupilId) pupilIdSet.add(pupilId);
+      }
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      scopeLabel = pupilDisplayName(data?.pupilById?.get(String(focusId)));
+      pupilIdSet.add(String(focusId));
+      for (const classId of data?.classIdsByPupil?.get(String(focusId)) || []) {
+        classIdSet.add(String(classId));
+      }
+    }
+  } else if (view === "year") {
+    if (focusId === ALL_YEARS_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All years";
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      scopeLabel = String(focusId || "Selected year");
+      for (const cls of classes) {
+        if (String(cls?.year_group || "").trim() === String(focusId)) {
+          const classId = String(cls?.id || "");
+          if (classId) classIdSet.add(classId);
+        }
+      }
+    }
+    for (const classId of classIdSet) {
+      for (const pupilId of data?.pupilIdsByClass?.get(String(classId)) || []) {
+        pupilIdSet.add(String(pupilId));
+      }
+    }
+  } else {
+    if (focusId === ALL_CLASSES_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All classes";
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      const cls = data?.classById?.get(String(focusId));
+      scopeLabel = cls?.name || "Selected class";
+      classIdSet.add(String(focusId));
+    }
+    for (const classId of classIdSet) {
+      for (const pupilId of data?.pupilIdsByClass?.get(String(classId)) || []) {
+        pupilIdSet.add(String(pupilId));
+      }
+    }
+  }
+
+  return {
+    view,
+    focusId,
+    scopeLabel,
+    classIdSet,
+    pupilIdSet,
+  };
+}
+
+function analyticsExportRowMatchesScope(row = null, scope = null, grapheme = "") {
+  const pupilId = String(row?.pupil_id || "");
+  const classId = String(row?.class_id || "");
+  if (!pupilId || !classId) return false;
+  if (scope?.pupilIdSet?.size && !scope.pupilIdSet.has(pupilId)) return false;
+  if (scope?.classIdSet?.size && !scope.classIdSet.has(classId)) return false;
+  const normalizedGrapheme = normalizeAnalyticsGrapheme(grapheme);
+  if (!normalizedGrapheme) return true;
+  return normalizeAnalyticsGrapheme(analyticsTargetForAttempt(row)) === normalizedGrapheme;
+}
+
+function getAnalyticsExportClassContext(row = null, data = null, scope = null) {
+  const rowClassId = String(row?.class_id || "");
+  const classIds = rowClassId
+    ? [rowClassId]
+    : Array.from(scope?.classIdSet || []);
+  const classNames = [];
+  const yearGroups = [];
+  for (const classId of classIds) {
+    const cls = data?.classById?.get(String(classId));
+    if (cls?.name) classNames.push(cls.name);
+    const yearGroup = String(cls?.year_group || "").trim();
+    if (yearGroup) yearGroups.push(yearGroup);
+  }
+  return {
+    className: [...new Set(classNames)].join(", "),
+    yearGroup: [...new Set(yearGroups)].join(", "),
+  };
+}
+
+function buildAnalyticsExportAttemptRows(exportState = state.analyticsExport) {
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return [];
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const grapheme = normalizeAnalyticsGrapheme(exportState?.grapheme);
+  const wordRowsById = getAnalyticsExportWordRowById(data);
+
+  return (data.attempts || [])
+    .filter((row) => analyticsExportRowMatchesScope(row, scope, grapheme))
+    .map((row) => {
+      const assignment = data.assignmentById?.get(String(row?.assignment_id || ""));
+      const classContext = getAnalyticsExportClassContext(row, data, scope);
+      const wordRow = wordRowsById.get(String(row?.test_word_id || "")) || null;
+      const choice = wordRow?.choice || {};
+      const correct = row?.correct === true;
+      const assignmentType = String(
+        assignment?.automation_kind ||
+        assignment?.automation_source ||
+        assignment?.question_type ||
+        ""
+      ).trim();
+      const supportParts = [
+        choice.assignment_support,
+        choice.support_preset,
+        assignment?.hints_enabled === false ? "no_hints" : "",
+      ].filter(Boolean);
+
+      return {
+        pupil_name: pupilDisplayName(data.pupilById?.get(String(row?.pupil_id || ""))),
+        pupil_id: String(row?.pupil_id || ""),
+        class_name: classContext.className,
+        class_id: String(row?.class_id || ""),
+        year_group: classContext.yearGroup,
+        grapheme: analyticsTargetForAttempt(row),
+        word: String(row?.word_text || wordRow?.word || "").trim(),
+        typed_answer: String(row?.typed || "").trim(),
+        assignment_name: String(assignment?.tests?.title || "").trim(),
+        assignment_id: String(row?.assignment_id || ""),
+        assignment_type: assignmentType,
+        attempt_source: String(row?.attempt_source || assignmentType || "").trim(),
+        timestamp: row?.created_at || "",
+        correct: correct ? "Yes" : "No",
+        incorrect: correct ? "No" : "Yes",
+        score: correct ? 1 : 0,
+        accuracy: formatPercent(correct ? 1 : 0),
+        attempt_number: Math.max(1, Number(row?.attempt_number || 1)),
+        mode: String(row?.mode || "").trim(),
+        question_type: String(assignment?.question_type || "").trim(),
+        support: supportParts.join(", "),
+        status: correct ? "Correct" : "Incorrect",
+        test_word_id: String(row?.test_word_id || ""),
+      };
+    });
+}
+
+function buildAnalyticsExportSummaryRows(exportState = state.analyticsExport) {
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return [];
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const grapheme = normalizeAnalyticsGrapheme(exportState?.grapheme);
+  const groups = new Map();
+
+  for (const row of data.latestRows || []) {
+    if (!analyticsExportRowMatchesScope(row, scope, grapheme)) continue;
+    const pupilId = String(row?.pupil_id || "");
+    const target = normalizeAnalyticsGrapheme(analyticsTargetForAttempt(row));
+    if (!pupilId || !target || target === "general") continue;
+    const key = `${pupilId}::${target}`;
+    const entry = groups.get(key) || {
+      pupilId,
+      target,
+      rows: [],
+      classIds: new Set(),
+    };
+    entry.rows.push(row);
+    if (row?.class_id) entry.classIds.add(String(row.class_id));
+    groups.set(key, entry);
+  }
+
+  return Array.from(groups.values())
+    .map((entry) => {
+      const rows = entry.rows;
+      const total = rows.length;
+      const correct = rows.filter((row) => row?.correct).length;
+      const firstTryCorrect = rows.filter((row) => row?.correct && Math.max(1, Number(row?.attempt_number || 1)) === 1).length;
+      const averageAttempts = total
+        ? rows.reduce((sum, row) => sum + Math.max(1, Number(row?.attempt_number || 1)), 0) / total
+        : 0;
+      const latestActivity = rows
+        .map((row) => new Date(row?.created_at || 0).getTime())
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => b - a)[0] || null;
+      const classContext = getAnalyticsExportClassContext(
+        { class_id: "" },
+        data,
+        { classIdSet: entry.classIds },
+      );
+      const accuracy = total ? correct / total : 0;
+      const signal = getVisualPupilSignal({
+        checkedWords: total,
+        accuracy,
+        averageAttempts,
+        needsIntervention: total >= 2 && (accuracy < 0.65 || averageAttempts > 2.2),
+      });
+      const indicator = estimateSpellingAttainmentIndicator({
+        responses: rows.map((row) => ({
+          correct: !!row?.correct,
+          difficultyScore: data.difficultyByWordId?.get(String(row?.test_word_id || ""))?.coreScore
+            ?? data.difficultyByWordId?.get(String(row?.test_word_id || ""))?.score
+            ?? 50,
+        })),
+        checkedAccuracy: total ? accuracy : null,
+        firstTimeCorrectRate: total ? firstTryCorrect / total : null,
+        completionRate: null,
+        averageAttempts: total ? averageAttempts : null,
+      });
+
+      return {
+        pupil_name: pupilDisplayName(data.pupilById?.get(String(entry.pupilId))),
+        pupil_id: entry.pupilId,
+        class_name: classContext.className,
+        year_group: classContext.yearGroup,
+        grapheme: entry.target,
+        attempts_count: total,
+        correct_count: correct,
+        incorrect_count: Math.max(0, total - correct),
+        accuracy: formatPercent(accuracy),
+        first_try: formatPercent(total ? firstTryCorrect / total : 0),
+        average_tries: formatOneDecimal(averageAttempts),
+        latest_activity: latestActivity ? new Date(latestActivity).toISOString() : "",
+        signal: signal.label,
+        sai: indicator?.score == null ? "" : String(indicator.score),
+        level: getIndicatorLevelText(indicator),
+        performance_descriptor: getIndicatorPerformanceText(indicator),
+      };
+    })
+    .sort((a, b) =>
+      String(a.pupil_name || "").localeCompare(String(b.pupil_name || "")) ||
+      String(a.grapheme || "").localeCompare(String(b.grapheme || ""))
+    );
+}
+
+function buildAnalyticsExportModelFromState() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return null;
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const dataset = normalizeAnalyticsExportDataset(exportState.dataset);
+  const rows = dataset === "attempts"
+    ? buildAnalyticsExportAttemptRows(exportState)
+    : buildAnalyticsExportSummaryRows(exportState);
+  const viewLabel = getAnalyticsExportOptionLabel(ANALYTICS_EXPORT_VIEW_OPTIONS, scope.view);
+  const graphemeLabel = normalizeAnalyticsGrapheme(exportState.grapheme) || "All graphemes";
+
+  return buildScopedAnalyticsExportModel({
+    dataset,
+    viewLabel,
+    scopeLabel: scope.scopeLabel,
+    graphemeLabel,
+    windowDays: state.visualAnalytics.windowDays || VISUAL_ANALYTICS_WINDOW_DAYS,
+    generatedAt: new Date().toISOString(),
+    rows,
+  });
+}
+
+function handleAnalyticsExportDownload() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  if (state.visualAnalytics.status !== "ready" || !state.visualAnalytics.sourceData) {
+    setAnalyticsExportMessage("Analytics need to finish loading before export.", "error");
+    paint();
+    return;
+  }
+  const model = buildAnalyticsExportModelFromState();
+  downloadAnalyticsExportModel(model, normalizeAnalyticsExportFormat(exportState.format));
+}
+
+function downloadAnalyticsExportModel(model = null, format = "csv") {
+  if (!model || !exportModelHasRows(model)) {
+    setAnalyticsExportMessage("No data found for that export selection.", "error");
+    paint();
+    return;
+  }
+
+  if (format === "xlsx") {
+    try {
+      writeExportWorkbook(model, window.XLSX);
+      setAnalyticsExportMessage("Excel export downloaded.", "success");
+    } catch (error) {
+      setAnalyticsExportMessage(error?.message || EXCEL_UNAVAILABLE_MESSAGE, "error");
+    }
+    paint();
+    return;
+  }
+
+  const csv = serializeExportCsv(model);
+  if (!csv.trim()) {
+    setAnalyticsExportMessage("No data found for that export selection.", "error");
+    paint();
+    return;
+  }
+
+  downloadTextFile(buildExportFilename(model, "csv"), csv, "text/csv;charset=utf-8");
+  setAnalyticsExportMessage("CSV export downloaded.", "success");
+  paint();
 }
 
 function getImportPreviewExportRows(preview = null, kind = "error") {
@@ -25198,6 +25810,68 @@ function injectStyles() {
       padding-left:14px;
       padding-right:14px;
       background-color:#f8fafc;
+    }
+
+    .td-analytics-export-card{
+      margin-top:12px;
+    }
+
+    .td-analytics-export-card-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+
+    .td-analytics-export-card-head h4{
+      margin:0;
+      font-size:1rem;
+      font-weight:800;
+      color:var(--wl-text);
+    }
+
+    .td-analytics-export-card-head p{
+      margin:3px 0 0;
+      color:var(--wl-text-muted);
+      font-size:0.92rem;
+    }
+
+    .td-analytics-export-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:12px;
+      align-items:end;
+    }
+
+    .td-analytics-export-action{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+    }
+
+    .td-analytics-export-action > span{
+      font-size:0.82rem;
+      line-height:1.25;
+    }
+
+    .td-analytics-export-action .td-btn{
+      min-height:48px;
+    }
+
+    .td-analytics-export-message{
+      margin-top:10px;
+      color:var(--wl-text-muted);
+      font-size:0.9rem;
+    }
+
+    .td-analytics-export-message.is-error{
+      color:var(--wl-error-ink);
+    }
+
+    .td-analytics-export-message.is-success{
+      color:var(--wl-success-ink);
     }
 
     .td-analytics-bar-title{
