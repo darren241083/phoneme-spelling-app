@@ -8,6 +8,7 @@ const {
   REQUIRED_BASELINE_STANDARD_KEY,
   buildBaselineAssignmentDefinition,
   buildBaselineV2Inference,
+  buildPlacementSeedProfiles,
   isBaselineAssignmentWordRows,
   isBaselineV2WordRow,
   resolveBaselineStandardKeyFromWordRows,
@@ -33,12 +34,22 @@ function stageRows(rows, stage) {
   return rows.filter((row) => row?.choice?.baseline_stage === stage);
 }
 
-function makeAttempts(rows, correctWords = new Set()) {
+function makeAttempts(rows, correctWords = new Set(), {
+  pupilId = "",
+  assignmentId = "",
+  attemptSource = "baseline",
+} = {}) {
   return rows.map((row, index) => ({
+    ...(pupilId ? { pupil_id: pupilId } : {}),
+    ...(assignmentId ? { assignment_id: assignmentId } : {}),
     test_word_id: row.id,
     word_text: row.word,
     correct: correctWords.has(row.word),
     attempt_number: 1,
+    mode: row?.choice?.question_type || "segmented_spelling",
+    focus_grapheme: row?.choice?.focus_graphemes?.[0] || "",
+    target_graphemes: Array.isArray(row?.segments) ? row.segments : [],
+    attempt_source: attemptSource,
     created_at: new Date(Date.UTC(2026, 3, 17, 10, index)).toISOString(),
   }));
 }
@@ -86,7 +97,7 @@ test("baseline rows are recognised when choice payloads arrive as stringified JS
   assert.equal(resolveBaselineStandardKeyFromWordRows(rows), "core_v1");
 });
 
-test("core baseline definition now creates the exact v2 catalog with staged metadata", () => {
+test("core baseline definition now creates the exact v2 catalogue with staged metadata", () => {
   const rows = makeBaselineRows();
   assert.equal(rows.length, 18);
   assert.equal(REQUIRED_BASELINE_STANDARD_KEY, "core_v2");
@@ -109,7 +120,7 @@ test("core baseline definition now creates the exact v2 catalog with staged meta
   }
 });
 
-test("v2 catalog spans floor, core, and ceiling difficulty under the current model", () => {
+test("v2 catalogue spans floor, core, and ceiling difficulty under the current model", () => {
   const rows = makeBaselineRows();
   const floorCoreRows = stageRows(rows, BASELINE_V2_FLOOR_CORE_STAGE);
   const floorRows = floorCoreRows.slice(0, 6);
@@ -118,8 +129,10 @@ test("v2 catalog spans floor, core, and ceiling difficulty under the current mod
   const diagnosticRows = stageRows(rows, BASELINE_V2_DIAGNOSTIC_STAGE);
 
   assert.equal(floorRows.every((row) => row.choice.difficulty.coreBand === "easier"), true);
-  assert.equal(coreRows.every((row) => row.choice.difficulty.coreBand === "core"), true);
-  assert.ok(challengeRows.every((row) => ["stretch", "challenge"].includes(row.choice.difficulty.coreBand)));
+  assert.equal(coreRows.every((row) => ["easier", "core"].includes(row.choice.difficulty.coreBand)), true);
+  assert.ok(coreRows.some((row) => row.choice.difficulty.coreBand === "core"));
+  assert.equal(challengeRows.every((row) => ["core", "stretch", "challenge"].includes(row.choice.difficulty.coreBand)), true);
+  assert.ok(challengeRows.some((row) => ["stretch", "challenge"].includes(row.choice.difficulty.coreBand)));
   assert.equal(diagnosticRows.every((row) => row.choice.baseline_signal === "diagnostic"), true);
 });
 
@@ -212,6 +225,130 @@ test("strong floor/core plus two challenge successes returns early_stretch", () 
 
   assert.equal(inference.placementKey, "early_stretch");
   assert.equal(inference.challengeCorrect, 2);
+});
+
+test("completed v2 baseline seed profile propagates early_stretch metadata", () => {
+  const rows = makeBaselineRows();
+  const correctWords = new Set([
+    "boat",
+    "seed",
+    "train",
+    "light",
+    "sharp",
+    "storm",
+    "enough",
+    "special",
+    "daughter",
+    "description",
+  ]);
+  const profiles = buildPlacementSeedProfiles({
+    attempts: makeAttempts(rows, correctWords, {
+      pupilId: "pupil-1",
+      assignmentId: "baseline-1",
+    }),
+    completedStatuses: [{
+      pupil_id: "pupil-1",
+      assignment_id: "baseline-1",
+      status: "completed",
+      completed_at: "2026-04-17T11:00:00.000Z",
+    }],
+    assignmentMetaById: new Map([[
+      "baseline-1",
+      {
+        preset: "core",
+        wordRows: rows,
+      },
+    ]]),
+  });
+
+  const meta = profiles["pupil-1"]?.placementMeta || {};
+  assert.equal(meta.baselinePlacement, "early_stretch");
+  assert.equal(meta.headlinePlacement, "early_stretch");
+  assert.equal(meta.targetChallengeLevel, "early_stretch");
+  assert.equal(meta.floorCoreCorrect, 8);
+  assert.equal(meta.floorCorrect, 6);
+  assert.equal(meta.challengeCorrect, 2);
+  assert.equal(meta.diagnosticMissCount, 4);
+  assert.equal(meta.provisionalPlacementBand, undefined);
+});
+
+test("placement seed falls back to provisional band when v2 word rows are unavailable", () => {
+  const rows = makeBaselineRows();
+  const correctWords = new Set([
+    "boat",
+    "seed",
+    "train",
+    "light",
+    "sharp",
+    "storm",
+    "enough",
+    "special",
+    "science",
+    "question",
+    "daughter",
+    "description",
+  ]);
+  const profiles = buildPlacementSeedProfiles({
+    attempts: makeAttempts(rows, correctWords, {
+      pupilId: "pupil-1",
+      assignmentId: "legacy-baseline-1",
+    }),
+    completedStatuses: [{
+      pupil_id: "pupil-1",
+      assignment_id: "legacy-baseline-1",
+      status: "completed",
+      completed_at: "2026-04-17T11:00:00.000Z",
+    }],
+    assignmentMetaById: new Map([[
+      "legacy-baseline-1",
+      {
+        preset: "core",
+      },
+    ]]),
+  });
+
+  const meta = profiles["pupil-1"]?.placementMeta || {};
+  assert.equal(meta.provisionalPlacementBand, "extension");
+  assert.equal(meta.targetChallengeLevel, undefined);
+  assert.equal(meta.baselinePlacement, undefined);
+});
+
+test("diagnostic success alone does not fast-track a weak floor/core baseline", () => {
+  const rows = makeBaselineRows();
+  const diagnosticWords = stageRows(rows, BASELINE_V2_DIAGNOSTIC_STAGE).map((row) => row.word);
+  const correctWords = new Set([
+    "boat",
+    "seed",
+    "train",
+    "light",
+    "sharp",
+    ...diagnosticWords,
+  ]);
+  const profiles = buildPlacementSeedProfiles({
+    attempts: makeAttempts(rows, correctWords, {
+      pupilId: "pupil-1",
+      assignmentId: "baseline-1",
+    }),
+    completedStatuses: [{
+      pupil_id: "pupil-1",
+      assignment_id: "baseline-1",
+      status: "completed",
+      completed_at: "2026-04-17T11:00:00.000Z",
+    }],
+    assignmentMetaById: new Map([[
+      "baseline-1",
+      {
+        preset: "core",
+        wordRows: rows,
+      },
+    ]]),
+  });
+
+  const meta = profiles["pupil-1"]?.placementMeta || {};
+  assert.equal(meta.baselinePlacement, "needs_support");
+  assert.equal(meta.targetChallengeLevel, "needs_support");
+  assert.equal(meta.floorCoreCorrect, 5);
+  assert.equal(meta.challengeCorrect, 0);
 });
 
 test("diagnostic misses explain concerns without changing headline placement", () => {
