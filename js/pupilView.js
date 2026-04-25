@@ -10,8 +10,8 @@ import {
   listPupilPracticeEvidenceAttempts,
   readAssignmentPupilStatus,
   saveAssignmentProgress,
-} from "./db.js?v=1.23";
-import { mountGame } from "./game.js?v=1.32";
+} from "./db.js?v=1.24";
+import { mountGame } from "./game.js?v=1.33";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
@@ -30,6 +30,7 @@ import {
   estimateSpellingAttainmentIndicator,
 } from "./spellingIndicator.js?v=1.5";
 import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
+import { buildPupilFeedbackCardModel } from "./pupilFeedbackModel.js?v=1.0";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -213,6 +214,7 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       return getAttemptTimestampMs(a) - getAttemptTimestampMs(b);
     });
     const latestAttempt = itemAttempts[itemAttempts.length - 1] || null;
+    const latestIncorrectAttempt = itemAttempts.filter((attempt) => !attempt?.correct).slice(-1)[0] || null;
     const derivedAttemptsUsed = itemAttempts.reduce((max, attempt) => Math.max(max, getAttemptOrderValue(attempt)), 0);
     const snapshotAttemptsUsed = Math.max(0, Number(snapshotEntry?.attemptsUsed || 0));
     const attemptsAllowed = resolveItemAttemptsAllowed(word, testMeta);
@@ -223,6 +225,13 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       ? !!latestAttempt.correct
       : !!snapshotEntry?.correct;
     const feedbackState = normalizeStoredFeedbackState(snapshotEntry?.feedbackState ?? snapshotEntry?.feedback_state);
+    const lastSubmittedIncorrectAnswer = completed
+      ? null
+      : (
+        String(latestIncorrectAttempt?.typed ?? "").trim()
+        || String(snapshotEntry?.lastSubmittedIncorrectAnswer ?? snapshotEntry?.last_submitted_incorrect_answer ?? "").trim()
+        || null
+      );
     const typed = latestAttempt
       ? String(latestAttempt?.typed ?? "").trim()
       : String(snapshotEntry?.typed ?? "").trim();
@@ -255,6 +264,7 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       targetGraphemes: Array.isArray(snapshotEntry?.targetGraphemes)
         ? snapshotEntry.targetGraphemes
         : (Array.isArray(word?.segments) ? word.segments : []),
+      lastSubmittedIncorrectAnswer,
       feedbackState,
       inputState: storedInputState,
     };
@@ -508,6 +518,7 @@ function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map(), wo
     accuracy,
     firstTrySuccessRate,
     averageAttempts,
+    attemptHistory: attempts,
     attainmentIndicator,
     secureNow,
     growing,
@@ -1210,6 +1221,37 @@ function renderProgressSection(progress) {
   `;
 }
 
+function renderFeedbackCardItem(item) {
+  const chips = Array.isArray(item?.chips) ? item.chips : [];
+  const variant = String(item?.variant || "wins").trim() || "wins";
+  return `
+    <article class="pupilFeedbackItem">
+      <div class="pupilFeedbackLabel">${escapeHtml(item?.label || "")}</div>
+      <div class="pupilFeedbackText">${escapeHtml(item?.text || "")}</div>
+      ${chips.length ? renderProgressChipList(chips, variant, (chip) => chip) : ""}
+    </article>
+  `;
+}
+
+function renderFeedbackCard(assignments, practiceModel, progress) {
+  const model = buildPupilFeedbackCardModel({ assignments, practiceModel, progress });
+  if (!model) return "";
+
+  return `
+    <section class="card pupilFeedbackCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("spark", model.title || "Good news so far")}</h3>
+        </div>
+      </div>
+      ${model?.intro ? `<p class="pupilFeedbackIntro">${escapeHtml(model.intro)}</p>` : ""}
+      <div class="pupilFeedbackGrid">
+        ${(Array.isArray(model?.items) ? model.items : []).map(renderFeedbackCardItem).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderAssignments(assignments) {
   if (!assignments.length) return "";
 
@@ -1643,6 +1685,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress)}
+      ${renderFeedbackCard(assignments, practiceModel, progress)}
       ${renderProgressSection(progress)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}

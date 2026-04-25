@@ -1,0 +1,179 @@
+function parseDateMs(value) {
+  const ms = new Date(value || "").getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function normalizeText(value = "") {
+  return String(value || "").trim();
+}
+
+function normalizeWordLabel(value = "") {
+  return normalizeText(value);
+}
+
+function buildAttemptKey(attempt = {}) {
+  const assignmentTargetId = normalizeText(attempt?.assignment_target_id || attempt?.assignmentTargetId);
+  if (assignmentTargetId) return `target:${assignmentTargetId}`;
+
+  const testWordId = normalizeText(attempt?.test_word_id || attempt?.testWordId);
+  if (testWordId) return `word:${testWordId}`;
+
+  const wordText = normalizeWordLabel(attempt?.word_text || attempt?.wordText);
+  return wordText ? `text:${wordText.toLowerCase()}` : "";
+}
+
+function uniqueLabels(rows = [], limit = 3) {
+  const labels = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const label = normalizeWordLabel(row?.word);
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+    if (labels.length >= limit) break;
+  }
+  return labels;
+}
+
+function formatFocusLabel(value = "") {
+  const clean = normalizeText(value).toLowerCase();
+  if (!clean || clean === "general") return "Mixed";
+  return clean;
+}
+
+function buildEncouragement({ wordsChecked = 0, pendingAssignments = 0, completedAssignments = 0 } = {}) {
+  if (wordsChecked >= 4) return "Here are a few bright spots from your recent spelling.";
+  if (completedAssignments > 0) return "Nice work. Your checked words are starting to build a picture.";
+  if (pendingAssignments > 0) return "Your next checked word will help this card grow.";
+  return "Every checked word helps build your progress.";
+}
+
+export function buildPupilAttemptFeedbackSignals(attempts = []) {
+  const rows = Array.isArray(attempts) ? attempts : [];
+  const latestByKey = new Map();
+  const historyByKey = new Map();
+
+  for (const attempt of rows) {
+    const key = buildAttemptKey(attempt);
+    if (!key) continue;
+
+    latestByKey.set(key, attempt);
+    const history = historyByKey.get(key) || [];
+    history.push(attempt);
+    historyByKey.set(key, history);
+  }
+
+  const recentEffortWords = uniqueLabels(
+    Array.from(latestByKey.values())
+      .map((attempt) => ({
+        word: normalizeWordLabel(attempt?.word_text || attempt?.wordText),
+        createdAtMs: parseDateMs(attempt?.created_at || attempt?.createdAt),
+      }))
+      .sort((a, b) => b.createdAtMs - a.createdAtMs),
+    3,
+  );
+
+  const improvedWords = uniqueLabels(
+    Array.from(historyByKey.values())
+      .map((history) => history.slice().sort((a, b) => (
+        parseDateMs(a?.created_at || a?.createdAt) - parseDateMs(b?.created_at || b?.createdAt)
+      )))
+      .map((history) => {
+        const latestAttempt = history[history.length - 1] || null;
+        if (!latestAttempt?.correct) return null;
+        const hadEarlierIncorrect = history.slice(0, -1).some((attempt) => !attempt?.correct);
+        if (!hadEarlierIncorrect) return null;
+        return {
+          word: normalizeWordLabel(latestAttempt?.word_text || latestAttempt?.wordText),
+          createdAtMs: parseDateMs(latestAttempt?.created_at || latestAttempt?.createdAt),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.createdAtMs - a.createdAtMs),
+    3,
+  );
+
+  return {
+    recentEffortWords,
+    improvedWords,
+  };
+}
+
+export function buildPupilFeedbackCardModel({
+  assignments = [],
+  practiceModel = null,
+  progress = null,
+} = {}) {
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const attemptHistory = Array.isArray(progress?.attemptHistory) ? progress.attemptHistory : [];
+  const signals = buildPupilAttemptFeedbackSignals(attemptHistory);
+  const pendingAssignments = safeAssignments.filter((item) => !item?.completed).length;
+  const completedAssignments = safeAssignments.filter((item) => !!item?.completed).length;
+  const wordsChecked = Math.max(0, Number(progress?.wordsChecked || 0));
+
+  const rawPracticeFocus = normalizeText(
+    practiceModel?.focusGrapheme
+    || practiceModel?.packs?.[0]?.focus
+    || progress?.practiseNext?.[0]?.target
+    || ""
+  );
+  const practiceFocus = rawPracticeFocus ? formatFocusLabel(rawPracticeFocus) : "";
+
+  const items = [];
+  if (signals.recentEffortWords.length) {
+    items.push({
+      key: "recent_effort",
+      label: "Recently checked",
+      text: signals.recentEffortWords.length === 1
+        ? "You checked this word recently."
+        : `You checked ${signals.recentEffortWords.length} words recently.`,
+      chips: signals.recentEffortWords,
+      variant: "wins",
+    });
+  }
+
+  if (signals.improvedWords.length) {
+    items.push({
+      key: "improved_words",
+      label: "Getting stronger",
+      text: signals.improvedWords.length === 1
+        ? "You got this word right after another try."
+        : `You got ${signals.improvedWords.length} words right after another try.`,
+      chips: signals.improvedWords,
+      variant: "growing",
+    });
+  }
+
+  if (practiceFocus) {
+    items.push({
+      key: "next_focus",
+      label: "Practise next",
+      text: practiceFocus === "Mixed"
+        ? "A mixed practice set is ready for you next."
+        : "This spelling pattern is a good next step.",
+      chips: [practiceFocus],
+      variant: "practice",
+    });
+  }
+
+  if (!items.length) {
+    items.push({
+      key: "encouragement",
+      label: "Keep going",
+      text: buildEncouragement({ wordsChecked, pendingAssignments, completedAssignments }),
+      chips: [],
+      variant: "wins",
+    });
+  }
+
+  const intro = items.length === 1 && items[0]?.key === "encouragement"
+    ? ""
+    : buildEncouragement({ wordsChecked, pendingAssignments, completedAssignments });
+
+  return {
+    title: "Good news so far",
+    intro,
+    items,
+  };
+}

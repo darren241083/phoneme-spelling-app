@@ -1463,6 +1463,11 @@ function sanitizeAssignmentResultRows(results = []) {
       targetGraphemes: Array.isArray(entry?.targetGraphemes)
         ? entry.targetGraphemes.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
         : [],
+      lastSubmittedIncorrectAnswer: String(
+        entry?.lastSubmittedIncorrectAnswer
+        ?? entry?.last_submitted_incorrect_answer
+        ?? ""
+      ).trim() || null,
       inputState: sanitizeAssignmentInputState(entry?.inputState),
       feedbackState: sanitizeAssignmentFeedbackState(entry?.feedbackState ?? entry?.feedback_state),
     }))

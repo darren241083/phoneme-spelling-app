@@ -19,6 +19,7 @@ import {
   mapPreviewSegments,
   renderPhonicsPreviewModel,
 } from "./phonicsRenderer.js";
+import { shouldBlockDuplicateIncorrectSubmission } from "./pupilAttemptGuard.js?v=1.0";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
 
 const LOOM_DECOY_COUNTS = {
@@ -1178,6 +1179,7 @@ export function mountGame({
     completed = false,
     correct = false,
     typed = "",
+    lastSubmittedIncorrectAnswer = null,
     attemptsUsed = 0,
     attemptsAllowed = null,
     questionType = null,
@@ -1218,6 +1220,7 @@ export function mountGame({
       focusGrapheme: getResolvedFocusGrapheme(item),
       patternType: choice?.pattern_type || null,
       targetGraphemes: Array.isArray(item?.segments) ? item.segments : [],
+      lastSubmittedIncorrectAnswer: String(lastSubmittedIncorrectAnswer ?? "").trim() || null,
       inputState: cloneProgressInputState(inputState),
       feedbackState: cloneProgressFeedbackState(feedbackState),
     };
@@ -1423,6 +1426,7 @@ export function mountGame({
       attemptsAllowed: getAttemptsAllowedForItem(item),
       questionType: resolveQuestionType(item),
       modeKind: currentModeKind || resolveModeKind(item),
+      lastSubmittedIncorrectAnswer: existingEntry?.lastSubmittedIncorrectAnswer || null,
       inputState: captureCurrentInputState(),
       feedbackState: null,
       index: idx + 1,
@@ -1590,20 +1594,15 @@ export function mountGame({
     showLeaveConfirm();
   }
 
-  function isFixedChoiceModeWithDuplicateGuard() {
-    return currentModeKind === "focus_sound" || currentModeKind === "multiple_choice_grapheme_picker";
-  }
-
-  function shouldBlockRepeatedWrongChoice(item, typed) {
-    if (!isFixedChoiceModeWithDuplicateGuard()) return false;
+  function shouldBlockRepeatedIncorrectSubmission(item, typed) {
     const previousEntry = getProgressEntry(item);
     if (!previousEntry || previousEntry.completed || previousEntry.correct) return false;
     if (Math.max(0, Number(previousEntry.attemptsUsed || 0)) < 1) return false;
-
-    const normalizedTyped = String(typed || "").trim().toLowerCase();
-    const normalizedPrevious = String(previousEntry.typed || "").trim().toLowerCase();
-    if (!normalizedTyped || !normalizedPrevious || normalizedTyped !== normalizedPrevious) return false;
-    return !isCurrentCorrect(typed);
+    return shouldBlockDuplicateIncorrectSubmission({
+      previousResultWasIncorrect: true,
+      lastSubmittedIncorrectAnswer: previousEntry?.lastSubmittedIncorrectAnswer || "",
+      currentSubmittedAnswer: typed,
+    });
   }
 
   function seedProgressFromResumeState() {
@@ -1618,6 +1617,7 @@ export function mountGame({
         completed: resumeEntry?.completed === true,
         correct: !!resumeEntry?.correct,
         typed: String(resumeEntry?.typed ?? "").trim(),
+        lastSubmittedIncorrectAnswer: resumeEntry?.lastSubmittedIncorrectAnswer,
         attemptsUsed: resumeEntry?.attemptsUsed,
         attemptsAllowed: resumeEntry?.attemptsAllowed,
         questionType: resumeEntry?.questionType,
@@ -3909,8 +3909,8 @@ export function mountGame({
     const typed = getCurrentTypedValue();
     const correct = isCurrentCorrect(typed);
 
-    if (!correct && shouldBlockRepeatedWrongChoice(item, typed)) {
-      feedback.innerHTML = `<strong>Try a different grapheme.</strong>`;
+    if (!correct && shouldBlockRepeatedIncorrectSubmission(item, typed)) {
+      feedback.innerHTML = `<strong>Have another look first. Change your spelling before checking again.</strong>`;
       return;
     }
 
@@ -3932,6 +3932,7 @@ export function mountGame({
         completed: false,
         correct: false,
         typed,
+        lastSubmittedIncorrectAnswer: typed,
         attemptsUsed: currentAttempt,
         attemptsAllowed,
         questionType: resolveQuestionType(item),

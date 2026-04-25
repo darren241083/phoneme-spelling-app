@@ -77,7 +77,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.42");
+      const module = await import("./pupilView.js?v=3.43");
       return module.renderPupilView;
     },
     () => {
@@ -101,7 +101,7 @@ function loadPupilAuth() {
 function loadGameRuntime() {
   gameRuntimePromise = getCachedImport(
     gameRuntimePromise,
-    () => import("./game.js?v=1.32"),
+    () => import("./game.js?v=1.33"),
     () => {
       gameRuntimePromise = null;
     },

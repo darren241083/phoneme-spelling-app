@@ -1314,6 +1314,7 @@ body {
 #viewPupil .assignmentLaunchCard,
 #viewPupil .pupilProgressStatCard,
 #viewPupil .pupilProgressFocusCard,
+#viewPupil .pupilFeedbackItem,
 #viewPupil .segmentedBox,
 #viewPupil .scrollSlot,
 #viewPupil .supportArrangeAnswer,
@@ -1345,6 +1346,8 @@ body {
 #viewPupil .attempts,
 #viewPupil .pupilPracticeFocus,
 #viewPupil .pupilProgressEmpty,
+#viewPupil .pupilFeedbackIntro,
+#viewPupil .pupilFeedbackLabel,
 #viewPupil .pupilSectionHead p,
 #viewPupil .pupilSummaryLabel,
 #viewPupil .resultSummaryLabel,
@@ -1364,6 +1367,10 @@ body.acc-text-large #viewPupil .pupilSectionTitleRow h3,
 body.acc-text-large #viewPupil .test-card h3,
 body.acc-text-large #viewPupil .pupilProgressFocusTitle{
   font-size:24px;
+}
+
+body.acc-text-large #viewPupil .pupilFeedbackText{
+  font-size:17px;
 }
 
 body.acc-text-large #viewPupil .pupilProgressMood,
@@ -1604,6 +1611,55 @@ body.acc-text-large #viewPupil .spellLoomToken{
 .pupilSectionTitleRow h3{
   margin:0;
   font-size:22px;
+}
+
+.pupilFeedbackCard{
+  padding:18px 20px;
+}
+
+.pupilFeedbackIntro{
+  margin:0 0 14px 0;
+  color:var(--muted);
+  font-size:15px;
+  line-height:1.5;
+}
+
+.pupilFeedbackGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+}
+
+.pupilFeedbackItem{
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:14px;
+  background:#fff;
+}
+
+.pupilFeedbackLabel{
+  margin-bottom:6px;
+  font-size:12px;
+  font-weight:800;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.pupilFeedbackText{
+  margin-bottom:10px;
+  color:var(--text);
+  font-size:15px;
+  line-height:1.45;
+}
+
+.pupilSectionHead--compact{
+  align-items:center;
+  margin-bottom:0;
+}
+
+.pupilSectionHead--compact .pupilSectionTitleRow{
+  margin-bottom:4px;
 }
 
 .pupilSectionCount{
@@ -2210,6 +2266,9 @@ body.acc-text-large #viewPupil .spellLoomToken{
   }
   .pupilHeroCopy{
     font-size:16px;
+  }
+  .pupilFeedbackGrid{
+    grid-template-columns:1fr;
   }
   .accessibilityGrid{
     grid-template-columns:1fr;
