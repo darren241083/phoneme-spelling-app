@@ -4446,57 +4446,54 @@ function compareBaselineGateAssignments(a, b) {
   return bCreated - aCreated;
 }
 
-export async function readPupilBaselineGateState({
-  pupilId = "",
+function isMissingPupilRuntimeAssignmentsReadFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("read_pupil_runtime_assignments");
+}
+
+function getBaselineGateAssignmentStandardKey(assignment = null) {
+  const wordRows = normalizeLoadedWordRows(assignment?.words || [])
+    .filter((row) => String(row?.word || "").trim())
+    .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
+  if (!wordRows.length || !isBaselineAssignmentWordRows(wordRows)) return "";
+  return resolveBaselineStandardKeyFromWordRows(wordRows);
+}
+
+function hasCompletedRuntimeAssignment(assignment = null) {
+  const status = String(assignment?.assignmentStatus || assignment?.assignment_status || "").trim().toLowerCase();
+  return !!assignment?.completed
+    || !!assignment?.completed_at
+    || !!assignment?.completedAt
+    || status === "completed";
+}
+
+function hasStartedRuntimeAssignment(assignment = null) {
+  const status = String(assignment?.assignmentStatus || assignment?.assignment_status || "").trim().toLowerCase();
+  return hasCompletedRuntimeAssignment(assignment)
+    || !!assignment?.started_at
+    || !!assignment?.startedAt
+    || status === "started"
+    || (Array.isArray(assignment?.result_json) && assignment.result_json.length > 0)
+    || (Array.isArray(assignment?.resultJson) && assignment.resultJson.length > 0);
+}
+
+function compareBaselineGateRuntimeAssignments(a, b) {
+  const aRank = hasCompletedRuntimeAssignment(a) ? 0 : hasStartedRuntimeAssignment(a) ? 1 : 2;
+  const bRank = hasCompletedRuntimeAssignment(b) ? 0 : hasStartedRuntimeAssignment(b) ? 1 : 2;
+  if (aRank !== bRank) return aRank - bRank;
+  return compareBaselineGateAssignments(a, b);
+}
+
+function buildBaselineGateStateFromRuntimeAssignments({
+  runtimePayload = null,
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {
-  const safePupilId = String(pupilId || "").trim();
   const safeRequiredKey = String(requiredStandardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase();
-
-  if (!safePupilId) {
-    return normalizeBaselineGateStatePayload({
-      status: "waiting",
-      requiredStandardKey: safeRequiredKey,
-      waiting_reason: null,
-      class_ids: [],
-      form_class_ids: [],
-      assignment: null,
-    }, { requiredStandardKey: safeRequiredKey });
-  }
-
-  const { data: rpcData, error: rpcError } = await supabase.rpc("read_pupil_baseline_gate_state", {
-    requested_pupil_id: safePupilId,
-    requested_standard_key: safeRequiredKey,
-  });
-  if (!rpcError) {
-    if (rpcData && typeof rpcData === "object" && rpcData?.status) {
-      return normalizeBaselineGateStatePayload(rpcData, {
-        requiredStandardKey: safeRequiredKey,
-      });
-    }
-  } else if (!isMissingPupilBaselineGateReadFunctionError(rpcError)) {
-    throw rpcError;
-  }
-
-  let canAccessRuntime = null;
-  try {
-    const { data: runtimeData, error: runtimeError } = await supabase.rpc("can_access_pupil_runtime", {
-      requested_pupil_id: safePupilId,
-    });
-    if (runtimeError) {
-      if (!isMissingPupilRuntimeAccessFunctionError(runtimeError)) {
-        throw runtimeError;
-      }
-    } else {
-      canAccessRuntime = runtimeData === true;
-    }
-  } catch (error) {
-    if (!isMissingPupilRuntimeAccessFunctionError(error)) {
-      console.warn("Could not read pupil runtime access for baseline gate fallback:", error);
-    }
-  }
-
-  if (canAccessRuntime === false) {
+  const runtimeStatus = String(runtimePayload?.status || "").trim().toLowerCase();
+  if (runtimeStatus && runtimeStatus !== "ok") {
     return normalizeBaselineGateStatePayload({
       status: "waiting",
       waiting_reason: "runtime_inactive",
@@ -4507,91 +4504,19 @@ export async function readPupilBaselineGateState({
     }, { requiredStandardKey: safeRequiredKey });
   }
 
-  const { data: memberships, error: membershipError } = await supabase
-    .from("pupil_classes")
-    .select("class_id")
-    .eq("pupil_id", safePupilId)
-    .eq("active", true);
-  if (membershipError) throw membershipError;
-
+  const assignments = Array.isArray(runtimePayload?.assignments) ? runtimePayload.assignments : [];
+  const requiredBaselineAssignments = assignments
+    .filter((assignment) => {
+      if (!assignment?.id) return false;
+      if (!assignment?.isBaseline && getBaselineGateAssignmentStandardKey(assignment) !== safeRequiredKey) return false;
+      return getBaselineGateAssignmentStandardKey(assignment) === safeRequiredKey;
+    })
+    .sort(compareBaselineGateRuntimeAssignments);
   const classIds = normalizeIdList(
-    (memberships || [])
-      .map((row) => String(row?.class_id || "").trim())
+    assignments
+      .map((assignment) => assignment?.class_id || assignment?.classId)
       .filter(Boolean)
   );
-  let formClassIds = [];
-  if (classIds.length) {
-    try {
-      const { data: classRows, error: classError } = await supabase
-        .from("classes")
-        .select("id, class_type")
-        .in("id", classIds);
-      if (classError) {
-        throw classError;
-      }
-      formClassIds = normalizeIdList(
-        (classRows || [])
-          .filter((row) => normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
-          .map((row) => row?.id)
-      );
-    } catch (error) {
-      console.warn("Could not refine active form memberships for baseline gate fallback:", error);
-      formClassIds = [...classIds];
-    }
-  }
-
-  if (!formClassIds.length) {
-    return normalizeBaselineGateStatePayload({
-      status: "waiting",
-      waiting_reason: "no_active_form_membership",
-      required_standard_key: safeRequiredKey,
-      class_ids: classIds,
-      form_class_ids: formClassIds,
-      assignment: null,
-    }, { requiredStandardKey: safeRequiredKey });
-  }
-
-  const { data: assignmentRows, error: assignmentError } = await supabase
-    .from("assignments_v2")
-    .select(`
-      id,
-      class_id,
-      end_at,
-      created_at,
-      tests (
-        id,
-        test_words (
-          id,
-          position,
-          word,
-          sentence,
-          segments,
-          choice
-        )
-      )
-    `)
-    .in("class_id", classIds)
-    .order("end_at", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: false });
-  if (assignmentError) throw assignmentError;
-
-  const requiredBaselineAssignments = (assignmentRows || [])
-    .map((assignment) => {
-      const wordRows = normalizeLoadedWordRows(assignment?.tests?.test_words)
-        .filter((row) => String(row?.word || "").trim())
-        .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
-      if (!isBaselineAssignmentWordRows(wordRows)) return null;
-      const standardKey = resolveBaselineStandardKeyFromWordRows(wordRows);
-      if (standardKey !== safeRequiredKey) return null;
-      return {
-        id: String(assignment?.id || "").trim(),
-        class_id: String(assignment?.class_id || "").trim(),
-        end_at: assignment?.end_at || null,
-        created_at: assignment?.created_at || null,
-      };
-    })
-    .filter((assignment) => !!assignment?.id)
-    .sort(compareBaselineGateAssignments);
 
   if (!requiredBaselineAssignments.length) {
     return normalizeBaselineGateStatePayload({

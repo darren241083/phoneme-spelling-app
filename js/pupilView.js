@@ -1699,6 +1699,9 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
   const practicePacks = getPracticePacks(practiceModel);
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.starting === "true") return;
+      button.dataset.starting = "true";
+      button.disabled = true;
       const assignmentId = button.getAttribute("data-assignment");
       const assignment = assignments.find((item) => String(item.id) === String(assignmentId));
       if (!assignment) return;
@@ -1768,15 +1771,18 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       assignment: gateState?.assignment || null,
     };
     if (!resolvedGate.assignment?.id) {
-      const loadedAssignments = await ensureAssignments();
-      const visibleGate = buildVisibleBaselineGate(loadedAssignments, gateState?.assignmentId || "");
-      if (visibleGate) {
-        resolvedGate = visibleGate;
-      }
+      containerEl.innerHTML = renderBaselineGateState(name, {
+        mode: "waiting",
+        waitingReason: "no_baseline_assignment",
+        session,
+      });
+      bindAccessibilityControlEvents(containerEl);
+      return;
     }
   } else if (gateState?.status === "waiting" && waitingReason !== "no_active_form_membership" && waitingReason !== "runtime_inactive") {
-    const loadedAssignments = await ensureAssignments();
-    resolvedGate = buildVisibleBaselineGate(loadedAssignments);
+    // Phase 0 hardening removed anon access to raw class membership tables.
+    // The baseline gate RPC is now the runtime source of truth for baseline readiness.
+    resolvedGate = null;
   }
 
   if (resolvedGate?.assignment?.id) {
@@ -1800,6 +1806,21 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
   }
 
   if (gateState?.status === "waiting") {
+    if (waitingReason === "no_baseline_assignment") {
+      const loadedAssignments = await ensureAssignments().catch((error) => {
+        console.warn("load pupil assignments after missing baseline gate error:", error);
+        return [];
+      });
+      const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
+      if (dashboardAssignments.length) {
+        const [practiceModel, progress] = await Promise.all([
+          loadPracticeModel(pupilId),
+          loadPupilProgress(pupilId),
+        ]);
+        renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+        return;
+      }
+    }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: "waiting",
       waitingReason,
@@ -1809,13 +1830,19 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     return;
   }
 
-  const loadedAssignments = await ensureAssignments();
+  const loadedAssignments = await ensureAssignments().catch((error) => {
+    console.warn("load pupil assignments error:", error);
+    return [];
+  });
+  const dashboardAssignments = gateState?.status === "ready"
+    ? loadedAssignments.filter((item) => !item?.isBaseline)
+    : loadedAssignments;
 
   const [practiceModel, progress] = await Promise.all([
     loadPracticeModel(pupilId),
     loadPupilProgress(pupilId),
   ]);
-  renderDashboard(containerEl, session, loadedAssignments, practiceModel, progress);
+  renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
