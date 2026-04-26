@@ -18,7 +18,7 @@ import {
   buildWordFromGraphemes,
   mapPreviewSegments,
   renderPhonicsPreviewModel,
-} from "./phonicsRenderer.js";
+} from "./phonicsRenderer.js?v=1.6";
 import { shouldBlockDuplicateIncorrectSubmission } from "./pupilAttemptGuard.js?v=1.0";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
 
@@ -85,14 +85,17 @@ export function mountGame({
   const isCompetitionMode = String(testMeta?.competition_mode || testMeta?.competitionMode || "").trim().toLowerCase() === "spelling_bee"
     || testMeta?.spelling_bee === true
     || testMeta?.spellingBee === true;
+  const isSampleMode = testMeta?.sample_mode === true || testMeta?.sampleMode === true;
   const isUntilWrongCompetition = isCompetitionMode
     && String(testMeta?.bee_length_mode || testMeta?.beeLengthMode || "").trim().toLowerCase() === "until_wrong";
-  const leaveConfirmTitle = isCompetitionMode ? "Leave competition?" : "Leave test?";
+  const leaveConfirmTitle = isCompetitionMode ? "Leave competition?" : isSampleMode ? "Leave sample test?" : "Leave test?";
   const leaveConfirmBody = isCompetitionMode
     ? "Leaving ends your Spelling Bee run."
-    : "Your progress will be saved and you can continue later.";
-  const leaveContinueLabel = isCompetitionMode ? "Stay in competition" : "Continue test";
-  const leaveConfirmLabel = isCompetitionMode ? "End competition" : "Save and leave";
+    : isSampleMode
+      ? "This demo will close and your progress will not be saved."
+      : "Your progress will be saved and you can continue later.";
+  const leaveContinueLabel = isCompetitionMode ? "Stay in competition" : isSampleMode ? "Stay in sample" : "Continue test";
+  const leaveConfirmLabel = isCompetitionMode ? "End competition" : isSampleMode ? "Leave sample" : "Save and leave";
   const gameplaySessionId = ++activeGameplaySessionId;
   const hasUnlimitedAttempts = false;
   let idx = 0;

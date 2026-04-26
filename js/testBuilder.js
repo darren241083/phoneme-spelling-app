@@ -11,7 +11,7 @@ import {
   withActiveSchoolId,
 } from "./db.js?v=1.45";
 import { parseWordList, splitWordToGraphemes, inferPattern, formatGraphemesForInput, parseGraphemeInput, detectMisspellingWarning } from "./wordParser.js?v=1.5";
-import { buildWordFromGraphemes, renderPhonicsPreview } from "./phonicsRenderer.js";
+import { buildWordFromGraphemes, renderPhonicsPreview } from "./phonicsRenderer.js?v=1.6";
 import { getPhonemeAlternativeOptions } from "./data/phonemeHelpers.js";
 import {
   buildCorrectionSignature,

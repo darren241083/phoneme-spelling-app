@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { applyActiveSchoolFilter, readStaffAccessContext, resolveActiveSchoolDetails } from "./db.js?v=1.45";
-import { mountGame } from "./game.js?v=1.30";
+import { mountGame } from "./game.js?v=1.41";
 import {
   DEFAULT_QUESTION_TYPE,
   getQuestionTypeDisplayLabel,
@@ -22,11 +22,68 @@ const QUESTION_TYPE_OPTIONS = [
   { value: "no_support_assessment", label: "No support" },
 ];
 
+const SAMPLE_WORD_COUNT_DEFAULT = 10;
+const SAMPLE_WORD_COUNT_MAX = 10;
+
+const FOCUS_GRAPHEME_OPTIONS = [
+  { value: "ai", label: "ai" },
+  { value: "ay", label: "ay" },
+  { value: "a-e", label: "a-e" },
+  { value: "ee", label: "ee" },
+  { value: "ea", label: "ea" },
+  { value: "igh", label: "igh" },
+  { value: "i-e", label: "i-e" },
+  { value: "oa", label: "oa" },
+  { value: "ow", label: "ow" },
+  { value: "o-e", label: "o-e" },
+  { value: "oo", label: "oo" },
+  { value: "ew", label: "ew" },
+  { value: "sh", label: "sh" },
+  { value: "ch", label: "ch" },
+  { value: "th", label: "th" },
+  { value: "ng", label: "ng" },
+  { value: "ck", label: "ck" },
+  { value: "qu", label: "qu" },
+  { value: "ar", label: "ar" },
+  { value: "or", label: "or" },
+  { value: "er", label: "er" },
+  { value: "oi", label: "oi" },
+  { value: "oy", label: "oy" },
+  { value: "", label: "Mixed focus" },
+];
+
+const SAMPLE_WORD_BANK = {
+  ai: ["train", "snail", "paint", "chain", "rain", "sail", "brain", "plain", "wait", "tail"],
+  ay: ["day", "play", "tray", "stay", "spray", "clay", "say", "pay", "hay", "way"],
+  "a-e": ["cake", "make", "lake", "same", "game", "snake", "plane", "brave", "shape", "flame"],
+  ee: ["see", "tree", "green", "sleep", "queen", "three", "street", "wheel", "feet", "seed"],
+  ea: ["team", "seat", "read", "teach", "beach", "dream", "clean", "cream", "meal", "leaf"],
+  igh: ["night", "light", "bright", "sight", "flight", "high", "sigh", "right", "might", "tight"],
+  "i-e": ["bike", "like", "time", "shine", "smile", "drive", "prize", "slide", "white", "five"],
+  oa: ["boat", "goat", "coat", "road", "toast", "float", "soak", "coach", "soap", "throat"],
+  ow: ["cow", "now", "down", "brown", "clown", "town", "flower", "power", "shower", "crown"],
+  "o-e": ["home", "hope", "rope", "note", "stone", "bone", "cone", "phone", "spoke", "those"],
+  oo: ["moon", "spoon", "book", "look", "food", "soon", "room", "pool", "boot", "smooth"],
+  ew: ["new", "chew", "grew", "flew", "drew", "screw", "threw", "few", "stew", "crew"],
+  sh: ["ship", "shop", "fish", "wish", "shell", "brush", "shape", "fresh", "shout", "sheep"],
+  ch: ["chip", "chop", "much", "lunch", "chin", "rich", "beach", "chair", "cheese", "teacher"],
+  th: ["thin", "thick", "bath", "path", "moth", "three", "thank", "tooth", "cloth", "thorn"],
+  ng: ["ring", "song", "king", "long", "thing", "swing", "bring", "strong", "bang", "sting"],
+  ck: ["back", "duck", "sock", "pick", "lock", "truck", "stick", "clock", "black", "snack"],
+  qu: ["queen", "quick", "quilt", "quiz", "quack", "quest", "quiet", "quake", "quote", "quite"],
+  ar: ["car", "star", "farm", "sharp", "park", "charm", "start", "smart", "scarf", "garden"],
+  or: ["fork", "horn", "storm", "sport", "short", "born", "corn", "horse", "morning", "thorn"],
+  er: ["her", "fern", "term", "verb", "perch", "serve", "herd", "stern", "clerk", "person"],
+  oi: ["coin", "soil", "boil", "spoil", "join", "point", "voice", "choice", "noise", "oil"],
+  oy: ["boy", "toy", "joy", "enjoy", "royal", "annoy", "oyster", "cowboy", "destroy", "loyal"],
+  mixed: ["night", "teacher", "shout", "rain", "cake", "green", "phone", "quick", "star", "toy"],
+};
+
 const STARTER_SETS = [
-  { id: "ai_words", title: "ai words test", questionType: "focus_sound", focus: "ai", words: ["train", "snail", "paint", "chain"] },
-  { id: "magic_e", title: "magic e test", questionType: "spell_loom", focus: "a-e", words: ["cake", "home", "bike", "cube"] },
-  { id: "ee_words", title: "ee words test", questionType: "type_what_you_hear", focus: "ee", words: ["green", "sleep", "queen", "street"] },
-  { id: "mixed_test", title: "mixed spelling test", questionType: "no_support_assessment", focus: "", words: ["night", "teacher", "shout", "rain"] },
+  { id: "ai_words", title: "ai sample test", questionType: "focus_sound", focus: "ai", words: SAMPLE_WORD_BANK.ai },
+  { id: "magic_e", title: "magic e sample test", questionType: "spell_loom", focus: "a-e", words: SAMPLE_WORD_BANK["a-e"] },
+  { id: "ee_words", title: "ee sample test", questionType: "type_what_you_hear", focus: "ee", words: SAMPLE_WORD_BANK.ee },
+  { id: "mixed_test", title: "mixed focus sample test", questionType: "no_support_assessment", focus: "", words: SAMPLE_WORD_BANK.mixed },
 ];
 
 const state = {
@@ -43,6 +100,8 @@ async function boot() {
   document.body.classList.add("presentPageBody");
   appEl?.classList.add("presentApp");
   appEl?.addEventListener("click", onClick);
+  appEl?.addEventListener("input", onInput);
+  appEl?.addEventListener("change", onChange);
   appEl?.addEventListener("submit", onSubmit);
 
   if (savedTestId) {
@@ -61,22 +120,85 @@ async function boot() {
   renderBuilder();
 }
 
-function getInitialBuilderState() {
-  const starter = STARTER_SETS.find((item) => item.questionType === requestedDemoType) || STARTER_SETS[0];
-  return {
-    starterId: starter.id,
-    title: starter.title,
-    questionType: starter.questionType,
-    focus: starter.focus,
-    wordsText: starter.words.join("\n"),
-  };
-}
-
 function questionTypeLabel(value) {
   return getQuestionTypeDisplayLabel(value, {
     noSupportLabel: "No support",
     fallbackLabel: "Spelling",
   });
+}
+
+function clampSampleWordCount(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return SAMPLE_WORD_COUNT_DEFAULT;
+  return Math.max(1, Math.min(SAMPLE_WORD_COUNT_MAX, parsed));
+}
+
+function buildWordsText(words) {
+  return (Array.isArray(words) ? words : [])
+    .map((word) => String(word || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getSampleWordsForFocus(focus, count, preferredWords = null) {
+  const safeCount = clampSampleWordCount(count);
+  const normalizedFocus = normalizeFocusValue(focus);
+  const primary = Array.isArray(preferredWords) && preferredWords.length
+    ? preferredWords
+    : SAMPLE_WORD_BANK[normalizedFocus] || [];
+  const fallback = SAMPLE_WORD_BANK.mixed;
+  const seen = new Set();
+  const words = [];
+
+  for (const word of [...primary, ...fallback]) {
+    const clean = String(word || "").trim().toLowerCase();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    words.push(clean);
+    if (words.length >= safeCount) break;
+  }
+
+  return words;
+}
+
+function buildGeneratedWordsText(focus, count, preferredWords = null) {
+  return buildWordsText(getSampleWordsForFocus(focus, count, preferredWords));
+}
+
+function buildSampleTitle(questionType, focus) {
+  const normalizedFocus = normalizeFocusValue(focus);
+  if (normalizedFocus) return `${normalizedFocus} sample test`;
+  if (questionType === "spell_loom") return "Spell Loom sample test";
+  if (questionType === "type_what_you_hear") return "Arrange what you hear sample test";
+  if (questionType === "segmented_spelling") return "Segmented spelling sample test";
+  if (questionType === "no_support_assessment") return "Mixed focus sample test";
+  return "Focus sound sample test";
+}
+
+function buildBuilderFromStarter(starter) {
+  const wordCount = clampSampleWordCount(starter?.wordCount || SAMPLE_WORD_COUNT_DEFAULT);
+  const focus = normalizeFocusValue(starter?.focus || "");
+  const questionType = normalizeStoredQuestionType(starter?.questionType || requestedDemoType || DEFAULT_QUESTION_TYPE, {});
+  const generatedWordsText = buildGeneratedWordsText(focus, wordCount, starter?.words || null);
+  const generatedTitle = String(starter?.title || "").trim() || buildSampleTitle(questionType, focus);
+
+  return {
+    starterId: String(starter?.id || "").trim(),
+    title: generatedTitle,
+    questionType,
+    focus,
+    wordCount,
+    wordsText: generatedWordsText,
+    generatedWordsText,
+    generatedTitle,
+    wordsEdited: false,
+    titleEdited: false,
+  };
+}
+
+function getInitialBuilderState() {
+  const starter = STARTER_SETS.find((item) => item.questionType === requestedDemoType) || STARTER_SETS[0];
+  return buildBuilderFromStarter(starter);
 }
 
 function normalizeFocusValue(value) {
@@ -104,6 +226,7 @@ function readBuilderForm() {
     title: String(form.elements.namedItem("title")?.value || "").trim(),
     questionType: normalizeStoredQuestionType(form.elements.namedItem("question_type")?.value || DEFAULT_QUESTION_TYPE, {}),
     focus: normalizeFocusValue(form.elements.namedItem("focus")?.value || ""),
+    wordCount: clampSampleWordCount(form.elements.namedItem("word_count")?.value || SAMPLE_WORD_COUNT_DEFAULT),
     wordsText: String(form.elements.namedItem("words_text")?.value || ""),
   };
 }
@@ -124,7 +247,7 @@ function buildChoice(questionType, segments, focusOverride) {
 function buildPublicSession(builder) {
   const questionType = normalizeStoredQuestionType(builder.questionType || DEFAULT_QUESTION_TYPE, {});
   const focus = normalizeFocusValue(builder.focus);
-  const rawWords = parseWordList(builder.wordsText || "");
+  const rawWords = parseWordList(builder.wordsText || "").slice(0, SAMPLE_WORD_COUNT_MAX);
 
   if (!rawWords.length) {
     throw new Error("Add at least one word before starting the test.");
@@ -152,12 +275,7 @@ function buildPublicSession(builder) {
 }
 
 function buildDefaultTitle(questionType, focus) {
-  if (focus) return `${focus} test`;
-  if (questionType === "spell_loom") return "Spell Loom test";
-  if (questionType === "type_what_you_hear") return "Arrange what you hear test";
-  if (questionType === "segmented_spelling") return "Segmented spelling test";
-  if (questionType === "no_support_assessment") return "Spelling test";
-  return "Focus sound test";
+  return buildSampleTitle(questionType, focus);
 }
 
 function isNoRowsError(error) {
@@ -172,7 +290,7 @@ async function loadSavedTest(testId) {
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError) throw authError;
   if (!authData?.user) {
-    throw new Error("Please sign in to present a saved test. You can still try the public builder below.");
+    throw new Error("Please sign in to present a saved test. You can still try the sample builder below.");
   }
 
   const accessContext = await readStaffAccessContext();
@@ -242,7 +360,7 @@ function launchSession(session) {
   state.error = "";
   state.session = session;
   state.result = null;
-  document.title = `${session.title} | Live test`;
+  document.title = `${session.title} | ${session.source === "public" ? "Sample test" : "Live test"}`;
   appEl.innerHTML = `<div id="presentGameHost"></div>`;
   const host = appEl.querySelector("#presentGameHost");
   if (!(host instanceof HTMLElement)) return;
@@ -259,6 +377,7 @@ function launchSession(session) {
       audio_enabled: true,
       hints_enabled: true,
       school_name: session.schoolName || session.school?.name || "",
+      ...(session.source === "public" ? { sample_mode: true } : {}),
     },
     pupilId: null,
     assignmentId: null,
@@ -288,7 +407,7 @@ function renderError(message, allowPublicBuilder = false) {
       <h1>Live test</h1>
       <p class="presentError">${escapeHtml(message)}</p>
       <div class="row presentActions">
-        ${allowPublicBuilder ? `<button class="btn" type="button" data-action="open-builder">Open public builder</button>` : ""}
+        ${allowPublicBuilder ? `<button class="btn" type="button" data-action="open-builder">Open sample builder</button>` : ""}
         <button class="btn secondary" type="button" data-action="go-home">Back</button>
       </div>
     </section>
@@ -297,8 +416,9 @@ function renderError(message, allowPublicBuilder = false) {
 
 function renderBuilder() {
   state.result = null;
-  document.title = "Live test builder";
+  document.title = "Sample test builder";
   const builder = state.builder;
+  const wordCount = clampSampleWordCount(builder.wordCount);
 
   appEl.innerHTML = `
     <div class="presentBuilderShell">
@@ -306,8 +426,8 @@ function renderBuilder() {
         <div class="row presentBuilderTopRow">
           <button class="btn secondary" type="button" data-action="go-home">Back</button>
         </div>
-        <h1>Build a live test</h1>
-        <p class="presentLead">Use the exact pupil test screen on the big display. Choose a test type, load a starter set, or type your own words, then launch it.</p>
+        <h1>Set up a sample test</h1>
+        <p class="presentLead">Pick a focus, adjust the words, then launch. Nothing is saved.</p>
         ${state.error ? `<p class="presentError">${escapeHtml(state.error)}</p>` : ""}
         <form id="presentBuilderForm" class="presentBuilderForm">
           <input type="hidden" name="starter_id" value="${escapeHtml(builder.starterId || "")}" />
@@ -319,8 +439,16 @@ function renderBuilder() {
               </select>
             </label>
             <label class="presentField">
-              <span>Focus spelling</span>
-              <input class="input" type="text" name="focus" value="${escapeHtml(builder.focus || "")}" placeholder="Optional: ai, ay, oa, igh" />
+              <span>Focus grapheme</span>
+              <select class="select" name="focus">
+                ${FOCUS_GRAPHEME_OPTIONS.map((item) => `<option value="${escapeHtml(item.value)}" ${normalizeFocusValue(builder.focus) === item.value ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+              </select>
+            </label>
+            <label class="presentField">
+              <span>Word count</span>
+              <select class="select" name="word_count">
+                ${Array.from({ length: SAMPLE_WORD_COUNT_MAX }, (_, index) => index + 1).map((count) => `<option value="${count}" ${wordCount === count ? "selected" : ""}>${count}</option>`).join("")}
+              </select>
             </label>
             <label class="presentField">
               <span>Test title</span>
@@ -342,7 +470,7 @@ function renderBuilder() {
           <label class="presentField">
             <span>Words</span>
             <textarea class="textarea presentWordsInput" name="words_text" rows="8" placeholder="One word per line, or paste a comma-separated list.">${escapeHtml(builder.wordsText || "")}</textarea>
-            <span class="presentHelper">The live test will use the same pupil renderer, audio, and question flow. Add one word per line for best results.</span>
+            <span class="presentHelper">Edit the generated words if needed. The sample uses up to 10 words.</span>
           </label>
 
           <div class="row presentActions">
@@ -365,7 +493,7 @@ function renderComplete() {
   appEl.innerHTML = `
     <div class="pupil-header">
       <h2>${escapeHtml(state.session?.title || "Test complete")}</h2>
-      <p class="muted">You finished the test.</p>
+      <p class="muted">${isSaved ? "You finished the test." : "You finished the sample test."}</p>
     </div>
     <section class="card test-card resultCardInline">
       <div class="resultSummaryGrid">
@@ -388,10 +516,65 @@ function renderComplete() {
       </div>
       <div class="row presentActions">
         <button class="btn" type="button" data-action="restart-session">Run again</button>
-        <button class="btn secondary" type="button" data-action="${isSaved ? "go-home" : "edit-builder"}">${isSaved ? "Back to tests" : "Edit setup"}</button>
+        <button class="btn secondary" type="button" data-action="${isSaved ? "go-home" : "edit-builder"}">${isSaved ? "Back to tests" : "Edit sample"}</button>
       </div>
     </section>
   `;
+}
+
+function onInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return;
+  if (!target.form || target.form.id !== "presentBuilderForm") return;
+
+  if (target.name === "words_text") {
+    const wordsText = String(target.value || "");
+    state.builder = {
+      ...state.builder,
+      wordsText,
+      wordsEdited: wordsText !== String(state.builder.generatedWordsText || ""),
+    };
+    return;
+  }
+
+  if (target.name === "title") {
+    const title = String(target.value || "").trim();
+    state.builder = {
+      ...state.builder,
+      title,
+      titleEdited: state.builder.titleEdited === true || title !== String(state.builder.generatedTitle || ""),
+    };
+  }
+}
+
+function onChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) return;
+  if (!target.form || target.form.id !== "presentBuilderForm") return;
+  if (!["question_type", "focus", "word_count"].includes(target.name)) return;
+
+  const formState = readBuilderForm();
+  const currentGeneratedWords = String(state.builder.generatedWordsText || "");
+  const wordsStillGenerated = String(formState.wordsText || "") === currentGeneratedWords;
+  const nextGeneratedWordsText = buildGeneratedWordsText(formState.focus, formState.wordCount);
+  const nextGeneratedTitle = buildSampleTitle(formState.questionType, formState.focus);
+  const titleEdited = state.builder.titleEdited === true;
+
+  state.builder = {
+    ...state.builder,
+    starterId: "",
+    questionType: formState.questionType,
+    focus: formState.focus,
+    wordCount: formState.wordCount,
+    title: titleEdited ? formState.title : nextGeneratedTitle,
+    wordsText: wordsStillGenerated ? nextGeneratedWordsText : formState.wordsText,
+    generatedTitle: nextGeneratedTitle,
+    generatedWordsText: nextGeneratedWordsText,
+    titleEdited,
+    wordsEdited: !wordsStillGenerated,
+  };
+  state.error = "";
+  renderBuilder();
 }
 
 function onSubmit(event) {
@@ -400,7 +583,10 @@ function onSubmit(event) {
   event.preventDefault();
 
   try {
-    state.builder = readBuilderForm();
+    state.builder = {
+      ...state.builder,
+      ...readBuilderForm(),
+    };
     launchSession(buildPublicSession(state.builder));
   } catch (error) {
     state.error = error?.message || "Could not start the test.";
@@ -417,13 +603,7 @@ function onClick(event) {
   if (action === "use-starter") {
     const starter = STARTER_SETS.find((item) => item.id === button.dataset.starterId);
     if (!starter) return;
-    state.builder = {
-      starterId: starter.id,
-      title: starter.title,
-      questionType: starter.questionType,
-      focus: starter.focus,
-      wordsText: starter.words.join("\n"),
-    };
+    state.builder = buildBuilderFromStarter(starter);
     state.error = "";
     renderBuilder();
     return;

@@ -436,7 +436,7 @@ function injectStyles() {
       font-weight:800;
       font-size:16px;
       line-height:1;
-      color:#0f172a;
+      color:var(--wl-text, #1C1C1C);
       flex:0 0 auto;
     }
 
@@ -450,7 +450,7 @@ function injectStyles() {
     }
 
     .pr-orange-fill{
-      fill:#f59e0b;
+      fill:var(--wl-warning, #C28A3D);
     }
 
     .pr-silent-dot{
@@ -460,7 +460,7 @@ function injectStyles() {
     }
 
     .pr-stroke{
-      stroke:#f59e0b;
+      stroke:var(--wl-warning, #C28A3D);
       stroke-width:4;
       stroke-linecap:round;
       stroke-linejoin:round;
