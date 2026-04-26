@@ -198,7 +198,11 @@ const CLASS_RESULTS_RANGE_OPTIONS = [
   { key: "all", label: "All" },
 ];
 const VISUAL_TREND_FLAT_DELTA = 0.06;
-const VISUAL_EXPECTED_MIN_ATTEMPTS = 4;
+const VISUAL_TREND_DIFFICULTY_DELTA = 5;
+const VISUAL_TREND_AVERAGE_TRIES_DELTA = 0.25;
+const VISUAL_TREND_DIFFICULTY_COVERAGE_MIN = 0.6;
+const VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL = 8;
+const VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT = 4;
 const VISUAL_STATUS_FILTER_OPTIONS = [
   { key: "needs_review", label: "Needs review", tone: "red" },
   { key: "developing", label: "Developing", tone: "amber" },
@@ -7101,7 +7105,7 @@ async function loadVisualAnalyticsSummaryData() {
     const rows = await loadPaginatedRows(
       (from, to) => supabase
         .from("attempts")
-        .select("assignment_id, pupil_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
+        .select("assignment_id, pupil_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes, attempt_source")
         .gte("created_at", cutoff)
         .in("assignment_id", chunk)
         .order("created_at", { ascending: true })
@@ -7923,6 +7927,59 @@ function calculateVisualTimelineExpectedAccuracy(rows) {
   return expectedAccuracyTotal / expectedAccuracyCount;
 }
 
+function calculateVisualTimelineAverageDifficulty(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const difficultyCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyCount || 0)), 0);
+  if (!difficultyCount) return null;
+  const difficultyTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyTotal || 0)), 0);
+  return difficultyTotal / difficultyCount;
+}
+
+function calculateVisualTimelineFirstTryRate(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
+  if (!attemptCount) return null;
+  const firstTrySuccessCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.firstTrySuccessCount || 0)), 0);
+  return firstTrySuccessCount / attemptCount;
+}
+
+function calculateVisualTimelineAverageTries(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
+  if (!attemptCount) return null;
+  const attemptNumberTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptNumberTotal || 0)), 0);
+  return attemptNumberTotal / attemptCount;
+}
+
+function buildVisualTrendWindow(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = calculateVisualTimelineAttemptCount(items);
+  const accuracy = calculateVisualTimelineAccuracy(items);
+  const expectedAccuracy = calculateVisualTimelineExpectedAccuracy(items);
+  const averageDifficultyScore = calculateVisualTimelineAverageDifficulty(items);
+  const firstTrySuccessRate = calculateVisualTimelineFirstTryRate(items);
+  const averageAttempts = calculateVisualTimelineAverageTries(items);
+  const difficultyCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyCount || 0)), 0);
+  const difficultyCoverage = attemptCount ? difficultyCount / attemptCount : 0;
+  const adjustedPerformance = Number.isFinite(Number(expectedAccuracy))
+    ? accuracy - Number(expectedAccuracy)
+    : null;
+  return {
+    attemptCount,
+    accuracy,
+    expectedAccuracy,
+    averageDifficultyScore,
+    firstTrySuccessRate,
+    averageAttempts,
+    difficultyCoverage,
+    adjustedPerformance,
+  };
+}
+
+function isTrendNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
 function getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel) {
   if (!difficultyModel || typeof difficultyModel !== "object") return null;
   const score = Number(difficultyModel?.coreScore ?? difficultyModel?.score);
@@ -7966,61 +8023,147 @@ function formatAnalyticsShortDayLabel(value) {
   });
 }
 
-function buildVisualExpectedBenchmarkPlaceholder({
-  recentAttemptCount = 0,
-  attempts = [],
-  benchmarkComparableAttempt = null,
-} = {}) {
-  // Future expected-performance benchmarking should stay in the analytics
-  // interpretation layer and only use benchmark-eligible evidence. That later
-  // work should gate on enough evidence volume, comparable task types,
-  // support/no-support distinctions, difficulty context, and potentially
-  // benchmark-eligible subsets only rather than all instructional evidence.
-  const comparableAttemptCount = typeof benchmarkComparableAttempt === "function"
-    ? (Array.isArray(attempts) ? attempts.filter((item) => benchmarkComparableAttempt(item)).length : 0)
-    : 0;
-
-  return {
-    label: "Expected benchmark coming soon",
-    statusText: recentAttemptCount >= VISUAL_EXPECTED_MIN_ATTEMPTS
-      ? "More evidence needed"
-      : "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-    tone: "neutral",
-    comparableAttemptCount,
-  };
+function isVisualTrendEvidenceAttempt(attempt) {
+  const attemptSource = String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase();
+  return attemptSource !== "practice" && attemptSource !== "baseline";
 }
 
-function buildVisualRecentTrend(timelineRows, {
-  attempts = [],
-  benchmarkComparableAttempt = null,
-} = {}) {
+function buildVisualTrendAttemptKey(attempt) {
+  const pupilId = String(attempt?.pupil_id || "").trim();
+  const assignmentId = String(attempt?.assignment_id || "").trim() || "__unassigned__";
+  const wordKey = String(
+    attempt?.test_word_id ||
+    attempt?.word_text ||
+    attempt?.target_graphemes ||
+    attempt?.focus_grapheme ||
+    ""
+  ).trim().toLowerCase();
+  if (!pupilId || !wordKey) return "";
+  return `${assignmentId}::${pupilId}::${wordKey}`;
+}
+
+function shouldReplaceVisualTrendAttempt(currentAttempt, nextAttempt) {
+  if (!currentAttempt) return true;
+  const currentAttemptNumber = Math.max(1, Number(currentAttempt?.attempt_number || 1));
+  const nextAttemptNumber = Math.max(1, Number(nextAttempt?.attempt_number || 1));
+  if (nextAttemptNumber !== currentAttemptNumber) {
+    return nextAttemptNumber > currentAttemptNumber;
+  }
+  return new Date(nextAttempt?.created_at || 0).getTime() >= new Date(currentAttempt?.created_at || 0).getTime();
+}
+
+function buildVisualTimelineRows(attempts, difficultyByWordId = new Map()) {
+  const attemptsByDay = new Map();
+
+  for (const attempt of attempts || []) {
+    if (!isVisualTrendEvidenceAttempt(attempt)) continue;
+    const dayKey = analyticsDayKey(attempt?.created_at);
+    const attemptKey = buildVisualTrendAttemptKey(attempt);
+    if (!dayKey || !attemptKey) continue;
+    const dayAttempts = attemptsByDay.get(dayKey) || new Map();
+    const currentAttempt = dayAttempts.get(attemptKey) || null;
+    if (shouldReplaceVisualTrendAttempt(currentAttempt, attempt)) {
+      dayAttempts.set(attemptKey, attempt);
+    }
+    attemptsByDay.set(dayKey, dayAttempts);
+  }
+
+  return Array.from(attemptsByDay.entries())
+    .map(([dayKey, finalAttemptMap]) => {
+      const finalAttempts = Array.from(finalAttemptMap.values());
+      const summary = {
+        dayKey,
+        attemptCount: 0,
+        correctCount: 0,
+        firstTrySuccessCount: 0,
+        attemptNumberTotal: 0,
+        pupilIds: new Set(),
+        difficultyTotal: 0,
+        difficultyCount: 0,
+        expectedAccuracyTotal: 0,
+        expectedAccuracyCount: 0,
+      };
+
+      for (const attempt of finalAttempts) {
+        const attemptsUsed = Math.max(1, Number(attempt?.attempt_number || 1));
+        const difficultyModel = difficultyByWordId.get(String(attempt?.test_word_id || ""));
+        const difficultyScore = getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel);
+        const expectedAccuracy = getExpectedAccuracyForDifficultyScore(difficultyScore);
+        summary.attemptCount += 1;
+        if (attempt?.correct) summary.correctCount += 1;
+        if (attempt?.correct && attemptsUsed === 1) summary.firstTrySuccessCount += 1;
+        summary.attemptNumberTotal += attemptsUsed;
+        if (attempt?.pupil_id) summary.pupilIds.add(String(attempt.pupil_id));
+        if (Number.isFinite(difficultyScore)) {
+          summary.difficultyTotal += difficultyScore;
+          summary.difficultyCount += 1;
+        }
+        if (Number.isFinite(expectedAccuracy)) {
+          summary.expectedAccuracyTotal += expectedAccuracy;
+          summary.expectedAccuracyCount += 1;
+        }
+      }
+
+      return {
+        dayKey,
+        attemptCount: summary.attemptCount,
+        correctCount: summary.correctCount,
+        firstTrySuccessCount: summary.firstTrySuccessCount,
+        attemptNumberTotal: summary.attemptNumberTotal,
+        pupilCount: summary.pupilIds.size,
+        accuracy: summary.attemptCount ? summary.correctCount / summary.attemptCount : 0,
+        averageDifficultyScore: summary.difficultyCount ? summary.difficultyTotal / summary.difficultyCount : null,
+        difficultyBandKey: summary.difficultyCount ? String(getDifficultyBand(summary.difficultyTotal / summary.difficultyCount)?.key || "") : "",
+        difficultyTotal: summary.difficultyTotal,
+        difficultyCount: summary.difficultyCount,
+        expectedAccuracy: summary.expectedAccuracyCount ? summary.expectedAccuracyTotal / summary.expectedAccuracyCount : null,
+        expectedAccuracyTotal: summary.expectedAccuracyTotal,
+        expectedAccuracyCount: summary.expectedAccuracyCount,
+        firstTrySuccessRate: summary.attemptCount ? summary.firstTrySuccessCount / summary.attemptCount : null,
+        averageAttempts: summary.attemptCount ? summary.attemptNumberTotal / summary.attemptCount : null,
+      };
+    })
+    .sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+    .slice(-7);
+}
+
+function buildVisualRecentTrend(timelineRows) {
   const rows = (Array.isArray(timelineRows) ? timelineRows : []).filter((item) => item?.dayKey);
   const totalAttempts = rows.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
   const startLabel = rows.length ? formatAnalyticsShortDayLabel(rows[0].dayKey) : "";
   const endLabel = rows.length ? formatAnalyticsShortDayLabel(rows[rows.length - 1].dayKey) : "";
   const singleWindowAttemptCount = calculateVisualTimelineAttemptCount(rows);
-  const singleWindowExpectedBenchmark = buildVisualExpectedBenchmarkPlaceholder({
-    recentAttemptCount: singleWindowAttemptCount,
-    attempts,
-    benchmarkComparableAttempt,
-  });
 
   if (rows.length < 2) {
+    const window = buildVisualTrendWindow(rows);
     return {
-      label: "Awaiting data",
+      label: "Low evidence",
       tone: "neutral",
       direction: "waiting",
       delta: 0,
       baselineAccuracy: rows[0]?.accuracy || 0,
       recentAccuracy: rows[0]?.accuracy || 0,
+      rawDelta: 0,
+      adjustedDelta: null,
+      difficultyDelta: null,
+      firstTryDelta: null,
+      averageTriesDelta: null,
       summaryText: rows.length
-        ? "Need one more activity day to compare earlier and recent performance."
-        : "Progress over time will appear once there is activity in this view.",
-      earlierExpectedAccuracy: rows[0]?.expectedAccuracy ?? null,
-      recentExpectedAccuracy: rows[0]?.expectedAccuracy ?? null,
+        ? "There is not enough recent assignment evidence yet to call a trend."
+        : "Progress over time will appear once there is enough recent assignment evidence in this view.",
+      earlierExpectedAccuracy: window.expectedAccuracy,
+      recentExpectedAccuracy: window.expectedAccuracy,
       recentAttemptCount: singleWindowAttemptCount,
-      expectedBenchmark: singleWindowExpectedBenchmark,
+      evidenceLabel: "Low evidence",
+      hasChallengeAdjustment: false,
+      earlierAverageDifficultyScore: window.averageDifficultyScore,
+      recentAverageDifficultyScore: window.averageDifficultyScore,
+      earlierFirstTrySuccessRate: window.firstTrySuccessRate,
+      recentFirstTrySuccessRate: window.firstTrySuccessRate,
+      earlierAverageAttempts: window.averageAttempts,
+      recentAverageAttempts: window.averageAttempts,
+      earlierDifficultyCoverage: window.difficultyCoverage,
+      recentDifficultyCoverage: window.difficultyCoverage,
       dayCount: rows.length,
       totalAttempts,
       startLabel,
@@ -8032,49 +8175,112 @@ function buildVisualRecentTrend(timelineRows, {
   const splitIndex = Math.max(1, Math.floor(rows.length / 2));
   const earlierRows = rows.slice(0, splitIndex);
   const recentRows = rows.slice(splitIndex);
-  const baselineAccuracy = calculateVisualTimelineAccuracy(earlierRows);
-  const recentAccuracy = calculateVisualTimelineAccuracy(recentRows);
+  const earlierWindow = buildVisualTrendWindow(earlierRows);
+  const recentWindow = buildVisualTrendWindow(recentRows);
+  const baselineAccuracy = earlierWindow.accuracy;
+  const recentAccuracy = recentWindow.accuracy;
   const delta = recentAccuracy - baselineAccuracy;
-  const earlierExpectedAccuracy = calculateVisualTimelineExpectedAccuracy(earlierRows);
-  const recentExpectedAccuracy = calculateVisualTimelineExpectedAccuracy(recentRows);
-  const recentAttemptCount = calculateVisualTimelineAttemptCount(recentRows);
-  let label = "Steady";
+  const earlierExpectedAccuracy = earlierWindow.expectedAccuracy;
+  const recentExpectedAccuracy = recentWindow.expectedAccuracy;
+  const recentAttemptCount = recentWindow.attemptCount;
+  const hasChallengeAdjustment = earlierWindow.difficultyCoverage >= VISUAL_TREND_DIFFICULTY_COVERAGE_MIN
+    && recentWindow.difficultyCoverage >= VISUAL_TREND_DIFFICULTY_COVERAGE_MIN
+    && isTrendNumber(earlierWindow.adjustedPerformance)
+    && isTrendNumber(recentWindow.adjustedPerformance);
+  const adjustedDelta = hasChallengeAdjustment
+    ? recentWindow.adjustedPerformance - earlierWindow.adjustedPerformance
+    : null;
+  const difficultyDelta = isTrendNumber(earlierWindow.averageDifficultyScore) && isTrendNumber(recentWindow.averageDifficultyScore)
+    ? recentWindow.averageDifficultyScore - earlierWindow.averageDifficultyScore
+    : null;
+  const firstTryDelta = isTrendNumber(earlierWindow.firstTrySuccessRate) && isTrendNumber(recentWindow.firstTrySuccessRate)
+    ? recentWindow.firstTrySuccessRate - earlierWindow.firstTrySuccessRate
+    : null;
+  const averageTriesDelta = isTrendNumber(earlierWindow.averageAttempts) && isTrendNumber(recentWindow.averageAttempts)
+    ? recentWindow.averageAttempts - earlierWindow.averageAttempts
+    : null;
+  const hasEnoughEvidence = totalAttempts >= VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL
+    && recentAttemptCount >= VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT;
+  const recentDifficultyIsHarder = isTrendNumber(difficultyDelta)
+    && difficultyDelta >= VISUAL_TREND_DIFFICULTY_DELTA;
+  const rawAccuracyIsStable = Math.abs(delta) < VISUAL_TREND_FLAT_DELTA;
+  const retryParts = [];
+  if (isTrendNumber(firstTryDelta) && Math.abs(firstTryDelta) >= VISUAL_TREND_FLAT_DELTA) {
+    retryParts.push(firstTryDelta > 0 ? "more first-try success" : "less first-try success");
+  }
+  if (isTrendNumber(averageTriesDelta) && Math.abs(averageTriesDelta) >= VISUAL_TREND_AVERAGE_TRIES_DELTA) {
+    retryParts.push(averageTriesDelta < 0 ? "fewer retries" : "more retries");
+  }
+  const retrySuffix = retryParts.length ? `, with ${retryParts.join(" and ")}` : "";
+  let label = "Stable";
   let tone = "neutral";
   let direction = "flat";
 
-  if (delta >= VISUAL_TREND_FLAT_DELTA) {
+  if (!hasEnoughEvidence) {
+    label = "Low evidence";
+    direction = "waiting";
+  } else if (
+    (hasChallengeAdjustment && adjustedDelta >= VISUAL_TREND_FLAT_DELTA)
+    || delta >= VISUAL_TREND_FLAT_DELTA
+    || (rawAccuracyIsStable && recentDifficultyIsHarder)
+  ) {
     label = "Improving";
     tone = "green";
     direction = "up";
-  } else if (delta <= -VISUAL_TREND_FLAT_DELTA) {
-    label = "Declining";
+  } else if (
+    (hasChallengeAdjustment && adjustedDelta <= -VISUAL_TREND_FLAT_DELTA)
+    || (delta <= -VISUAL_TREND_FLAT_DELTA && !recentDifficultyIsHarder)
+  ) {
+    label = "Needs attention";
     tone = "red";
     direction = "down";
   }
 
-  const summaryText = label === "Improving"
-    ? `Recent days averaged ${formatPercent(recentAccuracy)}, up from ${formatPercent(baselineAccuracy)} earlier in this view.`
-    : label === "Declining"
-      ? `Recent days averaged ${formatPercent(recentAccuracy)}, down from ${formatPercent(baselineAccuracy)} earlier in this view.`
-      : `Recent days averaged ${formatPercent(recentAccuracy)}, close to the earlier ${formatPercent(baselineAccuracy)} in this view.`;
-  const expectedBenchmark = buildVisualExpectedBenchmarkPlaceholder({
-    recentAttemptCount,
-    attempts,
-    benchmarkComparableAttempt,
-  });
+  const summaryText = label === "Low evidence"
+    ? "There is not enough recent assignment evidence yet to call a trend."
+    : label === "Improving" && hasChallengeAdjustment && adjustedDelta >= VISUAL_TREND_FLAT_DELTA
+      ? `Recent performance is improving after allowing for word difficulty${retrySuffix}.`
+      : label === "Improving" && delta >= VISUAL_TREND_FLAT_DELTA
+        ? `Recent accuracy is higher${getTrendChallengeSentencePart(difficultyDelta)}${retrySuffix}.`
+        : label === "Improving" && rawAccuracyIsStable && recentDifficultyIsHarder
+          ? `Recent performance is improving because accuracy stayed stable on harder words${retrySuffix}.`
+          : label === "Needs attention" && hasChallengeAdjustment && adjustedDelta <= -VISUAL_TREND_FLAT_DELTA
+            ? `Recent performance is lower after allowing for word difficulty${retrySuffix}.`
+            : label === "Needs attention"
+              ? `Recent performance is lower without a clear rise in challenge${retrySuffix}.`
+              : `Recent performance is stable${getTrendChallengeSentencePart(difficultyDelta)}${retrySuffix}.`;
+  const evidenceLabel = !hasEnoughEvidence
+    ? "Low evidence"
+    : totalAttempts >= 20 && rows.length >= 4 && recentAttemptCount >= 8
+      ? "Good evidence"
+      : "Moderate evidence";
 
   return {
     label,
     tone,
     direction,
     delta,
+    rawDelta: delta,
+    adjustedDelta,
+    difficultyDelta,
+    firstTryDelta,
+    averageTriesDelta,
+    hasChallengeAdjustment,
     baselineAccuracy,
     recentAccuracy,
     summaryText,
     earlierExpectedAccuracy,
     recentExpectedAccuracy,
     recentAttemptCount,
-    expectedBenchmark,
+    evidenceLabel,
+    earlierAverageDifficultyScore: earlierWindow.averageDifficultyScore,
+    recentAverageDifficultyScore: recentWindow.averageDifficultyScore,
+    earlierFirstTrySuccessRate: earlierWindow.firstTrySuccessRate,
+    recentFirstTrySuccessRate: recentWindow.firstTrySuccessRate,
+    earlierAverageAttempts: earlierWindow.averageAttempts,
+    recentAverageAttempts: recentWindow.averageAttempts,
+    earlierDifficultyCoverage: earlierWindow.difficultyCoverage,
+    recentDifficultyCoverage: recentWindow.difficultyCoverage,
     dayCount: rows.length,
     totalAttempts,
     startLabel,
@@ -8346,55 +8552,9 @@ function buildVisualScopeSummary({ scopeType, scopeId, data, graphemeFilter = ""
     .sort((a, b) => a.accuracy - b.accuracy || b.averageAttempts - a.averageAttempts || a.word.localeCompare(b.word))
     .slice(0, 5);
 
-  const timelineRows = Array.from(
-    scopedAttempts.reduce((map, row) => {
-      const key = analyticsDayKey(row?.created_at);
-      const difficultyModel = difficultyByWordId.get(String(row?.test_word_id || ""));
-      const difficultyScore = getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel);
-      const expectedAccuracy = getExpectedAccuracyForDifficultyScore(difficultyScore);
-      const current = map.get(key) || {
-        dayKey: key,
-        attemptCount: 0,
-        correctCount: 0,
-        pupilIds: new Set(),
-        difficultyTotal: 0,
-        difficultyCount: 0,
-        expectedAccuracyTotal: 0,
-        expectedAccuracyCount: 0,
-      };
-      current.attemptCount += 1;
-      if (row?.correct) current.correctCount += 1;
-      if (row?.pupil_id) current.pupilIds.add(String(row.pupil_id));
-      if (Number.isFinite(difficultyScore)) {
-        current.difficultyTotal += difficultyScore;
-        current.difficultyCount += 1;
-      }
-      if (Number.isFinite(expectedAccuracy)) {
-        current.expectedAccuracyTotal += expectedAccuracy;
-        current.expectedAccuracyCount += 1;
-      }
-      map.set(key, current);
-      return map;
-    }, new Map()).values(),
-  )
-    .map((item) => ({
-      dayKey: item.dayKey,
-      attemptCount: item.attemptCount,
-      correctCount: item.correctCount,
-      pupilCount: item.pupilIds.size,
-      accuracy: item.attemptCount ? item.correctCount / item.attemptCount : 0,
-      averageDifficultyScore: item.difficultyCount ? item.difficultyTotal / item.difficultyCount : null,
-      difficultyBandKey: item.difficultyCount ? String(getDifficultyBand(item.difficultyTotal / item.difficultyCount)?.key || "") : "",
-      expectedAccuracy: item.expectedAccuracyCount ? item.expectedAccuracyTotal / item.expectedAccuracyCount : null,
-      expectedAccuracyTotal: item.expectedAccuracyTotal,
-      expectedAccuracyCount: item.expectedAccuracyCount,
-    }))
-    .sort((a, b) => a.dayKey.localeCompare(b.dayKey))
-    .slice(-7);
+  const timelineRows = buildVisualTimelineRows(scopedAttempts, difficultyByWordId);
   const commonConfusions = buildVisualCommonConfusions(scopedAttempts, graphemeRows, normalizedGraphemeFilter);
-  const recentTrend = buildVisualRecentTrend(timelineRows, {
-    attempts: scopedAttempts,
-  });
+  const recentTrend = buildVisualRecentTrend(timelineRows);
 
   const classRows = selectedClassIds
     .filter(Boolean)
@@ -16481,10 +16641,50 @@ function formatTrendDelta(value) {
   return `${roundedValue > 0 ? "+" : "-"}${Math.abs(roundedValue)} pts`;
 }
 
+function formatTrendDifficultyScore(value) {
+  return isTrendNumber(value) ? String(Math.round(Number(value))) : "";
+}
+
+function formatTrendDifficultyRange(earlierValue, recentValue) {
+  if (isTrendNumber(earlierValue) && isTrendNumber(recentValue)) {
+    return `Difficulty ${formatTrendDifficultyScore(earlierValue)} -> ${formatTrendDifficultyScore(recentValue)}`;
+  }
+  if (isTrendNumber(recentValue)) {
+    return `Recent difficulty ${formatTrendDifficultyScore(recentValue)}`;
+  }
+  return "Difficulty data unavailable";
+}
+
+function formatTrendDifficultyDelta(value) {
+  if (!isTrendNumber(value)) return "Limited data";
+  const numericValue = Number(value);
+  if (numericValue >= 8) return "Much harder";
+  if (numericValue >= 2) return "Slightly harder";
+  if (numericValue <= -2) return "Easier";
+  return "Similar";
+}
+
+function getTrendChallengeSentencePart(value) {
+  if (!isTrendNumber(value)) return "";
+  const numericValue = Number(value);
+  if (numericValue >= 8) return " on much harder words";
+  if (numericValue >= 2) return " on slightly harder words";
+  if (numericValue <= -2) return " on easier words";
+  return " with similar challenge";
+}
+
+function formatTrendAverageTries(value) {
+  return isTrendNumber(value) ? `${formatOneDecimal(value)} avg tries` : "Avg tries unavailable";
+}
+
+function formatTrendFirstTryRate(value) {
+  return isTrendNumber(value) ? `First try ${formatPercent(value)}` : "First try unavailable";
+}
+
 function getVisualTrendExplanation(dayCount) {
   return dayCount >= 2
-    ? "This compares the earlier half of these activity days with the most recent half, so one day can dip without changing the overall direction."
-    : "One activity day is not enough to compare earlier and recent performance yet.";
+    ? "This compares the earlier half of these activity days with the most recent half, so one lower day does not automatically change the overall direction."
+    : "Two activity days are needed before the dashboard can call a trend.";
 }
 
 function getVisualTrendSplitIndex(dayCount) {
@@ -16594,12 +16794,26 @@ function renderVisualTrendSummary(trend) {
       : `${startLabel} to ${endLabel}`
     : startLabel || endLabel;
   const summaryText = trend?.summaryText || "Progress over time will appear once there is activity in this view.";
-  const expectedBenchmark = trend?.expectedBenchmark || {
-    label: "Expected benchmark coming soon",
-    statusText: "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-    tone: "neutral",
-  };
+  const hasChallengeAdjustment = trend?.hasChallengeAdjustment === true && isTrendNumber(trend?.adjustedDelta);
+  const changeDelta = hasChallengeAdjustment ? trend.adjustedDelta : trend?.rawDelta ?? trend?.delta;
+  const changeLabel = hasChallengeAdjustment ? "Adjusted for challenge" : "Raw accuracy change";
+  const evidenceLabel = trend?.evidenceLabel || "Low evidence";
+  const totalChecks = Math.max(0, Number(trend?.totalAttempts || 0));
+  const recentChecks = Math.max(0, Number(trend?.recentAttemptCount || 0));
+  const challengeText = formatTrendDifficultyDelta(trend?.difficultyDelta);
+  const challengeNote = formatTrendDifficultyRange(
+    trend?.earlierAverageDifficultyScore,
+    trend?.recentAverageDifficultyScore,
+  );
+  const earlierDifficultyText = isTrendNumber(trend?.earlierAverageDifficultyScore)
+    ? `Difficulty ${formatTrendDifficultyScore(trend.earlierAverageDifficultyScore)}`
+    : "";
+  const recentDifficultyText = isTrendNumber(trend?.recentAverageDifficultyScore)
+    ? `Difficulty ${formatTrendDifficultyScore(trend.recentAverageDifficultyScore)}`
+    : "";
+  const earlierRetryText = `${formatTrendFirstTryRate(trend?.earlierFirstTrySuccessRate)} • ${formatTrendAverageTries(trend?.earlierAverageAttempts)}`;
+  const recentRetryText = `${formatTrendFirstTryRate(trend?.recentFirstTrySuccessRate)} • ${formatTrendAverageTries(trend?.recentAverageAttempts)}`;
+  const evidenceText = `${totalChecks} check${totalChecks === 1 ? "" : "s"} across ${dayCount} day${dayCount === 1 ? "" : "s"}`;
 
   return `
     <div class="td-trend-panel">
@@ -16610,17 +16824,32 @@ function renderVisualTrendSummary(trend) {
       ${renderVisualTrendChart(trend)}
       <div class="td-trend-compare">
         <div class="td-trend-stat">
-          <span>${escapeHtml(hasComparison ? "Earlier average" : "Current accuracy")}</span>
+          <span>${escapeHtml(hasComparison ? "Earlier" : "Current")}</span>
           <strong>${escapeHtml(formatPercent(trend?.baselineAccuracy || 0))}</strong>
-        </div>
-        <div class="td-trend-change td-trend-change--${escapeAttr(expectedBenchmark.tone || "neutral")}">
-          <span class="td-trend-change-label">${escapeHtml(expectedBenchmark.label || "Expected benchmark coming soon")}</span>
-          <strong>${escapeHtml(expectedBenchmark.statusText || "More evidence needed")}</strong>
-          <small class="td-trend-change-note">${escapeHtml(expectedBenchmark.note || "")}</small>
+          ${earlierDifficultyText ? `<small>${escapeHtml(earlierDifficultyText)}</small>` : ""}
+          <small>${escapeHtml(earlierRetryText)}</small>
         </div>
         <div class="td-trend-stat">
-          <span>${escapeHtml(hasComparison ? "Recent average" : "Activity days")}</span>
+          <span>${escapeHtml(hasComparison ? "Recent" : "Activity days")}</span>
           <strong>${escapeHtml(hasComparison ? formatPercent(trend?.recentAccuracy || 0) : String(dayCount))}</strong>
+          ${recentDifficultyText ? `<small>${escapeHtml(recentDifficultyText)}</small>` : ""}
+          <small>${escapeHtml(recentRetryText)}</small>
+        </div>
+        <div class="td-trend-change td-trend-change--${escapeAttr(trend?.tone || "neutral")}">
+          <span class="td-trend-change-label">Change</span>
+          <strong>${escapeHtml(hasComparison ? formatTrendDelta(changeDelta) : "Waiting")}</strong>
+          <small class="td-trend-change-note">${escapeHtml(hasComparison ? changeLabel : "Need more days")}</small>
+        </div>
+        <div class="td-trend-stat">
+          <span>Challenge</span>
+          <strong>${escapeHtml(challengeText)}</strong>
+          <small>${escapeHtml(challengeNote)}</small>
+        </div>
+        <div class="td-trend-stat">
+          <span>Evidence</span>
+          <strong>${escapeHtml(evidenceLabel)}</strong>
+          <small>${escapeHtml(evidenceText)}</small>
+          <small>${escapeHtml(`Recent ${recentChecks} check${recentChecks === 1 ? "" : "s"}`)}</small>
         </div>
       </div>
       <p class="td-trend-summary-text">${escapeHtml(summaryText)}</p>
@@ -16694,14 +16923,9 @@ function renderCommonConfusionsSection(summary) {
 function renderRecentTrendSection(summary) {
   const trend = summary?.recentTrend || {};
   const points = trend?.points || [];
-  const expectedBenchmark = trend?.expectedBenchmark || {
-    label: "Expected benchmark coming soon",
-    statusText: "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-  };
   const trendInfo = [
-    "Raw accuracy stays visible here so you can see whether recent performance is improving, steady, or dropping.",
-    expectedBenchmark.note,
+    "Raw accuracy stays visible here, with challenge and retry context layered in so steady accuracy on harder words can still count as progress.",
+    "Practice and baseline attempts are left out so this trend reflects recent assignment evidence.",
     getVisualTrendExplanation(trend?.dayCount || 0),
   ].filter(Boolean).join("\n");
 
@@ -16712,7 +16936,7 @@ function renderRecentTrendSection(summary) {
           tag: "h5",
           infoLabel: "About progress over time",
         })}
-        <span class="td-trend-pill td-trend-pill--${escapeAttr(trend.tone || "neutral")}">${escapeHtml(trend.label || "Awaiting data")}</span>
+        <span class="td-trend-pill td-trend-pill--${escapeAttr(trend.tone || "neutral")}">${escapeHtml(trend.label || "Low evidence")}</span>
       </div>
       ${
         points.length
@@ -17347,9 +17571,9 @@ function getContextRankTrendMeta(summary) {
   if (!summary?.checkedWords || dayCount < 2) {
     return {
       tone: "slate",
-      label: "Awaiting data",
+      label: "Low evidence",
       iconHtml: "&rarr;",
-      title: "Not enough recent activity yet to compare earlier and recent performance.",
+      title: "There is not enough recent assignment evidence yet to call a trend.",
     };
   }
 
@@ -17365,23 +17589,23 @@ function getContextRankTrendMeta(summary) {
   if (direction === "down" || String(trend?.tone || "") === "red") {
     return {
       tone: "red",
-      label: String(trend?.label || "Declining"),
+      label: String(trend?.label || "Needs attention"),
       iconHtml: "&darr;",
-      title: String(trend?.summaryText || "Recent performance is declining."),
+      title: String(trend?.summaryText || "Recent performance needs attention."),
     };
   }
 
   return {
     tone: "amber",
-    label: String(trend?.label || "Steady"),
+    label: String(trend?.label || "Stable"),
     iconHtml: "&rarr;",
-    title: String(trend?.summaryText || "Recent performance is holding steady."),
+    title: String(trend?.summaryText || "Recent performance is stable."),
   };
 }
 
 function renderVisualPupilPerformanceContextSection(summary) {
   const cards = buildVisualPupilPerformanceCards(summary);
-  const infoText = "Ranks are based on the Spelling Attainment Indicator in the current view. If a grapheme filter is active, the rank reflects that filter too. The arrow chip shows whether recent performance is improving, steady, or dropping.";
+  const infoText = "Ranks are based on the Spelling Attainment Indicator in the current view. If a grapheme filter is active, the rank reflects that filter too. The arrow chip shows whether recent performance is improving, stable, needs attention, or still low on evidence.";
 
   return `
     <section class="td-results-block td-results-block--soft td-results-block--wide">
@@ -17414,7 +17638,7 @@ function renderVisualPupilPerformanceContextSection(summary) {
               >
                 <span class="td-context-rank-chip-content">
                   <span class="td-context-rank-chip-icon" aria-hidden="true">${item?.trendMeta?.iconHtml || "&rarr;"}</span>
-                  <span class="td-context-rank-chip-label">${escapeHtml(item?.trendMeta?.label || "Awaiting data")}</span>
+                  <span class="td-context-rank-chip-label">${escapeHtml(item?.trendMeta?.label || "Low evidence")}</span>
                 </span>
               </div>
             </article>
@@ -31876,7 +32100,7 @@ function injectStyles() {
 
     .td-trend-compare{
       display:grid;
-      grid-template-columns:repeat(3,minmax(0,1fr));
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
       gap:10px;
     }
 
@@ -31901,6 +32125,12 @@ function injectStyles() {
     .td-trend-stat strong{
       color:#0f172a;
       font-size:1rem;
+    }
+
+    .td-trend-stat small{
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.4;
     }
 
     .td-trend-change{
