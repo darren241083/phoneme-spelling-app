@@ -16,10 +16,12 @@ import {
   buildDefaultPersonalisedAutomationPolicy,
   getLegacyPersonalisedAutomationPolicyActiveValue,
   getPersonalisedAutomationPolicyLifecycle,
+  isSpellingBeeAutomationPolicy,
   isPersonalisedAutomationPolicyUsable,
+  normalizeSpellingBeeLengthMode,
   normalizeAutoAssignPolicy,
   normalizePersonalisedAutomationPolicy,
-} from "./autoAssignPolicy.js?v=1.7";
+} from "./autoAssignPolicy.js?v=1.9";
 
 const ASSIGNMENT_TARGET_TABLE = "assignment_pupil_target_words";
 const ASSIGNMENT_STATUS_TABLE = "assignment_pupil_statuses";
@@ -30,6 +32,7 @@ const PERSONALISED_GENERATION_RUN_PUPIL_TABLE = "personalised_generation_run_pup
 const PERSONALISED_AUTOMATION_POLICY_TABLE = "personalised_automation_policies";
 const PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE = "personalised_automation_policy_targets";
 const PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE = "personalised_automation_policy_events";
+const SPELLING_BEE_RESULT_TABLE = "spelling_bee_results";
 const STAFF_PROFILES_TABLE = "staff_profiles";
 const STAFF_IMPORT_BATCH_TABLE = "staff_import_batches";
 const PUPIL_IMPORT_BATCH_TABLE = "pupil_import_batches";
@@ -55,6 +58,7 @@ const STAFF_RESTORE_FUNCTION = "restore_staff_directory_record";
 const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
+export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
 export const ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
 export const CLASS_TYPE_FORM = "form";
 export const CLASS_TYPE_SUBJECT = "subject";
@@ -199,7 +203,8 @@ function isMissingPersonalisedGenerationRunColumnError(error) {
   const mentionsColumn =
     message.includes("automation_policy_id")
     || message.includes("policy_snapshot")
-    || message.includes("derived_deadline_at");
+    || message.includes("derived_deadline_at")
+    || message.includes("policy_type");
   return mentionsColumn && (
     code === "42703"
     || code === "PGRST204"
@@ -259,13 +264,28 @@ function isMissingPersonalisedAutomationPolicyColumnError(error) {
     || message.includes("name")
     || message.includes("description")
     || message.includes("archived_at")
-    || message.includes("archived_by");
+    || message.includes("archived_by")
+    || message.includes("policy_type");
   return mentionsColumn && (
     code === "42703"
     || code === "PGRST204"
     || message.includes("schema cache")
     || message.includes("column")
   );
+}
+
+function isMissingSpellingBeeResultTableError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || (message.includes(SPELLING_BEE_RESULT_TABLE) && (
+      message.includes("does not exist")
+      || message.includes("schema cache")
+      || message.includes("could not find the table")
+      || message.includes("relation")
+    ));
 }
 
 function normalizeTeacherAppRole(value) {
@@ -1042,16 +1062,18 @@ function normalizeIdList(items = []) {
 
 function normalizePersonalisedGenerationRunRow(row) {
   if (!row || typeof row !== "object") return null;
-  return {
+  const normalizedPolicy = normalizeAutoAssignPolicy(row);
+  const normalized = {
     id: String(row?.id || ""),
     teacher_id: String(row?.teacher_id || ""),
     trigger_role: String(row?.trigger_role || "central_owner"),
     run_source: String(row?.run_source || ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW),
     selected_class_ids: normalizeIdList(row?.selected_class_ids),
     automation_policy_id: String(row?.automation_policy_id || "").trim() || null,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: Math.max(0, Number(row?.assignment_length || 0)),
-    support_preset: normalizeAutoAssignPolicy(row).support_preset,
-    allow_starter_fallback: row?.allow_starter_fallback !== false,
+    support_preset: normalizedPolicy.support_preset,
+    allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
     policy_snapshot: row?.policy_snapshot && typeof row.policy_snapshot === "object" ? row.policy_snapshot : {},
     derived_deadline_at: row?.derived_deadline_at || null,
     status: String(row?.status || "running"),
@@ -1064,6 +1086,10 @@ function normalizePersonalisedGenerationRunRow(row) {
     created_at: row?.created_at || null,
     updated_at: row?.updated_at || null,
   };
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy)) {
+    normalized.bee_length_mode = normalizeSpellingBeeLengthMode(row?.bee_length_mode || row?.beeLengthMode);
+  }
+  return normalized;
 }
 
 function normalizePersonalisedAutomationPolicyRow(row) {
@@ -1158,6 +1184,12 @@ async function requireCentralOwnerContext({
     throw new Error(message);
   }
   return context;
+}
+
+function hasSpellingBeeAdminAccess(accessContext = null) {
+  return !!accessContext?.roles?.admin
+    || !!accessContext?.legacy?.is_legacy_central_owner
+    || !!accessContext?.capabilities?.can_manage_automation;
 }
 
 async function requireCsvImportContext({
@@ -1588,6 +1620,123 @@ function normalizeLoadedWordRows(wordRows) {
   return (Array.isArray(wordRows) ? wordRows : []).map((row) => normalizeLoadedWordRow(row));
 }
 
+function normalizeBeeEndedReason(value) {
+  const reason = String(value || "").trim().toLowerCase();
+  return ["wrong", "timeout", "completed", "abandoned"].includes(reason) ? reason : "abandoned";
+}
+
+function isRankableSpellingBeeResult(row = null) {
+  return !!row?.completed_at && String(row?.ended_reason || "").trim().toLowerCase() !== "abandoned";
+}
+
+function formatSpellingBeePupilDisplayName(pupil = null) {
+  const firstName = String(pupil?.first_name || "").trim();
+  const surname = String(pupil?.surname || "").trim();
+  if (firstName && surname) return `${firstName} ${surname.slice(0, 1).toUpperCase()}.`;
+  if (firstName) return firstName;
+  return String(pupil?.username || "Pupil").trim() || "Pupil";
+}
+
+function normalizeSpellingBeeResultRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const resultJson = Array.isArray(row?.result_json ?? row?.resultJson)
+    ? (row?.result_json ?? row?.resultJson)
+    : [];
+  return {
+    id: String(row?.id || "").trim(),
+    teacher_id: String(row?.teacher_id || row?.teacherId || "").trim(),
+    run_id: String(row?.run_id || row?.runId || "").trim(),
+    assignment_id: String(row?.assignment_id || row?.assignmentId || "").trim(),
+    test_id: String(row?.test_id || row?.testId || "").trim(),
+    class_id: String(row?.class_id || row?.classId || "").trim(),
+    pupil_id: String(row?.pupil_id || row?.pupilId || "").trim(),
+    streak: Math.max(0, Number(row?.streak || 0)),
+    rounds_attempted: Math.max(0, Number(row?.rounds_attempted ?? row?.roundsAttempted ?? 0)),
+    max_rounds: Math.max(0, Number(row?.max_rounds ?? row?.maxRounds ?? 0)),
+    bee_length_mode: normalizeSpellingBeeLengthMode(row?.bee_length_mode || row?.beeLengthMode),
+    ended_reason: String(row?.ended_reason || row?.endedReason || "").trim().toLowerCase() || null,
+    result_json: resultJson,
+    snapshot_year_group: String(row?.snapshot_year_group || row?.snapshotYearGroup || "").trim() || null,
+    snapshot_form_class_id: String(row?.snapshot_form_class_id || row?.snapshotFormClassId || "").trim() || null,
+    snapshot_form_class_name: String(row?.snapshot_form_class_name || row?.snapshotFormClassName || "").trim() || null,
+    snapshot_form_year_group: String(row?.snapshot_form_year_group || row?.snapshotFormYearGroup || "").trim() || null,
+    started_at: row?.started_at || row?.startedAt || null,
+    completed_at: row?.completed_at || row?.completedAt || null,
+    created_at: row?.created_at || row?.createdAt || null,
+    updated_at: row?.updated_at || row?.updatedAt || null,
+  };
+}
+
+function buildRankedSpellingBeeRows(rows = []) {
+  const sortedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const normalized = normalizeSpellingBeeResultRow(row);
+      return normalized ? { ...row, ...normalized } : null;
+    })
+    .filter((row) => !!row?.id || (!!row?.run_id && !!row?.pupil_id))
+    .sort((a, b) =>
+      Number(isRankableSpellingBeeResult(b)) - Number(isRankableSpellingBeeResult(a))
+      || Number(b.streak || 0) - Number(a.streak || 0)
+      || Number(a.rounds_attempted || 0) - Number(b.rounds_attempted || 0)
+      || String(a.completed_at || a.started_at || "").localeCompare(String(b.completed_at || b.started_at || ""))
+      || String(a.pupil_id || "").localeCompare(String(b.pupil_id || ""))
+    );
+
+  let lastStreak = null;
+  let lastRank = 0;
+  let rankableIndex = 0;
+  return sortedRows.map((row) => {
+    if (!isRankableSpellingBeeResult(row)) {
+      return {
+        ...row,
+        rank: null,
+      };
+    }
+    rankableIndex += 1;
+    if (lastStreak == null || Number(row.streak || 0) !== lastStreak) {
+      lastRank = rankableIndex;
+      lastStreak = Number(row.streak || 0);
+    }
+    return {
+      ...row,
+      rank: lastRank,
+    };
+  });
+}
+
+function addScopedSpellingBeeRanks(rows = []) {
+  const ranked = buildRankedSpellingBeeRows(rows);
+  const yearGroups = new Map();
+  const formGroups = new Map();
+  for (const row of ranked) {
+    const yearKey = String(row.snapshot_year_group || row.snapshot_form_year_group || "").trim();
+    if (yearKey) yearGroups.set(yearKey, [...(yearGroups.get(yearKey) || []), row]);
+    const formKey = String(row.snapshot_form_class_id || row.snapshot_form_class_name || "").trim();
+    if (formKey) formGroups.set(formKey, [...(formGroups.get(formKey) || []), row]);
+  }
+  const scopedByPupil = new Map(ranked.map((row) => [String(row.pupil_id || ""), { year_rank: null, form_rank: null }]));
+  for (const groupRows of yearGroups.values()) {
+    for (const row of buildRankedSpellingBeeRows(groupRows)) {
+      if (!row.rank) continue;
+      const entry = scopedByPupil.get(String(row.pupil_id || "")) || {};
+      entry.year_rank = row.rank;
+      scopedByPupil.set(String(row.pupil_id || ""), entry);
+    }
+  }
+  for (const groupRows of formGroups.values()) {
+    for (const row of buildRankedSpellingBeeRows(groupRows)) {
+      if (!row.rank) continue;
+      const entry = scopedByPupil.get(String(row.pupil_id || "")) || {};
+      entry.form_rank = row.rank;
+      scopedByPupil.set(String(row.pupil_id || ""), entry);
+    }
+  }
+  return ranked.map((row) => ({
+    ...row,
+    ...(scopedByPupil.get(String(row.pupil_id || "")) || {}),
+  }));
+}
+
 function normalizeBaselineGateAssignmentPayload(payload) {
   const assignment = payload && typeof payload === "object" ? payload : null;
   if (!assignment) return null;
@@ -1927,6 +2076,324 @@ export async function markAssignmentComplete({
     completedAt: completedAtIso,
   });
   return statusRow;
+}
+
+async function readBeeClassSnapshot(classId = "") {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return null;
+  let result = await supabase
+    .from("classes")
+    .select("id, name, year_group, class_type")
+    .eq("id", safeClassId)
+    .maybeSingle();
+  if (result.error && isMissingClassTypeColumnError(result.error)) {
+    result = await supabase
+      .from("classes")
+      .select("id, name, year_group")
+      .eq("id", safeClassId)
+      .maybeSingle();
+  }
+  if (result.error) throw result.error;
+  return normalizeClassRow(result.data, { legacyFallback: CLASS_TYPE_FORM });
+}
+
+async function readBeeFormClassSnapshot({ pupilId = "", fallbackClass = null } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (normalizeClassType(fallbackClass?.class_type, { legacyFallback: CLASS_TYPE_INTERVENTION }) === CLASS_TYPE_FORM) {
+    return fallbackClass;
+  }
+  if (!safePupilId) return null;
+
+  let result = await supabase
+    .from("pupil_classes")
+    .select(`
+      class_id,
+      classes (
+        id,
+        name,
+        year_group,
+        class_type
+      )
+    `)
+    .eq("pupil_id", safePupilId)
+    .eq("active", true);
+  if (result.error && isMissingClassTypeColumnError(result.error)) {
+    result = await supabase
+      .from("pupil_classes")
+      .select(`
+        class_id,
+        classes (
+          id,
+          name,
+          year_group
+        )
+      `)
+      .eq("pupil_id", safePupilId)
+      .eq("active", true);
+  }
+  if (result.error) throw result.error;
+
+  const rows = (result.data || [])
+    .map((row) => normalizeClassRow(
+      Array.isArray(row?.classes) ? row.classes[0] : row?.classes,
+      { legacyFallback: CLASS_TYPE_FORM },
+    ))
+    .filter(Boolean);
+  return rows.find((row) => normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
+    || rows[0]
+    || null;
+}
+
+async function readSpellingBeeAssignmentStartContext(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return null;
+  let result = await supabase
+    .from("assignments_v2")
+    .select("id, teacher_id, test_id, class_id, end_at, automation_kind")
+    .eq("id", safeAssignmentId)
+    .maybeSingle();
+  if (result.error && isMissingAutomationMetadataColumnError(result.error)) {
+    result = await supabase
+      .from("assignments_v2")
+      .select("id, teacher_id, test_id, class_id, end_at")
+      .eq("id", safeAssignmentId)
+      .maybeSingle();
+  }
+  if (result.error) throw result.error;
+  return result.data || null;
+}
+
+export async function readSpellingBeeResultsForAssignments({
+  assignmentIds = [],
+  pupilId = "",
+} = {}) {
+  const safeAssignmentIds = normalizeIdList(assignmentIds);
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeAssignmentIds.length || !safePupilId) return [];
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .in("assignment_id", safeAssignmentIds)
+    .eq("pupil_id", safePupilId);
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) return [];
+    throw error;
+  }
+
+  return (data || []).map(normalizeSpellingBeeResultRow).filter(Boolean);
+}
+
+export async function startSpellingBeeResult({
+  teacherId = "",
+  runId = "",
+  assignmentId = "",
+  testId = "",
+  classId = "",
+  pupilId = "",
+  maxRounds = 0,
+  beeLengthMode = "",
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeRunId || !safeAssignmentId || !safePupilId) {
+    throw new Error("Could not start the Spelling Bee.");
+  }
+
+  const assignmentContext = await readSpellingBeeAssignmentStartContext(safeAssignmentId);
+  if (!assignmentContext?.id) throw new Error("Could not find this Spelling Bee assignment.");
+  const assignmentKind = String(assignmentContext?.automation_kind || ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE).trim().toLowerCase();
+  if (assignmentKind && assignmentKind !== ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE) {
+    throw new Error("This assignment is not a Spelling Bee competition.");
+  }
+  const closesAtMs = assignmentContext?.end_at ? new Date(assignmentContext.end_at).getTime() : 0;
+  if (!Number.isFinite(closesAtMs) || closesAtMs <= 0) {
+    throw new Error("This Spelling Bee does not have a competition close time.");
+  }
+
+  const existingRes = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .maybeSingle();
+  if (existingRes.error && !isMissingSpellingBeeResultTableError(existingRes.error)) throw existingRes.error;
+  if (existingRes.data) {
+    return {
+      ...normalizeSpellingBeeResultRow(existingRes.data),
+      already_started: true,
+    };
+  }
+  if (closesAtMs <= Date.now()) {
+    throw new Error("This Spelling Bee has closed.");
+  }
+
+  const resolvedTeacherId = String(teacherId || assignmentContext?.teacher_id || "").trim();
+  const resolvedTestId = String(testId || assignmentContext?.test_id || "").trim();
+  const resolvedClassId = String(classId || assignmentContext?.class_id || "").trim();
+  const classSnapshot = await readBeeClassSnapshot(resolvedClassId);
+  const formSnapshot = await readBeeFormClassSnapshot({
+    pupilId: safePupilId,
+    fallbackClass: classSnapshot,
+  });
+  const nowIso = new Date().toISOString();
+  const payload = {
+    teacher_id: resolvedTeacherId || null,
+    run_id: safeRunId,
+    assignment_id: safeAssignmentId,
+    test_id: resolvedTestId || null,
+    class_id: resolvedClassId || null,
+    pupil_id: safePupilId,
+    streak: 0,
+    rounds_attempted: 0,
+    max_rounds: Math.max(0, Number(maxRounds || 0)),
+    bee_length_mode: normalizeSpellingBeeLengthMode(beeLengthMode),
+    ended_reason: null,
+    result_json: [],
+    snapshot_year_group: String(classSnapshot?.year_group || formSnapshot?.year_group || "").trim() || null,
+    snapshot_form_class_id: String(formSnapshot?.id || "").trim() || null,
+    snapshot_form_class_name: String(formSnapshot?.name || "").trim() || null,
+    snapshot_form_year_group: String(formSnapshot?.year_group || "").trim() || null,
+    started_at: nowIso,
+    completed_at: null,
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .insert([payload])
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) {
+      throw new Error("Spelling Bee result storage is not available yet. Run the latest Supabase migration.");
+    }
+    const code = String(error?.code || "").trim();
+    if (code === "23505") {
+      const retry = await supabase
+        .from(SPELLING_BEE_RESULT_TABLE)
+        .select("*")
+        .eq("run_id", safeRunId)
+        .eq("pupil_id", safePupilId)
+        .maybeSingle();
+      if (retry.error) throw retry.error;
+      return {
+        ...normalizeSpellingBeeResultRow(retry.data),
+        already_started: true,
+      };
+    }
+    throw error;
+  }
+
+  return {
+    ...normalizeSpellingBeeResultRow(data || payload),
+    just_started: true,
+  };
+}
+
+export async function finalizeSpellingBeeResult({
+  runId = "",
+  pupilId = "",
+  endedReason = "abandoned",
+  result = null,
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeRunId || !safePupilId) return null;
+
+  const resultRows = sanitizeAssignmentResultRows(result?.results || result?.itemStates || []);
+  const correctRows = resultRows.filter((row) => row.correct);
+  const reason = normalizeBeeEndedReason(endedReason || result?.endedReason || result?.ended_reason);
+  const totalWords = Math.max(0, Number(result?.totalWords || result?.maxRounds || resultRows.length || 0));
+  const payload = {
+    streak: Math.max(0, Number(result?.streak ?? result?.totalCorrect ?? correctRows.length ?? 0)),
+    rounds_attempted: Math.max(0, Number(result?.roundsAttempted ?? result?.rounds_attempted ?? resultRows.length ?? 0)),
+    max_rounds: totalWords,
+    ended_reason: reason,
+    result_json: resultRows,
+    completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .update(payload)
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .is("completed_at", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) {
+      throw new Error("Spelling Bee result storage is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  if (data) return normalizeSpellingBeeResultRow(data);
+
+  const current = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .maybeSingle();
+  if (current.error) {
+    if (isMissingSpellingBeeResultTableError(current.error)) return null;
+    throw current.error;
+  }
+  return normalizeSpellingBeeResultRow(current.data);
+}
+
+export async function listSpellingBeeResultsForRun({
+  runId = "",
+  assignmentId = "",
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeRunId && !safeAssignmentId) return [];
+
+  let query = supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select(`
+      *,
+      pupils (
+        first_name,
+        surname,
+        username
+      ),
+      classes (
+        name
+      )
+    `);
+  if (safeRunId) query = query.eq("run_id", safeRunId);
+  else query = query.eq("assignment_id", safeAssignmentId);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) return [];
+    throw error;
+  }
+
+  const rows = (data || [])
+    .map((row) => {
+      const normalized = normalizeSpellingBeeResultRow(row);
+      if (!normalized) return null;
+      const pupil = Array.isArray(row?.pupils) ? row.pupils[0] : row?.pupils;
+      const classRow = Array.isArray(row?.classes) ? row.classes[0] : row?.classes;
+      return {
+        ...normalized,
+        pupil_name: formatSpellingBeePupilDisplayName(pupil),
+        class_name: String(classRow?.name || "").trim() || null,
+      };
+    })
+    .filter(Boolean);
+
+  return addScopedSpellingBeeRanks(rows);
 }
 
 /* ---------------------------
@@ -2985,7 +3452,9 @@ export async function upsertPersonalisedAutomationPolicy({
   name = "",
   description = "",
   active = false,
+  policy_type,
   assignment_length,
+  bee_length_mode,
   support_preset,
   allow_starter_fallback,
   frequency,
@@ -3007,7 +3476,9 @@ export async function upsertPersonalisedAutomationPolicy({
     name,
     description,
     active,
+    policy_type,
     assignment_length,
+    bee_length_mode,
     support_preset,
     allow_starter_fallback,
     frequency,
@@ -3020,6 +3491,9 @@ export async function upsertPersonalisedAutomationPolicy({
     archived_at,
     archived_by,
   });
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy) && !hasSpellingBeeAdminAccess(context.accessContext)) {
+    throw new Error("Admin access is required to save Spelling Bee policies.");
+  }
   const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, normalizedPolicy.target_class_ids);
   const safePolicyId = String(normalizedPolicy.id || "").trim();
   const safeDuplicateSourcePolicyId = String(duplicate_source_policy_id || "").trim();
@@ -3051,6 +3525,7 @@ export async function upsertPersonalisedAutomationPolicy({
     name: normalizedPolicy.name,
     description: normalizedPolicy.description || null,
     active: legacyActive,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
@@ -3065,6 +3540,9 @@ export async function upsertPersonalisedAutomationPolicy({
     updated_by: context.teacherId,
     updated_at: nowIso,
   };
+  basePayload.bee_length_mode = isSpellingBeeAutomationPolicy(normalizedPolicy)
+    ? normalizedPolicy.bee_length_mode
+    : null;
 
   let data = null;
   let error = null;
@@ -3074,7 +3552,7 @@ export async function upsertPersonalisedAutomationPolicy({
       .update(basePayload)
       .eq("id", safePolicyId)
       .eq("teacher_id", context.teacherId)
-      .select("id, teacher_id, name, description, active, assignment_length, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
+      .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
     error = result.error;
@@ -3085,7 +3563,7 @@ export async function upsertPersonalisedAutomationPolicy({
         ...basePayload,
         created_by: context.teacherId,
       }])
-      .select("id, teacher_id, name, description, active, assignment_length, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
+      .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
     error = result.error;
@@ -3165,6 +3643,7 @@ export async function upsertPersonalisedAutomationPolicy({
       metadata: {
         name: normalizedPolicy.name,
         active: legacyActive,
+        policy_type: normalizedPolicy.policy_type,
         archived_at: normalizedPolicy.archived_at || null,
         target_class_ids: validatedClassIds,
         duplicate_source_policy_id: safeDuplicateSourcePolicyId || null,
@@ -3375,7 +3854,9 @@ export async function createPersonalisedGenerationRun({
   automationPolicyId = "",
   policySnapshot = null,
   derivedDeadlineAt = null,
+  policy_type,
   assignment_length,
+  bee_length_mode,
   support_preset,
   allow_starter_fallback,
 } = {}) {
@@ -3383,8 +3864,10 @@ export async function createPersonalisedGenerationRun({
     message: "Central-owner access is required to run personalised automation.",
   });
   const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, selectedClassIds);
-  const normalizedPolicy = normalizeAutoAssignPolicy({
+  let normalizedPolicy = normalizeAutoAssignPolicy({
+    policy_type,
     assignment_length,
+    bee_length_mode,
     support_preset,
     allow_starter_fallback,
   });
@@ -3394,7 +3877,7 @@ export async function createPersonalisedGenerationRun({
   if (safePolicyId) {
     const { data: policyRow, error: policyError } = await supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
-      .select("id, archived_at, start_date, end_date")
+      .select("id, archived_at, start_date, end_date, policy_type")
       .eq("id", safePolicyId)
       .eq("teacher_id", context.teacherId)
       .maybeSingle();
@@ -3417,7 +3900,14 @@ export async function createPersonalisedGenerationRun({
     if (!isPersonalisedAutomationPolicyUsable(policyRow)) {
       throw new Error(`This automation policy is scheduled to start on ${String(policyRow?.start_date || "").trim() || "its start date"}.`);
     }
+    normalizedPolicy = normalizeAutoAssignPolicy({
+      ...normalizedPolicy,
+      policy_type: policyRow.policy_type || normalizedPolicy.policy_type,
+    });
     resolvedPolicyId = String(policyRow.id);
+  }
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy) && !hasSpellingBeeAdminAccess(context.accessContext)) {
+    throw new Error("Admin access is required to run Spelling Bee competitions.");
   }
   const nowIso = new Date().toISOString();
   const payload = {
@@ -3426,6 +3916,7 @@ export async function createPersonalisedGenerationRun({
     run_source: ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
     selected_class_ids: validatedClassIds,
     automation_policy_id: resolvedPolicyId,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
@@ -3441,6 +3932,9 @@ export async function createPersonalisedGenerationRun({
     created_at: nowIso,
     updated_at: nowIso,
   };
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy)) {
+    payload.bee_length_mode = normalizedPolicy.bee_length_mode;
+  }
 
   const { data, error } = await supabase
     .from(PERSONALISED_GENERATION_RUN_TABLE)
@@ -3465,6 +3959,8 @@ export async function createPersonalisedGenerationRun({
           run_id: String(data?.id || "").trim() || null,
           selected_class_ids: validatedClassIds,
           derived_deadline_at: derivedDeadlineAt || null,
+          policy_type: normalizedPolicy.policy_type,
+          ...(isSpellingBeeAutomationPolicy(normalizedPolicy) ? { bee_length_mode: normalizedPolicy.bee_length_mode } : {}),
         },
       });
     } catch (eventError) {
@@ -3865,6 +4361,106 @@ export async function readPupilBaselineGateState({
     form_class_ids: formClassIds,
     assignment: null,
   }, { requiredStandardKey: safeRequiredKey });
+}
+
+function normalizePupilRuntimeAssignmentRow(row = {}) {
+  const source = row && typeof row === "object" ? row : {};
+  const title = String(source?.title || "").trim() || "Untitled test";
+  const isSpellingBee = !!(source?.isSpellingBee ?? source?.is_spelling_bee);
+  const isGenerated = !!(source?.isGenerated ?? source?.is_generated);
+  const isBaseline = !!(source?.isBaseline ?? source?.is_baseline);
+  const spellingBeeResult = normalizeSpellingBeeResultRow(
+    source?.spellingBeeResult ?? source?.spelling_bee_result
+  );
+
+  return {
+    ...source,
+    id: String(source?.id || "").trim(),
+    teacher_id: String(source?.teacher_id || source?.teacherId || "").trim(),
+    class_id: String(source?.class_id || source?.classId || "").trim(),
+    test_id: String(source?.test_id || source?.testId || "").trim(),
+    title,
+    question_type: isSpellingBee
+      ? "no_support_assessment"
+      : normalizeStoredQuestionType(source?.question_type, { title }),
+    mode: String(source?.mode || "test").trim() || "test",
+    max_attempts: source?.max_attempts == null ? null : Number(source.max_attempts),
+    audio_enabled: source?.audio_enabled !== false,
+    hints_enabled: isSpellingBee ? false : source?.hints_enabled !== false,
+    automation_kind: String(source?.automation_kind || source?.automationKind || "").trim() || null,
+    automation_source: String(source?.automation_source || source?.automationSource || "").trim() || null,
+    automation_run_id: String(source?.automation_run_id || source?.automationRunId || "").trim() || null,
+    automation_triggered_by: String(source?.automation_triggered_by || source?.automationTriggeredBy || "").trim() || null,
+    end_at: source?.end_at || source?.endAt || null,
+    created_at: source?.created_at || source?.createdAt || null,
+    analytics_target_words_enabled: !!(source?.analytics_target_words_enabled ?? source?.analyticsTargetWordsEnabled),
+    analytics_target_words_per_pupil: Math.max(0, Number(source?.analytics_target_words_per_pupil ?? source?.analyticsTargetWordsPerPupil ?? 0)),
+    attempt_source: String(source?.attempt_source || source?.attemptSource || "teacher_assigned").trim(),
+    assignmentOrigin: String(source?.assignmentOrigin || source?.assignment_origin || source?.attempt_source || "teacher_assigned").trim(),
+    isSpellingBee,
+    isGenerated,
+    isBaseline,
+    assignmentStatus: String(source?.assignmentStatus || source?.assignment_status || "assigned").trim() || "assigned",
+    spellingBeeLengthMode: isSpellingBee
+      ? normalizeSpellingBeeLengthMode(source?.spellingBeeLengthMode || source?.spelling_bee_length_mode)
+      : null,
+    started_at: source?.started_at || source?.startedAt || null,
+    completed_at: source?.completed_at || source?.completedAt || null,
+    total_words: Math.max(0, Number(source?.total_words ?? source?.totalWords ?? 0)),
+    correct_words: Math.max(0, Number(source?.correct_words ?? source?.correctWords ?? 0)),
+    average_attempts: Number.isFinite(Number(source?.average_attempts ?? source?.averageAttempts))
+      ? Number(source?.average_attempts ?? source?.averageAttempts)
+      : 0,
+    score_rate: Number.isFinite(Number(source?.score_rate ?? source?.scoreRate))
+      ? Number(source?.score_rate ?? source?.scoreRate)
+      : 0,
+    result_json: Array.isArray(source?.result_json ?? source?.resultJson)
+      ? (source?.result_json ?? source?.resultJson)
+      : [],
+    completed: !!source?.completed,
+    isLocked: !!(source?.isLocked ?? source?.is_locked),
+    spellingBeeResult,
+    spellingBeeEventClosed: !!(source?.spellingBeeEventClosed ?? source?.spelling_bee_event_closed),
+    pupilTitle: String(source?.pupilTitle || source?.pupil_title || title).trim() || title,
+    pupilReason: String(source?.pupilReason || source?.pupil_reason || "").trim(),
+    pupilWordCount: source?.pupilWordCount ?? source?.pupil_word_count ?? null,
+    words: normalizeLoadedWordRows(source?.words || []),
+  };
+}
+
+async function readPupilRuntimeAssignmentsPayload({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return {
+      status: "runtime_inactive",
+      pupilId: "",
+      assignments: [],
+    };
+  }
+
+  const { data, error } = await supabase.rpc("read_pupil_runtime_assignments", {
+    requested_pupil_id: safePupilId,
+  });
+  if (error) throw error;
+
+  const rows = Array.isArray(data?.assignments)
+    ? data.assignments
+    : Array.isArray(data)
+      ? data
+      : [];
+
+  return {
+    status: String(data?.status || "ok").trim().toLowerCase() || "ok",
+    pupilId: String(data?.pupil_id || data?.pupilId || safePupilId).trim(),
+    assignments: rows
+      .map((row) => normalizePupilRuntimeAssignmentRow(row))
+      .filter((row) => row?.id),
+  };
+}
+
+export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {
+  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId });
+  return runtimePayload.assignments;
 }
 
 /* ---------------------------

@@ -66,6 +66,7 @@ import {
   cancelStaffPendingAccessApproval,
   consumeLatestStaffProfileSyncNotice,
   ASSIGNMENT_AUTOMATION_KIND_PERSONALISED,
+  ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE,
   ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
   CLASS_TYPE_FORM,
   CLASS_TYPE_INTERVENTION,
@@ -114,7 +115,7 @@ import {
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.38";
+} from "./db.js?v=1.44";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -133,20 +134,31 @@ import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
   AUTO_ASSIGN_POLICY_LENGTH_MIN,
+  AUTOMATION_POLICY_TYPE_OPTIONS,
+  AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+  AUTOMATION_POLICY_TYPE_SPELLING_BEE,
   AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS,
+  SPELLING_BEE_LENGTH_MODE_OPTIONS,
   buildAutoAssignPolicySummary,
   buildDefaultPersonalisedAutomationPolicy,
+  buildSpellingBeeLengthModeSummary,
   doPersonalisedAutomationPolicyWindowsOverlap,
   derivePersonalisedAutomationDeadline,
   formatPersonalisedAutomationWeekdayList,
   getAutoAssignSupportPresetLabel,
+  getAutomationPolicyTypeLabel,
   getPersonalisedAutomationPolicyLifecycle,
   normalizeAutoAssignPolicy,
+  normalizeAutomationPolicyType,
   normalizePersonalisedAutomationPolicy,
+  normalizeSpellingBeeLengthMode,
+  isSpellingBeeAutomationPolicy,
+  isSpellingBeeUntilWrongPolicy,
   PERSONALISED_AUTOMATION_EXPIRY_WARNING_DAYS,
   PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS,
   PERSONALISED_AUTOMATION_WEEKDAY_OPTIONS,
-} from "./autoAssignPolicy.js?v=1.8";
+} from "./autoAssignPolicy.js?v=1.9";
+import { buildSpellingBeeLadder } from "./spellingBeePolicy.js?v=1.0";
 
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
@@ -708,6 +720,11 @@ function getAccessCapabilities() {
 
 function canManageAutomation() {
   return !!getAccessCapabilities()?.can_manage_automation;
+}
+
+function canManageSpellingBeePolicies() {
+  const roles = getAccessContext()?.roles || {};
+  return !!roles.admin || canManageAutomation();
 }
 
 function canImportCsv() {
@@ -3733,6 +3750,9 @@ function getAutomationRunPolicyValidation() {
 
   if (!String(policy.name || "").trim()) {
     errors.push("Give this automation policy a name.");
+  }
+  if (isSpellingBeeAutomationPolicy(policy) && !canManageSpellingBeePolicies()) {
+    errors.push("Admin access is required to create or manage Spelling Bee policies.");
   }
   if (!policy.selected_weekdays.length) {
     errors.push("Choose at least one weekday.");
@@ -8666,6 +8686,23 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="automation-policy-type"]')) {
+    const currentPolicy = getAutomationRunPolicy();
+    const nextType = normalizeAutomationPolicyType(target.value);
+    if (nextType === AUTOMATION_POLICY_TYPE_SPELLING_BEE && !canManageSpellingBeePolicies()) {
+      showNotice("Admin access is required to create or manage Spelling Bee policies.", "error");
+      paint();
+      return;
+    }
+    if (nextType === AUTOMATION_POLICY_TYPE_SPELLING_BEE) {
+      setAutomationRunPolicy({ policy_type: nextType, bee_length_mode: normalizeSpellingBeeLengthMode(currentPolicy.bee_length_mode), support_preset: AUTO_ASSIGN_POLICY_DEFAULTS.support_preset, allow_starter_fallback: false });
+    } else {
+      setAutomationRunPolicy({ policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED, support_preset: currentPolicy.support_preset || AUTO_ASSIGN_POLICY_DEFAULTS.support_preset, allow_starter_fallback: currentPolicy.allow_starter_fallback !== false, bee_length_mode: null });
+    }
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="automation-run-class"]')) {
     toggleAutomationRunSelectedClassId(target.value, !!target.checked);
     paint();
@@ -8708,6 +8745,12 @@ function onRootChange(event) {
 
   if (target.matches('[data-field="automation-run-starter-fallback"]')) {
     setAutomationRunPolicy({ allow_starter_fallback: !!target.checked });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="automation-bee-length-mode"]')) {
+    setAutomationRunPolicy({ bee_length_mode: normalizeSpellingBeeLengthMode(target.value) });
     paint();
     return;
   }
@@ -11032,6 +11075,141 @@ async function createGeneratedAssignmentForClass({
   }
 }
 
+function getApprovedSpellingBeeSourceWordRows(teacherTests = state.tests) {
+  return (Array.isArray(teacherTests) ? teacherTests : [])
+    .flatMap((test) =>
+      (Array.isArray(test?.test_words) ? test.test_words : [])
+        .map((wordRow) => ({
+          ...wordRow,
+          source_test_id: String(test?.id || "").trim(),
+        }))
+    );
+}
+
+function buildSpellingBeeReleaseTitle(policy = null) {
+  const name = getAutomationPolicyDisplayName(policy, "Spelling Bee");
+  const date = new Date().toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
+  return `${name} - Spelling Bee - ${date}`;
+}
+
+async function createSpellingBeeCompetitionRelease({
+  classIds = [],
+  deadlineIso = null,
+  ladder = [],
+  policy = null,
+  runRecord = null,
+} = {}) {
+  const safeClassIds = sortAutomationRunClassIds(classIds);
+  const words = Array.isArray(ladder) ? ladder : [];
+  if (!safeClassIds.length || !words.length) {
+    throw new Error("Could not release the Spelling Bee without target groups and approved words.");
+  }
+
+  let createdTestId = "";
+  const createdAssignmentIds = [];
+
+  try {
+    const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback("tests", {
+      teacher_id: state.user.id,
+      title: buildSpellingBeeReleaseTitle(policy),
+      status: "published",
+      question_type: "no_support_assessment",
+      analytics_target_words_enabled: false,
+      analytics_target_words_per_pupil: 0,
+    }, "id");
+    if (testError || !createdTest?.id) throw testError || new Error("Could not create the Spelling Bee test.");
+    createdTestId = String(createdTest.id);
+
+    const beeLengthMode = normalizeSpellingBeeLengthMode(policy?.bee_length_mode);
+    const { error: wordError } = await supabase
+      .from("test_words")
+      .insert(words.map((wordRow, index) => ({
+        test_id: createdTestId,
+        word: String(wordRow?.word || "").trim(),
+        sentence: String(wordRow?.sentence || "").trim() || null,
+        segments: Array.isArray(wordRow?.segments) ? wordRow.segments : [],
+        choice: {
+          ...(wordRow?.choice && typeof wordRow.choice === "object" ? wordRow.choice : {}),
+          source: "spelling_bee",
+          approved_source: "teacher",
+          competition_mode: "spelling_bee",
+          spelling_bee: true,
+          bee_round: Math.max(1, Number(wordRow?.beeRound || index + 1)),
+          bee_time_limit_ms: Math.max(0, Number(wordRow?.beeTimeLimitMs || 0)),
+          bee_length_mode: beeLengthMode,
+          question_type: "no_support_assessment",
+          assignment_role: "spelling_bee",
+          assignment_support: "none",
+        },
+      })));
+    if (wordError) throw wordError;
+
+    const classResults = [];
+    for (const classId of safeClassIds) {
+      const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
+      const className = String(selectedClass?.name || "Class").trim() || "Class";
+      const { data: createdAssignment, error: assignmentError } = await insertSingleRowWithAnalyticsFallback(
+        "assignments_v2",
+        {
+          teacher_id: state.user.id,
+          test_id: createdTestId,
+          class_id: classId,
+          mode: "test",
+          max_attempts: null,
+          audio_enabled: true,
+          hints_enabled: false,
+          end_at: deadlineIso || null,
+          analytics_target_words_enabled: false,
+          analytics_target_words_per_pupil: 0,
+          automation_kind: ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE,
+          automation_source: ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
+          automation_run_id: String(runRecord?.id || "").trim() || null,
+          automation_triggered_by: state.user.id,
+        },
+        "id, created_at",
+      );
+      if (assignmentError && isMissingAutomationMetadataColumnError(assignmentError)) {
+        throw new Error("Spelling Bee automation fields are not available yet. Run the latest Supabase migration.");
+      }
+      if (assignmentError || !createdAssignment?.id) {
+        throw assignmentError || new Error(`Could not create the Spelling Bee assignment for ${className}.`);
+      }
+      const assignmentId = String(createdAssignment.id);
+      createdAssignmentIds.push(assignmentId);
+      classResults.push({
+        classId,
+        className,
+        status: "generated",
+        assignmentId,
+        includedCount: 0,
+        skippedCount: 0,
+        skipReasons: {},
+      });
+    }
+
+    return {
+      testId: createdTestId,
+      assignmentIds: createdAssignmentIds,
+      classResults,
+    };
+  } catch (error) {
+    for (const assignmentId of createdAssignmentIds) {
+      await cleanupAutoAssignedArtifacts({
+        assignmentId,
+        testId: "",
+      });
+    }
+    await cleanupAutoAssignedArtifacts({
+      testId: createdTestId,
+      assignmentId: "",
+    });
+    throw error;
+  }
+}
+
 async function handleCreateBaselineAssignment(form) {
   if (!(canManageOwnContent() && canAssignTests())) {
     showNotice("Teacher or admin access is required to set a baseline test.", "error");
@@ -11260,7 +11438,9 @@ async function handleSaveAutomationPolicy(form) {
       id: policy.id,
       name: policy.name,
       description: policy.description,
+      policy_type: policy.policy_type,
       assignment_length: policy.assignment_length,
+      bee_length_mode: isSpellingBeeAutomationPolicy(policy) ? policy.bee_length_mode : null,
       support_preset: policy.support_preset,
       allow_starter_fallback: policy.allow_starter_fallback,
       frequency: policy.frequency,
@@ -11344,9 +11524,12 @@ async function handleRunNowPersonalisedGeneration() {
   const selectedClassIds = sortAutomationRunClassIds(effectivePolicy.target_class_ids);
   const deadlineMeta = derivePersonalisedAutomationDeadline(effectivePolicy, { from: new Date() });
   const deadlineIso = deadlineMeta.deadlineIso || null;
+  const runStatusMessage = isSpellingBeeAutomationPolicy(effectivePolicy)
+    ? "Releasing Spelling Bee competition for this policy..."
+    : "Generating personalised tests for this policy...";
 
   if (!selectedClassIds.length) {
-    showNotice("Select at least one form or intervention group before you run personalised generation.", "error");
+    showNotice("Select at least one form or intervention group before you run this policy.", "error");
     paint();
     return;
   }
@@ -11354,7 +11537,7 @@ async function handleRunNowPersonalisedGeneration() {
   setAutomationActionState({
     policyKey: requestedPolicyKey,
     mode: draftEntry.dirty || !String(policy.id || "").trim() ? "saving_and_running" : "running",
-    statusMessage: "Generating personalised tests for this policy...",
+    statusMessage: runStatusMessage,
   });
   paint();
 
@@ -11366,7 +11549,9 @@ async function handleRunNowPersonalisedGeneration() {
         id: effectivePolicy.id,
         name: effectivePolicy.name,
         description: effectivePolicy.description,
+        policy_type: effectivePolicy.policy_type,
         assignment_length: effectivePolicy.assignment_length,
+        bee_length_mode: isSpellingBeeAutomationPolicy(effectivePolicy) ? effectivePolicy.bee_length_mode : null,
         support_preset: effectivePolicy.support_preset,
         allow_starter_fallback: effectivePolicy.allow_starter_fallback,
         frequency: effectivePolicy.frequency,
@@ -11388,7 +11573,9 @@ async function handleRunNowPersonalisedGeneration() {
       setAutomationActionState({
         policyKey: resolveAutomationActionPolicyKey(effectivePolicy, selectedKey),
         mode: "running",
-        statusMessage: "Generating personalised tests for this policy...",
+        statusMessage: isSpellingBeeAutomationPolicy(effectivePolicy)
+          ? "Releasing Spelling Bee competition for this policy..."
+          : "Generating personalised tests for this policy...",
       });
       paint();
     }
@@ -11398,10 +11585,63 @@ async function handleRunNowPersonalisedGeneration() {
       automationPolicyId: effectivePolicy.id || "",
       policySnapshot: effectivePolicy,
       derivedDeadlineAt: deadlineIso,
+      policy_type: effectivePolicy.policy_type,
       assignment_length: effectivePolicy.assignment_length,
+      bee_length_mode: isSpellingBeeAutomationPolicy(effectivePolicy) ? effectivePolicy.bee_length_mode : null,
       support_preset: effectivePolicy.support_preset,
       allow_starter_fallback: effectivePolicy.allow_starter_fallback,
     });
+
+    if (isSpellingBeeAutomationPolicy(effectivePolicy)) {
+      const ladderResult = buildSpellingBeeLadder({
+        wordRows: getApprovedSpellingBeeSourceWordRows(),
+        maxRounds: effectivePolicy.assignment_length,
+        lengthMode: effectivePolicy.bee_length_mode,
+        seed: String(runRecord?.id || effectivePolicy.id || deadlineIso || ""),
+      });
+      if (ladderResult.status !== "ready") {
+        throw new Error(ladderResult.error || "Not enough teacher-approved words are available for a fair Spelling Bee.");
+      }
+
+      const createdBeeRelease = await createSpellingBeeCompetitionRelease({
+        classIds: selectedClassIds,
+        deadlineIso,
+        ladder: ladderResult.words,
+        policy: effectivePolicy,
+        runRecord,
+      });
+      const classResults = createdBeeRelease.classResults || [];
+      await updatePersonalisedGenerationRun({
+        runId: runRecord.id,
+        status: "completed",
+        classCount: selectedClassIds.length,
+        includedPupilCount: 0,
+        skippedPupilCount: 0,
+        summary: {
+          classes: classResults,
+          errorCount: 0,
+          automationPolicyId: effectivePolicy.id || null,
+          policySnapshot: effectivePolicy,
+          derivedDeadlineAt: deadlineIso,
+          nextReleaseAt: deadlineMeta.nextRelease ? deadlineMeta.nextRelease.toISOString() : null,
+          policy_type: effectivePolicy.policy_type,
+          bee_length_mode: effectivePolicy.bee_length_mode,
+          testId: createdBeeRelease.testId,
+          assignmentIds: createdBeeRelease.assignmentIds,
+        },
+      });
+
+      await loadDashboardData();
+      openDashboardSection("upcoming");
+      state.createAutoAssignOpen = false;
+      state.activePanel = null;
+      showNotice(
+        `Released Spelling Bee competition to ${selectedClassIds.length} group${selectedClassIds.length === 1 ? "" : "s"}.`,
+        "success",
+      );
+      paint();
+      return;
+    }
 
     const { pupilIdsByClassId, allPupilIds } = await readActivePupilIdsByClass(selectedClassIds);
     const [activeAutomationByPupil, baselineGateEntries] = await Promise.all([
@@ -13117,8 +13357,13 @@ function renderCreateBar() {
   const automationActionBusy = hasAutomationSelection ? isAutomationActionBusyMode(automationActionMode) : false;
   const automationRunActive = hasAutomationSelection ? isSelectedAutomationPolicyRunActive() : false;
   const automationBusyStatusMessage = hasAutomationSelection ? getSelectedAutomationActionStatusMessage() : "";
-  const automationEditorLocked = automationActionBusy;
-  const automationStructuralControlsDisabled = automationActionBusy;
+  const automationIsSpellingBee = isSpellingBeeAutomationPolicy(automationRunPolicy);
+  const automationBeeLengthMode = normalizeSpellingBeeLengthMode(automationRunPolicy.bee_length_mode);
+  const automationBeeUntilWrong = isSpellingBeeUntilWrongPolicy(automationRunPolicy);
+  const automationCanManageBee = canManageSpellingBeePolicies();
+  const automationBeeManagementLocked = automationIsSpellingBee && !automationCanManageBee;
+  const automationEditorLocked = automationActionBusy || automationBeeManagementLocked;
+  const automationStructuralControlsDisabled = automationActionBusy || automationBeeManagementLocked;
   const selectedAutomationPolicyId = String(
     savedAutomationPolicy?.id
       || (!automationIsNewDraft ? automationRunPolicy?.id : "")
@@ -13152,7 +13397,7 @@ function renderCreateBar() {
   const automationAlertEntries = buildAutomationPolicyAlertEntries();
   const automationCanDiscardChanges = automationDraftDirty;
   const automationShowDiscardChanges = automationCanDiscardChanges;
-  const automationSaveDisabled = !automationDraftDirty || automationActionBusy;
+  const automationSaveDisabled = !automationDraftDirty || automationActionBusy || automationBeeManagementLocked;
   const automationSaveLabel = automationActionMode === "saving" ? "Saving..." : "Save";
   const automationShowRunNowButton = automationActionMode === "running"
     || (!automationDraftDirty && automationActionMode !== "saving_and_running");
@@ -13162,6 +13407,7 @@ function renderCreateBar() {
       ? "Running..."
       : (automationShowRunNowButton ? "Run now" : "Save and run now"));
   const automationPrimaryRunDisabled = automationActionBusy
+    || automationBeeManagementLocked
     || (automationShowRunNowButton ? !automationRunReadyState.ready : (!automationDraftDirty || !automationRunReadyState.ready));
   const automationShowRunReadyMessage = !automationRunReadyState.ready
     && !!String(automationRunReadyState.message || "").trim();
@@ -13182,32 +13428,59 @@ function renderCreateBar() {
       </div>
     `
     : "";
-  const automationSummaryMetrics = [
-    {
-      label: "Word count",
-      value: `${automationRunPolicy.assignment_length} words`,
-    },
-    {
-      label: "Support preset",
-      value: getAutoAssignSupportPresetLabel(automationRunPolicy.support_preset),
-    },
-    {
-      label: "Frequency",
-      value: automationCadenceLabel,
-    },
-    {
-      label: "Release days",
-      value: automationReleasePatternLabel,
-    },
-    {
-      label: "Dates",
-      value: automationScheduleWindowLabel,
-    },
-    {
-      label: "Groups",
-      value: `${selectedAutomationClassIds.length} selected`,
-    },
-  ];
+  const automationSummaryMetrics = automationIsSpellingBee
+    ? [
+      {
+        label: "Policy type",
+        value: getAutomationPolicyTypeLabel(automationRunPolicy.policy_type),
+      },
+      {
+        label: "Length",
+        value: buildSpellingBeeLengthModeSummary(automationRunPolicy),
+      },
+      {
+        label: "Support",
+        value: "No assistance",
+      },
+      {
+        label: "Frequency",
+        value: automationCadenceLabel,
+      },
+      {
+        label: "Release days",
+        value: automationReleasePatternLabel,
+      },
+      {
+        label: "Groups",
+        value: `${selectedAutomationClassIds.length} selected`,
+      },
+    ]
+    : [
+      {
+        label: "Word count",
+        value: `${automationRunPolicy.assignment_length} words`,
+      },
+      {
+        label: "Support preset",
+        value: getAutoAssignSupportPresetLabel(automationRunPolicy.support_preset),
+      },
+      {
+        label: "Frequency",
+        value: automationCadenceLabel,
+      },
+      {
+        label: "Release days",
+        value: automationReleasePatternLabel,
+      },
+      {
+        label: "Dates",
+        value: automationScheduleWindowLabel,
+      },
+      {
+        label: "Groups",
+        value: `${selectedAutomationClassIds.length} selected`,
+      },
+    ];
   const buildAutomationWeekdayCheckboxGridHtml = ({ title, weekKey, selectedWeekdays }) => `
     <div class="td-automation-weekday-row">
       <div class="td-automation-weekday-row-title">${escapeHtml(title)}</div>
@@ -13254,14 +13527,21 @@ function renderCreateBar() {
     `${selectedAutomationClassIds.length} selected`,
     `${filteredAutomationEligibleClasses.length} shown`,
   ]);
-  const automationBottomPrimarySummary = joinAutomationSummaryParts([
-    `${automationPolicyValidation.policy.assignment_length} words`,
-    getAutoAssignSupportPresetLabel(automationPolicyValidation.policy.support_preset),
-    PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
-      (option) => option.value === automationPolicyValidation.policy.frequency
-    )?.label || "Weekly",
-    `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
-  ]);
+  const automationBottomPrimarySummary = automationIsSpellingBee
+    ? joinAutomationSummaryParts([
+      getAutomationPolicyTypeLabel(automationPolicyValidation.policy.policy_type),
+      buildSpellingBeeLengthModeSummary(automationPolicyValidation.policy),
+      "No assistance",
+      `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
+    ])
+    : joinAutomationSummaryParts([
+      `${automationPolicyValidation.policy.assignment_length} words`,
+      getAutoAssignSupportPresetLabel(automationPolicyValidation.policy.support_preset),
+      PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
+        (option) => option.value === automationPolicyValidation.policy.frequency
+      )?.label || "Weekly",
+      `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
+    ]);
   const automationBottomSecondarySummary = joinAutomationSummaryParts([
     getAutomationPolicyCompactDateRange(automationPolicyValidation.policy),
     getAutomationPolicyCompactStateLabel(automationPolicyValidation.policy, {
@@ -13307,6 +13587,33 @@ function renderCreateBar() {
         </span>
       </label>
     `)
+    .join("");
+  const automationPolicyTypeCardsHtml = AUTOMATION_POLICY_TYPE_OPTIONS
+    .map((option) => {
+      const selected = normalizeAutomationPolicyType(automationRunPolicy.policy_type) === option.value;
+      const beeOption = option.value === AUTOMATION_POLICY_TYPE_SPELLING_BEE;
+      const disabled = automationEditorLocked || (beeOption && !automationCanManageBee);
+      const helper = beeOption ? "Optional competition" : "Normal personalised test";
+      return `
+        <label class="td-automation-policy-type-card ${selected ? "is-current" : ""} ${disabled ? "is-disabled" : ""}">
+          <input
+            type="radio"
+            name="automation_policy_type"
+            value="${escapeAttr(option.value)}"
+            data-field="automation-policy-type"
+            ${selected ? "checked" : ""}
+            ${disabled ? "disabled" : ""}
+          />
+          <span>
+            <strong>${escapeHtml(option.label)}</strong>
+            <small>${escapeHtml(helper)}</small>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+  const automationBeeLengthModeOptionsHtml = SPELLING_BEE_LENGTH_MODE_OPTIONS
+    .map((option) => `<option value="${escapeAttr(option.value)}" ${automationBeeLengthMode === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`)
     .join("");
   const buildAutomationPolicyOptionHtml = (policy) => {
     const policyId = String(policy?.id || "").trim();
@@ -13691,6 +13998,16 @@ function renderCreateBar() {
                   <div class="td-automation-editor-shell td-automation-editor-shell--full">
                     <form data-form="save-automation-policy" class="td-form-stack td-form-stack--automation-policy">
                       <fieldset class="td-automation-editor-fieldset" ${automationEditorLocked ? "disabled" : ""}>
+                                            <div class="td-automation-panel-section">
+                        <div class="td-automation-panel-section-head">
+                          <strong>Policy type</strong>
+                        </div>
+                        <div class="td-automation-policy-type-grid">
+                          ${automationPolicyTypeCardsHtml}
+                        </div>
+                        ${!automationCanManageBee ? '<div class="td-action-inline-copy">Spelling Bee is managed by admins.</div>' : ""}
+                      </div>
+
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
                           <strong>Policy details</strong>
@@ -13803,53 +14120,48 @@ function renderCreateBar() {
                         <div class="td-automation-panel-section-head">
                           <strong>Generation settings</strong>
                         </div>
-                        <div class="td-automation-run-grid td-automation-run-grid--generation">
-                          <label class="td-field">
-                            <span>Word count</span>
-                            <input
-                              class="td-input"
-                              type="number"
-                              min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}"
-                              max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}"
-                              step="1"
-                              data-field="automation-run-length"
-                              value="${escapeAttr(String(automationRunPolicy.assignment_length))}"
-                            />
-                          </label>
-                          <div class="td-field td-field--checkbox td-field--automation-checkbox" style="grid-column: span 2;">
-                            <span class="td-automation-inline-label">
-                              <span>Starter fallback</span>
-                              ${renderInfoTip("Uses the starter catalog when pupil evidence is limited.", {
-                                label: "About starter fallback",
-                                className: "td-action-info-tip",
-                                triggerClassName: "td-action-info-tip-trigger",
-                                bubbleClassName: "td-action-info-tip-bubble",
-                                align: "start",
-                              })}
-                            </span>
-                            <label class="td-checkbox-row">
-                              <input
-                                type="checkbox"
-                                data-field="automation-run-starter-fallback"
-                                ${automationRunPolicy.allow_starter_fallback ? "checked" : ""}
-                              />
-                              <span>Use starter catalog</span>
+                        ${automationIsSpellingBee ? `
+                          <div class="td-automation-run-grid td-automation-run-grid--generation">
+                            <label class="td-field">
+                              <span>Length mode</span>
+                              <select class="td-input" data-field="automation-bee-length-mode">
+                                ${automationBeeLengthModeOptionsHtml}
+                              </select>
                             </label>
+                            ${automationBeeUntilWrong ? "" : `
+                              <label class="td-field">
+                                <span>Max rounds</span>
+                                <input class="td-input" type="number" min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}" max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}" step="1" data-field="automation-run-length" value="${escapeAttr(String(automationRunPolicy.assignment_length))}" />
+                              </label>
+                            `}
                           </div>
-                        </div>
-                        <div class="td-automation-inline-label-row">
-                          <strong>Support preset</strong>
-                          ${renderInfoTip("Controls how much support generated tests use.", {
-                            label: "About support preset",
-                            className: "td-action-info-tip",
-                            triggerClassName: "td-action-info-tip-trigger",
-                            bubbleClassName: "td-action-info-tip-bubble",
-                            align: "start",
-                          })}
-                        </div>
-                        <div class="td-automation-preset-guide">
-                          ${automationPresetGuideHtml}
-                        </div>
+                          <div class="td-action-inline-copy">Spelling Bee uses the approved word bank only and runs with no assistance.</div>
+                        ` : `
+                          <div class="td-automation-run-grid td-automation-run-grid--generation">
+                            <label class="td-field">
+                              <span>Word count</span>
+                              <input class="td-input" type="number" min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}" max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}" step="1" data-field="automation-run-length" value="${escapeAttr(String(automationRunPolicy.assignment_length))}" />
+                            </label>
+                            <div class="td-field td-field--checkbox td-field--automation-checkbox" style="grid-column: span 2;">
+                              <span class="td-automation-inline-label">
+                                <span>Starter fallback</span>
+                                ${renderInfoTip("Uses the starter catalog when pupil evidence is limited.", { label: "About starter fallback", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
+                              </span>
+                              <label class="td-checkbox-row">
+                                <input type="checkbox" data-field="automation-run-starter-fallback" ${automationRunPolicy.allow_starter_fallback ? "checked" : ""} />
+                                <span>Use starter catalog</span>
+                              </label>
+                            </div>
+                          </div>
+                          <div class="td-automation-inline-label-row">
+                            <strong>Support preset</strong>
+                            ${renderInfoTip("Controls how much support generated tests use.", { label: "About support preset", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
+                          </div>
+                          <div class="td-automation-preset-guide">
+                            ${automationPresetGuideHtml}
+                          </div>
+                        `}
+                      </div>
                       </div>
                       </fieldset>
 
@@ -24391,6 +24703,67 @@ function injectStyles() {
 
     .td-field--automation-description{
       grid-column:span 2;
+    }
+
+    .td-automation-policy-type-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+      gap:10px;
+    }
+
+    .td-automation-policy-type-card{
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+      padding:12px 14px;
+      border:1px solid var(--wl-border);
+      border-radius:12px;
+      background:#fff;
+      color:var(--wl-text-muted);
+      font-size:0.86rem;
+      line-height:1.45;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-automation-policy-type-card:hover{
+      border-color:#94a3b8;
+      background:var(--wl-bg-soft);
+    }
+
+    .td-automation-policy-type-card input{
+      margin-top:2px;
+      flex:0 0 auto;
+    }
+
+    .td-automation-policy-type-card span{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:0;
+    }
+
+    .td-automation-policy-type-card strong{
+      color:var(--wl-text);
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-policy-type-card small{
+      color:var(--wl-text-muted);
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-automation-policy-type-card.is-current{
+      border-color:#94a3b8;
+      background:var(--wl-accent-tint);
+      box-shadow:inset 0 0 0 1px rgba(148,163,184,0.14);
+    }
+
+    .td-automation-policy-type-card.is-disabled{
+      cursor:not-allowed;
+      opacity:0.68;
     }
 
     .td-automation-class-picker{

@@ -75,12 +75,24 @@ export function mountGame({
   assignmentId,
   onExit,
   onComplete,
+  onAbandon,
   onProgress,
   resumeState = null,
   recordAttempts = true,
   presentationMode = false,
 }) {
   cleanupActiveGameplayAudio();
+  const isCompetitionMode = String(testMeta?.competition_mode || testMeta?.competitionMode || "").trim().toLowerCase() === "spelling_bee"
+    || testMeta?.spelling_bee === true
+    || testMeta?.spellingBee === true;
+  const isUntilWrongCompetition = isCompetitionMode
+    && String(testMeta?.bee_length_mode || testMeta?.beeLengthMode || "").trim().toLowerCase() === "until_wrong";
+  const leaveConfirmTitle = isCompetitionMode ? "Leave competition?" : "Leave test?";
+  const leaveConfirmBody = isCompetitionMode
+    ? "Leaving ends your Spelling Bee run."
+    : "Your progress will be saved and you can continue later.";
+  const leaveContinueLabel = isCompetitionMode ? "Stay in competition" : "Continue test";
+  const leaveConfirmLabel = isCompetitionMode ? "End competition" : "Save and leave";
   const gameplaySessionId = ++activeGameplaySessionId;
   const hasUnlimitedAttempts = false;
   let idx = 0;
@@ -106,9 +118,15 @@ export function mountGame({
   let completionInFlight = false;
   let autoPlayTimer = 0;
   let segmentedRefocusTimer = 0;
+  let competitionAdvanceTimer = 0;
+  let beeTimerInterval = 0;
+  let beeTimerDeadline = 0;
+  let beeTimerDuration = 0;
   let audioPlaybackVersion = 0;
   let gameplaySessionActive = true;
   let currentAudioElement = null;
+  let competitionEnded = false;
+  let competitionAbandonInFlight = false;
 
   host.innerHTML = `
     <style>
@@ -233,6 +251,44 @@ export function mountGame({
       }
       .gameShell--present .wordProgress{
         width:min(760px,100%);
+      }
+      .beeTimer{
+        display:none;
+        width:min(520px,100%);
+        margin:0 auto;
+        padding:10px 0 0;
+      }
+      .gameShell--bee .beeTimer{
+        display:block;
+      }
+      .beeTimerTop{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        font-size:14px;
+        font-weight:800;
+        color:#0f172a;
+      }
+      .beeTimerValue{
+        font-variant-numeric:tabular-nums;
+        font-size:20px;
+      }
+      .beeTimerBar{
+        width:100%;
+        height:10px;
+        border-radius:999px;
+        background:#e2e8f0;
+        overflow:hidden;
+        margin-top:8px;
+      }
+      .beeTimerBar span{
+        display:block;
+        width:100%;
+        height:100%;
+        background:#0f172a;
+        transform-origin:left center;
+        transform:scaleX(1);
       }
       .gameShell--present .wordProgressText{
         font-size:16px;
@@ -738,10 +794,10 @@ export function mountGame({
         }
       }
     </style>
-    <div id="gameShell" class="gameShell ${presentationMode ? "gameShell--present" : ""}">
+    <div id="gameShell" class="gameShell ${presentationMode ? "gameShell--present" : ""} ${isCompetitionMode ? "gameShell--bee" : ""}">
     <div class="gameTop gameTop--enhanced">
       <div class="gameTopLeft">
-        <div>Word <b id="wNum">1</b> of <b id="wTot">0</b></div>
+        <div>Word <b id="wNum">1</b>${isUntilWrongCompetition ? "" : ` of <b id="wTot">0</b>`}</div>
         ${!presentationMode && String(testMeta?.title || "").trim() ? `<div id="gameActivityTitle" class="gameActivityTitle">${escapeHtml(String(testMeta.title || "").trim())}</div>` : ""}
       </div>
       <div class="gameTopRight">
@@ -765,6 +821,14 @@ export function mountGame({
         <div class="wordProgressText" id="wordProgressText"></div>
       </div>
 
+      <div id="beeTimer" class="beeTimer" aria-live="polite">
+        <div class="beeTimerTop">
+          <span>Time</span>
+          <strong id="beeTimerValue" class="beeTimerValue">0.0s</strong>
+        </div>
+        <div class="beeTimerBar" aria-hidden="true"><span id="beeTimerFill"></span></div>
+      </div>
+
       <div class="attemptDots" id="attemptDots"></div>
 
       <div id="main"></div>
@@ -780,11 +844,11 @@ export function mountGame({
     </div>
     <div id="leaveConfirm" class="gameModalBackdrop" hidden aria-hidden="true">
       <div class="gameModalCard" role="dialog" aria-modal="true" aria-labelledby="leaveConfirmTitle" aria-describedby="leaveConfirmBody">
-        <h2 id="leaveConfirmTitle" class="gameModalTitle">Leave test?</h2>
-        <p id="leaveConfirmBody" class="gameModalBody">Your progress will be saved and you can continue later.</p>
+        <h2 id="leaveConfirmTitle" class="gameModalTitle">${leaveConfirmTitle}</h2>
+        <p id="leaveConfirmBody" class="gameModalBody">${leaveConfirmBody}</p>
         <div class="gameModalActions">
-          <button id="btnLeaveContinue" class="btn secondary" type="button">Continue test</button>
-          <button id="btnLeaveSave" class="btn" type="button">Save and leave</button>
+          <button id="btnLeaveContinue" class="btn secondary" type="button">${leaveContinueLabel}</button>
+          <button id="btnLeaveSave" class="btn" type="button">${leaveConfirmLabel}</button>
         </div>
       </div>
     </div>
@@ -799,6 +863,9 @@ export function mountGame({
   const sentenceLine = $("sentenceLine");
   const wordProgressFill = $("wordProgressFill");
   const wordProgressText = $("wordProgressText");
+  const beeTimer = $("beeTimer");
+  const beeTimerValue = $("beeTimerValue");
+  const beeTimerFill = $("beeTimerFill");
   const attemptDots = $("attemptDots");
   const attemptsLeftTop = $("attemptsLeftTop");
   const main = $("main");
@@ -818,6 +885,23 @@ export function mountGame({
       && activeGameplaySessionId === gameplaySessionId;
   }
 
+  function handleCompetitionPageLeave() {
+    if (!isGameplaySessionActive() || !isCompetitionMode) return;
+    abandonCompetitionRun();
+  }
+
+  function bindCompetitionLeaveListeners() {
+    if (!isCompetitionMode) return;
+    window.addEventListener("pagehide", handleCompetitionPageLeave);
+    window.addEventListener("beforeunload", handleCompetitionPageLeave);
+  }
+
+  function removeCompetitionLeaveListeners() {
+    if (!isCompetitionMode) return;
+    window.removeEventListener("pagehide", handleCompetitionPageLeave);
+    window.removeEventListener("beforeunload", handleCompetitionPageLeave);
+  }
+
   function teardownGameplayAudio({ dispose = false } = {}) {
     audioPlaybackVersion += 1;
     clearAutoPlayTimer();
@@ -835,12 +919,16 @@ export function mountGame({
   }
 
   function disposeGameplaySessionAudio() {
+    removeCompetitionLeaveListeners();
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
     teardownGameplayAudio({ dispose: true });
   }
 
   activeGameplayAudioCleanup = disposeGameplaySessionAudio;
+  bindCompetitionLeaveListeners();
 
-  wTot.textContent = String(words.length);
+  if (wTot) wTot.textContent = String(words.length);
 
   function currentItem() {
     return words[idx] || null;
@@ -967,6 +1055,7 @@ export function mountGame({
   }
 
   function resolveQuestionType(item) {
+    if (isCompetitionMode) return "full_recall";
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1014,6 +1103,7 @@ export function mountGame({
   }
 
   function resolveModeKind(item) {
+    if (isCompetitionMode) return "no_support_assessment";
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1096,6 +1186,7 @@ export function mountGame({
   }
 
   function getAttemptsAllowedForItem(item = currentItem()) {
+    if (isCompetitionMode) return 1;
     return resolveItemAttemptsAllowed(item, testMeta);
   }
 
@@ -1344,6 +1435,89 @@ export function mountGame({
     };
   }
 
+  function buildCompetitionPayload({ reason = "completed", rows = results, audioFailed = false } = {}) {
+    const resultRows = Array.isArray(rows) ? rows : [];
+    const correctRows = resultRows.filter((row) => !!row?.correct);
+    const attempts = resultRows.length;
+    return {
+      totalWords: words.length,
+      totalCorrect: correctRows.length,
+      streak: correctRows.length,
+      roundsAttempted: attempts,
+      averageAttempts: attempts ? resultRows.reduce((sum, row) => sum + Math.max(1, Number(row?.attemptsUsed || 1)), 0) / attempts : 0,
+      results: resultRows,
+      attemptsAllowed: 1,
+      testTitle: testMeta?.title || "Spelling Bee",
+      endedReason: reason,
+      audioFailed: audioFailed === true,
+    };
+  }
+
+  async function endCompetitionRun({ reason = "abandoned", typed = "", audioFailed = false } = {}) {
+    if (!isCompetitionMode || competitionEnded || completionInFlight) return;
+    competitionEnded = true;
+    completionInFlight = true;
+    locked = true;
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
+    stopAudioPlayback();
+    btnExit.disabled = true;
+    btnListen.disabled = true;
+    btnCheck.disabled = true;
+    btnNext.disabled = true;
+    const item = currentItem();
+    if (item && (reason === "wrong" || reason === "timeout") && !getProgressEntry(item)?.completed) {
+      const entry = buildStoredProgressEntry(item, {
+        completed: true,
+        correct: false,
+        typed,
+        attemptsUsed: 1,
+        attemptsAllowed: 1,
+        questionType: "full_recall",
+        modeKind: "no_support_assessment",
+        inputState: null,
+        feedbackState: null,
+        index: idx + 1,
+      });
+      progressEntries.set(getItemStateKey(item), entry);
+      upsertCompletedResult(item, entry);
+      rebuildSessionResultState();
+    }
+    const payload = buildCompetitionPayload({ reason, audioFailed });
+    progressClosed = true;
+    try {
+      await onComplete?.(payload);
+      disposeGameplaySessionAudio();
+    } catch (error) {
+      console.warn("finish competition error:", error);
+      feedback.innerHTML = `<span class="badgeBad">Could not finish yet.</span>`;
+    }
+  }
+
+  function abandonCompetitionRun() {
+    if (!isCompetitionMode || competitionEnded || competitionAbandonInFlight || progressClosed) return;
+    competitionAbandonInFlight = true;
+    competitionEnded = true;
+    progressClosed = true;
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
+    stopAudioPlayback();
+    const payload = buildCompetitionPayload({ reason: "abandoned" });
+    void Promise.resolve(onAbandon?.(payload)).catch((error) => {
+      console.warn("abandon competition error:", error);
+    });
+  }
+
+  function failCompetitionAudio() {
+    if (!isCompetitionMode || competitionEnded || completionInFlight || progressClosed) return;
+    feedback.innerHTML = `<span class="badgeBad">Audio could not play.</span> <span class="muted">The competition has stopped for fairness.</span>`;
+    void endCompetitionRun({
+      reason: "abandoned",
+      typed: getCurrentTypedValue(),
+      audioFailed: true,
+    });
+  }
+
   function beginFinishingState() {
     completionInFlight = true;
     locked = true;
@@ -1521,6 +1695,61 @@ export function mountGame({
     }
   }
 
+  function getCompetitionGraphemeCount(item = currentItem()) {
+    const segments = Array.isArray(item?.segments)
+      ? item.segments.map((segment) => String(segment || "").trim()).filter(Boolean)
+      : [];
+    if (segments.length) return segments.length;
+    return splitWordToGraphemes(String(item?.word || "")).filter(Boolean).length || Math.max(1, String(item?.word || "").length);
+  }
+
+  function getCompetitionTimeLimitMs(item = currentItem()) {
+    const choice = getChoice(item);
+    const explicit = Number(choice?.bee_time_limit_ms ?? choice?.beeTimeLimitMs ?? item?.bee_time_limit_ms ?? item?.beeTimeLimitMs);
+    const rawLimit = Number.isFinite(explicit)
+      ? explicit
+      : 2200 + (850 * getCompetitionGraphemeCount(item));
+    return Math.max(4500, Math.min(11000, Math.round(rawLimit)));
+  }
+
+  function clearCompetitionTimer() {
+    if (beeTimerInterval) {
+      window.clearInterval(beeTimerInterval);
+      beeTimerInterval = 0;
+    }
+  }
+
+  function clearCompetitionAdvanceTimer() {
+    if (competitionAdvanceTimer) {
+      window.clearTimeout(competitionAdvanceTimer);
+      competitionAdvanceTimer = 0;
+    }
+  }
+
+  function updateCompetitionTimerDisplay(remainingMs = beeTimerDeadline - Date.now()) {
+    if (!isCompetitionMode || !beeTimer) return;
+    const safeRemaining = Math.max(0, Number(remainingMs || 0));
+    const ratio = beeTimerDuration > 0 ? Math.max(0, Math.min(1, safeRemaining / beeTimerDuration)) : 0;
+    if (beeTimerValue) beeTimerValue.textContent = `${(safeRemaining / 1000).toFixed(1)}s`;
+    if (beeTimerFill) beeTimerFill.style.transform = `scaleX(${ratio})`;
+  }
+
+  function startCompetitionTimer(item = currentItem()) {
+    if (!isCompetitionMode || !item) return;
+    clearCompetitionTimer();
+    beeTimerDuration = getCompetitionTimeLimitMs(item);
+    beeTimerDeadline = Date.now() + beeTimerDuration;
+    updateCompetitionTimerDisplay(beeTimerDuration);
+    beeTimerInterval = window.setInterval(() => {
+      const remaining = beeTimerDeadline - Date.now();
+      updateCompetitionTimerDisplay(remaining);
+      if (remaining <= 0) {
+        clearCompetitionTimer();
+        void endCompetitionRun({ reason: "timeout", typed: getCurrentTypedValue() });
+      }
+    }, 100);
+  }
+
   function clearSegmentedRefocusTimer() {
     if (segmentedRefocusTimer) {
       window.clearTimeout(segmentedRefocusTimer);
@@ -1578,6 +1807,21 @@ export function mountGame({
   async function exitWithSave() {
     stopAudioPlayback();
     hideLeaveConfirm({ restoreFocus: false });
+    if (isCompetitionMode && !competitionEnded) {
+      competitionEnded = true;
+      competitionAbandonInFlight = true;
+      clearCompetitionTimer();
+      clearCompetitionAdvanceTimer();
+      progressClosed = true;
+      try {
+        await onAbandon?.(buildCompetitionPayload({ reason: "abandoned" }));
+      } catch (error) {
+        console.warn("abandon competition error:", error);
+      }
+      disposeGameplaySessionAudio();
+      onExit?.();
+      return;
+    }
     await flushProgressSync();
     progressClosed = true;
     disposeGameplaySessionAudio();
@@ -1652,10 +1896,12 @@ export function mountGame({
   }
 
   function isHintsEnabled() {
+    if (isCompetitionMode) return false;
     return testMeta?.hints_enabled !== false && testMeta?.hintsEnabled !== false;
   }
 
   function shouldRevealOnFinalWrong(item) {
+    if (isCompetitionMode) return false;
     if (!presentationMode) return true;
     const choice = getChoice(item);
     if (typeof choice.reveal_on_final_wrong === "boolean") return choice.reveal_on_final_wrong;
@@ -1686,10 +1932,14 @@ export function mountGame({
     return choice?.focus_grapheme || (Array.isArray(choice?.focus_graphemes) ? choice.focus_graphemes[0] : null) || null;
   }
 
-  function speak(text) {
-    if (!isGameplaySessionActive() || !("speechSynthesis" in window) || !text) return;
+  function speak(text, { speechVersion = audioPlaybackVersion, itemKey = getItemStateKey(currentItem()) } = {}) {
+    if (!isGameplaySessionActive() || !text) return;
+    if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance === "undefined") {
+      failCompetitionAudio();
+      return;
+    }
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    const u = new window.SpeechSynthesisUtterance(text);
     u.rate = 0.9;
     const voices = window.speechSynthesis.getVoices?.() || [];
     const preferred =
@@ -1701,7 +1951,18 @@ export function mountGame({
         window.speechSynthesis.cancel();
       }
     };
-    window.speechSynthesis.speak(u);
+    u.onerror = () => {
+      if (!isCompetitionMode) return;
+      if (!isGameplaySessionActive() || progressClosed || completionInFlight) return;
+      if (speechVersion !== audioPlaybackVersion) return;
+      if (itemKey && itemKey !== getItemStateKey(currentItem())) return;
+      failCompetitionAudio();
+    };
+    try {
+      window.speechSynthesis.speak(u);
+    } catch {
+      failCompetitionAudio();
+    }
   }
 
   function playCurrentAudio({
@@ -1736,9 +1997,11 @@ export function mountGame({
     attemptsLeftTop.textContent = hasUnlimitedAttempts
       ? "Unlimited"
       : String(Math.max(0, attemptsAllowed - currentAttempt + 1));
-    const pct = words.length ? ((idx) / words.length) * 100 : 0;
+    const pct = isUntilWrongCompetition ? 0 : (words.length ? ((idx) / words.length) * 100 : 0);
     wordProgressFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-    wordProgressText.textContent = `Word ${idx + 1} of ${words.length}`;
+    wordProgressText.textContent = isUntilWrongCompetition
+      ? `Word ${idx + 1}`
+      : `Word ${idx + 1} of ${words.length}`;
   }
 
   function renderAttemptDots() {
@@ -1859,6 +2122,7 @@ export function mountGame({
   }
 
   function getSegmentedVisualAidsMode(item) {
+    if (isCompetitionMode) return "none";
     const choice = getChoice(item);
     return String(choice?.visual_aids_mode || choice?.visualAidsMode || "none").trim().toLowerCase() === "phonics"
       ? "phonics"
@@ -3689,6 +3953,8 @@ export function mountGame({
     locked = false;
     completionInFlight = false;
     stopAudioPlayback();
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
     btnExit.disabled = false;
     feedback.innerHTML = "";
     btnNext.style.display = "none";
@@ -3768,6 +4034,7 @@ export function mountGame({
       return;
     }
 
+    if (isCompetitionMode) startCompetitionTimer(item);
     scheduleAutoPlay(item);
   }
 
@@ -3847,6 +4114,7 @@ export function mountGame({
 
   function finishWord({ correct, typed }) {
     locked = true;
+    clearCompetitionTimer();
     stopAudioPlayback();
     btnListen.disabled = true;
     btnCheck.disabled = true;
@@ -3886,6 +4154,14 @@ export function mountGame({
 
     if (correct) {
       feedback.innerHTML = `<span class="badgeOk">Correct.</span> <span class="muted">${attemptsUsed} ${attemptsUsed === 1 ? "attempt" : "attempts"}.</span>`;
+      if (isCompetitionMode) {
+        btnNext.style.display = "none";
+        competitionAdvanceTimer = window.setTimeout(() => {
+          competitionAdvanceTimer = 0;
+          if (!isGameplaySessionActive() || competitionEnded || completionInFlight) return;
+          void nextWord();
+        }, 650);
+      }
       return;
     }
 
@@ -3915,6 +4191,11 @@ export function mountGame({
     }
 
     await logAttempt({ typed, correct });
+
+    if (isCompetitionMode && !correct) {
+      await endCompetitionRun({ reason: "wrong", typed });
+      return;
+    }
 
     if (correct) {
       finishWord({ correct: true, typed });
@@ -3975,9 +4256,11 @@ export function mountGame({
 
     const nextIndex = findNextUnfinishedIndex(idx + 1);
     if (nextIndex >= words.length) {
-      const completionPayload = !hasPendingFinalWrongRevealInSession()
-        ? buildCompletionPayload()
-        : null;
+      const completionPayload = isCompetitionMode
+        ? buildCompetitionPayload({ reason: "completed" })
+        : (!hasPendingFinalWrongRevealInSession()
+          ? buildCompletionPayload()
+          : null);
       if (!completionPayload) {
         const unfinishedIndex = findNextUnfinishedIndex(0);
         if (unfinishedIndex < words.length) idx = unfinishedIndex;
@@ -3987,6 +4270,10 @@ export function mountGame({
 
       beginFinishingState();
       try {
+        if (isCompetitionMode) {
+          competitionEnded = true;
+          clearCompetitionTimer();
+        }
         await flushProgressSync();
         if (progressSyncTimer) {
           window.clearTimeout(progressSyncTimer);

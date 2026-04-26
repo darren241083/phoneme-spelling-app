@@ -1,6 +1,33 @@
 export const AUTO_ASSIGN_POLICY_LENGTH_MIN = 4;
 export const AUTO_ASSIGN_POLICY_LENGTH_MAX = 20;
 
+export const AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED = "regular_personalised";
+export const AUTOMATION_POLICY_TYPE_SPELLING_BEE = "spelling_bee";
+export const SPELLING_BEE_LENGTH_MODE_CAPPED = "capped";
+export const SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG = "until_wrong";
+
+export const AUTOMATION_POLICY_TYPE_OPTIONS = Object.freeze([
+  {
+    value: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+    label: "Regular personalised",
+  },
+  {
+    value: AUTOMATION_POLICY_TYPE_SPELLING_BEE,
+    label: "Spelling Bee competition",
+  },
+]);
+
+export const SPELLING_BEE_LENGTH_MODE_OPTIONS = Object.freeze([
+  {
+    value: SPELLING_BEE_LENGTH_MODE_CAPPED,
+    label: "Capped",
+  },
+  {
+    value: SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG,
+    label: "Until wrong",
+  },
+]);
+
 export const AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS = Object.freeze([
   {
     value: "balanced",
@@ -20,6 +47,7 @@ export const AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS = Object.freeze([
 ]);
 
 export const AUTO_ASSIGN_POLICY_DEFAULTS = Object.freeze({
+  policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
   assignment_length: 10,
   support_preset: "balanced",
   allow_starter_fallback: true,
@@ -135,6 +163,7 @@ export function buildDefaultPersonalisedAutomationPolicy({ today = new Date() } 
     name: "",
     description: "",
     active: false,
+    policy_type: AUTO_ASSIGN_POLICY_DEFAULTS.policy_type,
     assignment_length: AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length,
     support_preset: AUTO_ASSIGN_POLICY_DEFAULTS.support_preset,
     allow_starter_fallback: AUTO_ASSIGN_POLICY_DEFAULTS.allow_starter_fallback,
@@ -171,6 +200,53 @@ function normalizeSupportPreset(value) {
     : AUTO_ASSIGN_POLICY_DEFAULTS.support_preset;
 }
 
+export function normalizeAutomationPolicyType(value) {
+  const next = String(value || "").trim().toLowerCase();
+  return AUTOMATION_POLICY_TYPE_OPTIONS.some((option) => option.value === next)
+    ? next
+    : AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED;
+}
+
+export function isSpellingBeeAutomationPolicy(rawPolicy = null) {
+  const source = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
+  return normalizeAutomationPolicyType(source.policy_type || source.policyType) === AUTOMATION_POLICY_TYPE_SPELLING_BEE;
+}
+
+export function getAutomationPolicyTypeLabel(value) {
+  const normalized = normalizeAutomationPolicyType(value);
+  return AUTOMATION_POLICY_TYPE_OPTIONS.find((option) => option.value === normalized)?.label || "Regular personalised";
+}
+
+export function normalizeSpellingBeeLengthMode(value) {
+  const next = String(value || "").trim().toLowerCase();
+  return SPELLING_BEE_LENGTH_MODE_OPTIONS.some((option) => option.value === next)
+    ? next
+    : SPELLING_BEE_LENGTH_MODE_CAPPED;
+}
+
+export function getSpellingBeeLengthModeLabel(value) {
+  const normalized = normalizeSpellingBeeLengthMode(value);
+  return SPELLING_BEE_LENGTH_MODE_OPTIONS.find((option) => option.value === normalized)?.label || "Capped";
+}
+
+export function isSpellingBeeUntilWrongPolicy(rawPolicy = null) {
+  return isSpellingBeeAutomationPolicy(rawPolicy)
+    && normalizeSpellingBeeLengthMode(rawPolicy?.bee_length_mode || rawPolicy?.beeLengthMode) === SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG;
+}
+
+export function buildSpellingBeeLengthModeSummary(rawPolicy = null) {
+  const source = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
+  const mode = normalizeSpellingBeeLengthMode(source.bee_length_mode || source.beeLengthMode);
+  if (mode === SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG) return "Until wrong";
+  const length = clampInteger(
+    source.assignment_length,
+    AUTO_ASSIGN_POLICY_LENGTH_MIN,
+    AUTO_ASSIGN_POLICY_LENGTH_MAX,
+    AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length,
+  );
+  return `${length} max rounds`;
+}
+
 function normalizePolicyName(value) {
   return String(value || "").trim();
 }
@@ -181,21 +257,29 @@ function normalizePolicyDescription(value) {
 
 export function normalizeAutoAssignPolicy(rawPolicy = null) {
   const source = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
-  return {
+  const policyType = normalizeAutomationPolicyType(source.policy_type || source.policyType);
+  const spellingBee = policyType === AUTOMATION_POLICY_TYPE_SPELLING_BEE;
+  const normalized = {
+    policy_type: policyType,
     assignment_length: clampInteger(
       source.assignment_length,
       AUTO_ASSIGN_POLICY_LENGTH_MIN,
       AUTO_ASSIGN_POLICY_LENGTH_MAX,
       AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length,
     ),
-    support_preset: normalizeSupportPreset(source.support_preset),
-    allow_starter_fallback: source.allow_starter_fallback !== false,
+    support_preset: spellingBee ? AUTO_ASSIGN_POLICY_DEFAULTS.support_preset : normalizeSupportPreset(source.support_preset),
+    allow_starter_fallback: spellingBee ? false : source.allow_starter_fallback !== false,
   };
+  if (spellingBee) {
+    normalized.bee_length_mode = normalizeSpellingBeeLengthMode(source.bee_length_mode || source.beeLengthMode);
+  }
+  return normalized;
 }
 
 export function isDefaultAutoAssignPolicy(rawPolicy = null) {
   const normalized = normalizeAutoAssignPolicy(rawPolicy);
   return normalized.assignment_length === AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length
+    && normalized.policy_type === AUTO_ASSIGN_POLICY_DEFAULTS.policy_type
     && normalized.support_preset === AUTO_ASSIGN_POLICY_DEFAULTS.support_preset
     && normalized.allow_starter_fallback === AUTO_ASSIGN_POLICY_DEFAULTS.allow_starter_fallback;
 }
@@ -214,6 +298,9 @@ export function getAutoAssignSupportPresetDescription(value) {
 export function buildAutoAssignPolicySummary(rawPolicy = null, { useDefaultLabel = false } = {}) {
   const normalized = normalizeAutoAssignPolicy(rawPolicy);
   if (useDefaultLabel && isDefaultAutoAssignPolicy(normalized)) return "default";
+  if (normalized.policy_type === AUTOMATION_POLICY_TYPE_SPELLING_BEE) {
+    return `${buildSpellingBeeLengthModeSummary(normalized)} | Spelling Bee competition | No assistance`;
+  }
   return `${normalized.assignment_length} words | ${getAutoAssignSupportPresetLabel(normalized.support_preset)} | Starter fallback ${normalized.allow_starter_fallback ? "on" : "off"}`;
 }
 
@@ -265,12 +352,13 @@ export function normalizePersonalisedAutomationPolicy(rawPolicy = null, { today 
   const selectedWeekdays = frequency === "fortnightly"
     ? mergeWeekdayLists(selectedWeekdaysWeek1, selectedWeekdaysWeek2)
     : legacySelectedWeekdays;
-  return {
+  const normalizedPolicy = {
     id: String(source.id || "").trim(),
     teacher_id: String(source.teacher_id || "").trim(),
     name: normalizePolicyName(source.name),
     description: normalizePolicyDescription(source.description),
     active: source.active === true || String(source.active || "").trim().toLowerCase() === "true",
+    policy_type: normalizedBase.policy_type,
     assignment_length: normalizedBase.assignment_length,
     support_preset: normalizedBase.support_preset,
     allow_starter_fallback: normalizedBase.allow_starter_fallback,
@@ -288,6 +376,10 @@ export function normalizePersonalisedAutomationPolicy(rawPolicy = null, { today 
     created_by: String(source.created_by || "").trim(),
     updated_by: String(source.updated_by || "").trim(),
   };
+  if (normalizedBase.policy_type === AUTOMATION_POLICY_TYPE_SPELLING_BEE) {
+    normalizedPolicy.bee_length_mode = normalizedBase.bee_length_mode;
+  }
+  return normalizedPolicy;
 }
 
 export function isPersonalisedAutomationPolicyArchived(rawPolicy = null) {
@@ -361,6 +453,7 @@ export function getLegacyPersonalisedAutomationPolicyActiveValue(rawPolicy = nul
 export function doPersonalisedAutomationPolicyWindowsOverlap(rawPolicyA = null, rawPolicyB = null) {
   const policyA = normalizePersonalisedAutomationPolicy(rawPolicyA);
   const policyB = normalizePersonalisedAutomationPolicy(rawPolicyB);
+  if (policyA.policy_type !== policyB.policy_type) return false;
   if (isPersonalisedAutomationPolicyArchived(policyA) || isPersonalisedAutomationPolicyArchived(policyB)) {
     return false;
   }
@@ -401,14 +494,16 @@ export function formatPersonalisedAutomationDateDisplay(value) {
 export function buildPersonalisedAutomationPolicySummary(rawPolicy = null, { includeTargets = false } = {}) {
   const policy = normalizePersonalisedAutomationPolicy(rawPolicy);
   const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+  const spellingBee = isSpellingBeeAutomationPolicy(policy);
   const cadenceText = policy.frequency === "fortnightly"
     ? `Fortnightly | Week 1: ${formatPersonalisedAutomationWeekdayList(policy.selected_weekdays_week_1)} | Week 2: ${policy.selected_weekdays_week_2.length ? formatPersonalisedAutomationWeekdayList(policy.selected_weekdays_week_2) : "not selected"}`
     : `${getPersonalisedAutomationFrequencyLabel(policy.frequency)} on ${formatPersonalisedAutomationWeekdayList(policy.selected_weekdays)}`;
   const parts = [
     lifecycle.label,
-    `${policy.assignment_length} words`,
-    getAutoAssignSupportPresetLabel(policy.support_preset),
-    `Starter fallback ${policy.allow_starter_fallback ? "on" : "off"}`,
+    getAutomationPolicyTypeLabel(policy.policy_type),
+    spellingBee ? buildSpellingBeeLengthModeSummary(policy) : `${policy.assignment_length} words`,
+    spellingBee ? "No assistance" : getAutoAssignSupportPresetLabel(policy.support_preset),
+    spellingBee ? "Approved bank only" : `Starter fallback ${policy.allow_starter_fallback ? "on" : "off"}`,
     cadenceText,
     policy.end_date
       ? `${formatPersonalisedAutomationDateDisplay(policy.start_date)} to ${formatPersonalisedAutomationDateDisplay(policy.end_date)}`

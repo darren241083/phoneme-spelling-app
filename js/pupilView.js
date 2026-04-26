@@ -1,17 +1,20 @@
 import { supabase } from "./supabaseClient.js";
 import {
-  getPupilAssignments,
   markAssignmentComplete,
   markAssignmentSessionOpened,
   readPupilBaselineGateState,
+  readPupilRuntimeAssignments,
   readAssignmentAttemptRows,
   reconcileAssignmentResultAttempts,
   listApprovedPracticeWordBankRows,
   listPupilPracticeEvidenceAttempts,
+  listSpellingBeeResultsForRun,
   readAssignmentPupilStatus,
   saveAssignmentProgress,
-} from "./db.js?v=1.24";
-import { mountGame } from "./game.js?v=1.33";
+  startSpellingBeeResult,
+  finalizeSpellingBeeResult,
+} from "./db.js?v=1.43";
+import { mountGame } from "./game.js?v=1.41";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
@@ -30,6 +33,7 @@ import {
   estimateSpellingAttainmentIndicator,
 } from "./spellingIndicator.js?v=1.5";
 import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
+import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
 import { buildPupilFeedbackCardModel } from "./pupilFeedbackModel.js?v=1.0";
 
 const PUPIL_SECTION_LIMIT = 3;
@@ -37,6 +41,7 @@ const pupilDashboardState = {
   expandedSections: {
     teacher_tasks: false,
   },
+  beeLeaderboardOpenByAssignment: {},
 };
 
 function escapeHtml(str) {
@@ -562,19 +567,30 @@ async function loadPupilProgress(pupilId) {
 }
 
 async function loadAssignments(pupilId) {
-  const { data: memberships, error: membershipError } = await supabase
-    .from("pupil_classes")
-    .select("class_id")
-    .eq("pupil_id", pupilId)
-    .eq("active", true);
-  if (membershipError) throw membershipError;
-
-  const classIds = (memberships || []).map((m) => m.class_id).filter(Boolean);
-  if (!classIds.length) return [];
-
-  const perClass = await Promise.all(classIds.map((classId) => getPupilAssignments({ classId, pupilId })));
-  const rows = perClass.flat();
-  const assignmentIds = rows.map((r) => r.id).filter(Boolean);
+  const perClass = await readPupilRuntimeAssignments({ pupilId });
+  const rows = [];
+  const beeRowIndexByRun = new Map();
+  for (const item of perClass) {
+    if (item?.isSpellingBee && item?.automation_run_id) {
+      const runKey = String(item.automation_run_id || "");
+      const existingIndex = beeRowIndexByRun.get(runKey);
+      if (existingIndex == null) {
+        beeRowIndexByRun.set(runKey, rows.length);
+        rows.push(item);
+        continue;
+      }
+      const existing = rows[existingIndex];
+      if (!existing?.spellingBeeResult && item?.spellingBeeResult) {
+        rows[existingIndex] = item;
+      }
+      continue;
+    }
+    rows.push(item);
+  }
+  const assignmentIds = rows
+    .filter((r) => !r?.isSpellingBee)
+    .map((r) => r.id)
+    .filter(Boolean);
   const latestAttemptByAssignmentWord = new Map();
   const nowMs = Date.now();
 
@@ -601,8 +617,33 @@ async function loadAssignments(pupilId) {
     }
   }
 
-  return rows
+  const mappedAssignments = rows
     .map((item) => {
+      if (item?.isSpellingBee) {
+        const result = item?.spellingBeeResult || null;
+        const totalWordCount = Math.max(0, Number(result?.max_rounds || item?.words?.length || 0));
+        const correctWordCount = Math.max(0, Number(result?.streak || 0));
+        const completedAtMs = parseDateMs(result?.completed_at || item?.completed_at || item?.completedAt);
+        const dueAtMs = parseDateMs(item?.end_at);
+        const isOverdue = !!dueAtMs && dueAtMs <= nowMs;
+        return {
+          ...item,
+          attemptedWordCount: Math.max(0, Number(result?.rounds_attempted || 0)),
+          totalWordCount,
+          correctWordCount,
+          scoreRate: totalWordCount ? correctWordCount / totalWordCount : 0,
+          completed: !!completedAtMs,
+          completedAt: completedAtMs ? new Date(completedAtMs).toISOString() : null,
+          isLocked: !!completedAtMs,
+          isOverdue,
+          keepVisible: true,
+          spellingBeeEventClosed: isOverdue,
+          spellingBeeRank: null,
+          spellingBeeYearRank: null,
+          spellingBeeFormRank: null,
+          spellingBeeLeaderboardRows: [],
+        };
+      }
       const summaryRows = Array.isArray(item?.result_json) ? item.result_json : [];
       const hasSummary = !!item?.completed_at && Math.max(0, Number(item?.total_words || 0)) > 0 && summaryRows.length > 0;
       const wordKeys = (Array.isArray(item?.words) ? item.words : [])
@@ -659,6 +700,34 @@ async function loadAssignments(pupilId) {
       const bTime = b.end_at ? new Date(b.end_at).getTime() : Number.POSITIVE_INFINITY;
       return aTime - bTime;
     });
+
+  const closedBeeRuns = [...new Set(
+    mappedAssignments
+      .filter((item) => item?.isSpellingBee && item?.completed && item?.spellingBeeEventClosed && item?.automation_run_id)
+      .map((item) => String(item.automation_run_id || ""))
+      .filter(Boolean)
+  )];
+  const leaderboardsByRun = new Map();
+  await Promise.all(closedBeeRuns.map(async (runId) => {
+    const leaderboardRows = await listSpellingBeeResultsForRun({ runId }).catch((error) => {
+      console.warn("read spelling bee leaderboard error:", error);
+      return [];
+    });
+    leaderboardsByRun.set(runId, leaderboardRows);
+  }));
+
+  return mappedAssignments.map((item) => {
+    if (!item?.isSpellingBee || !item?.completed || !item?.spellingBeeEventClosed) return item;
+    const leaderboardRows = leaderboardsByRun.get(String(item.automation_run_id || "")) || [];
+    const ownRow = leaderboardRows.find((row) => String(row?.pupil_id || "") === String(pupilId || "")) || null;
+    return {
+      ...item,
+      spellingBeeRank: ownRow?.rank || null,
+      spellingBeeYearRank: ownRow?.year_rank || null,
+      spellingBeeFormRank: ownRow?.form_rank || null,
+      spellingBeeLeaderboardRows: leaderboardRows,
+    };
+  });
 }
 
 function formatPracticeFocusLabel(focus) {
@@ -957,7 +1026,106 @@ function getDisplayedAssignmentTitle(item) {
   return String(item?.pupilTitle || item?.title || "Test").trim() || "Test";
 }
 
+function renderSpellingBeeLeaderboardPreview(item) {
+  const rows = Array.isArray(item?.spellingBeeLeaderboardRows) ? item.spellingBeeLeaderboardRows : [];
+  const visibleRows = rows.slice(0, 8);
+  if (!visibleRows.length) return "";
+  return `
+    <div class="resultsList">
+      ${visibleRows.map((row) => `
+        <article class="resultRow ${String(row?.pupil_id || "") === String(item?.spellingBeeResult?.pupil_id || "") ? "resultOk" : ""}">
+          <div class="resultWordLine">
+            <span>${escapeHtml(`${row?.rank ? `#${row.rank}` : "Unranked"} ${row?.pupil_name || "Pupil"}`)}</span>
+            <span class="resultAttempts">${escapeHtml(`${Math.max(0, Number(row?.streak || 0))} streak`)}</span>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSpellingBeeAssignmentCard(item) {
+  const isComplete = !!item.completed;
+  const hasStarted = !!item?.spellingBeeResult?.started_at || !!item?.started_at;
+  const eventClosed = !!item.spellingBeeEventClosed;
+  const streak = Math.max(0, Number(item?.correctWordCount || item?.spellingBeeResult?.streak || 0));
+  const leaderboardOpen = !!pupilDashboardState.beeLeaderboardOpenByAssignment?.[String(item.id || "")];
+  const untilWrong = String(item?.spellingBeeLengthMode || item?.spellingBeeResult?.bee_length_mode || "").trim().toLowerCase() === SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG;
+  const rankLine = item?.spellingBeeRank
+    ? `<span class="pupilMetaPill pupilMetaPill--result" title="Competition rank">${renderIcon("award")}<span>${escapeHtml(`Your rank: ${item.spellingBeeRank}`)}</span></span>`
+    : "";
+  const yearRankLine = item?.spellingBeeYearRank
+    ? `<span class="pupilMetaPill" title="Year rank">${renderIcon("list")}<span>${escapeHtml(`Year rank: ${item.spellingBeeYearRank}`)}</span></span>`
+    : "";
+  const formRankLine = item?.spellingBeeFormRank
+    ? `<span class="pupilMetaPill" title="Form rank">${renderIcon("list")}<span>${escapeHtml(`Form rank: ${item.spellingBeeFormRank}`)}</span></span>`
+    : "";
+
+  return `
+    <article class="card test-card pupilTestCard ${isComplete ? "pupilTestCard--complete" : ""}">
+      <h3>Spelling Bee</h3>
+      <p class="pupilTaskReason">Optional competition</p>
+      <p class="pupilTaskReason">Take part if you want to</p>
+      <div class="pupilTestMeta">
+        ${isComplete ? `
+          <span class="pupilMetaPill pupilMetaPill--complete" title="Completed competition">
+            ${renderIcon("checkCircle")}
+            <span>Spelling Bee completed</span>
+          </span>
+          <span class="pupilMetaPill pupilMetaPill--result" title="Streak">
+            ${renderIcon("list")}
+            <span>${escapeHtml(`Your streak: ${streak}`)}</span>
+          </span>
+          ${eventClosed ? `${rankLine}${yearRankLine}${formRankLine}` : `
+            <span class="pupilMetaPill" title="Results timing">
+              ${renderIcon("calendar")}
+              <span>Ranking and results are released after the competition closes</span>
+            </span>
+          `}
+        ` : hasStarted ? `
+          <span class="pupilMetaPill pupilMetaPill--complete" title="Entered competition">
+            ${renderIcon("checkCircle")}
+            <span>Already entered</span>
+          </span>
+          <span class="pupilMetaPill" title="Competition entry">
+            ${renderIcon("calendar")}
+            <span>You cannot restart this event</span>
+          </span>
+        ` : `
+          <span class="pupilMetaPill" title="Optional competition">
+            ${renderIcon("spark")}
+            <span>Optional competition</span>
+          </span>
+          ${untilWrong ? `
+            <span class="pupilMetaPill" title="Competition length">
+              ${renderIcon("list")}
+              <span>Ends when you get one wrong</span>
+            </span>
+          ` : ""}
+          <span class="pupilMetaPill pupilMetaPill--deadline ${deadlineClass(item.end_at)}" title="Competition closes">
+            ${renderIcon("calendar")}
+            <span>${escapeHtml(formatDeadline(item.end_at))}</span>
+          </span>
+        `}
+      </div>
+      ${
+        isComplete
+          ? (eventClosed
+            ? `<button class="btn secondary start-test-btn" data-action="toggle-bee-leaderboard" data-assignment-id="${escapeHtml(String(item.id || ""))}" type="button">${leaderboardOpen ? "Hide results" : "View results"}</button>`
+            : `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Completed</button>`)
+          : hasStarted
+            ? `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Already entered</button>`
+          : (eventClosed
+            ? `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Competition closed</button>`
+            : `<button class="btn primary start-test-btn" data-assignment="${escapeHtml(item.id)}" type="button">Start competition</button>`)
+      }
+      ${isComplete && eventClosed && leaderboardOpen ? renderSpellingBeeLeaderboardPreview(item) : ""}
+    </article>
+  `;
+}
+
 function renderAssignmentCard(item) {
+  if (item?.isSpellingBee) return renderSpellingBeeAssignmentCard(item);
   const defaultQuestionCount = Array.isArray(item.words) ? item.words.length : 0;
   const generatedQuestionCount = Number.isFinite(Number(item?.pupilWordCount))
     ? Math.max(0, Number(item.pupilWordCount))
@@ -1407,6 +1575,95 @@ function renderCompletionSummary(item, result) {
   `;
 }
 
+function renderSpellingBeeCompletionSummary(item, result, leaderboardRows = []) {
+  const streak = Math.max(0, Number(result?.streak ?? result?.totalCorrect ?? 0));
+  const eventClosed = item?.end_at ? new Date(item.end_at).getTime() <= Date.now() : false;
+  const audioFailed = result?.audioFailed === true || result?.audio_failed === true;
+  const ownRow = eventClosed
+    ? (leaderboardRows || []).find((row) => String(row?.pupil_id || "") === String(item?.spellingBeeResult?.pupil_id || result?.pupil_id || result?.pupilId || ""))
+    : null;
+  const rows = Array.isArray(leaderboardRows) ? leaderboardRows.slice(0, 8) : [];
+
+  return `
+    <div class="pupil-header">
+      <h2>${audioFailed ? "Spelling Bee stopped" : "Spelling Bee completed"}</h2>
+      <p class="muted">${audioFailed ? "Audio could not play clearly enough for a fair round." : (eventClosed ? "Results are available now." : "Ranking and results are released after the competition closes.")}</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <div class="resultSummaryGrid">
+        <div class="resultSummaryCard">
+          <div class="resultSummaryLabel">Your streak</div>
+          <div class="resultSummaryValue">${escapeHtml(String(streak))}</div>
+        </div>
+        ${eventClosed && ownRow?.rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Your rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.rank))}</div>
+          </div>
+        ` : ""}
+        ${eventClosed && ownRow?.year_rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Year rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.year_rank))}</div>
+          </div>
+        ` : ""}
+        ${eventClosed && ownRow?.form_rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Form rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.form_rank))}</div>
+          </div>
+        ` : ""}
+      </div>
+      ${eventClosed && rows.length ? `
+        <div class="resultSummaryLabel">Leaderboard</div>
+        <div class="resultsList">
+          ${rows.map((row) => `
+            <article class="resultRow ${String(row?.pupil_id || "") === String(ownRow?.pupil_id || "") ? "resultOk" : ""}">
+              <div class="resultWordLine">
+                <span>${escapeHtml(`${row?.rank ? `#${row.rank}` : "Unranked"} ${row?.pupil_name || "Pupil"}`)}</span>
+                <span class="resultAttempts">${escapeHtml(`${Math.max(0, Number(row?.streak || 0))} streak`)}</span>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+      ` : ""}
+      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </section>
+  `;
+}
+
+function canStartSpellingBeeAudio() {
+  return typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined";
+}
+
+function renderSpellingBeeAudioBlocked() {
+  return `
+    <div class="pupil-header">
+      <h2>Spelling Bee</h2>
+      <p class="muted">Audio is needed for this competition.</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <p class="pupilTaskReason">This browser cannot play the word audio right now.</p>
+      <p class="pupilTaskReason">Try again on a device with audio before the competition closes.</p>
+      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </section>
+  `;
+}
+
+function renderSpellingBeeAlreadyStarted() {
+  return `
+    <div class="pupil-header">
+      <h2>Spelling Bee</h2>
+      <p class="muted">You have already entered this competition.</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <p class="pupilTaskReason">Only one live run is allowed.</p>
+      <p class="pupilTaskReason">You cannot restart the same event.</p>
+      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </section>
+  `;
+}
+
 function attachDashboardEvents(containerEl, session, assignments, practiceModel, progress) {
   const practicePacks = getPracticePacks(practiceModel);
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
@@ -1432,6 +1689,18 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
       const key = String(button.getAttribute("data-section") || "");
       if (!Object.prototype.hasOwnProperty.call(pupilDashboardState.expandedSections, key)) return;
       pupilDashboardState.expandedSections[key] = !pupilDashboardState.expandedSections[key];
+      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="toggle-bee-leaderboard"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const assignmentId = String(button.getAttribute("data-assignment-id") || "");
+      if (!assignmentId) return;
+      pupilDashboardState.beeLeaderboardOpenByAssignment = {
+        ...(pupilDashboardState.beeLeaderboardOpenByAssignment || {}),
+        [assignmentId]: !pupilDashboardState.beeLeaderboardOpenByAssignment?.[assignmentId],
+      };
       renderDashboard(containerEl, session, assignments, practiceModel, progress);
     });
   });
@@ -1517,7 +1786,8 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
-  const isAssignedTask = !!item?.class_id && item?.attempt_source !== "practice";
+  const isSpellingBee = !!item?.isSpellingBee;
+  const isAssignedTask = !!item?.class_id && item?.attempt_source !== "practice" && !isSpellingBee;
   let latestStatus = null;
   let resumeState = null;
   console.log("TEST LOAD ids:", {
@@ -1596,22 +1866,80 @@ async function openSession(containerEl, session, item, assignments, practicePack
     })),
   });
 
+  let spellingBeeStartRow = null;
+  if (isSpellingBee) {
+    if (item?.completed || item?.spellingBeeResult?.completed_at) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (item?.spellingBeeEventClosed) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (item?.spellingBeeResult?.started_at || item?.started_at) {
+      containerEl.innerHTML = renderSpellingBeeAlreadyStarted();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    if (!canStartSpellingBeeAudio()) {
+      containerEl.innerHTML = renderSpellingBeeAudioBlocked();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    spellingBeeStartRow = await startSpellingBeeResult({
+      teacherId: item?.teacher_id,
+      runId: item?.automation_run_id,
+      assignmentId: item?.id,
+      testId: item?.test_id,
+      classId: item?.class_id,
+      pupilId: session?.pupil_id,
+      maxRounds: Array.isArray(item?.words) ? item.words.length : item?.totalWordCount,
+      beeLengthMode: item?.spellingBeeLengthMode || item?.words?.[0]?.choice?.bee_length_mode || "",
+    });
+    if (spellingBeeStartRow?.completed_at) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (spellingBeeStartRow?.already_started && !spellingBeeStartRow?.completed_at) {
+      containerEl.innerHTML = renderSpellingBeeAlreadyStarted();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    item = {
+      ...item,
+      spellingBeeResult: spellingBeeStartRow,
+      started_at: spellingBeeStartRow?.started_at || new Date().toISOString(),
+    };
+  }
+
   mountGame({
     host: containerEl,
     words: item.words || [],
     testMeta: {
       id: item.test_id,
       title: getDisplayedAssignmentTitle(item),
-      question_type: item.question_type || "focus_sound",
+      question_type: isSpellingBee ? "no_support_assessment" : (item.question_type || "focus_sound"),
       mode: item.mode || "test",
-      max_attempts: item.max_attempts == null ? null : item.max_attempts,
+      max_attempts: isSpellingBee ? 1 : (item.max_attempts == null ? null : item.max_attempts),
       attempt_source: item.attempt_source || "test",
       audio_enabled: item.audio_enabled !== false,
-      hints_enabled: item.hints_enabled !== false,
+      hints_enabled: isSpellingBee ? false : item.hints_enabled !== false,
+      competition_mode: isSpellingBee ? "spelling_bee" : null,
+      spelling_bee: isSpellingBee,
+      bee_length_mode: isSpellingBee
+        ? (item?.spellingBeeLengthMode || item?.words?.[0]?.choice?.bee_length_mode || "")
+        : null,
     },
     pupilId: session?.pupil_id,
-    assignmentId: isAssignedTask ? item.id : null,
+    assignmentId: isAssignedTask || isSpellingBee ? item.id : null,
     resumeState,
+    recordAttempts: !isSpellingBee,
     onProgress: isAssignedTask && item?.id && session?.pupil_id
       ? async (progress) => {
         await saveAssignmentProgress({
@@ -1621,6 +1949,16 @@ async function openSession(containerEl, session, item, assignments, practicePack
           testId: item?.test_id,
           pupilId: session?.pupil_id,
           progress,
+        });
+      }
+      : null,
+    onAbandon: isSpellingBee
+      ? async (result) => {
+        await finalizeSpellingBeeResult({
+          runId: item?.automation_run_id,
+          pupilId: session?.pupil_id,
+          endedReason: "abandoned",
+          result,
         });
       }
       : null,
@@ -1635,6 +1973,31 @@ async function openSession(containerEl, session, item, assignments, practicePack
         sessionAttemptId: null,
         resultCount: Array.isArray(result?.results) ? result.results.length : 0,
       });
+      if (isSpellingBee && item?.id && session?.pupil_id) {
+        const finalizedResult = await finalizeSpellingBeeResult({
+          runId: item?.automation_run_id,
+          pupilId: session?.pupil_id,
+          endedReason: result?.endedReason || "completed",
+          result,
+        });
+        const eventClosed = item?.end_at ? new Date(item.end_at).getTime() <= Date.now() : false;
+        const leaderboardRows = eventClosed
+          ? await listSpellingBeeResultsForRun({ runId: item?.automation_run_id }).catch((error) => {
+            console.warn("read spelling bee leaderboard error:", error);
+            return [];
+          })
+          : [];
+        const summaryItem = {
+          ...item,
+          spellingBeeResult: finalizedResult || spellingBeeStartRow || item?.spellingBeeResult || null,
+        };
+        containerEl.innerHTML = renderSpellingBeeCompletionSummary(summaryItem, finalizedResult || result, leaderboardRows);
+        containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+        });
+        return;
+      }
+
       if (isAssignedTask && item?.id && session?.pupil_id) {
         console.log("FINISH TEST writes:", {
           assignmentId: String(item?.id || ""),
