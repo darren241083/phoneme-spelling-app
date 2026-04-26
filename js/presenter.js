@@ -634,7 +634,7 @@ function leavePresenter() {
     window.history.back();
     return;
   }
-  const url = new URL("./index.html", window.location.href);
+  const url = new URL("./login.html", window.location.href);
   window.location.href = url.toString();
 }
 
@@ -644,7 +644,7 @@ function injectStyles() {
   style.id = "presenterStyles";
   style.textContent = `
     .presentPageBody{
-      background:#f8fafc;
+      background:var(--wl-bg-soft);
       min-height:100vh;
     }
     .presentApp{
@@ -702,8 +702,8 @@ function injectStyles() {
       cursor:pointer;
     }
     .presentStarterButton.is-active{
-      border-color:#93c5fd;
-      background:#eff6ff;
+      border-color:rgba(var(--wl-accent-rgb),.36);
+      background:var(--wl-accent-tint);
     }
     .presentWordsInput{
       min-height:190px;
@@ -714,9 +714,9 @@ function injectStyles() {
       color:var(--muted);
     }
     .presentError{
-      border:1px solid rgba(239,68,68,.2);
-      background:rgba(239,68,68,.06);
-      color:#991b1b;
+      border:1px solid rgba(184,92,75,.30);
+      background:rgba(184,92,75,.08);
+      color:var(--wl-error-ink);
       border-radius:12px;
       padding:12px 14px;
       margin-bottom:0;
