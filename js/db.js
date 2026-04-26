@@ -4492,6 +4492,7 @@ async function buildBaselineGateStateFromRuntimeAssignments({
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {
   const safeRequiredKey = String(requiredStandardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase();
+  const safePupilId = String(runtimePayload?.pupilId || runtimePayload?.pupil_id || "").trim();
   const runtimeStatus = String(runtimePayload?.status || "").trim().toLowerCase();
   if (runtimeStatus && runtimeStatus !== "ok") {
     return normalizeBaselineGateStatePayload({
@@ -4517,6 +4518,7 @@ async function buildBaselineGateStateFromRuntimeAssignments({
       .map((assignment) => assignment?.class_id || assignment?.classId)
       .filter(Boolean)
   );
+  const formClassIds = classIds;
 
   if (!requiredBaselineAssignments.length) {
     return normalizeBaselineGateStatePayload({
@@ -4673,6 +4675,11 @@ async function readPupilRuntimeAssignmentsPayload({ pupilId = "" } = {}) {
       .map((row) => normalizePupilRuntimeAssignmentRow(row))
       .filter((row) => row?.id),
   };
+}
+
+export async function readPupilBaselineGateState({ pupilId = "" } = {}) {
+  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId });
+  return buildBaselineGateStateFromRuntimeAssignments({ runtimePayload });
 }
 
 export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {
