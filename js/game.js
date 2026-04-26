@@ -1979,7 +1979,7 @@ export function mountGame({
     if (!item) return;
     if (scheduledItemKey && scheduledItemKey !== getItemStateKey(item)) return;
     const spoken = item?.word || item?.sentence || "";
-    speak(spoken);
+    speak(spoken, { speechVersion: scheduledVersion, itemKey: scheduledItemKey });
     if (currentModeKind === "segmented_spelling") {
       focusSegmentedController();
       const refocusVersion = scheduledVersion;
@@ -2113,8 +2113,8 @@ export function mountGame({
   function mapTargetSegmentsToLetters(item) {
     const targetParts = getTargetParts(item);
     const displayWord = buildWordFromGraphemes(targetParts);
-    const { letters, segments } = mapPreviewSegments(displayWord, targetParts);
-    return { letters, mapped: segments, targetParts };
+    const { letters, marks, segments } = mapPreviewSegments(displayWord, targetParts);
+    return { letters, marks, mapped: segments, targetParts };
   }
 
   function getSegmentedLetterParts(item, safeWord) {
@@ -2237,7 +2237,8 @@ export function mountGame({
         return `<span class="segmentedMark segmentedMark--silent" style="grid-column:${localStart + 1};"></span>`;
       }
       if (segment.type === "underline" || segment.markType === "underline") {
-        return `<span class="segmentedMark segmentedMark--underline" style="grid-column:${localStart + 1} / ${localEnd + 2};"></span>`;
+        const offsetClass = segment?.offset === "below_dots" ? " segmentedMark--underline-below-dots" : "";
+        return `<span class="segmentedMark segmentedMark--underline${offsetClass}" style="grid-column:${localStart + 1} / ${localEnd + 2};"></span>`;
       }
       return `<span class="segmentedMark segmentedMark--bridge" style="grid-column:${localStart + 1} / ${localEnd + 2};"><span class="segmentedMarkBridgeInner"></span></span>`;
     }).join("");
@@ -2610,35 +2611,52 @@ export function mountGame({
     return clean || "—";
   }
 
-  function renderMarks(letters, mapped) {
+  function renderMarks(letters, mapped, marks = null) {
     const safeLetters = Array.isArray(letters) ? letters : [];
     if (!safeLetters.length) return "";
 
-    const splitMarks = mapped.filter((segment) => segment.markType === "split");
-    const underlineMarks = mapped.filter((segment) => segment.markType === "underline");
+    const sourceMarks = Array.isArray(marks) && marks.length
+      ? marks
+      : (Array.isArray(mapped) ? mapped.map((segment) => ({
+        type: segment.markType,
+        start: segment.start,
+        end: segment.end,
+      })) : []);
+    const splitMarks = sourceMarks.filter((segment) => segment.type === "split" || segment.markType === "split");
+    const underlineMarks = sourceMarks.filter((segment) => segment.type === "underline" || segment.markType === "underline");
+    const dotMarks = sourceMarks.filter((segment) => segment.type === "dot" || segment.markType === "dot");
+    const silentDotMarks = sourceMarks.filter((segment) => segment.type === "silent_dot" || segment.markType === "silent_dot");
+    const hasExplicitDots = dotMarks.length > 0 || silentDotMarks.length > 0;
 
     const greyDots = new Set();
-    const orangeDots = new Set();
+    const silentDots = new Set();
 
-    for (let i = 0; i < safeLetters.length; i += 1) greyDots.add(i);
-
-    for (const mark of underlineMarks) {
-      for (let i = mark.start; i <= mark.end; i += 1) {
-        greyDots.delete(i);
+    if (hasExplicitDots) {
+      for (const mark of dotMarks) {
+        const index = Number(mark.start);
+        if (Number.isInteger(index)) greyDots.add(index);
       }
+      for (const mark of silentDotMarks) {
+        const index = Number(mark.start);
+        if (Number.isInteger(index)) silentDots.add(index);
+      }
+    } else {
+      for (let i = 0; i < safeLetters.length; i += 1) greyDots.add(i);
     }
 
-    for (const mark of splitMarks) {
-      orangeDots.add(mark.start);
-      orangeDots.add(mark.end);
-      greyDots.delete(mark.start);
-      greyDots.delete(mark.end);
+    if (!hasExplicitDots) {
+      for (const mark of underlineMarks) {
+        for (let i = mark.start; i <= mark.end; i += 1) {
+          greyDots.delete(i);
+        }
+      }
     }
 
     const CELL_W = 28;
     const GAP = 8;
     const DOT_R = 5;
     const DOT_Y = 12;
+    const UNDERLINE_DOT_OFFSET_Y = DOT_Y + DOT_R + 7;
     const BRIDGE_DEPTH = 18;
     const PAD = 6;
     const STROKE = 4;
@@ -2652,16 +2670,17 @@ export function mountGame({
       .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#94a3b8" />`)
       .join("");
 
-    const orangeSvg = [...orangeDots]
+    const silentSvg = [...silentDots]
       .sort((a, b) => a - b)
-      .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#f59e0b" />`)
+      .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#fff" stroke="#94a3b8" stroke-width="3" />`)
       .join("");
 
     const underlineSvg = underlineMarks
       .map((mark) => {
         const x1 = centerX(mark.start) - PAD;
         const x2 = centerX(mark.end) + PAD;
-        return `<line x1="${x1}" y1="${DOT_Y}" x2="${x2}" y2="${DOT_Y}" stroke="#f59e0b" stroke-width="${STROKE}" stroke-linecap="round" />`;
+        const y = mark?.offset === "below_dots" ? UNDERLINE_DOT_OFFSET_Y : DOT_Y;
+        return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#C28A3D" stroke-width="${STROKE}" stroke-linecap="round" />`;
       })
       .join("");
 
@@ -2674,7 +2693,7 @@ export function mountGame({
         return `
           <path
             d="M ${x1} ${y} L ${x1} ${bottom} Q ${x1} ${bottom + 4} ${x1 + 8} ${bottom + 4} L ${x2 - 8} ${bottom + 4} Q ${x2} ${bottom + 4} ${x2} ${bottom} L ${x2} ${y}"
-            stroke="#f59e0b"
+            stroke="#C28A3D"
             stroke-width="${STROKE}"
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -2696,7 +2715,7 @@ export function mountGame({
         ${underlineSvg}
         ${bridgeSvg}
         ${greySvg}
-        ${orangeSvg}
+        ${silentSvg}
       </svg>
     `;
   }
@@ -3601,7 +3620,7 @@ export function mountGame({
       return;
     }
 
-    const { letters, mapped, targetParts } = mapTargetSegmentsToLetters(item);
+    const { letters, marks, mapped, targetParts } = mapTargetSegmentsToLetters(item);
     const cols = Math.max(letters.length, 1);
     const activeIndex = typeof currentScroll.active === "number" ? currentScroll.active : 0;
     const activeSegment = mapped.find((segment) => segment.partIndex === activeIndex);
@@ -3615,7 +3634,7 @@ export function mountGame({
       <div class="fs-letter" style="grid-column:${index + 1};">${escapeHtml(letter)}</div>
     `).join("");
 
-    const marksHtml = renderMarks(letters, mapped);
+    const marksHtml = renderMarks(letters, mapped, marks);
 
     const soundLabelsHtml = mapped.map((segment) => {
       const soundLabel = getSegmentPhoneme(

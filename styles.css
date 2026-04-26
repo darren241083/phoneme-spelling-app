@@ -672,6 +672,10 @@ body {
   border-radius:999px;
   background:#f59e0b;
 }
+.segmentedMark--underline-below-dots::before
+{
+  top:16px;
+}
 .segmentedMark--bridge{
   justify-self:stretch;
   z-index:1;
