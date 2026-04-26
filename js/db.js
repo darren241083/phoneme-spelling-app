@@ -4487,7 +4487,7 @@ function compareBaselineGateRuntimeAssignments(a, b) {
   return compareBaselineGateAssignments(a, b);
 }
 
-function buildBaselineGateStateFromRuntimeAssignments({
+async function buildBaselineGateStateFromRuntimeAssignments({
   runtimePayload = null,
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {

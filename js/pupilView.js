@@ -14,7 +14,7 @@ import {
   saveAssignmentProgress,
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
-} from "./db.js?v=1.45";
+} from "./db.js?v=1.46";
 import { mountGame } from "./game.js?v=1.41";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
