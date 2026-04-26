@@ -91,7 +91,7 @@ begin
     'coreBand', band_key,
     'label', band_label,
     'coreLabel', band_label,
-    'reasons', jsonb_build_array('baseline catalog difficulty'),
+    'reasons', jsonb_build_array('baseline catalogue difficulty'),
     'modifierReasons', '[]'::jsonb,
     'flags', jsonb_build_object('tricky_word', false),
     'features', jsonb_build_object(

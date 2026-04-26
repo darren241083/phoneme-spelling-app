@@ -216,13 +216,13 @@ $$;
 select is(
   (select int_value from check_values where name = 'catalog_v2_count'),
   18,
-  'core_v2 catalog has exactly 18 words'
+  'core_v2 catalogue has exactly 18 words'
 );
 
 select is(
   (select text_value from check_values where name = 'catalog_v2_words'),
   'boat,seed,train,light,sharp,storm,enough,special,science,question,paint,point,fair,nurse,daughter,communication,description,subtraction',
-  'core_v2 catalog preserves the standardised word order'
+  'core_v2 catalogue preserves the standardised word order'
 );
 
 select is(
@@ -246,7 +246,7 @@ select is(
 select is(
   (select int_value from check_values where name = 'catalog_v1_count'),
   16,
-  'core_v1 catalog remains readable for historical baseline rows'
+  'core_v1 catalogue remains readable for historical baseline rows'
 );
 
 select is(

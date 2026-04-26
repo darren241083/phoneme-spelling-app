@@ -598,7 +598,7 @@ export function buildStarterCatalogVirtualTests() {
   return rows.length
     ? [{
       id: "__baseline_starter_catalog__",
-      title: "Baseline starter catalog",
+      title: "Baseline starter catalogue",
       question_type: "segmented_spelling",
       test_words: rows,
     }]
