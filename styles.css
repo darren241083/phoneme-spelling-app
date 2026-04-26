@@ -1398,6 +1398,9 @@ body {
 #viewPupil .pupilProgressEmpty,
 #viewPupil .pupilFeedbackIntro,
 #viewPupil .pupilFeedbackLabel,
+#viewPupil .pupilYourProgressIntro,
+#viewPupil .pupilYourProgressLabel,
+#viewPupil .pupilYourProgressTimelineDate,
 #viewPupil .pupilSectionHead p,
 #viewPupil .pupilSummaryLabel,
 #viewPupil .resultSummaryLabel,
@@ -1420,6 +1423,10 @@ body.acc-text-large #viewPupil .pupilProgressFocusTitle{
 }
 
 body.acc-text-large #viewPupil .pupilFeedbackText{
+  font-size:17px;
+}
+
+body.acc-text-large #viewPupil .pupilYourProgressText{
   font-size:17px;
 }
 
@@ -1701,6 +1708,122 @@ body.acc-text-large #viewPupil .spellLoomToken{
   color:var(--text);
   font-size:15px;
   line-height:1.45;
+}
+
+.pupilYourProgressCard{
+  padding:18px 20px;
+  background:
+    radial-gradient(circle at top right, rgba(191,219,254,0.16), transparent 30%),
+    linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+}
+
+.pupilYourProgressIntro{
+  margin:0 0 14px 0;
+  font-size:15px;
+  line-height:1.5;
+}
+
+.pupilYourProgressGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:12px;
+}
+
+.pupilYourProgressBlock{
+  border:1px solid rgba(203,213,225,.9);
+  border-radius:18px;
+  padding:14px;
+  background:#fff;
+  box-shadow:0 8px 20px rgba(15,23,42,.04);
+}
+
+.pupilYourProgressBlock--growing{
+  background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);
+}
+
+.pupilYourProgressBlock--practice{
+  background:linear-gradient(180deg,#f8fafc 0%,#ffffff 100%);
+}
+
+.pupilYourProgressBlock--wins{
+  background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);
+}
+
+.pupilYourProgressLabel{
+  margin-bottom:6px;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.pupilYourProgressText{
+  color:var(--text);
+  font-size:15px;
+  line-height:1.45;
+}
+
+.pupilYourProgressBlock .pupilProgressChips{
+  margin-top:10px;
+}
+
+.pupilYourProgressTimeline{
+  margin-top:14px;
+}
+
+.pupilYourProgressTimelineTitle{
+  margin-bottom:10px;
+  font-size:13px;
+  font-weight:800;
+  color:#475569;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+
+.pupilYourProgressTimelineList{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.pupilYourProgressTimelineRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px 14px;
+  border:1px solid rgba(203,213,225,.88);
+  border-radius:16px;
+  background:#fff;
+}
+
+.pupilYourProgressTimelineCopy{
+  min-width:0;
+}
+
+.pupilYourProgressTimelineTask{
+  color:#0f172a;
+  font-size:15px;
+  font-weight:800;
+  line-height:1.35;
+}
+
+.pupilYourProgressTimelineDate{
+  margin-top:2px;
+  font-size:13px;
+  line-height:1.4;
+}
+
+.pupilYourProgressTimelineScore{
+  flex:0 0 auto;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#eff6ff;
+  border:1px solid #bfdbfe;
+  color:#1d4ed8;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.2;
 }
 
 .pupilSectionHead--compact{
@@ -2317,8 +2440,15 @@ body.acc-text-large #viewPupil .spellLoomToken{
   .pupilHeroCopy{
     font-size:16px;
   }
+  .pupilYourProgressGrid{
+    grid-template-columns:1fr;
+  }
   .pupilFeedbackGrid{
     grid-template-columns:1fr;
+  }
+  .pupilYourProgressTimelineRow{
+    flex-direction:column;
+    align-items:flex-start;
   }
   .accessibilityGrid{
     grid-template-columns:1fr;

@@ -49,6 +49,122 @@ function buildEncouragement({ wordsChecked = 0, pendingAssignments = 0, complete
   return "Every checked word helps build your progress.";
 }
 
+function normalizeAttemptSource(value = "") {
+  return normalizeText(value).toLowerCase();
+}
+
+function isBaselineAttempt(attempt = null) {
+  return normalizeAttemptSource(attempt?.attempt_source || attempt?.attemptSource) === "baseline";
+}
+
+function isPracticeAttempt(attempt = null) {
+  return normalizeAttemptSource(attempt?.attempt_source || attempt?.attemptSource) === "practice";
+}
+
+function isIncludedProgressAttempt(attempt = null) {
+  return !!attempt && !isBaselineAttempt(attempt) && !isPracticeAttempt(attempt);
+}
+
+function isIncludedRecentResult(item = null) {
+  if (!item?.completed) return false;
+  if (item?.isBaseline || item?.isSpellingBee) return false;
+  return normalizeAttemptSource(item?.attempt_source || item?.attemptSource) !== "practice";
+}
+
+function formatCountLabel(value = 0, singular = "task", plural = "tasks") {
+  const safeValue = Math.max(0, Number(value) || 0);
+  return `${safeValue} ${safeValue === 1 ? singular : plural}`;
+}
+
+function formatResultScoreText(item = null) {
+  const totalWords = Math.max(0, Number(
+    item?.totalWordCount
+    ?? item?.total_words
+    ?? item?.totalWords
+    ?? 0
+  ));
+  const correctWords = Math.max(0, Number(
+    item?.correctWordCount
+    ?? item?.correct_words
+    ?? item?.correctWords
+    ?? 0
+  ));
+  if (totalWords > 0) return `${correctWords}/${totalWords}`;
+
+  const scoreRate = Number(item?.scoreRate ?? item?.score_rate ?? 0);
+  if (Number.isFinite(scoreRate)) {
+    return `${Math.round(scoreRate * 100)}%`;
+  }
+  return "";
+}
+
+function buildLatestResultText(item = null) {
+  const totalWords = Math.max(0, Number(
+    item?.totalWordCount
+    ?? item?.total_words
+    ?? item?.totalWords
+    ?? 0
+  ));
+  const correctWords = Math.max(0, Number(
+    item?.correctWordCount
+    ?? item?.correct_words
+    ?? item?.correctWords
+    ?? 0
+  ));
+  if (totalWords > 0) {
+    return `You spelled ${correctWords} out of ${totalWords} words correctly in your latest task.`;
+  }
+
+  const scoreRate = Number(item?.scoreRate ?? item?.score_rate ?? 0);
+  if (Number.isFinite(scoreRate)) {
+    return `You got ${Math.round(scoreRate * 100)}% correct in your latest task.`;
+  }
+
+  return "";
+}
+
+function buildShortDateLabel(value = "") {
+  const ms = parseDateMs(value);
+  if (!ms) return "Recently";
+  return new Date(ms).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+function getAssignmentDisplayTitle(item = null) {
+  return normalizeText(item?.pupilTitle || item?.pupil_title || item?.title || "Task") || "Task";
+}
+
+function buildNextFocusModel(practiceModel = null, progress = null) {
+  const rawFocus = normalizeText(
+    practiceModel?.focusGrapheme
+    || practiceModel?.packs?.[0]?.focus
+    || progress?.practiseNext?.[0]?.target
+    || ""
+  );
+  const focus = rawFocus ? formatFocusLabel(rawFocus) : "Mixed";
+
+  if (focus === "Mixed") {
+    return {
+      key: "next_focus",
+      label: "Next focus",
+      text: "Next focus: practise a mixed set of words.",
+      chips: ["Mixed practice"],
+      variant: "practice",
+    };
+  }
+
+  return {
+    key: "next_focus",
+    label: "Next focus",
+    text: `Next focus: practise words with '${focus}'.`,
+    chips: [focus],
+    variant: "practice",
+  };
+}
+
 export function buildPupilAttemptFeedbackSignals(attempts = []) {
   const rows = Array.isArray(attempts) ? attempts : [];
   const latestByKey = new Map();
@@ -175,5 +291,87 @@ export function buildPupilFeedbackCardModel({
     title: "Good news so far",
     intro,
     items,
+  };
+}
+
+export function buildPupilProgressCardModel({
+  assignments = [],
+  practiceModel = null,
+  progress = null,
+} = {}) {
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const filteredAttempts = (Array.isArray(progress?.attemptHistory) ? progress.attemptHistory : [])
+    .filter((attempt) => isIncludedProgressAttempt(attempt));
+  const signals = buildPupilAttemptFeedbackSignals(filteredAttempts);
+  const recentResults = safeAssignments
+    .filter((item) => isIncludedRecentResult(item))
+    .sort((a, b) => (
+      parseDateMs(b?.completedAt || b?.completed_at || b?.created_at)
+      - parseDateMs(a?.completedAt || a?.completed_at || a?.created_at)
+    ))
+    .slice(0, 3)
+    .map((item, index) => ({
+      key: String(item?.id || `result-${index + 1}`),
+      title: getAssignmentDisplayTitle(item),
+      dateLabel: buildShortDateLabel(item?.completedAt || item?.completed_at || item?.created_at),
+      scoreText: formatResultScoreText(item),
+    }));
+  const latestResultSource = recentResults[0]
+    ? safeAssignments.find((item) => String(item?.id || "") === String(recentResults[0].key))
+    : null;
+  const improvedWords = Array.isArray(signals?.improvedWords) ? signals.improvedWords : [];
+  const nextFocus = buildNextFocusModel(practiceModel, progress);
+  const hasAnyEvidence = filteredAttempts.length > 0 || safeAssignments.some((item) => isIncludedRecentResult(item));
+
+  const blocks = [];
+  if (recentResults.length) {
+    blocks.push({
+      key: "recent_effort",
+      label: "Recent effort",
+      text: `You've finished ${formatCountLabel(recentResults.length, "recent task", "recent tasks")}.`,
+      chips: [],
+      variant: "wins",
+    });
+  }
+
+  const latestResultText = buildLatestResultText(latestResultSource);
+  if (latestResultText) {
+    blocks.push({
+      key: "latest_result",
+      label: "Latest result",
+      text: latestResultText,
+      chips: [],
+      variant: "wins",
+    });
+  }
+
+  if (improvedWords.length) {
+    blocks.push({
+      key: "getting_stronger",
+      label: "Getting stronger",
+      text: `You improved on ${formatCountLabel(improvedWords.length, "word", "words")} you had found tricky before.`,
+      chips: improvedWords.slice(0, 3),
+      variant: "growing",
+    });
+  }
+
+  blocks.push(nextFocus);
+
+  let intro = "";
+  let state = "ready";
+  if (!hasAnyEvidence) {
+    state = "empty";
+    intro = "Complete a few activities and your progress will appear here.";
+  } else if (!recentResults.length) {
+    state = "light";
+    intro = "You're getting started. Each finished activity helps build your progress.";
+  }
+
+  return {
+    title: "Your progress",
+    state,
+    intro,
+    blocks,
+    recentResults,
   };
 }

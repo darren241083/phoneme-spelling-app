@@ -35,7 +35,7 @@ import {
 } from "./spellingIndicator.js?v=1.5";
 import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
 import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
-import { buildPupilFeedbackCardModel } from "./pupilFeedbackModel.js?v=1.0";
+import { buildPupilProgressCardModel } from "./pupilFeedbackModel.js?v=1.1";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -1420,33 +1420,53 @@ function renderProgressSection(progress) {
   `;
 }
 
-function renderFeedbackCardItem(item) {
+function renderYourProgressBlock(item) {
   const chips = Array.isArray(item?.chips) ? item.chips : [];
   const variant = String(item?.variant || "wins").trim() || "wins";
   return `
-    <article class="pupilFeedbackItem">
-      <div class="pupilFeedbackLabel">${escapeHtml(item?.label || "")}</div>
-      <div class="pupilFeedbackText">${escapeHtml(item?.text || "")}</div>
+    <article class="pupilYourProgressBlock pupilYourProgressBlock--${escapeHtml(variant)}">
+      <div class="pupilYourProgressLabel">${escapeHtml(item?.label || "")}</div>
+      <div class="pupilYourProgressText">${escapeHtml(item?.text || "")}</div>
       ${chips.length ? renderProgressChipList(chips, variant, (chip) => chip) : ""}
     </article>
   `;
 }
 
-function renderFeedbackCard(assignments, practiceModel, progress) {
-  const model = buildPupilFeedbackCardModel({ assignments, practiceModel, progress });
+function renderYourProgressResultRow(item) {
+  return `
+    <article class="pupilYourProgressTimelineRow">
+      <div class="pupilYourProgressTimelineCopy">
+        <div class="pupilYourProgressTimelineTask">${escapeHtml(item?.title || "Task")}</div>
+        <div class="pupilYourProgressTimelineDate">${escapeHtml(item?.dateLabel || "Recently")}</div>
+      </div>
+      <div class="pupilYourProgressTimelineScore">${escapeHtml(item?.scoreText || "Done")}</div>
+    </article>
+  `;
+}
+
+function renderYourProgressCard(assignments, practiceModel, progress) {
+  const model = buildPupilProgressCardModel({ assignments, practiceModel, progress });
   if (!model) return "";
 
   return `
-    <section class="card pupilFeedbackCard">
+    <section class="card pupilYourProgressCard">
       <div class="pupilSectionHead pupilSectionHead--compact">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("spark", model.title || "Good news so far")}</h3>
+          <h3>${renderIconLabel("chart", model.title || "Your progress")}</h3>
         </div>
       </div>
-      ${model?.intro ? `<p class="pupilFeedbackIntro">${escapeHtml(model.intro)}</p>` : ""}
-      <div class="pupilFeedbackGrid">
-        ${(Array.isArray(model?.items) ? model.items : []).map(renderFeedbackCardItem).join("")}
+      ${model?.intro ? `<p class="pupilYourProgressIntro">${escapeHtml(model.intro)}</p>` : ""}
+      <div class="pupilYourProgressGrid">
+        ${(Array.isArray(model?.blocks) ? model.blocks : []).map(renderYourProgressBlock).join("")}
       </div>
+      ${Array.isArray(model?.recentResults) && model.recentResults.length ? `
+        <div class="pupilYourProgressTimeline">
+          <div class="pupilYourProgressTimelineTitle">Recent results</div>
+          <div class="pupilYourProgressTimelineList">
+            ${model.recentResults.map(renderYourProgressResultRow).join("")}
+          </div>
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -2109,8 +2129,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
-      ${renderFeedbackCard(assignments, practiceModel, progress)}
-      ${renderProgressSection(progress)}
+      ${renderYourProgressCard(assignments, practiceModel, progress)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}
