@@ -1,15 +1,22 @@
 import { supabase } from "./supabaseClient.js";
+import { normalizeSchoolSummary } from "./db.js?v=1.45";
 
 const KEY = "ps_pupil_session_v2";
 
 function normalizePupilSessionPayload(data) {
   const row = data && typeof data === "object" ? data : {};
+  const school = normalizeSchoolSummary(row);
   return {
     pupil_id: String(row?.pupil_id || row?.id || "").trim(),
     username: String(row?.username || "").trim().toLowerCase(),
     first_name: String(row?.first_name || "").trim(),
     surname: String(row?.surname || "").trim(),
     must_reset_pin: !!row?.must_reset_pin,
+    school,
+    school_id: String(school?.id || "").trim(),
+    school_name: String(school?.name || "").trim(),
+    school_slug: String(school?.slug || "").trim(),
+    school_is_legacy_default: !!school?.is_legacy_default,
   };
 }
 

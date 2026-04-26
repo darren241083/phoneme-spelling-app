@@ -83,6 +83,65 @@ function randomJoinCode(len = 6) {
   return out;
 }
 
+function normalizeSchoolId(value = "") {
+  return String(value || "").trim();
+}
+
+export function isDeveloperSchoolSwitchEnabled() {
+  try {
+    const hostname = String(
+      typeof window !== "undefined" && window?.location?.hostname
+        ? window.location.hostname
+        : (typeof globalThis !== "undefined" && globalThis?.location?.hostname
+          ? globalThis.location.hostname
+          : "")
+    ).trim().toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function getActiveSchoolStorage() {
+  try {
+    if (typeof window !== "undefined" && window?.localStorage) return window.localStorage;
+    if (typeof globalThis !== "undefined" && globalThis?.localStorage) return globalThis.localStorage;
+  } catch (_error) {
+    return null;
+  }
+  return null;
+}
+
+export function readStoredActiveSchoolId() {
+  const storage = getActiveSchoolStorage();
+  if (!storage) return "";
+  try {
+    return normalizeSchoolId(storage.getItem(ACTIVE_SCHOOL_STORAGE_KEY));
+  } catch (_error) {
+    return "";
+  }
+}
+
+export function storeActiveSchoolId(schoolId = "") {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  const storage = getActiveSchoolStorage();
+  if (!storage) return safeSchoolId;
+  try {
+    if (safeSchoolId) {
+      storage.setItem(ACTIVE_SCHOOL_STORAGE_KEY, safeSchoolId);
+    } else {
+      storage.removeItem(ACTIVE_SCHOOL_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // Local storage is only a convenience; the database context is authoritative.
+  }
+  return safeSchoolId;
+}
+
+export function clearStoredActiveSchoolId() {
+  return storeActiveSchoolId("");
+}
+
 function isMissingAssignmentTargetTableError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -594,12 +653,131 @@ function buildDefaultStaffAccessContext({
     data_health: {
       unmapped_subject_class_count: 0,
     },
+    active_school_id: null,
+    default_school_id: null,
+    schools: [],
   };
 }
 
 function normalizeTextList(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+export function normalizeSchoolSummary(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const id = normalizeSchoolId(value?.id || value?.school_id || value?.schoolId);
+  const name = String(value?.name || value?.school_name || value?.schoolName || "").trim();
+  const slug = String(value?.slug || value?.school_slug || value?.schoolSlug || "").trim();
+  if (!id && !name && !slug) return null;
+  return {
+    id,
+    slug,
+    name: name || "School",
+    is_legacy_default: !!(value?.is_legacy_default ?? value?.school_is_legacy_default ?? value?.schoolIsLegacyDefault),
+  };
+}
+
+function normalizeSchoolOption(value = {}) {
+  const normalized = normalizeSchoolSummary(value);
+  return normalized?.id ? normalized : null;
+}
+
+export function normalizeAvailableSchools(value = []) {
+  const source = Array.isArray(value) ? value : [];
+  const byId = new Map();
+  for (const item of source) {
+    const normalized = normalizeSchoolOption(item);
+    if (normalized?.id && !byId.has(normalized.id)) {
+      byId.set(normalized.id, normalized);
+    }
+  }
+  return [...byId.values()];
+}
+
+function schoolIdIsAvailable(schoolId = "", schools = []) {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  if (!safeSchoolId) return false;
+  return normalizeAvailableSchools(schools).some((school) => school.id === safeSchoolId);
+}
+
+export function resolveStoredActiveSchoolSelection(accessContext = null, storedSchoolId = readStoredActiveSchoolId()) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const safeStoredSchoolId = normalizeSchoolId(storedSchoolId);
+  const safeActiveSchoolId = normalizeSchoolId(accessContext?.active_school_id);
+  const safeDefaultSchoolId = normalizeSchoolId(accessContext?.default_school_id);
+
+  if (!schools.length) {
+    return {
+      activeSchoolId: safeActiveSchoolId,
+      storedSchoolId: safeStoredSchoolId,
+      shouldClearStored: false,
+    };
+  }
+
+  if (schoolIdIsAvailable(safeStoredSchoolId, schools)) {
+    return {
+      activeSchoolId: safeStoredSchoolId,
+      storedSchoolId: safeStoredSchoolId,
+      shouldClearStored: false,
+    };
+  }
+
+  const fallbackSchoolId = schoolIdIsAvailable(safeActiveSchoolId, schools)
+    ? safeActiveSchoolId
+    : (schoolIdIsAvailable(safeDefaultSchoolId, schools) ? safeDefaultSchoolId : (schools[0]?.id || ""));
+
+  return {
+    activeSchoolId: fallbackSchoolId,
+    storedSchoolId: safeStoredSchoolId,
+    shouldClearStored: !!safeStoredSchoolId,
+  };
+}
+
+export function syncStoredActiveSchoolIdFromContext(accessContext = null, storedSchoolId = readStoredActiveSchoolId()) {
+  const selection = resolveStoredActiveSchoolSelection(accessContext, storedSchoolId);
+  if (selection.shouldClearStored) clearStoredActiveSchoolId();
+  return selection.activeSchoolId;
+}
+
+export function getActiveSchoolIdFromAccessContext(accessContext = null) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const safeActiveSchoolId = normalizeSchoolId(accessContext?.active_school_id);
+  if (!schools.length) return safeActiveSchoolId;
+  if (schoolIdIsAvailable(safeActiveSchoolId, schools)) return safeActiveSchoolId;
+
+  const safeDefaultSchoolId = normalizeSchoolId(accessContext?.default_school_id);
+  if (schoolIdIsAvailable(safeDefaultSchoolId, schools)) return safeDefaultSchoolId;
+  return schools[0]?.id || "";
+}
+
+export function resolveActiveSchoolDetails(accessContext = null) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const activeSchoolId = getActiveSchoolIdFromAccessContext(accessContext);
+  const activeSchool = normalizeSchoolSummary(
+    schools.find((school) => school.id === activeSchoolId)
+    || (activeSchoolId ? { id: activeSchoolId } : null)
+  );
+  return {
+    activeSchoolId,
+    activeSchool,
+    activeSchoolName: String(activeSchool?.name || "").trim() || "School",
+  };
+}
+
+export function withActiveSchoolId(payload = {}, accessContext = null) {
+  const schoolId = typeof accessContext === "string"
+    ? normalizeSchoolId(accessContext)
+    : getActiveSchoolIdFromAccessContext(accessContext);
+  return schoolId ? { ...(payload || {}), school_id: schoolId } : { ...(payload || {}) };
+}
+
+export function applyActiveSchoolFilter(query, accessContext = null) {
+  const schoolId = typeof accessContext === "string"
+    ? normalizeSchoolId(accessContext)
+    : getActiveSchoolIdFromAccessContext(accessContext);
+  if (!schoolId || !query || typeof query.eq !== "function") return query;
+  return query.eq("school_id", schoolId);
 }
 
 function normalizeRoleScopes(value = {}, fallback = {}) {
@@ -887,7 +1065,7 @@ function normalizePupilImportMembershipRow(row = {}) {
   };
 }
 
-function normalizeStaffAccessContext(value, {
+export function normalizeStaffAccessContext(value, {
   userId = "",
   legacyRole = null,
 } = {}) {
@@ -920,6 +1098,14 @@ function normalizeStaffAccessContext(value, {
     can_manage_own_content: !!value?.capabilities?.can_manage_own_content,
     can_view_schoolwide_analytics: !!value?.capabilities?.can_view_schoolwide_analytics,
   };
+  const normalizedSchools = normalizeAvailableSchools(value?.schools || fallback.schools);
+  const normalizedDefaultSchoolId = normalizeSchoolId(value?.default_school_id || fallback.default_school_id);
+  let normalizedActiveSchoolId = normalizeSchoolId(value?.active_school_id || fallback.active_school_id);
+  if (normalizedActiveSchoolId && normalizedSchools.length && !schoolIdIsAvailable(normalizedActiveSchoolId, normalizedSchools)) {
+    normalizedActiveSchoolId = schoolIdIsAvailable(normalizedDefaultSchoolId, normalizedSchools)
+      ? normalizedDefaultSchoolId
+      : (normalizedSchools[0]?.id || "");
+  }
 
   return {
     version: Math.max(1, Number(value?.version || fallback.version) || 1),
@@ -950,6 +1136,9 @@ function normalizeStaffAccessContext(value, {
     data_health: {
       unmapped_subject_class_count: Math.max(0, Number(value?.data_health?.unmapped_subject_class_count || 0)),
     },
+    active_school_id: normalizedActiveSchoolId || null,
+    default_school_id: normalizedDefaultSchoolId || null,
+    schools: normalizedSchools,
   };
 }
 
@@ -1117,6 +1306,7 @@ async function getSignedInTeacherContext() {
   return {
     teacherId,
     appRole: deriveTeacherAppRoleFromAccessContext(accessContext),
+    schoolId: getActiveSchoolIdFromAccessContext(accessContext),
     accessContext,
   };
 }
@@ -1141,30 +1331,37 @@ async function readLegacyTeacherAppRoleForTeacherId(teacherId = "") {
   return data?.app_role ? normalizeTeacherAppRole(data.app_role) : null;
 }
 
+async function readStaffAccessContextRpc(requestedSchoolId = "") {
+  const safeRequestedSchoolId = normalizeSchoolId(requestedSchoolId);
+  const args = { requested_school_id: safeRequestedSchoolId || null };
+  const { data, error } = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION, args);
+  if (!error) return data;
+
+  if (isMissingStaffAccessFoundationError(error)) {
+    const retry = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION);
+    if (!retry.error) return retry.data;
+  }
+
+  throw error;
+}
+
 async function readStaffAccessContextForTeacherId(teacherId = "", { user = null } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   const legacyRole = await readLegacyTeacherAppRoleForTeacherId(safeTeacherId);
+  const requestedSchoolId = readStoredActiveSchoolId();
   await ensureMyStaffProfile({
     user,
     teacherId: safeTeacherId,
   });
 
   try {
-    const { data, error } = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION);
-    if (error) {
-      if (isMissingStaffAccessFoundationError(error)) {
-        return buildDefaultStaffAccessContext({
-          userId: safeTeacherId,
-          legacyRole,
-        });
-      }
-      throw error;
-    }
-
-    return normalizeStaffAccessContext(data, {
+    const data = await readStaffAccessContextRpc(requestedSchoolId);
+    const normalizedContext = normalizeStaffAccessContext(data, {
       userId: safeTeacherId,
       legacyRole,
     });
+    syncStoredActiveSchoolIdFromContext(normalizedContext, requestedSchoolId);
+    return normalizedContext;
   } catch (error) {
     if (isMissingStaffAccessFoundationError(error)) {
       return buildDefaultStaffAccessContext({
@@ -1207,19 +1404,20 @@ async function recordPersonalisedAutomationPolicyEvent({
   policyId = "",
   eventType = "",
   metadata = {},
+  accessContext = null,
 } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   const safePolicyId = String(policyId || "").trim();
   const safeEventType = String(eventType || "").trim().toLowerCase();
   if (!safeTeacherId || !safePolicyId || !safeEventType) return null;
 
-  const payload = {
+  const payload = withActiveSchoolId({
     teacher_id: safeTeacherId,
     policy_id: safePolicyId,
     actor_id: safeTeacherId,
     event_type: safeEventType,
     metadata: metadata && typeof metadata === "object" ? metadata : {},
-  };
+  }, accessContext);
 
   const { error } = await supabase
     .from(PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE)
@@ -1236,7 +1434,7 @@ async function recordPersonalisedAutomationPolicyEvent({
   return payload;
 }
 
-async function validateAutomationEligibleClassIds(teacherId, classIds = []) {
+async function validateAutomationEligibleClassIds(teacherId, classIds = [], accessContext = null) {
   const safeTeacherId = String(teacherId || "").trim();
   const safeClassIds = normalizeIdList(classIds);
   if (!safeTeacherId || !safeClassIds.length) return [];
@@ -1246,14 +1444,17 @@ async function validateAutomationEligibleClassIds(teacherId, classIds = []) {
     .select("id, class_type")
     .eq("teacher_id", safeTeacherId)
     .in("id", safeClassIds);
+  query = applyActiveSchoolFilter(query, accessContext);
 
   let { data, error } = await query;
   if (error && isMissingClassTypeColumnError(error)) {
-    const legacyResult = await supabase
+    let legacyQuery = supabase
       .from("classes")
       .select("id")
       .eq("teacher_id", safeTeacherId)
       .in("id", safeClassIds);
+    legacyQuery = applyActiveSchoolFilter(legacyQuery, accessContext);
+    const legacyResult = await legacyQuery;
     data = legacyResult.data || [];
     error = legacyResult.error || null;
   }
@@ -2430,7 +2631,7 @@ export async function createClass({
 
     const { data, error } = await supabase
       .from("classes")
-      .insert([payload])
+      .insert([withActiveSchoolId(payload, context.accessContext)])
       .select("*")
       .single();
 
@@ -2444,12 +2645,12 @@ export async function createClass({
 
       const { data: legacyData, error: legacyError } = await supabase
         .from("classes")
-        .insert([{
+        .insert([withActiveSchoolId({
           teacher_id: teacherId,
           name: className,
           join_code,
           year_group: yearGroup,
-        }])
+        }, context.accessContext)])
         .select("*")
         .single();
 
@@ -2468,10 +2669,13 @@ export async function createClass({
 }
 
 export async function listClasses() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("classes")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select("*");
+  query = applyActiveSchoolFilter(query, context.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data || [])
@@ -2505,11 +2709,11 @@ export async function createInterventionGroup({
     const { error: membershipError } = await supabase
       .from("pupil_classes")
       .insert(
-        selectedPupilIds.map((pupilId) => ({
+        selectedPupilIds.map((pupilId) => withActiveSchoolId({
           pupil_id: pupilId,
           class_id: createdClassId,
           active: true,
-        }))
+        }, context.accessContext))
       );
 
     if (membershipError) {
@@ -2706,11 +2910,14 @@ export function consumeLatestStaffProfileSyncNotice() {
 }
 
 export async function listStaffProfiles() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(STAFF_PROFILES_TABLE)
     .select("id, user_id, email, display_name, external_staff_id, notes, profile_source, import_metadata, last_import_batch_id, last_imported_at, last_imported_by, archived_at, archived_by, archive_reason, created_at, updated_at")
     .order("display_name", { ascending: true })
     .order("email", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffProfilesSupportError(error)) {
@@ -2725,12 +2932,15 @@ export async function listStaffProfiles() {
 }
 
 export async function listActiveStaffRoleAssignments() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("id, user_id, role, active, granted_by, created_at, updated_at")
     .eq("active", true)
     .order("user_id", { ascending: true })
     .order("role", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2748,12 +2958,15 @@ export async function listStaffRoleAssignments(targetUserId = "") {
   const safeTargetUserId = String(targetUserId || "").trim();
   if (!safeTargetUserId) return [];
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("id, user_id, role, active, granted_by, created_at, updated_at")
     .eq("user_id", safeTargetUserId)
     .eq("active", true)
     .order("role", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2771,7 +2984,8 @@ export async function listStaffScopeAssignments(targetUserId = "") {
   const safeTargetUserId = String(targetUserId || "").trim();
   if (!safeTargetUserId) return [];
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_scope_assignments")
     .select("id, user_id, role, scope_type, scope_value, active, granted_by, created_at, updated_at")
     .eq("user_id", safeTargetUserId)
@@ -2779,6 +2993,8 @@ export async function listStaffScopeAssignments(targetUserId = "") {
     .order("role", { ascending: true })
     .order("scope_type", { ascending: true })
     .order("scope_value", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2797,12 +3013,15 @@ export async function listStaffAccessAuditEntries(targetUserId = "", { limit = 1
   if (!safeTargetUserId) return [];
 
   const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_access_audit_log")
     .select("id, actor_user_id, target_user_id, action, role, scope_type, scope_value, metadata, created_at")
     .eq("target_user_id", safeTargetUserId)
     .order("created_at", { ascending: false })
     .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2821,12 +3040,15 @@ export async function listStaffDirectoryAuditEntries(profileId = "", { limit = 1
   if (!safeProfileId) throw new Error("Choose a staff record first.");
 
   const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_directory_audit_log")
     .select("id, actor_user_id, target_profile_id, target_user_id, action, reason, metadata, created_at")
     .eq("target_profile_id", safeProfileId)
     .order("created_at", { ascending: false })
     .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffLifecycleSupportError(error)) {
@@ -2841,11 +3063,14 @@ export async function listStaffDirectoryAuditEntries(profileId = "", { limit = 1
 }
 
 export async function listActiveAdminUserIds() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("user_id")
     .eq("role", "admin")
     .eq("active", true);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2858,7 +3083,10 @@ export async function listActiveAdminUserIds() {
 }
 
 export async function readStaffPendingAccessDuplicatePreflight() {
-  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION);
+  const context = await getSignedInTeacherContext();
+  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
       return normalizeStaffPendingAccessDuplicatePreflight({});
@@ -2869,7 +3097,10 @@ export async function readStaffPendingAccessDuplicatePreflight() {
 }
 
 export async function listStaffPendingAccessSummaries() {
-  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION);
+  const context = await getSignedInTeacherContext();
+  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) return [];
     throw error;
@@ -2885,8 +3116,10 @@ export async function readStaffPendingAccessDetail(profileId = "") {
     return normalizeStaffPendingAccessDetail({});
   }
 
+  const context = await getSignedInTeacherContext();
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_DETAIL_FUNCTION, {
     target_profile_id: safeProfileId,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2907,11 +3140,13 @@ export async function saveStaffPendingAccessApproval(profileId = "", {
 } = {}) {
   const safeProfileId = String(profileId || "").trim();
   if (!safeProfileId) throw new Error("Choose a pending staff record first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SAVE_FUNCTION, {
     target_profile_id: safeProfileId,
     requested_roles: Array.isArray(roles) ? roles : [],
     requested_scopes: Array.isArray(scopes) ? scopes : [],
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2927,9 +3162,11 @@ export async function saveStaffPendingAccessApproval(profileId = "", {
 export async function cancelStaffPendingAccessApproval(profileId = "") {
   const safeProfileId = String(profileId || "").trim();
   if (!safeProfileId) throw new Error("Choose a pending staff record first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_CANCEL_FUNCTION, {
     target_profile_id: safeProfileId,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2947,10 +3184,12 @@ export async function grantStaffRole(targetUserId = "", role = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("grant_staff_role", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2966,10 +3205,12 @@ export async function revokeStaffRole(targetUserId = "", role = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("revoke_staff_role", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -3051,12 +3292,14 @@ export async function grantStaffScope(targetUserId = "", role = "", scopeType = 
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
   if (!safeScopeType || !safeScopeValue) throw new Error("Choose a scope before adding it.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("grant_staff_scope", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
     requested_scope_type: safeScopeType,
     requested_scope_value: safeScopeValue,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -3075,12 +3318,14 @@ export async function revokeStaffScope(targetUserId = "", role = "", scopeType =
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
   if (!safeScopeType || !safeScopeValue) throw new Error("Choose a scope before removing it.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("revoke_staff_scope", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
     requested_scope_type: safeScopeType,
     requested_scope_value: safeScopeValue,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -3096,6 +3341,9 @@ export async function importStaffDirectoryCsv({
   fileName = "",
   previewSummary = {},
 } = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required before importing staff.",
+  });
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) {
     throw new Error("Choose at least one valid CSV row before importing staff.");
@@ -3105,6 +3353,7 @@ export async function importStaffDirectoryCsv({
     import_rows: safeRows,
     import_file_name: String(fileName || "").trim() || null,
     preview_summary: previewSummary && typeof previewSummary === "object" ? previewSummary : {},
+    requested_school_id: context.schoolId || null,
   });
 
   if (error) {
@@ -3121,9 +3370,10 @@ export async function readPupilImportDuplicatePreflight() {
   const context = await requireCsvImportContext({
     message: "Admin access is required to review pupil import data health.",
   });
-  void context;
 
-  const { data, error } = await supabase.rpc(PUPIL_IMPORT_PREFLIGHT_FUNCTION);
+  const { data, error } = await supabase.rpc(PUPIL_IMPORT_PREFLIGHT_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingPupilImportSupportError(error)) {
       return normalizePupilImportDuplicatePreflight({});
@@ -3139,7 +3389,6 @@ export async function readPupilImportReferenceData({
   const context = await requireCsvImportContext({
     message: "Admin access is required to prepare pupil CSV import previews.",
   });
-  void context;
 
   const safeFormClassIds = normalizeIdList(formClassIds);
   const pupils = [];
@@ -3147,11 +3396,13 @@ export async function readPupilImportReferenceData({
 
   for (let from = 0; ; from += pupilPageSize) {
     const to = from + pupilPageSize - 1;
-    const { data, error } = await supabase
+    let query = supabase
       .from("pupils")
       .select("id, mis_id, first_name, surname, username, is_active, archived_at")
       .order("id", { ascending: true })
       .range(from, to);
+    query = applyActiveSchoolFilter(query, context.accessContext);
+    const { data, error } = await query;
     if (error) throw error;
     const normalizedRows = (data || [])
       .map((row) => normalizePupilImportReferencePupilRow(row))
@@ -3165,12 +3416,14 @@ export async function readPupilImportReferenceData({
     const membershipPageSize = 1000;
     for (let from = 0; ; from += membershipPageSize) {
       const to = from + membershipPageSize - 1;
-      const { data, error } = await supabase
+      let query = supabase
         .from("pupil_classes")
         .select("id, pupil_id, class_id, active")
         .in("class_id", safeFormClassIds)
         .order("id", { ascending: true })
         .range(from, to);
+      query = applyActiveSchoolFilter(query, context.accessContext);
+      const { data, error } = await query;
       if (error) throw error;
       const normalizedRows = (data || [])
         .map((row) => normalizePupilImportMembershipRow(row))
@@ -3191,6 +3444,9 @@ export async function importPupilRosterCsv({
   fileName = "",
   previewSummary = {},
 } = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required before importing pupils.",
+  });
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) {
     throw new Error("Choose at least one safe CSV row before importing pupils.");
@@ -3200,6 +3456,7 @@ export async function importPupilRosterCsv({
     import_rows: safeRows,
     import_file_name: String(fileName || "").trim() || null,
     preview_summary: previewSummary && typeof previewSummary === "object" ? previewSummary : {},
+    requested_school_id: context.schoolId || null,
   });
 
   if (error) {
@@ -3368,6 +3625,7 @@ function sortPersonalisedAutomationPolicies(rows = []) {
 async function readPersonalisedAutomationPoliciesInternal({
   teacherId = "",
   includeArchived = true,
+  accessContext = null,
 } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   if (!safeTeacherId) return [];
@@ -3377,6 +3635,7 @@ async function readPersonalisedAutomationPoliciesInternal({
     .select("*")
     .eq("teacher_id", safeTeacherId)
     .order("updated_at", { ascending: false });
+  query = applyActiveSchoolFilter(query, accessContext);
 
   if (!includeArchived) {
     query = query.is("archived_at", null);
@@ -3397,11 +3656,13 @@ async function readPersonalisedAutomationPoliciesInternal({
   const policyIds = normalizeIdList(policyRows.map((row) => row?.id));
   if (!policyIds.length) return [];
 
-  const { data: targetRows, error: targetError } = await supabase
+  let targetQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
     .select("policy_id, class_id")
     .eq("teacher_id", safeTeacherId)
     .in("policy_id", policyIds);
+  targetQuery = applyActiveSchoolFilter(targetQuery, accessContext);
+  const { data: targetRows, error: targetError } = await targetQuery;
 
   if (targetError) {
     if (isMissingPersonalisedAutomationPolicyTargetTableError(targetError)) {
@@ -3437,6 +3698,7 @@ export async function listPersonalisedAutomationPolicies({ includeArchived = tru
   return readPersonalisedAutomationPoliciesInternal({
     teacherId: context.teacherId,
     includeArchived,
+    accessContext: context.accessContext,
   });
 }
 
@@ -3494,7 +3756,11 @@ export async function upsertPersonalisedAutomationPolicy({
   if (isSpellingBeeAutomationPolicy(normalizedPolicy) && !hasSpellingBeeAdminAccess(context.accessContext)) {
     throw new Error("Admin access is required to save Spelling Bee policies.");
   }
-  const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, normalizedPolicy.target_class_ids);
+  const validatedClassIds = await validateAutomationEligibleClassIds(
+    context.teacherId,
+    normalizedPolicy.target_class_ids,
+    context.accessContext,
+  );
   const safePolicyId = String(normalizedPolicy.id || "").trim();
   const safeDuplicateSourcePolicyId = String(duplicate_source_policy_id || "").trim();
   const legacyActive = getLegacyPersonalisedAutomationPolicyActiveValue(normalizedPolicy);
@@ -3547,11 +3813,13 @@ export async function upsertPersonalisedAutomationPolicy({
   let data = null;
   let error = null;
   if (safePolicyId) {
-    const result = await supabase
+    let resultQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
       .update(basePayload)
       .eq("id", safePolicyId)
-      .eq("teacher_id", context.teacherId)
+      .eq("teacher_id", context.teacherId);
+    resultQuery = applyActiveSchoolFilter(resultQuery, context.accessContext);
+    const result = await resultQuery
       .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
@@ -3559,10 +3827,10 @@ export async function upsertPersonalisedAutomationPolicy({
   } else {
     const result = await supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
-      .insert([{
+      .insert([withActiveSchoolId({
         ...basePayload,
         created_by: context.teacherId,
-      }])
+      }, context.accessContext)])
       .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
@@ -3584,11 +3852,13 @@ export async function upsertPersonalisedAutomationPolicy({
     throw new Error("Could not save the automation policy.");
   }
 
-  const { data: existingTargetRows, error: existingTargetError } = await supabase
+  let existingTargetQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
     .select("class_id")
     .eq("teacher_id", context.teacherId)
     .eq("policy_id", policyId);
+  existingTargetQuery = applyActiveSchoolFilter(existingTargetQuery, context.accessContext);
+  const { data: existingTargetRows, error: existingTargetError } = await existingTargetQuery;
 
   if (existingTargetError) {
     if (isMissingPersonalisedAutomationPolicyTargetTableError(existingTargetError)) {
@@ -3598,12 +3868,12 @@ export async function upsertPersonalisedAutomationPolicy({
   }
 
   if (validatedClassIds.length) {
-    const targetPayload = validatedClassIds.map((classId) => ({
+    const targetPayload = validatedClassIds.map((classId) => withActiveSchoolId({
       policy_id: policyId,
       teacher_id: context.teacherId,
       class_id: classId,
       updated_at: nowIso,
-    }));
+    }, context.accessContext));
 
     const { error: targetError } = await supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
@@ -3620,12 +3890,14 @@ export async function upsertPersonalisedAutomationPolicy({
   const existingIds = normalizeIdList((existingTargetRows || []).map((row) => row?.class_id));
   const idsToDelete = existingIds.filter((classId) => !validatedClassIds.includes(classId));
   if (idsToDelete.length) {
-    const { error: deleteError } = await supabase
+    let deleteQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
       .delete()
       .eq("teacher_id", context.teacherId)
       .eq("policy_id", policyId)
       .in("class_id", idsToDelete);
+    deleteQuery = applyActiveSchoolFilter(deleteQuery, context.accessContext);
+    const { error: deleteError } = await deleteQuery;
 
     if (deleteError && !isMissingPersonalisedAutomationPolicyTargetTableError(deleteError)) {
       throw deleteError;
@@ -3640,6 +3912,7 @@ export async function upsertPersonalisedAutomationPolicy({
       eventType: safePolicyId
         ? "updated"
         : (safeDuplicateSourcePolicyId ? "duplicated" : "created"),
+      accessContext: context.accessContext,
       metadata: {
         name: normalizedPolicy.name,
         active: legacyActive,
@@ -3684,11 +3957,13 @@ export async function setPersonalisedAutomationPolicyArchived({
     updated_at: nowIso,
   };
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
     .update(payload)
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
+  updateQuery = applyActiveSchoolFilter(updateQuery, context.accessContext);
+  const { error } = await updateQuery;
 
   if (error) {
     if (
@@ -3709,6 +3984,7 @@ export async function setPersonalisedAutomationPolicyArchived({
       teacherId: context.teacherId,
       policyId: safePolicyId,
       eventType: archived ? "archived" : "restored",
+      accessContext: context.accessContext,
       metadata: {
         archived,
       },
@@ -3731,11 +4007,13 @@ export async function deletePersonalisedAutomationPolicy(policyId = "") {
     throw new Error("Choose a saved automation policy first.");
   }
 
-  const { error } = await supabase
+  let deleteQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
     .delete()
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
+  deleteQuery = applyActiveSchoolFilter(deleteQuery, context.accessContext);
+  const { error } = await deleteQuery;
 
   if (error) {
     if (
@@ -3751,10 +4029,13 @@ export async function deletePersonalisedAutomationPolicy(policyId = "") {
 }
 
 export async function listClassAutoAssignPolicies() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .select("*")
     .order("updated_at", { ascending: false });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) return [];
@@ -3770,11 +4051,13 @@ export async function getClassAutoAssignPolicy(classId) {
   const safeClassId = String(classId || "").trim();
   if (!safeClassId) return null;
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .select("*")
-    .eq("class_id", safeClassId)
-    .maybeSingle();
+    .eq("class_id", safeClassId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) return null;
@@ -3793,23 +4076,22 @@ export async function upsertClassAutoAssignPolicy({
   const safeClassId = String(class_id || "").trim();
   if (!safeClassId) throw new Error("Choose a class before saving an auto-assign policy.");
 
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
   const normalizedPolicy = normalizeAutoAssignPolicy({
     assignment_length,
     support_preset,
     allow_starter_fallback,
   });
   const nowIso = new Date().toISOString();
-  const payload = {
+  const payload = withActiveSchoolId({
     teacher_id: teacherId,
     class_id: safeClassId,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
     updated_at: nowIso,
-  };
+  }, context.accessContext);
 
   const { data, error } = await supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
@@ -3831,15 +4113,16 @@ export async function deleteClassAutoAssignPolicy(classId) {
   const safeClassId = String(classId || "").trim();
   if (!safeClassId) return;
 
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
-  const { error } = await supabase
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .delete()
     .eq("teacher_id", teacherId)
     .eq("class_id", safeClassId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { error } = await query;
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) {
@@ -3863,7 +4146,11 @@ export async function createPersonalisedGenerationRun({
   const context = await requireCentralOwnerContext({
     message: "Central-owner access is required to run personalised automation.",
   });
-  const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, selectedClassIds);
+  const validatedClassIds = await validateAutomationEligibleClassIds(
+    context.teacherId,
+    selectedClassIds,
+    context.accessContext,
+  );
   let normalizedPolicy = normalizeAutoAssignPolicy({
     policy_type,
     assignment_length,
@@ -3875,12 +4162,14 @@ export async function createPersonalisedGenerationRun({
   let resolvedPolicyId = null;
 
   if (safePolicyId) {
-    const { data: policyRow, error: policyError } = await supabase
+    let policyQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
       .select("id, archived_at, start_date, end_date, policy_type")
       .eq("id", safePolicyId)
       .eq("teacher_id", context.teacherId)
       .maybeSingle();
+    policyQuery = applyActiveSchoolFilter(policyQuery, context.accessContext);
+    const { data: policyRow, error: policyError } = await policyQuery;
     if (policyError) {
       if (isMissingPersonalisedAutomationPolicyTableError(policyError)) {
         throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
@@ -3938,7 +4227,7 @@ export async function createPersonalisedGenerationRun({
 
   const { data, error } = await supabase
     .from(PERSONALISED_GENERATION_RUN_TABLE)
-    .insert([payload])
+    .insert([withActiveSchoolId(payload, context.accessContext)])
     .select("*")
     .single();
 
@@ -3955,6 +4244,7 @@ export async function createPersonalisedGenerationRun({
         teacherId: context.teacherId,
         policyId: resolvedPolicyId,
         eventType: "run_started",
+        accessContext: context.accessContext,
         metadata: {
           run_id: String(data?.id || "").trim() || null,
           selected_class_ids: validatedClassIds,
@@ -3997,11 +4287,13 @@ export async function updatePersonalisedGenerationRun({
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  let updateQuery = supabase
     .from(PERSONALISED_GENERATION_RUN_TABLE)
     .update(payload)
     .eq("id", safeRunId)
-    .eq("teacher_id", context.teacherId)
+    .eq("teacher_id", context.teacherId);
+  updateQuery = applyActiveSchoolFilter(updateQuery, context.accessContext);
+  const { data, error } = await updateQuery
     .select("*")
     .single();
 
@@ -4043,7 +4335,7 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
   });
   const nowIso = new Date().toISOString();
 
-  const payload = normalizedRows.map((row) => ({
+  const payload = normalizedRows.map((row) => withActiveSchoolId({
     teacher_id: context.teacherId,
     run_id: row.run_id,
     class_id: row.class_id,
@@ -4053,7 +4345,7 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
     skip_reason: row.skip_reason,
     created_at: nowIso,
     updated_at: nowIso,
-  }));
+  }, context.accessContext));
 
   const { data, error } = await supabase
     .from(PERSONALISED_GENERATION_RUN_PUPIL_TABLE)
@@ -4468,16 +4760,15 @@ export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {
 ---------------------------- */
 
 export async function createTest({ title, question_type = DEFAULT_QUESTION_TYPE }) {
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
   const testTitle = (title || "").trim() || "New test";
   const safeQuestionType = normalizeStoredQuestionType(question_type, { title: testTitle });
 
   const { data, error } = await supabase
     .from("tests")
-    .insert([{ teacher_id: teacherId, title: testTitle, question_type: safeQuestionType }])
+    .insert([withActiveSchoolId({ teacher_id: teacherId, title: testTitle, question_type: safeQuestionType }, context.accessContext)])
     .select("*")
     .single();
 
@@ -4486,15 +4777,16 @@ export async function createTest({ title, question_type = DEFAULT_QUESTION_TYPE 
 }
 
 export async function listTests() {
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("tests")
     .select("id, title, created_at, question_type")
-    .eq("teacher_id", teacherId)
-    .order("created_at", { ascending: false });
+    .eq("teacher_id", teacherId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data || []).map((item) => ({

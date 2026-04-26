@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient.js";
 import {
   markAssignmentComplete,
   markAssignmentSessionOpened,
+  normalizeSchoolSummary,
   readPupilBaselineGateState,
   readPupilRuntimeAssignments,
   readAssignmentAttemptRows,
@@ -13,7 +14,7 @@ import {
   saveAssignmentProgress,
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
-} from "./db.js?v=1.43";
+} from "./db.js?v=1.45";
 import { mountGame } from "./game.js?v=1.41";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
@@ -837,10 +838,36 @@ async function loadPracticeModel(pupilId) {
 }
 
 function renderSummaryCard(name) {
+  return renderSummaryCardWithSchool(name, null);
+}
+
+function getSessionSchoolSummary(session) {
+  return normalizeSchoolSummary(session?.school || session || null);
+}
+
+function getSessionSchoolName(session) {
+  const school = getSessionSchoolSummary(session);
+  return String(school?.name || session?.school_name || "").trim();
+}
+
+function renderSchoolLabelChip(schoolName) {
+  const safeSchoolName = String(schoolName || "").trim();
+  if (!safeSchoolName) return "";
+  return `
+    <span class="schoolContextLabel" title="${escapeHtml(safeSchoolName)}">
+      <span>School</span>
+      <strong>${escapeHtml(safeSchoolName)}</strong>
+    </span>
+  `;
+}
+
+function renderSummaryCardWithSchool(name, session = null) {
+  const schoolName = getSessionSchoolName(session);
   return `
     <div class="pupil-header">
       <h2>Hello ${escapeHtml(name)}</h2>
       <p class="muted">Loading your latest wins and next steps.</p>
+      ${schoolName ? `<div class="schoolContextRow">${renderSchoolLabelChip(schoolName)}</div>` : ""}
     </div>
   `;
 }
@@ -849,6 +876,7 @@ function renderBaselineGateState(name, {
   mode = "waiting",
   assignment = null,
   waitingReason = null,
+  session = null,
 } = {}) {
   const isResume = mode === "resume";
   const isStart = mode === "start";
@@ -885,6 +913,7 @@ function renderBaselineGateState(name, {
       <div class="pupil-header">
         <h2>Hello ${escapeHtml(name)}</h2>
         <p class="muted">${escapeHtml(subtitle)}</p>
+        ${getSessionSchoolName(session) ? `<div class="schoolContextRow">${renderSchoolLabelChip(getSessionSchoolName(session))}</div>` : ""}
       </div>
       <section class="card pupilSectionCard pupilEmptyCard">
         <div class="pupilSectionTitleRow">
@@ -1001,8 +1030,9 @@ function renderPupilHeroGroup(group) {
   `;
 }
 
-function renderPupilAnalyticsHero(name, assignments, practiceModel, progress) {
+function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session = null) {
   const hero = buildPupilHeroModel(assignments, practiceModel, progress);
+  const schoolName = getSessionSchoolName(session);
 
   return `
     <section class="card pupilHeroCard">
@@ -1010,6 +1040,7 @@ function renderPupilAnalyticsHero(name, assignments, practiceModel, progress) {
         <div class="pupilHeroIntro">
           <h2>Hello ${escapeHtml(name)}</h2>
           <p class="pupilHeroCopy">${escapeHtml(hero.summary)}</p>
+          ${schoolName ? `<div class="schoolContextRow">${renderSchoolLabelChip(schoolName)}</div>` : ""}
         </div>
       </div>
 
@@ -1759,6 +1790,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: resolvedGate.status,
       assignment: resolvedGate.assignment,
+      session,
     });
     containerEl.querySelector('[data-action="open-gated-baseline"]')?.addEventListener("click", async () => {
       await openSession(containerEl, session, resolvedGate.assignment, assignmentList, []);
@@ -1771,6 +1803,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: "waiting",
       waitingReason,
+      session,
     });
     bindAccessibilityControlEvents(containerEl);
     return;
@@ -1935,6 +1968,7 @@ async function openSession(containerEl, session, item, assignments, practicePack
       bee_length_mode: isSpellingBee
         ? (item?.spellingBeeLengthMode || item?.words?.[0]?.choice?.bee_length_mode || "")
         : null,
+      school_name: getSessionSchoolName(session),
     },
     pupilId: session?.pupil_id,
     assignmentId: isAssignedTask || isSpellingBee ? item.id : null,
@@ -2047,7 +2081,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
   const name = session?.first_name || session?.username || "Pupil";
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
-      ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress)}
+      ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
       ${renderFeedbackCard(assignments, practiceModel, progress)}
       ${renderProgressSection(progress)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
@@ -2062,10 +2096,10 @@ export async function renderPupilView(containerEl, session) {
   if (!containerEl) return;
   applyAccessibilitySettings();
   const name = session?.first_name || session?.username || "Pupil";
-  containerEl.innerHTML = renderSummaryCard(name);
+  containerEl.innerHTML = renderSummaryCardWithSchool(name, session);
   try {
     await renderPupilHome(containerEl, session);
   } catch (error) {
-    containerEl.innerHTML = `${renderSummaryCard(name)}<section class="card"><p class="muted">Could not load assigned tests.</p><pre style="white-space:pre-wrap;">${escapeHtml(error?.message || String(error))}</pre></section>`;
+    containerEl.innerHTML = `${renderSummaryCardWithSchool(name, session)}<section class="card"><p class="muted">Could not load assigned tests.</p><pre style="white-space:pre-wrap;">${escapeHtml(error?.message || String(error))}</pre></section>`;
   }
 }

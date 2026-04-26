@@ -71,6 +71,7 @@ import {
   CLASS_TYPE_FORM,
   CLASS_TYPE_INTERVENTION,
   CLASS_TYPE_SUBJECT,
+  applyActiveSchoolFilter,
   archivePupilDirectoryRecord,
   archiveStaffDirectoryRecord,
   createClass,
@@ -82,6 +83,7 @@ import {
   grantStaffScope,
   importPupilRosterCsv,
   importStaffDirectoryCsv,
+  isDeveloperSchoolSwitchEnabled,
   listTeacherPupilDirectoryForInterventionGroups,
   listActiveAdminUserIds,
   listActiveStaffRoleAssignments,
@@ -103,6 +105,7 @@ import {
   readStaffPendingAccessDuplicatePreflight,
   readTeacherAppRole,
   resetPupilLoginPin,
+  resolveActiveSchoolDetails,
   revokeAllStaffLiveAccess,
   revokeStaffRole,
   revokeStaffScope,
@@ -111,11 +114,13 @@ import {
   saveStaffPendingAccessApproval,
   seedAutomatedAssignmentPupilStatuses,
   setPersonalisedAutomationPolicyArchived,
+  storeActiveSchoolId,
   updatePersonalisedGenerationRun,
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.44";
+  withActiveSchoolId,
+} from "./db.js?v=1.45";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -576,6 +581,9 @@ function createDefaultAccessContext(userId = "") {
     data_health: {
       unmapped_subject_class_count: 0,
     },
+    active_school_id: null,
+    default_school_id: null,
+    schools: [],
   };
 }
 
@@ -791,6 +799,57 @@ function getTeacherAppRole() {
     || String(state.appRole || "teacher").trim().toLowerCase() === "central_owner"
     ? "central_owner"
     : "teacher";
+}
+
+function getCurrentSchoolDetails() {
+  return resolveActiveSchoolDetails(getAccessContext());
+}
+
+function canUseDeveloperSchoolSwitch() {
+  const schools = Array.isArray(getAccessContext()?.schools) ? getAccessContext().schools : [];
+  return isDeveloperSchoolSwitchEnabled() && schools.length > 1;
+}
+
+function renderCurrentSchoolContextRow() {
+  const accessContext = getAccessContext();
+  const schools = Array.isArray(accessContext?.schools) ? accessContext.schools : [];
+  const { activeSchoolId, activeSchoolName } = getCurrentSchoolDetails();
+  const schoolLabel = `
+    <span class="schoolContextLabel" title="${escapeAttr(activeSchoolName)}">
+      <span>School</span>
+      <strong>${escapeHtml(activeSchoolName)}</strong>
+    </span>
+  `;
+
+  if (!canUseDeveloperSchoolSwitch()) {
+    return `<div class="schoolContextRow">${schoolLabel}</div>`;
+  }
+
+  return `
+    <div class="schoolContextRow">
+      ${schoolLabel}
+      <label class="schoolContextControl" aria-label="Developer school switch">
+        <span class="schoolContextControlText">Developer school</span>
+        <select class="select schoolContextSelect" data-field="active-school-dev-select">
+          ${schools.map((school) => {
+            const optionId = String(school?.id || "").trim();
+            return `<option value="${escapeAttr(optionId)}" ${optionId === String(activeSchoolId || "").trim() ? "selected" : ""}>${escapeHtml(String(school?.name || "School"))}</option>`;
+          }).join("")}
+        </select>
+      </label>
+    </div>
+  `;
+}
+
+function handleDeveloperSchoolSwitch(nextSchoolId = "") {
+  if (!canUseDeveloperSchoolSwitch()) return;
+  const schools = Array.isArray(getAccessContext()?.schools) ? getAccessContext().schools : [];
+  const safeNextSchoolId = String(nextSchoolId || "").trim();
+  if (!safeNextSchoolId) return;
+  if (!schools.some((school) => String(school?.id || "").trim() === safeNextSchoolId)) return;
+  if (safeNextSchoolId === String(getCurrentSchoolDetails().activeSchoolId || "").trim()) return;
+  storeActiveSchoolId(safeNextSchoolId);
+  window.location.reload();
 }
 
 function isCentralOwnerAppRole() {
@@ -4298,14 +4357,15 @@ async function applyInterventionGroupFilters({ force = false } = {}) {
 
 async function loadDashboardData() {
   const teacherId = state.user.id;
+  const accessContext = await readStaffAccessContext();
+  state.accessContext = accessContext || createDefaultAccessContext(teacherId);
 
-  const [classes, tests, assignments, _analyticsThreads, classPolicies, accessContext, appRole, automationPolicies] = await Promise.all([
+  const [classes, tests, assignments, _analyticsThreads, classPolicies, appRole, automationPolicies] = await Promise.all([
     loadClasses(),
     loadTests(),
     loadAssignments(),
     loadAnalyticsAssistantThreads(teacherId),
     listClassAutoAssignPolicies(),
-    readStaffAccessContext(),
     readTeacherAppRole(),
     listPersonalisedAutomationPolicies({ includeArchived: true }),
   ]);
@@ -4313,7 +4373,6 @@ async function loadDashboardData() {
   state.classes = classes;
   state.tests = tests;
   state.assignments = sortAssignmentsForAttention(assignments);
-  state.accessContext = accessContext || createDefaultAccessContext(teacherId);
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
@@ -4370,7 +4429,6 @@ async function loadDashboardData() {
     state.sections.pupilOnboarding = false;
   }
 }
-
 async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
   const requestId = ++staffAccessDirectoryRequestId;
   state.staffAccess.loadingDirectory = true;
@@ -5182,13 +5240,15 @@ async function loadAnalyticsAssistantThreads(teacherId) {
   if (!teacherId || state.analyticsAssistant.historyAvailable === false) return [];
 
   state.analyticsAssistant.threadsLoading = true;
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_threads")
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at, archived_at")
     .eq("teacher_id", teacherId)
     .is("archived_at", null)
     .order("last_message_at", { ascending: false })
     .limit(ANALYTICS_ASSISTANT_THREAD_LIMIT);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query;
 
   state.analyticsAssistant.threadsLoading = false;
 
@@ -5210,11 +5270,13 @@ async function loadAnalyticsAssistantThreads(teacherId) {
 async function loadAnalyticsAssistantThreadMessages(threadId) {
   if (!threadId || state.analyticsAssistant.historyAvailable === false) return null;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_messages")
     .select("id, role, text, scope_label, meta, created_at")
     .eq("thread_id", threadId)
     .order("created_at", { ascending: true });
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingAnalyticsAssistantHistoryTableError(error)) {
@@ -5250,7 +5312,7 @@ async function createAnalyticsAssistantThread({
 
   const { data, error } = await supabase
     .from("teacher_ai_threads")
-    .insert(payload)
+    .insert(withActiveSchoolId(payload, state.accessContext))
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at")
     .single();
 
@@ -5283,10 +5345,12 @@ async function updateAnalyticsAssistantThread(threadId, {
     last_message_at: lastMessageAt || new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_threads")
     .update(payload)
-    .eq("id", threadId)
+    .eq("id", threadId);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at")
     .single();
 
@@ -5326,7 +5390,7 @@ async function saveAnalyticsAssistantMessage({
 
   const { data, error } = await supabase
     .from("teacher_ai_messages")
-    .insert(payload)
+    .insert(withActiveSchoolId(payload, state.accessContext))
     .select("id, role, text, scope_label, meta, created_at")
     .single();
 
@@ -5371,10 +5435,12 @@ function startNewAnalyticsAssistantThread() {
 }
 
 async function loadClasses() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("classes")
-    .select("*")
-    .order("name", { ascending: true });
+    .select("*");
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("name", { ascending: true });
 
   if (error) {
     console.error("loadClasses error:", error);
@@ -5388,7 +5454,7 @@ async function loadClasses() {
 }
 
 async function loadTests() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("tests")
     .select(`
       *,
@@ -5406,8 +5472,10 @@ async function loadTests() {
           name
         )
       )
-    `)
-    .order("created_at", { ascending: false });
+    `);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     console.error("loadTests error:", error);
@@ -5442,7 +5510,7 @@ async function loadTests() {
 }
 
 async function loadAssignments() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("assignments_v2")
     .select(`
       *,
@@ -5454,8 +5522,10 @@ async function loadAssignments() {
         id,
         name
       )
-    `)
-    .order("created_at", { ascending: false });
+    `);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     console.error("loadAssignments error:", error);
@@ -8587,6 +8657,11 @@ function onRootInput(event) {
 function onRootChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  if (target.matches('[data-field="active-school-dev-select"]')) {
+    handleDeveloperSchoolSwitch(target instanceof HTMLSelectElement ? target.value : "");
+    return;
+  }
 
   if (target.matches('[data-field="staff-access-csv-file"]')) {
     const input = target instanceof HTMLInputElement ? target : null;
@@ -13196,9 +13271,10 @@ function paint() {
   rootEl.innerHTML = `
     <section class="td-shell">
       <div class="td-topbar">
-        <div>
+        <div class="schoolContextStack">
           <h2 class="td-page-title">${escapeHtml(getDashboardTitle())}</h2>
           <p class="td-muted">Signed in as ${escapeHtml(state.user?.email || "")}</p>
+          ${renderCurrentSchoolContextRow()}
         </div>
       </div>
 

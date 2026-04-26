@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient.js";
+import { applyActiveSchoolFilter, readStaffAccessContext, resolveActiveSchoolDetails } from "./db.js?v=1.45";
 import { mountGame } from "./game.js?v=1.30";
 import {
   DEFAULT_QUESTION_TYPE,
@@ -159,6 +160,14 @@ function buildDefaultTitle(questionType, focus) {
   return "Focus sound test";
 }
 
+function isNoRowsError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "PGRST116"
+    || message.includes("0 rows")
+    || message.includes("json object requested");
+}
+
 async function loadSavedTest(testId) {
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError) throw authError;
@@ -166,7 +175,10 @@ async function loadSavedTest(testId) {
     throw new Error("Please sign in to present a saved test. You can still try the public builder below.");
   }
 
-  const { data, error } = await supabase
+  const accessContext = await readStaffAccessContext();
+  const { activeSchool, activeSchoolName } = resolveActiveSchoolDetails(accessContext);
+
+  let query = supabase
     .from("tests")
     .select(`
       id,
@@ -182,10 +194,14 @@ async function loadSavedTest(testId) {
       )
     `)
     .eq("id", testId)
-    .eq("teacher_id", authData.user.id)
-    .single();
+    .eq("teacher_id", authData.user.id);
+  query = applyActiveSchoolFilter(query, accessContext);
+  const { data, error } = await query.single();
 
   if (error || !data?.id) {
+    if (!data?.id && (!error || isNoRowsError(error))) {
+      throw new Error("This test is not available in the current school.");
+    }
     throw error || new Error("Could not load this saved test.");
   }
 
@@ -216,6 +232,8 @@ async function loadSavedTest(testId) {
     source: "saved",
     title: String(data.title || "Untitled test").trim() || "Untitled test",
     questionType: normalizeStoredQuestionType(data.question_type, { title: data.title }),
+    school: activeSchool,
+    schoolName: activeSchoolName,
     words,
   };
 }
@@ -240,6 +258,7 @@ function launchSession(session) {
       attempt_source: session.source === "saved" ? "presentation" : "public_presentation",
       audio_enabled: true,
       hints_enabled: true,
+      school_name: session.schoolName || session.school?.name || "",
     },
     pupilId: null,
     assignmentId: null,

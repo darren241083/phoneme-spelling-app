@@ -63,7 +63,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.88");
+      const module = await import("./teacherView.js?v=6.89");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -77,7 +77,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.54");
+      const module = await import("./pupilView.js?v=3.55");
       return module.renderPupilView;
     },
     () => {
@@ -90,7 +90,7 @@ function loadPupilView() {
 function loadPupilAuth() {
   pupilAuthPromise = getCachedImport(
     pupilAuthPromise,
-    () => import("./authPupil.js?v=1.1"),
+    () => import("./authPupil.js?v=1.2"),
     () => {
       pupilAuthPromise = null;
     },

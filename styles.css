@@ -397,7 +397,40 @@ select.select{
 .pills{display:flex; gap:8px; flex-wrap:wrap;}
 .pill{border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:13px; color:var(--muted);}
 .pill b{color:var(--text);}
-
+.schoolContextStack{display:flex; flex-direction:column; gap:8px;}
+.schoolContextRow{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;}
+.schoolContextLabel{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:36px;
+  padding:6px 12px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:#fff;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.2;
+}
+.schoolContextLabel strong{color:var(--text); font-weight:700;}
+.schoolContextControl{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.schoolContextControlText{
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.2;
+}
+select.select.schoolContextSelect{
+  min-height:38px;
+  min-width:220px;
+  padding-top:8px;
+  padding-bottom:8px;
+  font-size:13px;
+}
 .table{
   width:100%;
   border-collapse:collapse;
