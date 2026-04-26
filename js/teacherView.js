@@ -368,6 +368,15 @@ function createDefaultInterventionGroupState() {
   };
 }
 
+function createDefaultClassRemovalState() {
+  return {
+    preflightByClassId: {},
+    loadingByClassId: {},
+    errorByClassId: {},
+    busyByClassId: {},
+  };
+}
+
 function createDefaultStaffPendingApprovalDraft() {
   return {
     roles: [],
@@ -608,6 +617,7 @@ const state = {
   notice: "",
   noticeType: "info",
   testSearch: "",
+  selectedTestIds: [],
   analyticsByAssignment: {},
   testGroupExpanded: {
     live: false,
@@ -671,8 +681,11 @@ const state = {
   createBaselineOpen: false,
   createAutoAssignOpen: false,
   createAutoAssignClassId: "",
+  classRemoval: createDefaultClassRemovalState(),
   automationPolicies: [],
   automationSelectedPolicyKey: "",
+  automationSelectionExplicit: false,
+  automationSelectionOpenedThisSession: false,
   automationDraftsByKey: {},
   automationAction: createDefaultAutomationActionState(),
   interventionGroup: createDefaultInterventionGroupState(),
@@ -907,6 +920,61 @@ function canAssignFromTestRecord(record) {
   return canEditTestRecord(record) && canAssignTests();
 }
 
+function getSelectedTestIds() {
+  return normalizeIdList(state.selectedTestIds);
+}
+
+function setSelectedTestIds(testIds) {
+  const editableIds = new Set(
+    (state.tests || [])
+      .filter((test) => canEditTestRecord(test))
+      .map((test) => String(test?.id || "").trim())
+      .filter(Boolean)
+  );
+  state.selectedTestIds = normalizeIdList(testIds).filter((testId) => editableIds.has(testId));
+}
+
+function toggleSelectedTestId(testId, selected) {
+  const safeTestId = String(testId || "").trim();
+  if (!safeTestId) return;
+  const current = new Set(getSelectedTestIds());
+  const test = findTestRecord(safeTestId);
+
+  if (selected && canEditTestRecord(test)) {
+    current.add(safeTestId);
+  } else {
+    current.delete(safeTestId);
+  }
+
+  setSelectedTestIds([...current]);
+}
+
+function clearSelectedTestIds() {
+  state.selectedTestIds = [];
+}
+
+function syncSelectedTestIdsWithLoadedTests() {
+  setSelectedTestIds(getSelectedTestIds());
+}
+
+function getSelectedEditableTests() {
+  const selectedIds = new Set(getSelectedTestIds());
+  return (state.tests || []).filter((test) => selectedIds.has(String(test?.id || "")) && canEditTestRecord(test));
+}
+
+function getFilteredEditableTestIds() {
+  const term = state.testSearch.trim().toLowerCase();
+  const groups = getGroupedTests(term);
+  return [...groups.live, ...groups.draft, ...groups.ready]
+    .filter((test) => canEditTestRecord(test))
+    .map((test) => String(test?.id || "").trim())
+    .filter(Boolean);
+}
+
+function isLiveTestRecord(test) {
+  return Number(test?.assignment_count || 0) > 0;
+}
+
 function canManageAssignmentRecord(record) {
   return !!record && canManageOwnContent() && ownsTeacherRecord(record);
 }
@@ -928,6 +996,73 @@ function getClassTypeDisplayLabel(value) {
   if (classType === CLASS_TYPE_INTERVENTION) return "Intervention group";
   if (classType === CLASS_TYPE_FORM) return "Form group";
   return "Subject class";
+}
+
+function getClassRemovalTypeLabel(record = null) {
+  return getClassTypeDisplayLabel(record?.class_type).toLowerCase();
+}
+
+function getClassRemovalStateForClass(classId = "") {
+  const safeClassId = String(classId || "").trim();
+  const removal = state.classRemoval || createDefaultClassRemovalState();
+  return {
+    preflight: removal.preflightByClassId?.[safeClassId] || null,
+    loading: !!removal.loadingByClassId?.[safeClassId],
+    error: String(removal.errorByClassId?.[safeClassId] || "").trim(),
+    busy: !!removal.busyByClassId?.[safeClassId],
+  };
+}
+
+function setClassRemovalLoading(classId = "", loading = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.loadingByClassId = {
+    ...(state.classRemoval.loadingByClassId || {}),
+    [safeClassId]: !!loading,
+  };
+}
+
+function setClassRemovalBusy(classId = "", busy = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.busyByClassId = {
+    ...(state.classRemoval.busyByClassId || {}),
+    [safeClassId]: !!busy,
+  };
+}
+
+function setClassRemovalError(classId = "", message = "") {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.errorByClassId = {
+    ...(state.classRemoval.errorByClassId || {}),
+    [safeClassId]: String(message || "").trim(),
+  };
+}
+
+function setClassRemovalPreflight(classId = "", preflight = null) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.preflightByClassId = {
+    ...(state.classRemoval.preflightByClassId || {}),
+    [safeClassId]: preflight,
+  };
+}
+
+function getClassRemovalTargetClasses(sourceClass = null) {
+  const sourceId = String(sourceClass?.id || "").trim();
+  const sourceType = getNormalizedClassType(sourceClass?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+  return getOwnedClasses()
+    .filter((item) => {
+      const classId = String(item?.id || "").trim();
+      if (!classId || classId === sourceId) return false;
+      return getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === sourceType;
+    })
+    .sort((a, b) => {
+      const yearDelta = String(a?.year_group || "").localeCompare(String(b?.year_group || ""));
+      if (yearDelta !== 0) return yearDelta;
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
 }
 
 function isAutomationEligibleClass(item) {
@@ -3510,6 +3645,7 @@ function persistAutomationPolicyDraft() {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify({
       selectedPolicyKey: state.automationSelectedPolicyKey || "",
+      selectedPolicyExplicit: state.automationSelectionExplicit === true,
       draftsByKey: buildPersistableAutomationDrafts(),
     }));
   } catch (error) {
@@ -3522,6 +3658,8 @@ function restoreAutomationPolicyDraft() {
   const storageKey = buildAutomationPolicyDraftStorageKey();
   if (!storageKey) return;
   try {
+    const hadActiveSelection = state.automationSelectionOpenedThisSession === true
+      && state.automationSelectionExplicit === true;
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return;
     const parsed = JSON.parse(raw);
@@ -3533,7 +3671,11 @@ function restoreAutomationPolicyDraft() {
       Object.entries(draftsByKey)
         .map(([key, value]) => [key, buildAutomationDraftEntry(value)])
     );
-    state.automationSelectedPolicyKey = String(parsed.selectedPolicyKey || "").trim();
+    const restoredSelectedPolicyKey = String(parsed.selectedPolicyKey || "").trim();
+    state.automationSelectedPolicyKey = hadActiveSelection ? restoredSelectedPolicyKey : "";
+    state.automationSelectionExplicit = hadActiveSelection
+      && parsed.selectedPolicyExplicit === true
+      && state.automationSelectedPolicyKey !== "";
   } catch (error) {
     console.warn("Could not restore automation policy draft:", error);
   }
@@ -3549,6 +3691,18 @@ function getAutomationSelectedPolicyKey() {
   if (savedIds.has(requestedKey)) return requestedKey;
   if (state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]?.dirty) return AUTOMATION_NEW_POLICY_KEY;
   return String(savedPolicies[0]?.id || "").trim();
+}
+
+function getExplicitAutomationSelectedPolicyKey() {
+  const savedPolicies = getAutomationPolicies();
+  const savedIds = new Set(savedPolicies.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const requestedKey = String(state.automationSelectedPolicyKey || "").trim();
+  if (state.automationSelectionExplicit !== true) return "";
+  if (requestedKey === AUTOMATION_NEW_POLICY_KEY && state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]) {
+    return AUTOMATION_NEW_POLICY_KEY;
+  }
+  if (savedIds.has(requestedKey)) return requestedKey;
+  return "";
 }
 
 function getAutomationRunPolicy() {
@@ -3609,7 +3763,8 @@ function setAutomationPolicies(policies = []) {
   }
 
   state.automationDraftsByKey = nextDrafts;
-  state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+  state.automationSelectedPolicyKey = getExplicitAutomationSelectedPolicyKey();
+  state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
 }
 
 function markCurrentAutomationPolicySaved(
@@ -3638,16 +3793,26 @@ function markCurrentAutomationPolicySaved(
       targetFiltersTouched: previousEntry?.targetFiltersTouched === true,
     }, { basePolicy: normalized });
     state.automationSelectedPolicyKey = normalized.id;
+    state.automationSelectionExplicit = true;
   } else {
     state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+    state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
   }
   persistAutomationPolicyDraft();
 }
 
 function selectAutomationPolicy(policyId = "") {
   const safePolicyId = String(policyId || "").trim();
-  if (!safePolicyId) return;
+  if (!safePolicyId) {
+    state.automationSelectedPolicyKey = "";
+    state.automationSelectionExplicit = false;
+    state.automationSelectionOpenedThisSession = false;
+    persistAutomationPolicyDraft();
+    return;
+  }
   state.automationSelectedPolicyKey = safePolicyId;
+  state.automationSelectionExplicit = true;
+  state.automationSelectionOpenedThisSession = true;
   getCurrentAutomationDraftEntry();
   persistAutomationPolicyDraft();
 }
@@ -4373,13 +4538,15 @@ async function loadDashboardData() {
 
   state.classes = classes;
   state.tests = tests;
+  syncSelectedTestIdsWithLoadedTests();
   state.assignments = sortAssignmentsForAttention(assignments);
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
   const profileSyncNotice = consumeLatestStaffProfileSyncNotice();
   restoreAutomationPolicyDraft();
-  state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+  state.automationSelectedPolicyKey = getExplicitAutomationSelectedPolicyKey();
+  state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
   if (!canCreateClasses()) {
     state.createClassOpen = false;
   }
@@ -4430,6 +4597,7 @@ async function loadDashboardData() {
     state.sections.pupilOnboarding = false;
   }
 }
+
 async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
   const requestId = ++staffAccessDirectoryRequestId;
   state.staffAccess.loadingDirectory = true;
@@ -8680,6 +8848,13 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="test-bulk-select"]')) {
+    const input = target instanceof HTMLInputElement ? target : null;
+    toggleSelectedTestId(input?.value || target.dataset.testId || "", !!input?.checked);
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="pupil-placement-form-select"]')) {
     setPupilPlacementSelectedFormId(target.dataset.pupilId || "", target.value || "");
     paint();
@@ -10139,6 +10314,23 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "select-filtered-tests") {
+    setSelectedTestIds([...getSelectedTestIds(), ...getFilteredEditableTestIds()]);
+    paint();
+    return;
+  }
+
+  if (action === "clear-selected-tests") {
+    clearSelectedTestIds();
+    paint();
+    return;
+  }
+
+  if (action === "delete-selected-tests") {
+    await handleDeleteSelectedTests(button);
+    return;
+  }
+
   if (action === "open-assign-test") {
     const testId = button.dataset.testId;
     if (!testId) return;
@@ -10320,11 +10512,24 @@ async function onRootClick(event) {
     if (!classId) return;
     const selectedClass = findClassRecord(classId);
     if (!canEditClassRecord(selectedClass)) {
-      showNotice("You can only delete classes that you own.", "error");
+      showNotice("You can only remove classes that you own.", "error");
       paint();
       return;
     }
-    await handleDeleteClass(classId);
+    await handleOpenClassRemoval(classId, button);
+    return;
+  }
+
+  if (action === "reload-class-removal-preflight") {
+    const classId = button.dataset.classId;
+    if (!classId) return;
+    await loadClassRemovalPreflight(classId, { force: true });
+    return;
+  }
+
+  if (action === "cancel-class-removal") {
+    state.activePanel = null;
+    paint();
     return;
   }
 }
@@ -10377,6 +10582,21 @@ async function onRootSubmit(event) {
 
   if (form.matches('[data-form="class-auto-assign-policy"]')) {
     await handleSaveClassAutoAssignPolicy(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-move"]')) {
+    await handleClassRemovalMoveAndDelete(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-remove-memberships"]')) {
+    await handleClassRemovalRemoveMembershipsAndDelete(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-delete-empty"]')) {
+    await handleClassRemovalDeleteEmpty(form);
     return;
   }
 
@@ -12098,7 +12318,8 @@ async function handleDeleteAutomationPolicy(policyId) {
     if (String(state.automationSelectedPolicyKey || "").trim() === String(policyId || "").trim()) {
       state.automationSelectedPolicyKey = state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]
         ? AUTOMATION_NEW_POLICY_KEY
-        : String(state.automationPolicies[0]?.id || "").trim();
+        : "";
+      state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
     }
     persistAutomationPolicyDraft();
     showNotice(`Deleted "${getAutomationPolicyDisplayName(deletedPolicy || sourcePolicy)}".`, "success");
@@ -12515,11 +12736,13 @@ async function handleDeleteTest(testId) {
   const ok = window.confirm(`Delete "${label}"?`);
   if (!ok) return;
 
-  const { error } = await supabase
+  let query = supabase
     .from("tests")
     .delete()
     .eq("id", testId)
     .eq("teacher_id", state.user.id);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
 
   if (error) {
     console.error("delete test error:", error);
@@ -12531,6 +12754,61 @@ async function handleDeleteTest(testId) {
   await loadDashboardData();
   if (state.activePanel?.id === testId) state.activePanel = null;
   showNotice("Test deleted.", "success");
+  paint();
+}
+
+async function handleDeleteSelectedTests(button = null) {
+  const selectedTests = getSelectedEditableTests();
+  if (!selectedTests.length) {
+    showNotice("Select one or more tests you own first.", "error");
+    paint();
+    return;
+  }
+
+  const selectedIds = selectedTests
+    .map((test) => String(test?.id || "").trim())
+    .filter(Boolean);
+  const liveCount = selectedTests.filter((test) => isLiveTestRecord(test)).length;
+  const preview = selectedTests
+    .slice(0, 5)
+    .map((test) => `- ${String(test?.title || "Untitled test").trim() || "Untitled test"}`)
+    .join("\n");
+  const extraCount = Math.max(0, selectedTests.length - 5);
+  const titlePreview = `${preview}${extraCount ? `\n- and ${extraCount} more` : ""}`;
+
+  if (liveCount > 0) {
+    const typed = window.prompt(
+      `Delete ${formatCountLabel(selectedTests.length, "selected test")}?\n\n${titlePreview}\n\n${formatCountLabel(liveCount, "test is", "tests are")} live/assigned. Deleting live tests also removes their linked class assignments.\n\nType DELETE to confirm.`
+    );
+    if (typed !== "DELETE") return;
+  } else {
+    const ok = window.confirm(`Delete ${formatCountLabel(selectedTests.length, "selected test")}?\n\n${titlePreview}`);
+    if (!ok) return;
+  }
+
+  setBusy(button, true, "Deleting...");
+
+  let query = supabase
+    .from("tests")
+    .delete()
+    .eq("teacher_id", state.user.id)
+    .in("id", selectedIds);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
+
+  setBusy(button, false);
+
+  if (error) {
+    console.error("delete selected tests error:", error);
+    showNotice("Could not delete the selected tests.", "error");
+    paint();
+    return;
+  }
+
+  await loadDashboardData();
+  if (selectedIds.includes(String(state.activePanel?.id || ""))) state.activePanel = null;
+  clearSelectedTestIds();
+  showNotice(`${formatCountLabel(selectedTests.length, "test")} deleted.`, "success");
   paint();
 }
 
@@ -12593,35 +12871,358 @@ async function handleDuplicateTest(testId) {
   clearFlashLater("test");
 }
 
-async function handleDeleteClass(classId) {
-  const cls = state.classes.find((c) => String(c.id) === String(classId));
+async function readClassRemovalPreflight(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) throw new Error("Choose a class first.");
+
+  const cls = findClassRecord(safeClassId);
   if (!canEditClassRecord(cls)) {
-    showNotice("You can only delete classes that you own.", "error");
+    throw new Error("You can only remove classes that you own.");
+  }
+
+  const memberships = await loadPaginatedRows((from, to) =>
+    supabase
+      .from("pupil_classes")
+      .select("id, pupil_id, active")
+      .eq("class_id", safeClassId)
+      .range(from, to)
+  );
+  const pupilIds = normalizeIdList(memberships.map((item) => item?.pupil_id));
+  const pupilRows = [];
+  for (const chunk of chunkArray(pupilIds, 100)) {
+    const { data, error } = await supabase
+      .from("pupils")
+      .select("id, first_name, surname, username, mis_id, is_active, archived_at")
+      .in("id", chunk);
+    if (error) throw error;
+    pupilRows.push(...(Array.isArray(data) ? data : []));
+  }
+
+  const pupilsById = new Map(pupilRows.map((item) => [String(item?.id || "").trim(), item]));
+  const activeMemberships = memberships.filter((item) => item?.active !== false);
+  const activePupilIds = normalizeIdList(
+    activeMemberships
+      .map((item) => String(item?.pupil_id || "").trim())
+      .filter((pupilId) => {
+        const pupil = pupilsById.get(pupilId);
+        if (!pupil) return true;
+        return pupil?.is_active !== false && !String(pupil?.archived_at || "").trim();
+      })
+  );
+
+  const [assignmentRows, legacyAssignmentRows] = await Promise.all([
+    loadPaginatedRows((from, to) =>
+      supabase
+        .from("assignments_v2")
+        .select("id, created_at, end_at, tests(title)")
+        .eq("class_id", safeClassId)
+        .range(from, to)
+    ),
+    loadPaginatedRows((from, to) =>
+      supabase
+        .from("assignments")
+        .select("id, created_at, end_at")
+        .eq("class_id", safeClassId)
+        .range(from, to)
+    ).catch((error) => {
+      console.warn("Could not check legacy class assignments:", error);
+      return [];
+    }),
+  ]);
+  const assignmentIds = new Set();
+  for (const row of [...assignmentRows, ...legacyAssignmentRows]) {
+    const assignmentId = String(row?.id || "").trim();
+    if (assignmentId) assignmentIds.add(assignmentId);
+  }
+  const automationPolicies = getAutomationPolicies()
+    .filter((policy) => normalizeIdList(policy?.target_class_ids).includes(safeClassId))
+    .map((policy) => ({
+      id: String(policy?.id || "").trim(),
+      name: getAutomationPolicyDisplayName(policy),
+      archived: !!String(policy?.archived_at || "").trim(),
+      policyType: getAutomationPolicyTypeLabel(policy?.policy_type),
+    }));
+
+  return {
+    classId: safeClassId,
+    membershipCount: memberships.length,
+    activeMembershipCount: activeMemberships.length,
+    activePupilCount: activePupilIds.length,
+    activePupils: activePupilIds.map((pupilId) => pupilsById.get(pupilId) || { id: pupilId }),
+    inactiveMembershipCount: Math.max(0, memberships.length - activeMemberships.length),
+    assignmentCount: assignmentIds.size,
+    assignmentSamples: assignmentRows.slice(0, 3),
+    automationPolicies,
+    activeAutomationPolicyCount: automationPolicies.filter((policy) => !policy.archived).length,
+    hasClassAutoAssignPolicy: !!getSavedClassAutoAssignPolicy(safeClassId),
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+async function loadClassRemovalPreflight(classId, { force = false } = {}) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return null;
+  const current = getClassRemovalStateForClass(safeClassId);
+  if (!force && current.preflight && !current.error) return current.preflight;
+
+  setClassRemovalLoading(safeClassId, true);
+  setClassRemovalError(safeClassId, "");
+  paint();
+
+  try {
+    const preflight = await readClassRemovalPreflight(safeClassId);
+    setClassRemovalPreflight(safeClassId, preflight);
+    return preflight;
+  } catch (error) {
+    console.error("class removal preflight error:", error);
+    setClassRemovalError(safeClassId, error?.message || "Could not check this class before removing it.");
+    setClassRemovalPreflight(safeClassId, null);
+    return null;
+  } finally {
+    setClassRemovalLoading(safeClassId, false);
+    paint();
+  }
+}
+
+async function handleOpenClassRemoval(classId, button = null) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  const cls = findClassRecord(safeClassId);
+  if (!canEditClassRecord(cls)) {
+    showNotice("You can only remove classes that you own.", "error");
     paint();
     return;
   }
-  const label = cls?.name || "this class";
 
-  const ok = window.confirm(`Delete "${label}"?`);
-  if (!ok) return;
+  const wasSame =
+    state.activePanel?.type === "remove-class" &&
+    String(state.activePanel.id) === safeClassId;
+  const anchorEl = button?.closest?.(".td-class-card") || rootEl;
+
+  preserveScrollAround(anchorEl, () => {
+    state.activePanel = wasSame ? null : { type: "remove-class", id: safeClassId };
+    paint();
+  });
+
+  if (!wasSame) {
+    await loadClassRemovalPreflight(safeClassId, { force: true });
+  }
+}
+
+function buildClassRemovalConfirmMessage({ cls, preflight, mode, targetClass = null } = {}) {
+  const className = String(cls?.name || "this class").trim();
+  const activePupilCount = Number(preflight?.activePupilCount || 0);
+  const assignmentCount = Number(preflight?.assignmentCount || 0);
+  const policyCount = Number(preflight?.activeAutomationPolicyCount || preflight?.automationPolicies?.length || 0);
+  const lines = [];
+
+  if (mode === "move") {
+    lines.push(`Move ${formatCountLabel(activePupilCount, "active pupil")} to "${targetClass?.name || "the selected class"}" and remove "${className}"?`);
+  } else if (mode === "remove-memberships") {
+    lines.push(`Remove ${formatCountLabel(activePupilCount, "active pupil")} from "${className}" and delete the class permanently?`);
+    lines.push("The pupils will remain in the pupil directory, but they may stop receiving assignments or personalised auto-tests until they are added to another class.");
+  } else {
+    lines.push(`Delete "${className}" permanently?`);
+  }
+
+  if (assignmentCount > 0) {
+    lines.push(`This class has ${formatCountLabel(assignmentCount, "linked assignment")}. Linked assignments/results may be removed with the class.`);
+  }
+
+  if (policyCount > 0) {
+    lines.push(`This class is used by ${formatCountLabel(policyCount, "automation policy", "automation policies")}. Future personalised runs will no longer target it.`);
+  }
+
+  lines.push("This cannot be undone.");
+  return lines.join("\n\n");
+}
+
+async function deleteClassMembershipRows(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
 
   const { error } = await supabase
+    .from("pupil_classes")
+    .delete()
+    .eq("class_id", safeClassId);
+
+  if (error) throw error;
+}
+
+async function moveClassMembershipRowsForRemoval(sourceClassId, targetClassId) {
+  const safeSourceClassId = String(sourceClassId || "").trim();
+  const safeTargetClassId = String(targetClassId || "").trim();
+  if (!safeSourceClassId || !safeTargetClassId) {
+    throw new Error("Choose where to move pupils before removing the class.");
+  }
+  if (safeSourceClassId === safeTargetClassId) {
+    throw new Error("Choose a different class to move pupils into.");
+  }
+
+  const sourceRows = await loadPaginatedRows((from, to) =>
+    supabase
+      .from("pupil_classes")
+      .select("id, pupil_id, active")
+      .eq("class_id", safeSourceClassId)
+      .range(from, to)
+  );
+  const activeRows = sourceRows.filter((row) => row?.active !== false);
+  const inactiveIds = sourceRows
+    .filter((row) => row?.active === false)
+    .map((row) => String(row?.id || "").trim())
+    .filter(Boolean);
+  const activePupilIds = normalizeIdList(activeRows.map((row) => row?.pupil_id));
+  const existingTargetPupilIds = new Set();
+
+  for (const chunk of chunkArray(activePupilIds, 100)) {
+    const { data, error } = await supabase
+      .from("pupil_classes")
+      .select("pupil_id")
+      .eq("class_id", safeTargetClassId)
+      .eq("active", true)
+      .in("pupil_id", chunk);
+    if (error) throw error;
+    for (const row of data || []) {
+      const pupilId = String(row?.pupil_id || "").trim();
+      if (pupilId) existingTargetPupilIds.add(pupilId);
+    }
+  }
+
+  const rowsToMove = activeRows.filter((row) => {
+    const pupilId = String(row?.pupil_id || "").trim();
+    return pupilId && !existingTargetPupilIds.has(pupilId);
+  });
+  const idsToMove = rowsToMove.map((row) => String(row?.id || "").trim()).filter(Boolean);
+  const duplicateActiveIds = activeRows
+    .filter((row) => existingTargetPupilIds.has(String(row?.pupil_id || "").trim()))
+    .map((row) => String(row?.id || "").trim())
+    .filter(Boolean);
+
+  for (const chunk of chunkArray(idsToMove, 100)) {
+    const { error } = await supabase
+      .from("pupil_classes")
+      .update({ class_id: safeTargetClassId })
+      .in("id", chunk)
+      .eq("class_id", safeSourceClassId);
+    if (error) throw error;
+  }
+
+  for (const chunk of chunkArray([...inactiveIds, ...duplicateActiveIds], 100)) {
+    if (!chunk.length) continue;
+    const { error } = await supabase
+      .from("pupil_classes")
+      .delete()
+      .in("id", chunk);
+    if (error) throw error;
+  }
+
+  await deleteClassMembershipRows(safeSourceClassId);
+
+  return {
+    movedCount: idsToMove.length,
+    alreadyInTargetCount: duplicateActiveIds.length,
+  };
+}
+
+async function deleteClassRecord(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+
+  let query = supabase
     .from("classes")
     .delete()
-    .eq("id", classId)
+    .eq("id", safeClassId)
     .eq("teacher_id", state.user.id);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
 
-  if (error) {
-    console.error("delete class error:", error);
-    showNotice("Could not delete class.", "error");
+  if (error) throw error;
+}
+
+async function handleDeleteClass(classId, { mode = "empty", targetClassId = "" } = {}) {
+  const safeClassId = String(classId || "").trim();
+  const cls = findClassRecord(safeClassId);
+  if (!canEditClassRecord(cls)) {
+    showNotice("You can only remove classes that you own.", "error");
     paint();
     return;
   }
 
-  await loadDashboardData();
-  if (state.activePanel?.id === classId) state.activePanel = null;
-  showNotice("Class deleted.", "success");
+  setClassRemovalBusy(safeClassId, true);
+  setClassRemovalError(safeClassId, "");
   paint();
+
+  try {
+    const preflight = await readClassRemovalPreflight(safeClassId);
+    setClassRemovalPreflight(safeClassId, preflight);
+
+    if (preflight.activePupilCount > 0 && mode === "empty") {
+      throw new Error("Move pupils to another class, or remove them from this class, before deleting it.");
+    }
+
+    const targetClass = targetClassId ? findClassRecord(targetClassId) : null;
+    if (mode === "move") {
+      if (!targetClass || !canEditClassRecord(targetClass)) {
+        throw new Error("Choose a destination class you can manage.");
+      }
+      const sourceType = getNormalizedClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+      const targetType = getNormalizedClassType(targetClass?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+      if (sourceType !== targetType) {
+        throw new Error(`Choose another ${getClassRemovalTypeLabel(cls)} as the destination.`);
+      }
+    }
+
+    const confirmed = window.confirm(buildClassRemovalConfirmMessage({
+      cls,
+      preflight,
+      mode,
+      targetClass,
+    }));
+    if (!confirmed) return;
+
+    if (mode === "move") {
+      await moveClassMembershipRowsForRemoval(safeClassId, targetClassId);
+    } else {
+      await deleteClassMembershipRows(safeClassId);
+    }
+
+    await deleteClassRecord(safeClassId);
+    await loadDashboardData();
+    if (state.activePanel?.id === safeClassId) state.activePanel = null;
+    showNotice(mode === "move" && targetClass
+      ? `Class removed. Pupils moved to ${targetClass.name || "the selected class"}.`
+      : "Class removed. Pupil records were kept.",
+      "success");
+  } catch (error) {
+    console.error("delete class error:", error);
+    setClassRemovalError(safeClassId, error?.message || "Could not remove this class.");
+    showNotice(error?.message || "Could not remove this class.", "error");
+  } finally {
+    setClassRemovalBusy(safeClassId, false);
+    paint();
+  }
+}
+
+async function handleClassRemovalMoveAndDelete(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "move",
+    targetClassId: fd.get("target_class_id"),
+  });
+}
+
+async function handleClassRemovalRemoveMembershipsAndDelete(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "remove-memberships",
+  });
+}
+
+async function handleClassRemovalDeleteEmpty(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "empty",
+  });
 }
 
 function setBusy(button, isBusy, busyText = "Saving...") {
@@ -13408,12 +14009,16 @@ function renderCreateBar() {
   });
   const automationPoliciesExpired = automationPolicies.filter((policy) => getPersonalisedAutomationPolicyLifecycle(policy).expired);
   const automationPoliciesArchived = automationPolicies.filter((policy) => !!String(policy?.archived_at || "").trim());
-  const selectedAutomationPolicyKey = getAutomationSelectedPolicyKey();
+  const selectedAutomationPolicyKey = getExplicitAutomationSelectedPolicyKey();
   const hasAutomationSelection = !!selectedAutomationPolicyKey;
+  const showAutomationEditingSummary = hasAutomationSelection
+    && state.automationSelectionOpenedThisSession === true;
   const automationRunPolicy = hasAutomationSelection
     ? getAutomationRunPolicy()
     : buildDefaultPersonalisedAutomationPolicy();
-  const savedAutomationPolicy = getSavedAutomationPolicy();
+  const savedAutomationPolicy = hasAutomationSelection
+    ? getSavedAutomationPolicy(selectedAutomationPolicyKey)
+    : null;
   const selectedAutomationClassIds = hasAutomationSelection ? getAutomationRunSelectedClassIds() : [];
   const automationPolicyValidation = hasAutomationSelection
     ? getAutomationRunPolicyValidation()
@@ -13704,6 +14309,9 @@ function renderCreateBar() {
     return `<option value="${escapeAttr(policyId)}" ${isSelected ? "selected" : ""}>${escapeHtml(`${getAutomationPolicyDisplayName(policy)} · ${statusLabel}${hasDirtyDraft ? " · Unsaved draft" : ""}`)}</option>`;
   };
   const automationPolicySelectorOptionsHtml = [
+    !hasAutomationSelection
+      ? `<option value="" selected>Choose a policy...</option>`
+      : "",
     automationIsNewDraft
       ? `<option value="${escapeAttr(AUTOMATION_NEW_POLICY_KEY)}" selected>New policy draft</option>`
       : "",
@@ -21731,6 +22339,28 @@ function renderTestLibrarySummary(groups, filteredCount) {
   `;
 }
 
+function renderTestBulkActions() {
+  const selectedCount = getSelectedEditableTests().length;
+  const matchingEditableCount = getFilteredEditableTestIds().length;
+
+  if (!selectedCount && !matchingEditableCount) return "";
+
+  return `
+    <div class="td-test-bulk-row">
+      <span>${escapeHtml(
+        selectedCount
+          ? `${formatCountLabel(selectedCount, "test")} selected`
+          : `${formatCountLabel(matchingEditableCount, "editable test")} in current results`
+      )}</span>
+      <div class="td-test-bulk-actions">
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-filtered-tests" ${matchingEditableCount ? "" : "disabled"}>Select results</button>
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-selected-tests" ${selectedCount ? "" : "disabled"}>Clear</button>
+        <button class="td-btn td-btn--danger td-btn--small" type="button" data-action="delete-selected-tests" ${selectedCount ? "" : "disabled"}>Delete selected</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderTestGroupSection({ key, title, description, tests, term }) {
   if (!tests.length) return "";
 
@@ -21802,6 +22432,7 @@ function renderSectionTests() {
               ? filteredCount
                 ? `
                   ${renderTestLibrarySummary(groups, filteredCount)}
+                  ${renderTestBulkActions()}
                   <div class="td-test-groups">
                     ${renderTestGroupSection({
                       key: "live",
@@ -23758,13 +24389,32 @@ function renderTestCard(test) {
     String(state.activePanel.id) === String(test.id);
 
   const isFlashed = String(state.flashTestId) === String(test.id);
+  const testId = String(test?.id || "").trim();
+  const isSelected = getSelectedTestIds().includes(testId);
+  const title = test.title || "Untitled test";
 
   return `
-    <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""}">
+    <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""} ${isSelected ? "is-selected" : ""}">
       <div class="td-card-row">
+        ${
+          canEditTest
+            ? `
+              <label class="td-test-select td-checkbox-row">
+                <input
+                  type="checkbox"
+                  data-field="test-bulk-select"
+                  data-test-id="${escapeAttr(testId)}"
+                  value="${escapeAttr(testId)}"
+                  aria-label="${escapeAttr(`Select ${title} for bulk delete`)}"
+                  ${isSelected ? "checked" : ""}
+                />
+              </label>
+            `
+            : ""
+        }
         <div class="td-card-main">
           <div class="td-card-title">
-            ${escapeHtml(test.title || "Untitled test")}
+            ${escapeHtml(title)}
             ${test?.is_auto_generated ? `<span class="td-pill">Auto-assigned</span>` : ""}
           </div>
           <div class="td-card-subtitle">${renderTestMeta(test)}</div>
@@ -23844,15 +24494,224 @@ function renderTestCard(test) {
   `;
 }
 
+function renderClassRemovalWarningList(cls, preflight) {
+  const warnings = [];
+  const activePupilCount = Number(preflight?.activePupilCount || 0);
+  const inactiveMembershipCount = Number(preflight?.inactiveMembershipCount || 0);
+  const assignmentCount = Number(preflight?.assignmentCount || 0);
+  const activeAutomationPolicyCount = Number(preflight?.activeAutomationPolicyCount || 0);
+  const archivedAutomationPolicyCount = Math.max(0, Number(preflight?.automationPolicies?.length || 0) - activeAutomationPolicyCount);
+  const sampleNames = (preflight?.activePupils || [])
+    .slice(0, 4)
+    .map((pupil) => getPupilPlacementDisplayName(pupil))
+    .filter(Boolean);
+
+  if (activePupilCount > 0) {
+    warnings.push({
+      severity: "error",
+      title: `${formatCountLabel(activePupilCount, "active pupil")} in this ${getClassRemovalTypeLabel(cls)}`,
+      body: `Move pupils to another ${getClassRemovalTypeLabel(cls)}, or remove them from this class. If they are removed and not added elsewhere, they may stop receiving assignments or personalised auto-tests.`,
+      points: sampleNames.length
+        ? [`Examples: ${sampleNames.join(", ")}${activePupilCount > sampleNames.length ? ", ..." : ""}`]
+        : [],
+    });
+  }
+
+  if (assignmentCount > 0) {
+    warnings.push({
+      severity: "error",
+      title: `${formatCountLabel(assignmentCount, "linked assignment")}`,
+      body: "Deleting the class can remove class-linked assignments, status rows, target-word rows, and related result views. Use this only when you are intentionally clearing the class.",
+      points: (preflight?.assignmentSamples || [])
+        .map((assignment) => String(assignment?.tests?.title || "").trim())
+        .filter(Boolean)
+        .slice(0, 3),
+    });
+  }
+
+  if (activeAutomationPolicyCount > 0) {
+    warnings.push({
+      severity: "warning",
+      title: `${formatCountLabel(activeAutomationPolicyCount, "active automation policy", "active automation policies")} target this class`,
+      body: "Future personalised runs will not include this class after it is removed.",
+      points: (preflight?.automationPolicies || [])
+        .filter((policy) => !policy.archived)
+        .map((policy) => `${policy.name}${policy.policyType ? ` (${policy.policyType})` : ""}`)
+        .slice(0, 4),
+    });
+  }
+
+  if (archivedAutomationPolicyCount > 0 || preflight?.hasClassAutoAssignPolicy) {
+    warnings.push({
+      severity: "warning",
+      title: "Class setup links will be removed",
+      body: "Saved class policy links and archived automation references for this class will no longer be usable after deletion.",
+      points: [],
+    });
+  }
+
+  if (inactiveMembershipCount > 0) {
+    warnings.push({
+      severity: "warning",
+      title: `${formatCountLabel(inactiveMembershipCount, "old membership record")}`,
+      body: "Old membership rows for this class must also be cleared before the class can be deleted.",
+      points: [],
+    });
+  }
+
+  if (!warnings.length) {
+    warnings.push({
+      severity: "info",
+      title: "No active pupil memberships found",
+      body: "This class looks empty. You can delete it permanently if it was created by mistake or is no longer needed.",
+      points: [],
+    });
+  }
+
+  return `
+    <div class="td-staff-access-warning-list">
+      ${warnings.map((warning) => `
+        <div class="td-staff-access-warning ${warning.severity === "error" ? "is-error" : warning.severity === "info" ? "is-info" : ""}">
+          <strong>${escapeHtml(warning.title)}</strong>
+          <p>${escapeHtml(warning.body)}</p>
+          ${
+            warning.points?.length
+              ? `<div class="td-staff-access-warning-points">${warning.points.map((point) => `<span>${escapeHtml(point)}</span>`).join("")}</div>`
+              : ""
+          }
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderClassRemovalPanel(cls) {
+  const classId = String(cls?.id || "").trim();
+  const removal = getClassRemovalStateForClass(classId);
+  const preflight = removal.preflight;
+  const targetClasses = getClassRemovalTargetClasses(cls);
+  const hasActivePupils = Number(preflight?.activePupilCount || 0) > 0;
+  const busyLabel = removal.busy ? "Removing..." : "";
+  const typeLabel = getClassRemovalTypeLabel(cls);
+
+  return `
+    <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm">
+      <div class="td-inline-head">
+        <h4>Remove class</h4>
+        <button type="button" class="td-btn td-btn--tiny" data-action="cancel-class-removal">Close</button>
+      </div>
+
+      <div class="td-class-removal-intro">
+        <strong>${escapeHtml(cls?.name || "Untitled class")}</strong>
+        <p>Before this class is deleted, Wordloom checks pupils, assignments, and automation links so you do not accidentally orphan pupils or stop personalised testing.</p>
+      </div>
+
+      ${
+        removal.loading && !preflight
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>Checking class before removal...</strong>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        removal.error
+          ? `
+            <div class="td-staff-access-warning-list">
+              <div class="td-staff-access-warning is-error">
+                <strong>Could not check this class</strong>
+                <p>${escapeHtml(removal.error)}</p>
+              </div>
+            </div>
+            <div class="td-form-actions">
+              <button class="td-btn td-btn--ghost" type="button" data-action="reload-class-removal-preflight" data-class-id="${escapeAttr(classId)}">Try again</button>
+              <button class="td-btn td-btn--ghost" type="button" data-action="cancel-class-removal">Cancel</button>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        preflight && !removal.error
+          ? `
+            ${renderClassRemovalWarningList(cls, preflight)}
+
+            ${
+              hasActivePupils
+                ? `
+                  <form data-form="class-removal-move" class="td-form-stack td-class-removal-option">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Move pupils to another ${escapeHtml(typeLabel)}</strong>
+                      <p class="td-muted">Best choice when pupils should continue receiving assignments or personalised auto-tests from another live group.</p>
+                    </div>
+                    <label class="td-field">
+                      <span>Destination ${escapeHtml(typeLabel)}</span>
+                      <select class="td-input" name="target_class_id" ${removal.busy || !targetClasses.length ? "disabled" : ""} required>
+                        <option value="">Choose destination...</option>
+                        ${targetClasses.map((targetClass) => `
+                          <option value="${escapeAttr(targetClass.id)}">
+                            ${escapeHtml(targetClass?.year_group ? `${targetClass.name} (${targetClass.year_group})` : targetClass.name || "Untitled class")}
+                          </option>
+                        `).join("")}
+                      </select>
+                    </label>
+                    ${
+                      targetClasses.length
+                        ? ""
+                        : `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">Create another ${escapeHtml(typeLabel)} before moving pupils.</p>`
+                    }
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--primary" type="submit" ${removal.busy || !targetClasses.length ? "disabled" : ""}>${escapeHtml(busyLabel || "Move pupils and delete class")}</button>
+                    </div>
+                  </form>
+
+                  <form data-form="class-removal-remove-memberships" class="td-form-stack td-class-removal-option td-class-removal-option--danger">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Remove pupils from this class</strong>
+                      <p class="td-muted">Pupils stay in the pupil directory, but they will no longer be members of this class and may stop receiving assignments or personalised auto-tests until added to another class.</p>
+                    </div>
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--danger" type="submit" ${removal.busy ? "disabled" : ""}>${escapeHtml(busyLabel || "Remove memberships and delete class")}</button>
+                    </div>
+                  </form>
+                `
+                : `
+                  <form data-form="class-removal-delete-empty" class="td-form-stack td-class-removal-option">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Delete this class permanently</strong>
+                      <p class="td-muted">Use this for empty classes or setup mistakes. Pupil records are not deleted.</p>
+                    </div>
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--danger" type="submit" ${removal.busy ? "disabled" : ""}>${escapeHtml(busyLabel || "Delete class permanently")}</button>
+                      <button class="td-btn td-btn--ghost" type="button" data-action="reload-class-removal-preflight" data-class-id="${escapeAttr(classId)}" ${removal.busy ? "disabled" : ""}>Check again</button>
+                    </div>
+                  </form>
+                `
+            }
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderClassCardLegacy(cls) {
   const isEditOpen =
     state.activePanel?.type === "edit-class" &&
+    String(state.activePanel.id) === String(cls.id);
+  const isRemovalOpen =
+    state.activePanel?.type === "remove-class" &&
     String(state.activePanel.id) === String(cls.id);
   const isResultsOpen =
     state.activePanel?.type === "class-results" &&
     String(state.activePanel.id) === String(cls.id);
 
-  const isActive = isEditOpen || isResultsOpen;
+  const isActive = isEditOpen || isRemovalOpen || isResultsOpen;
   const isFlashed = String(state.flashClassId) === String(cls.id);
   const subtitleParts = [];
   if (cls?.year_group) subtitleParts.push(cls.year_group);
@@ -23885,13 +24744,15 @@ function renderClassCardLegacy(cls) {
             Analytics
           </button>
           <button class="td-btn td-btn--ghost" type="button" data-action="open-edit-class" data-class-id="${escapeAttr(cls.id)}">Edit</button>
-          <button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">Delete</button>
+          <button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">${isRemovalOpen ? "Close remove" : "Remove"}</button>
         </div>
       </div>
 
       ${
         isResultsOpen
           ? renderClassResultsPanel(cls)
+          : isRemovalOpen
+          ? renderClassRemovalPanel(cls)
           : isEditOpen
           ? `
         <div class="td-inline-panel td-inline-panel--attached">
@@ -24020,11 +24881,15 @@ function renderClassCard(cls) {
     canEditClass &&
     state.activePanel?.type === "edit-class" &&
     String(state.activePanel.id) === String(cls.id);
+  const isRemovalOpen =
+    canEditClass &&
+    state.activePanel?.type === "remove-class" &&
+    String(state.activePanel.id) === String(cls.id);
   const isResultsOpen =
     state.activePanel?.type === "class-results" &&
     String(state.activePanel.id) === String(cls.id);
 
-  const isActive = isEditOpen || isResultsOpen;
+  const isActive = isEditOpen || isRemovalOpen || isResultsOpen;
   const isFlashed = String(state.flashClassId) === String(cls.id);
   const savedAutoAssignPolicy = getSavedClassAutoAssignPolicy(cls.id);
   const effectiveAutoAssignPolicy = getEffectiveClassAutoAssignPolicy(cls.id);
@@ -24055,13 +24920,15 @@ function renderClassCard(cls) {
             ${isResultsOpen ? "Hide results" : "Results"}
           </button>
           ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="open-edit-class" data-class-id="${escapeAttr(cls.id)}">Edit</button>` : ""}
-          ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">Delete</button>` : ""}
+          ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">${isRemovalOpen ? "Close remove" : "Remove"}</button>` : ""}
         </div>
       </div>
 
       ${
         isResultsOpen
           ? renderClassResultsPanel(cls)
+          : isRemovalOpen
+            ? renderClassRemovalPanel(cls)
           : canEditClass && isEditOpen
             ? `
         <div class="td-inline-panel td-inline-panel--attached">
@@ -24425,6 +25292,41 @@ function injectStyles() {
       font-size:0.88rem;
       line-height:1.45;
       max-width:none;
+    }
+
+    .td-class-removal-intro,
+    .td-class-removal-option{
+      border:1px solid var(--wl-border);
+      border-radius:14px;
+      padding:14px;
+      background:#fff;
+    }
+
+    .td-class-removal-intro{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      background:var(--wl-bg-soft);
+    }
+
+    .td-class-removal-intro strong,
+    .td-class-removal-option strong{
+      color:var(--wl-text);
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-class-removal-intro p,
+    .td-class-removal-option p{
+      margin:0;
+      color:var(--wl-text-muted);
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-class-removal-option--danger{
+      border-color:rgba(184,92,75,.34);
+      background:#fff9f6;
     }
 
     .td-btn--small{
@@ -28784,6 +29686,24 @@ function injectStyles() {
       margin-bottom:14px;
     }
 
+    .td-test-bulk-row{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:0 0 14px;
+      color:var(--wl-text-muted);
+      font-size:0.92rem;
+    }
+
+    .td-test-bulk-actions{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+    }
+
     .td-summary-chip{
       display:flex;
       flex-direction:column;
@@ -28890,6 +29810,10 @@ function injectStyles() {
       animation:tdFlash 2s ease;
     }
 
+    .td-test-card.is-selected{
+      border-color:rgba(var(--wl-accent-rgb),.42);
+    }
+
     @keyframes tdFlash{
       0%{ box-shadow:0 0 0 0 rgba(15,23,42,0.18); background:#f8fafc; }
       100%{ box-shadow:0 10px 24px rgba(15,23,42,0.03); background:#fff; }
@@ -28906,6 +29830,11 @@ function injectStyles() {
     .td-card-main{
       min-width:0;
       flex:1 1 auto;
+    }
+
+    .td-test-select{
+      flex:0 0 auto;
+      margin-top:2px;
     }
 
     .td-card-title{
