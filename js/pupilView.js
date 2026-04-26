@@ -667,16 +667,6 @@ async function loadAssignments(pupilId) {
       const dueAtMs = parseDateMs(item?.end_at);
       const isOverdue = !!dueAtMs && dueAtMs < nowMs;
 
-      console.log("PUPIL DASHBOARD source:", {
-        assignmentId: String(item?.id || ""),
-        pupilId: String(pupilId || ""),
-        source: hasSummary ? "assignment_pupil_statuses.result_json" : "attempts",
-        totalWords: totalWordCount,
-        correctWords: correctWordCount,
-        summaryCount: summaryRows.length,
-        attemptCount: latestAttempts.length,
-      });
-
       return {
         ...item,
         attemptedWordCount,
