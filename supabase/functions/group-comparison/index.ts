@@ -33,6 +33,7 @@ type MetricType =
 
 type ComparisonRequest = {
   groupType?: GroupType | string;
+  schoolId?: string | null;
   filters?: {
     classId?: string | null;
     yearGroup?: string | null;
@@ -79,6 +80,16 @@ type AttemptRow = {
   correct: boolean | null;
   attempt_number: number | null;
   created_at: string | null;
+};
+
+type SchoolScope = {
+  schoolId: string;
+  defaultSchoolId: string | null;
+};
+
+type SchoolScopedQuery = {
+  eq: (column: string, value: unknown) => unknown;
+  or: (filters: string) => unknown;
 };
 
 type GroupInfo = {
@@ -393,15 +404,59 @@ function isUuid(value: string | null | undefined) {
   return UUID_PATTERN.test(String(value || "").trim());
 }
 
+function applySchoolScope<T extends SchoolScopedQuery>(query: T, schoolScope: SchoolScope): T {
+  if (schoolScope.defaultSchoolId && schoolScope.schoolId === schoolScope.defaultSchoolId) {
+    return query.or(`school_id.eq.${schoolScope.schoolId},school_id.is.null`) as T;
+  }
+  return query.eq("school_id", schoolScope.schoolId) as T;
+}
+
+async function readDefaultLegacySchoolId(serviceClient: ReturnType<typeof createClient>) {
+  const { data, error } = await serviceClient.rpc("default_legacy_school_id");
+  if (error) throw error;
+  const schoolId = String(data || "").trim().toLowerCase();
+  return isUuid(schoolId) ? schoolId : null;
+}
+
+async function resolveSchoolScope(
+  serviceClient: ReturnType<typeof createClient>,
+  teacherId: string,
+  requestedSchoolIdValue: unknown,
+): Promise<SchoolScope | { response: Response }> {
+  const requestedSchoolId = String(requestedSchoolIdValue || "").trim().toLowerCase();
+  if (requestedSchoolId && !isUuid(requestedSchoolId)) {
+    return { response: json({ error: "School filter must be a valid school id." }, 400) };
+  }
+
+  const defaultSchoolId = await readDefaultLegacySchoolId(serviceClient);
+  const { data, error } = await serviceClient.rpc("phase3_resolve_active_school_id", {
+    requested_user_id: teacherId,
+    requested_school_id: requestedSchoolId || null,
+  });
+  if (error) throw error;
+
+  const schoolId = String(data || "").trim().toLowerCase();
+  if (!isUuid(schoolId)) {
+    return { response: json({ error: "No school is available for this teacher account." }, 403) };
+  }
+  if (requestedSchoolId && schoolId !== requestedSchoolId) {
+    return { response: json({ error: "You do not have access to that school." }, 403) };
+  }
+
+  return { schoolId, defaultSchoolId };
+}
+
 async function resolveVisibleClassIds(
   serviceClient: ReturnType<typeof createClient>,
   teacherId: string,
   {
     classId = "",
     yearGroup = "",
+    schoolScope,
   }: {
     classId?: string;
     yearGroup?: string;
+    schoolScope: SchoolScope;
   },
 ) {
   const { data, error } = await serviceClient.rpc("list_viewable_class_ids", {
@@ -412,8 +467,24 @@ async function resolveVisibleClassIds(
   });
 
   if (error) throw error;
-  return Array.isArray(data)
+  const visibleClassIds = Array.isArray(data)
     ? data.map((item) => String(item || "")).filter(Boolean)
+    : [];
+  if (!visibleClassIds.length) return [];
+
+  let query = serviceClient
+    .from("classes")
+    .select("id")
+    .in("id", visibleClassIds)
+    .order("name", { ascending: true });
+  query = applySchoolScope(query, schoolScope);
+  if (classId) query = query.eq("id", classId);
+  if (yearGroup) query = query.eq("year_group", yearGroup);
+
+  const { data: scopedClasses, error: scopedClassError } = await query;
+  if (scopedClassError) throw scopedClassError;
+  return Array.isArray(scopedClasses)
+    ? scopedClasses.map((item) => String(item?.id || "")).filter(Boolean)
     : [];
 }
 
@@ -870,6 +941,10 @@ Deno.serve(async (req) => {
       return json({ error: "Your teacher session could not be verified. Please sign in again." }, 401);
     }
 
+    const schoolScopeResult = await resolveSchoolScope(serviceClient, teacherId, body?.schoolId);
+    if ("response" in schoolScopeResult) return schoolScopeResult.response;
+    const schoolScope = schoolScopeResult;
+
     const rawFilters = body?.filters || {};
     const classId = String(rawFilters?.classId || "").trim();
     const yearGroup = String(rawFilters?.yearGroup || "").trim();
@@ -886,6 +961,7 @@ Deno.serve(async (req) => {
     const classIds = await resolveVisibleClassIds(serviceClient, teacherId, {
       classId,
       yearGroup,
+      schoolScope,
     });
 
     if (!classIds.length) {
@@ -914,6 +990,7 @@ Deno.serve(async (req) => {
           .in("class_id", classIds)
           .order("created_at", { ascending: false })
           .range(from, to);
+        query = applySchoolScope(query, schoolScope);
 
         if (testId) {
           query = query.eq("test_id", testId);
@@ -962,13 +1039,17 @@ Deno.serve(async (req) => {
 
     const memberships = assignmentClassIds.length
       ? await fetchAllRows<MembershipRow>(
-        async (from, to) => await serviceClient
-          .from("pupil_classes")
-          .select("class_id, pupil_id")
-          .in("class_id", assignmentClassIds)
-          .eq("active", true)
-          .order("class_id", { ascending: true })
-          .range(from, to),
+        async (from, to) => {
+          let query = serviceClient
+            .from("pupil_classes")
+            .select("class_id, pupil_id")
+            .in("class_id", assignmentClassIds)
+            .eq("active", true)
+            .order("class_id", { ascending: true })
+            .range(from, to);
+          query = applySchoolScope(query, schoolScope);
+          return await query;
+        },
         500,
         20,
       )
@@ -995,11 +1076,13 @@ Deno.serve(async (req) => {
 
     const rawGroupRows: Array<GroupValueRow & { updated_at?: string | null; created_at?: string | null }> = [];
     for (const chunk of chunkArray(selectedPupilIds, 200)) {
-      const { data, error } = await serviceClient
+      let query = serviceClient
         .from("teacher_pupil_group_values")
         .select("pupil_id, group_value, updated_at, created_at")
         .eq("group_type", groupType)
         .in("pupil_id", chunk);
+      query = applySchoolScope(query, schoolScope);
+      const { data, error } = await query;
 
       if (error) throw error;
       rawGroupRows.push(...(data || []));
@@ -1013,10 +1096,12 @@ Deno.serve(async (req) => {
 
     const testWords: TestWordRow[] = [];
     for (const chunk of chunkArray(testIds, 200)) {
-      const { data, error } = await serviceClient
+      let query = serviceClient
         .from("test_words")
         .select("id, test_id, choice")
         .in("test_id", chunk);
+      query = applySchoolScope(query, schoolScope);
+      const { data, error } = await query;
 
       if (error) throw error;
       testWords.push(...(data || []));
@@ -1056,6 +1141,7 @@ Deno.serve(async (req) => {
             .in("assignment_id", chunk)
             .order("created_at", { ascending: true })
             .range(from, to);
+          query = applySchoolScope(query, schoolScope);
 
           if (dateRange.dateFrom) {
             query = query.gte("created_at", dateRange.dateFrom);

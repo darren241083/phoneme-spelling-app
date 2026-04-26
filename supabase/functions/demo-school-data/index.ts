@@ -8,6 +8,7 @@ const corsHeaders = {
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
 const DEMO_PUPILS_PER_CLASS = 14;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FEMALE_FIRST_NAMES = [
   "Amelia",
   "Mia",
@@ -94,6 +95,17 @@ type Action = "seed" | "clear";
 type DemoSchoolRequest = {
   action?: Action | string;
   accessToken?: string | null;
+  schoolId?: string | null;
+};
+
+type SchoolScope = {
+  schoolId: string;
+  defaultSchoolId: string | null;
+};
+
+type SchoolScopedQuery = {
+  eq: (column: string, value: unknown) => unknown;
+  or: (filters: string) => unknown;
 };
 
 type DemoWord = {
@@ -288,6 +300,66 @@ function describeError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function isUuid(value: string | null | undefined) {
+  return UUID_PATTERN.test(String(value || "").trim());
+}
+
+function applySchoolScope<T extends SchoolScopedQuery>(query: T, schoolScope: SchoolScope): T {
+  if (schoolScope.defaultSchoolId && schoolScope.schoolId === schoolScope.defaultSchoolId) {
+    return query.or(`school_id.eq.${schoolScope.schoolId},school_id.is.null`) as T;
+  }
+  return query.eq("school_id", schoolScope.schoolId) as T;
+}
+
+async function readDefaultLegacySchoolId(serviceClient: ReturnType<typeof createClient>) {
+  const { data, error } = await serviceClient.rpc("default_legacy_school_id");
+  if (error) throw error;
+  const schoolId = String(data || "").trim().toLowerCase();
+  return isUuid(schoolId) ? schoolId : null;
+}
+
+async function resolveSchoolScope(
+  serviceClient: ReturnType<typeof createClient>,
+  teacherId: string,
+  requestedSchoolIdValue: unknown,
+): Promise<SchoolScope | { response: Response }> {
+  const requestedSchoolId = String(requestedSchoolIdValue || "").trim().toLowerCase();
+  if (requestedSchoolId && !isUuid(requestedSchoolId)) {
+    return { response: json({ error: "School filter must be a valid school id." }, 400) };
+  }
+
+  const defaultSchoolId = await readDefaultLegacySchoolId(serviceClient);
+  const { data, error } = await serviceClient.rpc("phase3_resolve_active_school_id", {
+    requested_user_id: teacherId,
+    requested_school_id: requestedSchoolId || null,
+  });
+  if (error) throw error;
+
+  const schoolId = String(data || "").trim().toLowerCase();
+  if (!isUuid(schoolId)) {
+    return { response: json({ error: "No school is available for this teacher account." }, 403) };
+  }
+  if (requestedSchoolId && schoolId !== requestedSchoolId) {
+    return { response: json({ error: "You do not have access to that school." }, 403) };
+  }
+
+  return { schoolId, defaultSchoolId };
+}
+
+function buildSchoolAwareDemoPrefix(teacherId: string, schoolId: string) {
+  const teacherPart = teacherId.replaceAll("-", "").slice(0, 8).toUpperCase();
+  const schoolPart = schoolId.replaceAll("-", "").slice(0, 8).toUpperCase();
+  return `DEMO-${teacherPart}-${schoolPart}`;
+}
+
+function buildLegacyDemoPrefix(teacherId: string) {
+  return `DEMO-${teacherId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+}
+
+function buildDemoUsernamePrefix(schoolId: string) {
+  return schoolId.replaceAll("-", "").slice(0, 8).toLowerCase();
+}
+
 function randomJoinCode() {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let out = "";
@@ -317,9 +389,11 @@ function buildDemoPupilIdentity(classIndex: number, pupilIndex: number) {
 
 function buildDemoGroupValueRows({
   teacherId,
+  schoolId,
   pupilsWithClass,
 }: {
   teacherId: string;
+  schoolId: string;
   pupilsWithClass: Array<{ id: string; classKey: string }>;
 }) {
   const classIndexByKey = new Map(CLASS_SPECS.map((item, index) => [item.key, index]));
@@ -351,6 +425,7 @@ function buildDemoGroupValueRows({
     return [
       {
         teacher_id: teacherId,
+        school_id: schoolId,
         pupil_id: pupil.id,
         group_type: "pp",
         group_value: ppValue,
@@ -359,6 +434,7 @@ function buildDemoGroupValueRows({
       },
       {
         teacher_id: teacherId,
+        school_id: schoolId,
         pupil_id: pupil.id,
         group_type: "sen",
         group_value: senValue,
@@ -367,6 +443,7 @@ function buildDemoGroupValueRows({
       },
       {
         teacher_id: teacherId,
+        school_id: schoolId,
         pupil_id: pupil.id,
         group_type: "gender",
         group_value: genderValue,
@@ -432,6 +509,7 @@ function buildLegacyAssignmentVariantRows(
     const base = {
       id: assignment.id,
       teacher_id: assignment.teacher_id,
+      school_id: assignment.school_id,
       class_id: assignment.class_id,
       test_id: assignment.test_id,
       created_at: assignment.created_at,
@@ -501,91 +579,152 @@ async function ensureLegacyAssignmentsCompatibility(
   return false;
 }
 
-async function cleanupDemoData(serviceClient: ReturnType<typeof createClient>, teacherId: string, demoMisPrefix: string) {
-  const { data: demoClasses, error: demoClassesError } = await serviceClient
+async function cleanupDemoData(
+  serviceClient: ReturnType<typeof createClient>,
+  teacherId: string,
+  demoMisPrefixes: string[],
+  schoolScope: SchoolScope,
+) {
+  const uniqueDemoMisPrefixes = [...new Set((demoMisPrefixes || []).map((item) => String(item || "").trim()).filter(Boolean))];
+  let demoClassesQuery = serviceClient
     .from("classes")
     .select("id")
     .eq("teacher_id", teacherId)
     .ilike("name", `${DEMO_CLASS_PREFIX}%`);
+  demoClassesQuery = applySchoolScope(demoClassesQuery, schoolScope);
+  const { data: demoClasses, error: demoClassesError } = await demoClassesQuery;
   if (demoClassesError) throw new Error(describeError(demoClassesError, "Could not find existing demo classes."));
 
-  const { data: demoTests, error: demoTestsError } = await serviceClient
+  let demoTestsQuery = serviceClient
     .from("tests")
     .select("id")
     .eq("teacher_id", teacherId)
     .ilike("title", `${DEMO_TEST_PREFIX}%`);
+  demoTestsQuery = applySchoolScope(demoTestsQuery, schoolScope);
+  const { data: demoTests, error: demoTestsError } = await demoTestsQuery;
   if (demoTestsError) throw new Error(describeError(demoTestsError, "Could not find existing demo tests."));
 
-  const { data: demoPupils, error: demoPupilsError } = await serviceClient
-    .from("pupils")
-    .select("id")
-    .ilike("mis_id", `${demoMisPrefix}%`);
-  if (demoPupilsError) throw new Error(describeError(demoPupilsError, "Could not find existing demo pupils."));
+  const demoPupilsById = new Map<string, { id: string }>();
+  for (const demoMisPrefix of uniqueDemoMisPrefixes) {
+    let demoPupilsQuery = serviceClient
+      .from("pupils")
+      .select("id")
+      .ilike("mis_id", `${demoMisPrefix}%`);
+    demoPupilsQuery = applySchoolScope(demoPupilsQuery, schoolScope);
+    const { data: demoPupils, error: demoPupilsError } = await demoPupilsQuery;
+    if (demoPupilsError) throw new Error(describeError(demoPupilsError, "Could not find existing demo pupils."));
+    for (const pupil of demoPupils || []) {
+      const id = String(pupil?.id || "");
+      if (id) demoPupilsById.set(id, { id });
+    }
+  }
 
   const classIds = (demoClasses || []).map((item) => String(item.id || "")).filter(Boolean);
   const testIds = (demoTests || []).map((item) => String(item.id || "")).filter(Boolean);
-  const pupilIds = (demoPupils || []).map((item) => String(item.id || "")).filter(Boolean);
+  const pupilIds = Array.from(demoPupilsById.keys());
 
-  const { data: demoAssignments, error: demoAssignmentsError } = classIds.length || testIds.length
-    ? await serviceClient
+  const demoAssignmentsById = new Map<string, { id: string }>();
+  if (classIds.length) {
+    let demoAssignmentsQuery = serviceClient
       .from("assignments_v2")
       .select("id")
       .eq("teacher_id", teacherId)
-      .or([
-        classIds.length ? `class_id.in.(${classIds.join(",")})` : null,
-        testIds.length ? `test_id.in.(${testIds.join(",")})` : null,
-        ].filter(Boolean).join(","))
-    : { data: [], error: null };
-  if (demoAssignmentsError) throw new Error(describeError(demoAssignmentsError, "Could not find existing demo assignments."));
+      .in("class_id", classIds);
+    demoAssignmentsQuery = applySchoolScope(demoAssignmentsQuery, schoolScope);
+    const { data: classAssignments, error: classAssignmentsError } = await demoAssignmentsQuery;
+    if (classAssignmentsError) throw new Error(describeError(classAssignmentsError, "Could not find existing demo assignments."));
+    for (const assignment of classAssignments || []) {
+      const id = String(assignment?.id || "");
+      if (id) demoAssignmentsById.set(id, { id });
+    }
+  }
+  if (testIds.length) {
+    let demoAssignmentsQuery = serviceClient
+      .from("assignments_v2")
+      .select("id")
+      .eq("teacher_id", teacherId)
+      .in("test_id", testIds);
+    demoAssignmentsQuery = applySchoolScope(demoAssignmentsQuery, schoolScope);
+    const { data: testAssignments, error: testAssignmentsError } = await demoAssignmentsQuery;
+    if (testAssignmentsError) throw new Error(describeError(testAssignmentsError, "Could not find existing demo assignments."));
+    for (const assignment of testAssignments || []) {
+      const id = String(assignment?.id || "");
+      if (id) demoAssignmentsById.set(id, { id });
+    }
+  }
 
-  const assignmentIds = (demoAssignments || []).map((item) => String(item.id || "")).filter(Boolean);
+  const assignmentIds = Array.from(demoAssignmentsById.keys());
 
   if (assignmentIds.length) {
-    const { error } = await serviceClient.from("attempts").delete().in("assignment_id", assignmentIds);
+    let attemptDeleteQuery = serviceClient.from("attempts").delete().in("assignment_id", assignmentIds);
+    attemptDeleteQuery = applySchoolScope(attemptDeleteQuery, schoolScope);
+    const { error } = await attemptDeleteQuery;
     if (error && pupilIds.length) {
-      const { error: pupilDeleteError } = await serviceClient.from("attempts").delete().in("pupil_id", pupilIds);
+      let pupilAttemptDeleteQuery = serviceClient.from("attempts").delete().in("pupil_id", pupilIds);
+      pupilAttemptDeleteQuery = applySchoolScope(pupilAttemptDeleteQuery, schoolScope);
+      const { error: pupilDeleteError } = await pupilAttemptDeleteQuery;
       if (pupilDeleteError) throw new Error(describeError(pupilDeleteError, "Could not remove existing demo attempts."));
     } else if (error) {
       throw new Error(describeError(error, "Could not remove existing demo attempts."));
     }
   } else if (pupilIds.length) {
-    const { error } = await serviceClient.from("attempts").delete().in("pupil_id", pupilIds);
+    let attemptDeleteQuery = serviceClient.from("attempts").delete().in("pupil_id", pupilIds);
+    attemptDeleteQuery = applySchoolScope(attemptDeleteQuery, schoolScope);
+    const { error } = await attemptDeleteQuery;
     if (error) throw new Error(describeError(error, "Could not remove existing demo attempts."));
   }
 
   if (assignmentIds.length) {
-    const { error } = await serviceClient.from("assignments").delete().in("id", assignmentIds);
+    let legacyAssignmentDeleteQuery = serviceClient.from("assignments").delete().in("id", assignmentIds);
+    legacyAssignmentDeleteQuery = applySchoolScope(legacyAssignmentDeleteQuery, schoolScope);
+    const { error } = await legacyAssignmentDeleteQuery;
     if (error) {
       console.warn("Could not remove legacy demo assignments.", error);
     }
   }
 
   if (assignmentIds.length) {
-    const { error } = await serviceClient.from("assignments_v2").delete().in("id", assignmentIds);
+    let assignmentDeleteQuery = serviceClient.from("assignments_v2").delete().in("id", assignmentIds);
+    assignmentDeleteQuery = applySchoolScope(assignmentDeleteQuery, schoolScope);
+    const { error } = await assignmentDeleteQuery;
     if (error) throw new Error(describeError(error, "Could not remove existing demo assignments."));
   }
   if (testIds.length) {
-    const { error: testWordsDeleteError } = await serviceClient.from("test_words").delete().in("test_id", testIds);
+    let testWordsDeleteQuery = serviceClient.from("test_words").delete().in("test_id", testIds);
+    testWordsDeleteQuery = applySchoolScope(testWordsDeleteQuery, schoolScope);
+    const { error: testWordsDeleteError } = await testWordsDeleteQuery;
     if (testWordsDeleteError) throw new Error(describeError(testWordsDeleteError, "Could not remove existing demo test words."));
-    const { error: testsDeleteError } = await serviceClient.from("tests").delete().in("id", testIds);
+    let testsDeleteQuery = serviceClient.from("tests").delete().in("id", testIds);
+    testsDeleteQuery = applySchoolScope(testsDeleteQuery, schoolScope);
+    const { error: testsDeleteError } = await testsDeleteQuery;
     if (testsDeleteError) throw new Error(describeError(testsDeleteError, "Could not remove existing demo tests."));
   }
   if (classIds.length) {
-    const { error: membershipsDeleteError } = await serviceClient.from("pupil_classes").delete().in("class_id", classIds);
+    let classMembershipsDeleteQuery = serviceClient.from("pupil_classes").delete().in("class_id", classIds);
+    classMembershipsDeleteQuery = applySchoolScope(classMembershipsDeleteQuery, schoolScope);
+    const { error: membershipsDeleteError } = await classMembershipsDeleteQuery;
     if (membershipsDeleteError) throw new Error(describeError(membershipsDeleteError, "Could not remove existing demo class memberships."));
-    const { error: classesDeleteError } = await serviceClient.from("classes").delete().in("id", classIds);
+    let classesDeleteQuery = serviceClient.from("classes").delete().in("id", classIds);
+    classesDeleteQuery = applySchoolScope(classesDeleteQuery, schoolScope);
+    const { error: classesDeleteError } = await classesDeleteQuery;
     if (classesDeleteError) throw new Error(describeError(classesDeleteError, "Could not remove existing demo classes."));
   }
   if (pupilIds.length) {
-    const { error: groupValuesDeleteError } = await serviceClient
+    let groupValuesDeleteQuery = serviceClient
       .from("teacher_pupil_group_values")
       .delete()
       .eq("teacher_id", teacherId)
       .in("pupil_id", pupilIds);
+    groupValuesDeleteQuery = applySchoolScope(groupValuesDeleteQuery, schoolScope);
+    const { error: groupValuesDeleteError } = await groupValuesDeleteQuery;
     if (groupValuesDeleteError) throw new Error(describeError(groupValuesDeleteError, "Could not remove existing demo group comparison values."));
-    const { error: membershipsDeleteError } = await serviceClient.from("pupil_classes").delete().in("pupil_id", pupilIds);
+    let pupilMembershipsDeleteQuery = serviceClient.from("pupil_classes").delete().in("pupil_id", pupilIds);
+    pupilMembershipsDeleteQuery = applySchoolScope(pupilMembershipsDeleteQuery, schoolScope);
+    const { error: membershipsDeleteError } = await pupilMembershipsDeleteQuery;
     if (membershipsDeleteError) throw new Error(describeError(membershipsDeleteError, "Could not remove existing demo pupil memberships."));
-    const { error: pupilsDeleteError } = await serviceClient.from("pupils").delete().in("id", pupilIds);
+    let pupilsDeleteQuery = serviceClient.from("pupils").delete().in("id", pupilIds);
+    pupilsDeleteQuery = applySchoolScope(pupilsDeleteQuery, schoolScope);
+    const { error: pupilsDeleteError } = await pupilsDeleteQuery;
     if (pupilsDeleteError) throw new Error(describeError(pupilsDeleteError, "Could not remove existing demo pupils."));
   }
 
@@ -597,8 +736,15 @@ async function cleanupDemoData(serviceClient: ReturnType<typeof createClient>, t
   };
 }
 
-async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teacherId: string, demoMisPrefix: string) {
+async function seedDemoData(
+  serviceClient: ReturnType<typeof createClient>,
+  teacherId: string,
+  schoolScope: SchoolScope,
+  demoMisPrefix: string,
+) {
   const now = new Date();
+  const schoolId = schoolScope.schoolId;
+  const usernameSchoolPart = buildDemoUsernamePrefix(schoolId);
 
   const insertedClasses = [];
   for (const classSpec of CLASS_SPECS) {
@@ -606,6 +752,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
       .from("classes")
       .insert({
         teacher_id: teacherId,
+        school_id: schoolId,
         name: classSpec.name,
         year_group: classSpec.yearGroup,
         join_code: randomJoinCode(),
@@ -623,6 +770,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
       .from("tests")
       .insert({
         teacher_id: teacherId,
+        school_id: schoolId,
         title: test.title,
         question_type: test.questionType,
         created_at: createdAt,
@@ -636,6 +784,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
   const wordRows = insertedTests.flatMap((test) =>
     test.words.map((word, index) => ({
       test_id: test.id,
+      school_id: schoolId,
       position: index + 1,
       word: word.word,
       sentence: word.sentence,
@@ -671,8 +820,9 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
         classKey: classSpec.key,
         first_name: firstName,
         surname,
-        username: `demo_${classSpec.key}_${pupilIndex + 1}`.toLowerCase(),
+        username: `demo_${usernameSchoolPart}_${classSpec.key}_${pupilIndex + 1}`.toLowerCase(),
         mis_id: `${demoMisPrefix}-${suffix}`,
+        school_id: schoolId,
         pin: "1234",
         must_reset_pin: false,
         is_active: true,
@@ -697,6 +847,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
 
   const demoGroupValues = buildDemoGroupValueRows({
     teacherId,
+    schoolId,
     pupilsWithClass,
   });
   if (demoGroupValues.length) {
@@ -710,6 +861,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
   const memberships = pupilsWithClass.map((pupil) => ({
     class_id: classIdByKey.get(pupil.classKey),
     pupil_id: pupil.id,
+    school_id: schoolId,
     active: true,
   }));
   const { error: membershipError } = await serviceClient.from("pupil_classes").insert(memberships);
@@ -726,6 +878,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
       .from("assignments_v2")
       .insert({
         teacher_id: teacherId,
+        school_id: schoolId,
         test_id: test.id,
         class_id: classSpec.id,
         mode: "test",
@@ -753,6 +906,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
     insertedAssignments.map((assignment) => ({
       id: assignment.assignmentId,
       teacher_id: teacherId,
+      school_id: schoolId,
       class_id: assignment.classId,
       test_id: assignment.testId,
       mode: "test",
@@ -789,6 +943,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
         for (const target of suggestedTargetRows.slice(0, targetLimit)) {
           targetWordsPayload.push({
             teacher_id: teacherId,
+            school_id: schoolId,
             assignment_id: assignment.assignmentId,
             pupil_id: pupil.id,
             test_word_id: target.row.id,
@@ -821,6 +976,7 @@ async function seedDemoData(serviceClient: ReturnType<typeof createClient>, teac
           const createdAt = new Date(assignment.createdAt.getTime() + (wordIndex % 5) * 24 * 60 * 60 * 1000 + minuteOffset * 60 * 1000);
           attemptsPayload.push({
             pupil_id: pupil.id,
+            school_id: schoolId,
             assignment_id: assignment.assignmentId,
             test_id: assignment.testId,
             test_word_id: wordRow.id,
@@ -903,8 +1059,13 @@ Deno.serve(async (req) => {
 
     const action = String(body?.action || "seed") as Action;
     const teacherId = authData.user.id;
+    const schoolScopeResult = await resolveSchoolScope(serviceClient, teacherId, body?.schoolId);
+    if ("response" in schoolScopeResult) return schoolScopeResult.response;
+    const schoolScope = schoolScopeResult;
+
     const { data: canManageDemoData, error: capabilityError } = await serviceClient.rpc("can_manage_roles", {
       requested_user_id: teacherId,
+      requested_school_id: schoolScope.schoolId,
     });
     if (capabilityError) {
       throw capabilityError;
@@ -913,9 +1074,10 @@ Deno.serve(async (req) => {
       return json({ error: "Admin access is required to manage demo data." }, 403);
     }
 
-    const demoMisPrefix = `DEMO-${teacherId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+    const legacyDemoMisPrefix = buildLegacyDemoPrefix(teacherId);
+    const demoMisPrefix = buildSchoolAwareDemoPrefix(teacherId, schoolScope.schoolId);
 
-    const cleared = await cleanupDemoData(serviceClient, teacherId, demoMisPrefix);
+    const cleared = await cleanupDemoData(serviceClient, teacherId, [demoMisPrefix, legacyDemoMisPrefix], schoolScope);
     if (action === "clear") {
       return json({
         ok: true,
@@ -924,7 +1086,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const seeded = await seedDemoData(serviceClient, teacherId, demoMisPrefix);
+    const seeded = await seedDemoData(serviceClient, teacherId, schoolScope, demoMisPrefix);
     return json({
       ok: true,
       action,

@@ -1,5 +1,5 @@
 // /js/teacherView.js
-import { fetchTeacherGroupComparison, manageDemoSchoolData, teacherAnalyticsChat } from "../ai.js?v=3.1";
+import { fetchTeacherGroupComparison, manageDemoSchoolData, teacherAnalyticsChat } from "../ai.js?v=3.2";
 import { supabase } from "./supabaseClient.js";
 import {
   persistAssignmentTargetRows,
@@ -83,6 +83,7 @@ import {
   grantStaffScope,
   importPupilRosterCsv,
   importStaffDirectoryCsv,
+  getActiveSchoolIdFromAccessContext,
   isDeveloperSchoolSwitchEnabled,
   listTeacherPupilDirectoryForInterventionGroups,
   listActiveAdminUserIds,
@@ -5104,6 +5105,7 @@ async function loadGroupComparison({ button = null } = {}) {
 
   try {
     const accessToken = await getTeacherAccessTokenOrThrow();
+    const activeSchoolId = getActiveSchoolIdFromAccessContext(state.accessContext);
     const sharedFilters = {
       classId: scopeType === "class" ? scopeValue || null : null,
       yearGroup: scopeType === "year_group" ? scopeValue || null : null,
@@ -5118,6 +5120,7 @@ async function loadGroupComparison({ button = null } = {}) {
           groupType: option.value,
           filters: sharedFilters,
           accessToken,
+          schoolId: activeSchoolId,
         }),
       ]))
     );
@@ -12723,6 +12726,7 @@ async function handleManageDemoData(action = "seed") {
     const result = await manageDemoSchoolData({
       action: normalizedAction,
       accessToken,
+      schoolId: getActiveSchoolIdFromAccessContext(state.accessContext),
     });
 
     await loadDashboardData();
@@ -13055,6 +13059,7 @@ async function submitTeacherAnalyticsQuestion(question) {
       scopeId: scopeType === "overview" ? null : scopeId,
       scopeLabel,
       history,
+      schoolId: getActiveSchoolIdFromAccessContext(state.accessContext),
     });
     const latestOutcomes = Number(response?.context?.counts?.latestWordOutcomes || 0);
     const isSampleData = Boolean(response?.context?.mockMode);

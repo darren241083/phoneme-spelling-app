@@ -67,34 +67,42 @@ async function callSupabaseFunction(name, body, accessToken = "") {
   return data;
 }
 
+function withOptionalSchoolId(body, schoolId = "") {
+  const normalizedSchoolId = String(schoolId || "").trim();
+  return normalizedSchoolId
+    ? { ...(body || {}), schoolId: normalizedSchoolId }
+    : { ...(body || {}) };
+}
+
 export async function aiSuggest(prompt) {
   const data = await callSupabaseFunction("ai-suggest", { prompt });
   return data.result || "";
 }
 
-export async function teacherAnalyticsChat({ question, scopeType = "overview", scopeId = null, scopeLabel = "", history = [], accessToken = "" }) {
-  return callSupabaseFunction("teacher-analytics-chat", {
+export async function teacherAnalyticsChat({ question, scopeType = "overview", scopeId = null, scopeLabel = "", history = [], accessToken = "", schoolId = "" }) {
+  return callSupabaseFunction("teacher-analytics-chat", withOptionalSchoolId({
     question,
     scopeType,
     scopeId,
     scopeLabel,
     history,
-  }, accessToken);
+  }, schoolId), accessToken);
 }
 
 export async function fetchTeacherGroupComparison({
   groupType = "pp",
   filters = {},
   accessToken = "",
+  schoolId = "",
 }) {
-  return callSupabaseFunction("group-comparison", {
+  return callSupabaseFunction("group-comparison", withOptionalSchoolId({
     groupType,
     filters,
-  }, accessToken);
+  }, schoolId), accessToken);
 }
 
-export async function manageDemoSchoolData({ action = "seed", accessToken = "" }) {
-  return callSupabaseFunction("demo-school-data", {
+export async function manageDemoSchoolData({ action = "seed", accessToken = "", schoolId = "" }) {
+  return callSupabaseFunction("demo-school-data", withOptionalSchoolId({
     action,
-  }, accessToken);
+  }, schoolId), accessToken);
 }
