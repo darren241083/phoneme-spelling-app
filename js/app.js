@@ -35,6 +35,18 @@ let gameRuntimePromise = null;
 let authListenerBound = false;
 let routing = false;
 
+function buildLoginRedirectTo() {
+  const origin = window.location.origin;
+  let path = window.location.pathname || "/";
+
+  if (path.endsWith("/index.html")) {
+    path = path.replace(/index\.html$/, "login.html");
+  } else if (!path.endsWith("/login.html")) {
+    path = path.endsWith("/") ? `${path}login.html` : `${path}/login.html`;
+  }
+
+  return origin + path;
+}
 function getCachedImport(currentPromise, factory, reset) {
   if (!currentPromise) {
     currentPromise = factory().catch((error) => {
@@ -393,11 +405,7 @@ pupilPin?.addEventListener("keydown", async (event) => {
 btnGoogle?.addEventListener("click", async () => {
   try {
     const supabase = await loadSupabase();
-    const origin = window.location.origin;
-    let path = window.location.pathname;
-    if (path.endsWith("/index.html")) path = path.replace("/index.html", "/");
-    if (!path.endsWith("/")) path += "/";
-    const redirectTo = origin + path;
+    const redirectTo = buildLoginRedirectTo();
 
     await supabase.auth.signInWithOAuth({
       provider: "google",

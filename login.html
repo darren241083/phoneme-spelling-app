@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wordloom Login</title>
+  <link rel="stylesheet" href="./styles.css?v=1.10" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brandTitle">Wordloom</div>
+        <div class="brandSub">Teacher tests, class presentation + pupil practice</div>
+      </div>
+      <div class="topbarRight">
+        <button id="btnSignOut" class="btn secondary" type="button" style="display:none;">Sign out</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" style="display:none;"></div>
+
+    <section id="viewRole" class="card">
+      <h2>Choose role</h2>
+      <p class="muted">Teachers create tests, present them to the class, and assign them. Pupils log in with username and PIN.</p>
+      <div class="row">
+        <button id="btnTeacher" class="btn" type="button">I&rsquo;m a teacher</button>
+        <button id="btnPupil" class="btn secondary" type="button">I&rsquo;m a pupil</button>
+        <button id="btnTryLesson" class="btn secondary" type="button">Try sample test</button>
+      </div>
+      <p class="muted">Launch a quick sample without signing in.</p>
+    </section>
+
+    <section id="viewTeacherAuth" class="card" style="display:none;">
+      <h2>Teacher sign in</h2>
+      <p class="muted">Continue with Google to create tests, classes and assignments.</p>
+      <button id="btnGoogle" class="btn" type="button">Continue with Google</button>
+      <div id="teacherAuthMsg" class="notice" style="display:none;"></div>
+    </section>
+
+    <section id="viewTeacher" class="card" style="display:none;"></section>
+
+    <section id="viewPupilAuth" class="card" style="display:none;">
+      <h2>Pupil login</h2>
+      <p class="muted">Enter your username and PIN.</p>
+      <div class="grid2">
+        <div>
+          <label>Username</label>
+          <input id="pupilClassCode" class="input" placeholder="e.g. honeill1001" />
+        </div>
+        <div>
+          <label>PIN</label>
+          <input id="pupilCode" class="input" type="password" placeholder="4 digit PIN" />
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnPupilLogin" class="btn" type="button">Login</button>
+        <button id="btnBackFromPupil" class="btn secondary" type="button">Back</button>
+      </div>
+      <div id="pupilAuthMsg" class="notice" style="display:none;"></div>
+    </section>
+
+    <section id="viewPupil" class="card" style="display:none;"></section>
+  </div>
+
+  <script src="./vendor/xlsx.full.min.js?v=0.18.5"></script>
+  <script type="module" src="./js/app.js?v=5.104"></script>
+</body>
+</html>
