@@ -1427,6 +1427,20 @@ function renderYourProgressBlock(item) {
   `;
 }
 
+function renderYourProgressStageBlock(model) {
+  const isPlaceholder = model?.state === "placeholder";
+  const tone = isPlaceholder ? "placeholder" : (model?.tone || "growing");
+  const labelText = isPlaceholder ? model?.labelText : model?.stageLabel;
+
+  return `
+    <article class="pupilYourProgressBlock pupilYourProgressBlock--stage">
+      <div class="pupilYourProgressLabel">${escapeHtml(model?.title || "Current spelling stage")}</div>
+      <div class="pupilYourProgressStagePill pupilYourProgressStagePill--${escapeHtml(tone)}">${escapeHtml(labelText || "")}</div>
+      <div class="pupilYourProgressText">${escapeHtml(model?.summaryText || "")}</div>
+    </article>
+  `;
+}
+
 function renderYourProgressResultRow(item) {
   const title = item?.title || "Task";
   return `
@@ -1443,6 +1457,15 @@ function renderYourProgressResultRow(item) {
 function renderYourProgressCard(assignments, practiceModel, progress) {
   const model = buildPupilProgressCardModel({ assignments, practiceModel, progress });
   if (!model) return "";
+  const progressBlocks = Array.isArray(model?.blocks) ? model.blocks.slice() : [];
+  const stageModel = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
+  const latestResultIndex = progressBlocks.findIndex((item) => item?.key === "latest_result");
+  const nextFocusIndex = progressBlocks.findIndex((item) => item?.key === "next_focus");
+  const stageBlock = { key: "current_spelling_stage", type: "spelling_stage", model: stageModel };
+  const stageInsertIndex = latestResultIndex >= 0
+    ? latestResultIndex + 1
+    : (nextFocusIndex >= 0 ? nextFocusIndex : progressBlocks.length);
+  progressBlocks.splice(stageInsertIndex, 0, stageBlock);
 
   return `
     <section class="card pupilYourProgressCard">
@@ -1453,7 +1476,11 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
       </div>
       ${model?.intro ? `<p class="pupilYourProgressIntro">${escapeHtml(model.intro)}</p>` : ""}
       <div class="pupilYourProgressGrid">
-        ${(Array.isArray(model?.blocks) ? model.blocks : []).map(renderYourProgressBlock).join("")}
+        ${progressBlocks.map((item) => (
+          item?.type === "spelling_stage"
+            ? renderYourProgressStageBlock(item.model)
+            : renderYourProgressBlock(item)
+        )).join("")}
       </div>
       ${Array.isArray(model?.recentResults) && model.recentResults.length ? `
         <div class="pupilYourProgressTimeline">
@@ -1463,25 +1490,6 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
           </div>
         </div>
       ` : ""}
-    </section>
-  `;
-}
-
-function renderSpellingStageCard(progress) {
-  const model = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
-  const isPlaceholder = model?.state === "placeholder";
-  const toneClass = escapeHtml(isPlaceholder ? "placeholder" : (model.tone || "growing"));
-  const labelText = isPlaceholder ? model?.labelText : model?.stageLabel;
-
-  return `
-    <section class="card pupilSpellingStageCard pupilSpellingStageCard--${toneClass}">
-      <div class="pupilSectionHead pupilSectionHead--compact">
-        <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("chart", model.title || "Current spelling stage")}</h3>
-        </div>
-      </div>
-      <div class="pupilSpellingStageLabel">${escapeHtml(labelText || "")}</div>
-      <p class="pupilSpellingStageText">${escapeHtml(model.summaryText || "")}</p>
     </section>
   `;
 }
@@ -1506,16 +1514,13 @@ function renderSpellingBeeSummaryCard(assignments) {
   `;
 }
 
-function renderPupilDashboardMiniCards(progress, assignments) {
-  const cards = [
-    renderSpellingStageCard(progress),
-    renderSpellingBeeSummaryCard(assignments),
-  ].filter(Boolean);
-  if (!cards.length) return "";
+function renderPupilDashboardMiniCards(assignments) {
+  const beeSummaryCard = renderSpellingBeeSummaryCard(assignments);
+  if (!beeSummaryCard) return "";
 
   return `
     <div class="pupilDashboardMiniCards">
-      ${cards.join("")}
+      ${beeSummaryCard}
     </div>
   `;
 }
@@ -2177,7 +2182,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
       ${renderYourProgressCard(assignments, practiceModel, progress)}
-      ${renderPupilDashboardMiniCards(progress, assignments)}
+      ${renderPupilDashboardMiniCards(assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}
