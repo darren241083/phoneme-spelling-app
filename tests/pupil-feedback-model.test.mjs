@@ -272,7 +272,7 @@ test("progress card next focus prefers practice focus over progress focus", () =
   });
 
   const nextFocus = model.blocks.find((item) => item.key === "next_focus");
-  assert.equal(nextFocus.text, "Next focus: practise words with 'ai'.");
+  assert.equal(nextFocus.text, "Practise words with 'ai' next.");
   assert.deepEqual(JSON.parse(JSON.stringify(nextFocus.chips)), ["ai"]);
 });
 
@@ -288,7 +288,7 @@ test("progress card shows a positive fallback when there is not enough data", ()
 
   assert.equal(model.state, "empty");
   assert.equal(model.intro, "Complete a few activities and your progress will appear here.");
-  assert.equal(model.blocks.find((item) => item.key === "next_focus")?.text, "Next focus: practise a mixed set of words.");
+  assert.equal(model.blocks.find((item) => item.key === "next_focus")?.text, "Keep practising a mix of words to build confidence.");
 });
 
 test("progress card recent results sort newest first and limit to 3", () => {

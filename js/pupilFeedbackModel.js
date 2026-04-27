@@ -149,17 +149,17 @@ function buildNextFocusModel(practiceModel = null, progress = null) {
   if (focus === "Mixed") {
     return {
       key: "next_focus",
-      label: "Next focus",
-      text: "Next focus: practise a mixed set of words.",
-      chips: ["Mixed practice"],
+      label: "What to try next",
+      text: "Keep practising a mix of words to build confidence.",
+      chips: ["Mixed words"],
       variant: "practice",
     };
   }
 
   return {
     key: "next_focus",
-    label: "Next focus",
-    text: `Next focus: practise words with '${focus}'.`,
+    label: "What to try next",
+    text: `Practise words with '${focus}' next.`,
     chips: [focus],
     variant: "practice",
   };
@@ -327,8 +327,8 @@ export function buildPupilProgressCardModel({
   if (recentResults.length) {
     blocks.push({
       key: "recent_effort",
-      label: "Recent effort",
-      text: `You've finished ${formatCountLabel(recentResults.length, "recent task", "recent tasks")}.`,
+      label: "What you've done",
+      text: `Great effort. You've finished ${formatCountLabel(recentResults.length, "recent task", "recent tasks")}.`,
       chips: [],
       variant: "wins",
     });
@@ -338,7 +338,7 @@ export function buildPupilProgressCardModel({
   if (latestResultText) {
     blocks.push({
       key: "latest_result",
-      label: "Latest result",
+      label: "Your latest result",
       text: latestResultText,
       chips: [],
       variant: "wins",

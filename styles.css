@@ -1751,10 +1751,11 @@ body.acc-text-large #viewPupil .spellLoomToken{
 
 .pupilYourProgressLabel{
   margin-bottom:6px;
-  font-size:12px;
-  font-weight:800;
-  text-transform:uppercase;
-  letter-spacing:.03em;
+  font-size:13px;
+  font-weight:700;
+  color:#475569;
+  text-transform:none;
+  letter-spacing:0;
 }
 
 .pupilYourProgressText{
@@ -1774,10 +1775,10 @@ body.acc-text-large #viewPupil .spellLoomToken{
 .pupilYourProgressTimelineTitle{
   margin-bottom:10px;
   font-size:13px;
-  font-weight:800;
+  font-weight:700;
   color:#475569;
-  text-transform:uppercase;
-  letter-spacing:.04em;
+  text-transform:none;
+  letter-spacing:0;
 }
 
 .pupilYourProgressTimelineList{
@@ -1798,6 +1799,7 @@ body.acc-text-large #viewPupil .spellLoomToken{
 }
 
 .pupilYourProgressTimelineCopy{
+  flex:1 1 auto;
   min-width:0;
 }
 
@@ -1806,6 +1808,9 @@ body.acc-text-large #viewPupil .spellLoomToken{
   font-size:15px;
   font-weight:800;
   line-height:1.35;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 .pupilYourProgressTimelineDate{

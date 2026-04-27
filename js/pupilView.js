@@ -1423,10 +1423,11 @@ function renderYourProgressBlock(item) {
 }
 
 function renderYourProgressResultRow(item) {
+  const title = item?.title || "Task";
   return `
     <article class="pupilYourProgressTimelineRow">
       <div class="pupilYourProgressTimelineCopy">
-        <div class="pupilYourProgressTimelineTask">${escapeHtml(item?.title || "Task")}</div>
+        <div class="pupilYourProgressTimelineTask" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
         <div class="pupilYourProgressTimelineDate">${escapeHtml(item?.dateLabel || "Recently")}</div>
       </div>
       <div class="pupilYourProgressTimelineScore">${escapeHtml(item?.scoreText || "Done")}</div>
@@ -1451,7 +1452,7 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
       </div>
       ${Array.isArray(model?.recentResults) && model.recentResults.length ? `
         <div class="pupilYourProgressTimeline">
-          <div class="pupilYourProgressTimelineTitle">Recent results</div>
+          <div class="pupilYourProgressTimelineTitle">Recent tasks</div>
           <div class="pupilYourProgressTimelineList">
             ${model.recentResults.map(renderYourProgressResultRow).join("")}
           </div>
