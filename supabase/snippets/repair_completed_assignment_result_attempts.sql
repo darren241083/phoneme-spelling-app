@@ -160,7 +160,7 @@ begin
       tw.test_id,
       lower(btrim(tw.word)) as word_key,
       count(*)::integer as word_match_count,
-      min(tw.id) as test_word_id
+      (array_agg(tw.id order by tw.id::text))[1] as test_word_id
     from public.test_words as tw
     group by tw.test_id, lower(btrim(tw.word))
   ),
