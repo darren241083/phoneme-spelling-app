@@ -12,6 +12,7 @@ const btnPupil = document.getElementById("btnPupil");
 const btnTryLesson = document.getElementById("btnTryLesson");
 const btnGoogle = document.getElementById("btnGoogle");
 const btnSignOut = document.getElementById("btnSignOut");
+const btnBackFromTeacher = document.getElementById("btnBackFromTeacher");
 const btnBackFromPupil = document.getElementById("btnBackFromPupil");
 const btnPupilLogin = document.getElementById("btnPupilLogin");
 const pupilUsername = document.getElementById("pupilClassCode");
@@ -368,6 +369,14 @@ btnTryLesson?.addEventListener("click", () => {
   window.location.href = url.toString();
 });
 
+btnBackFromTeacher?.addEventListener("click", async () => {
+  clearRole();
+  setBanner("");
+  setNotice(teacherAuthMsg, "");
+  setNotice(pupilAuthMsg, "");
+  await route();
+});
+
 btnBackFromPupil?.addEventListener("click", async () => {
   await stopPupilGameplayAudio();
   try {
@@ -409,7 +418,12 @@ btnGoogle?.addEventListener("click", async () => {
 
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
     });
   } catch (error) {
     setBanner("Google sign-in is unavailable right now. Please refresh and try again.", "error");
