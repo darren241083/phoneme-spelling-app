@@ -37,9 +37,10 @@ import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePla
 import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
 import {
   buildPupilProgressCardModel,
+  buildPupilSpellingStagePlaceholderModel,
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
-} from "./pupilFeedbackModel.js?v=1.5";
+} from "./pupilFeedbackModel.js?v=1.6";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -1467,17 +1468,19 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
 }
 
 function renderSpellingStageCard(progress) {
-  const model = buildPupilSpellingStageModel(progress);
-  if (!model) return "";
+  const model = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
+  const isPlaceholder = model?.state === "placeholder";
+  const toneClass = escapeHtml(isPlaceholder ? "placeholder" : (model.tone || "growing"));
+  const labelText = isPlaceholder ? model?.labelText : model?.stageLabel;
 
   return `
-    <section class="card pupilSpellingStageCard pupilSpellingStageCard--${escapeHtml(model.tone || "growing")}">
+    <section class="card pupilSpellingStageCard pupilSpellingStageCard--${toneClass}">
       <div class="pupilSectionHead pupilSectionHead--compact">
         <div class="pupilSectionTitleRow">
           <h3>${renderIconLabel("chart", model.title || "Current spelling stage")}</h3>
         </div>
       </div>
-      <div class="pupilSpellingStageLabel">${escapeHtml(model.stageLabel || "")}</div>
+      <div class="pupilSpellingStageLabel">${escapeHtml(labelText || "")}</div>
       <p class="pupilSpellingStageText">${escapeHtml(model.summaryText || "")}</p>
     </section>
   `;

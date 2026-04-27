@@ -5,6 +5,7 @@ const {
   buildPupilAttemptFeedbackSignals,
   buildPupilFeedbackCardModel,
   buildPupilProgressCardModel,
+  buildPupilSpellingStagePlaceholderModel,
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
 } = await loadBrowserModule("../js/pupilFeedbackModel.js", import.meta.url);
@@ -475,6 +476,36 @@ test("spelling stage model exposes only pupil-safe fields", () => {
   assert.equal("evidence" in model, false);
   assert.equal("scoreRange" in model, false);
   assert.equal("secureDifficultyScore" in model, false);
+});
+
+test("spelling stage placeholder returns the exact pupil-facing title", () => {
+  const model = buildPupilSpellingStagePlaceholderModel();
+  assert.equal(model.title, "Current spelling stage");
+});
+
+test("spelling stage placeholder returns the exact encouragement label", () => {
+  const model = buildPupilSpellingStagePlaceholderModel();
+  assert.equal(model.labelText, "Keep going");
+});
+
+test("spelling stage placeholder returns the exact summary text", () => {
+  const model = buildPupilSpellingStagePlaceholderModel();
+  assert.equal(model.summaryText, "Your spelling stage will appear as you complete more spelling tasks.");
+});
+
+test("spelling stage placeholder keeps placeholder state and tone", () => {
+  const model = buildPupilSpellingStagePlaceholderModel();
+  assert.equal(model.state, "placeholder");
+  assert.equal(model.tone, "placeholder");
+});
+
+test("spelling stage placeholder exposes only pupil-safe fields", () => {
+  const model = buildPupilSpellingStagePlaceholderModel();
+  assert.deepEqual(Object.keys(model).sort(), ["labelText", "state", "summaryText", "title", "tone"]);
+  assert.equal("stageLabel" in model, false);
+  assert.equal("score" in model, false);
+  assert.equal("responseCount" in model, false);
+  assert.equal("evidence" in model, false);
 });
 
 test("spelling bee summary returns null when there is no completed Bee result", () => {

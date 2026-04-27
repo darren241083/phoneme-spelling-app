@@ -1854,6 +1854,12 @@ body.acc-text-large #viewPupil .spellLoomToken{
     linear-gradient(180deg,#ffffff 0%,#ecfdf5 100%);
 }
 
+.pupilSpellingStageCard--placeholder{
+  background:
+    radial-gradient(circle at top right, rgba(191,219,254,0.16), transparent 34%),
+    linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+}
+
 .pupilSpellingStageLabel{
   display:inline-flex;
   align-items:center;
@@ -1866,6 +1872,12 @@ body.acc-text-large #viewPupil .spellLoomToken{
   font-size:13px;
   font-weight:800;
   line-height:1.2;
+}
+
+.pupilSpellingStageCard--placeholder .pupilSpellingStageLabel{
+  background:#eff6ff;
+  border-color:#bfdbfe;
+  color:#1d4ed8;
 }
 
 .pupilSpellingStageText{

@@ -472,6 +472,16 @@ export function buildPupilSpellingStageModel(progress = null) {
   };
 }
 
+export function buildPupilSpellingStagePlaceholderModel() {
+  return {
+    title: "Current spelling stage",
+    labelText: "Keep going",
+    summaryText: "Your spelling stage will appear as you complete more spelling tasks.",
+    tone: "placeholder",
+    state: "placeholder",
+  };
+}
+
 export function buildPupilSpellingBeeSummaryModel(assignments = []) {
   const safeAssignments = Array.isArray(assignments) ? assignments : [];
   const completedBeeRows = safeAssignments
