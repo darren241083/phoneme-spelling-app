@@ -137,6 +137,39 @@ function getAssignmentDisplayTitle(item = null) {
   return normalizeText(item?.pupilTitle || item?.pupil_title || item?.title || "Task") || "Task";
 }
 
+const PUPIL_STAGE_LABELS = {
+  easier: "Foundations",
+  core: "Core patterns",
+  stretch: "Expanding patterns",
+  challenge: "Advanced patterns",
+};
+
+const PUPIL_STAGE_SUMMARY_TEXT = {
+  easier: {
+    growing: "You're building confidence with foundation spelling patterns.",
+    secure: "You're working securely with foundation spelling patterns.",
+  },
+  core: {
+    growing: "You're building confidence with core patterns.",
+    secure: "You're working securely with core patterns.",
+  },
+  stretch: {
+    growing: "You're building confidence with expanding patterns.",
+    secure: "You're working securely with expanding patterns.",
+  },
+  challenge: {
+    growing: "You're building confidence with advanced patterns.",
+    secure: "You're ready for more advanced spelling patterns.",
+  },
+};
+
+const ATTAINMENT_LABEL_TO_STAGE_KEY = {
+  foundations: "easier",
+  "core patterns": "core",
+  "expanding patterns": "stretch",
+  "advanced patterns": "challenge",
+};
+
 function getBeeRoundReached(item = null) {
   const candidates = [
     item?.spellingBeeResult?.rounds_attempted,
@@ -406,6 +439,36 @@ export function buildPupilProgressCardModel({
     intro,
     blocks,
     recentResults,
+  };
+}
+
+export function buildPupilSpellingStageModel(progress = null) {
+  const indicator = progress?.attainmentIndicator || null;
+  const responseCount = Math.max(0, Number(indicator?.responseCount || 0));
+  const evidenceKey = normalizeText(indicator?.evidence?.key).toLowerCase();
+  if (!indicator || responseCount < 10 || (evidenceKey !== "secure" && evidenceKey !== "strong")) {
+    return null;
+  }
+
+  const stageKey = normalizeText(indicator?.attainmentBand?.key).toLowerCase()
+    || ATTAINMENT_LABEL_TO_STAGE_KEY[normalizeText(indicator?.attainmentDisplayLabel).toLowerCase()]
+    || "";
+  const stageLabel = PUPIL_STAGE_LABELS[stageKey];
+  if (!stageLabel) return null;
+
+  const performanceKey = normalizeText(indicator?.performanceKey).toLowerCase();
+  const tone = performanceKey === "secure" || performanceKey === "strong"
+    ? "secure"
+    : "growing";
+  const summaryText = PUPIL_STAGE_SUMMARY_TEXT[stageKey]?.[tone] || "";
+  if (!summaryText) return null;
+
+  return {
+    title: "Current spelling stage",
+    stageKey,
+    stageLabel,
+    summaryText,
+    tone,
   };
 }
 

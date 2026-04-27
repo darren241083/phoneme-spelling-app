@@ -37,8 +37,9 @@ import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePla
 import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
 import {
   buildPupilProgressCardModel,
+  buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
-} from "./pupilFeedbackModel.js?v=1.2";
+} from "./pupilFeedbackModel.js?v=1.3";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -1465,6 +1466,23 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
   `;
 }
 
+function renderSpellingStageCard(progress) {
+  const model = buildPupilSpellingStageModel(progress);
+  if (!model) return "";
+
+  return `
+    <section class="card pupilSpellingStageCard pupilSpellingStageCard--${escapeHtml(model.tone || "growing")}">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("chart", model.title || "Current spelling stage")}</h3>
+        </div>
+      </div>
+      <div class="pupilSpellingStageLabel">${escapeHtml(model.stageLabel || "")}</div>
+      <p class="pupilSpellingStageText">${escapeHtml(model.summaryText || "")}</p>
+    </section>
+  `;
+}
+
 function renderSpellingBeeSummaryCard(assignments) {
   const model = buildPupilSpellingBeeSummaryModel(assignments);
   if (!model) return "";
@@ -1482,6 +1500,20 @@ function renderSpellingBeeSummaryCard(assignments) {
         ${model?.rankText ? `<p class="pupilBeeSummaryLine pupilBeeSummaryLine--rank">${escapeHtml(model.rankText)}</p>` : ""}
       </div>
     </section>
+  `;
+}
+
+function renderPupilDashboardMiniCards(progress, assignments) {
+  const cards = [
+    renderSpellingStageCard(progress),
+    renderSpellingBeeSummaryCard(assignments),
+  ].filter(Boolean);
+  if (!cards.length) return "";
+
+  return `
+    <div class="pupilDashboardMiniCards">
+      ${cards.join("")}
+    </div>
   `;
 }
 
@@ -2144,7 +2176,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
       ${renderYourProgressCard(assignments, practiceModel, progress)}
-      ${renderSpellingBeeSummaryCard(assignments)}
+      ${renderPupilDashboardMiniCards(progress, assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}

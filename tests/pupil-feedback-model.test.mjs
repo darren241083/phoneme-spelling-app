@@ -5,6 +5,7 @@ const {
   buildPupilAttemptFeedbackSignals,
   buildPupilFeedbackCardModel,
   buildPupilProgressCardModel,
+  buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
 } = await loadBrowserModule("../js/pupilFeedbackModel.js", import.meta.url);
 
@@ -64,6 +65,25 @@ function assignment({
     spellingBeeResult,
     spellingBeeEventClosed,
     spellingBeeRank,
+  };
+}
+
+function progress({
+  responseCount = 10,
+  evidenceKey = "secure",
+  stageKey = "core",
+  stageLabel = "Core patterns",
+  performanceKey = "developing",
+} = {}) {
+  const indicator = {};
+  if (responseCount != null) indicator.responseCount = responseCount;
+  if (evidenceKey != null) indicator.evidence = { key: evidenceKey };
+  if (stageKey != null) indicator.attainmentBand = { key: stageKey };
+  if (stageLabel != null) indicator.attainmentDisplayLabel = stageLabel;
+  if (performanceKey != null) indicator.performanceKey = performanceKey;
+
+  return {
+    attainmentIndicator: indicator,
   };
 }
 
@@ -316,6 +336,96 @@ test("progress card recent results sort newest first and limit to 3", () => {
   });
 
   assert.deepEqual(model.recentResults.map((item) => item.title), ["Task 2", "Task 3", "Task 4"]);
+});
+
+test("spelling stage returns null when progress is missing", () => {
+  assert.equal(buildPupilSpellingStageModel(null), null);
+});
+
+test("spelling stage returns null when responseCount is below 10", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    responseCount: 9,
+  }));
+
+  assert.equal(model, null);
+});
+
+test("spelling stage returns null when evidence is limited or minimal", () => {
+  assert.equal(buildPupilSpellingStageModel(progress({ evidenceKey: "limited" })), null);
+  assert.equal(buildPupilSpellingStageModel(progress({ evidenceKey: "minimal" })), null);
+});
+
+test("spelling stage returns null when no attainment band or display label exists", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    stageKey: null,
+    stageLabel: null,
+  }));
+
+  assert.equal(model, null);
+});
+
+test("spelling stage uses core developing wording safely", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    stageKey: "core",
+    performanceKey: "developing",
+  }));
+
+  assert.equal(model.stageLabel, "Core patterns");
+  assert.equal(model.summaryText, "You're building confidence with core patterns.");
+  assert.equal(model.tone, "growing");
+});
+
+test("spelling stage uses core secure wording safely", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    stageKey: "core",
+    performanceKey: "secure",
+  }));
+
+  assert.equal(model.summaryText, "You're working securely with core patterns.");
+  assert.equal(model.tone, "secure");
+});
+
+test("spelling stage uses stretch developing wording safely", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    stageKey: "stretch",
+    stageLabel: "Expanding patterns",
+    performanceKey: "developing",
+  }));
+
+  assert.equal(model.stageLabel, "Expanding patterns");
+  assert.equal(model.summaryText, "You're building confidence with expanding patterns.");
+});
+
+test("spelling stage uses challenge strong wording safely", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    stageKey: "challenge",
+    stageLabel: "Advanced patterns",
+    performanceKey: "strong",
+    evidenceKey: "strong",
+  }));
+
+  assert.equal(model.stageLabel, "Advanced patterns");
+  assert.equal(model.summaryText, "You're ready for more advanced spelling patterns.");
+  assert.equal(model.tone, "secure");
+});
+
+test("spelling stage labels map safely for every pupil-facing band", () => {
+  const cases = [
+    { stageKey: "easier", stageLabel: "Foundations" },
+    { stageKey: "core", stageLabel: "Core patterns" },
+    { stageKey: "stretch", stageLabel: "Expanding patterns" },
+    { stageKey: "challenge", stageLabel: "Advanced patterns" },
+  ];
+
+  const labels = cases.map(({ stageKey, stageLabel }) => (
+    buildPupilSpellingStageModel(progress({
+      stageKey,
+      stageLabel,
+      performanceKey: "secure",
+    }))?.stageLabel
+  ));
+
+  assert.deepEqual(labels, ["Foundations", "Core patterns", "Expanding patterns", "Advanced patterns"]);
 });
 
 test("spelling bee summary returns null when there is no completed Bee result", () => {
