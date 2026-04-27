@@ -9,7 +9,7 @@ import {
   resolveActiveSchoolDetails,
   storeActiveSchoolId,
   withActiveSchoolId,
-} from "./db.js?v=1.45";
+} from "./db.js?v=1.46";
 import { parseWordList, splitWordToGraphemes, inferPattern, formatGraphemesForInput, parseGraphemeInput, detectMisspellingWarning } from "./wordParser.js?v=1.5";
 import { buildWordFromGraphemes, renderPhonicsPreview } from "./phonicsRenderer.js?v=1.6";
 import { getPhonemeAlternativeOptions } from "./data/phonemeHelpers.js";
@@ -116,11 +116,6 @@ function syncActiveSchoolState(){
 function canUseDeveloperSchoolSwitch(){
   const schools = Array.isArray(state.accessContext?.schools) ? state.accessContext.schools : [];
   return isDeveloperSchoolSwitchEnabled() && schools.length > 1;
-}
-
-function withActiveSchoolMatch(match = {}){
-  const activeSchoolId = String(getCurrentSchoolDetails().activeSchoolId || "").trim();
-  return activeSchoolId ? { ...(match || {}), school_id: activeSchoolId } : { ...(match || {}) };
 }
 
 function renderCurrentSchoolContextRow(){
@@ -237,12 +232,13 @@ async function insertSingleRowWithAnalyticsFallback(table, payload, selectColumn
   return result;
 }
 
-async function updateRowsWithAnalyticsFallback(table, payload, match = {}){
+async function updateRowsWithAnalyticsFallback(table, payload, match = {}, { schoolScoped = false } = {}){
   const runUpdate = async(nextPayload) => {
     let query = supabase.from(table).update(nextPayload);
     for(const [key, value] of Object.entries(match || {})){
       query = query.eq(key, value);
     }
+    if(schoolScoped) query = applyActiveSchoolFilter(query, state.accessContext);
     return query;
   };
 
@@ -404,8 +400,15 @@ async function loadAll(){
   let testQuery = supabase.from("tests").select("*").eq("id", state.testId).eq("teacher_id", teacherId);
   testQuery = applyActiveSchoolFilter(testQuery, state.accessContext);
 
+  const testRes = await testQuery.single();
+  if(testRes.error || !testRes.data){
+    if(!testRes.data && (!testRes.error || isNoRowsError(testRes.error))){
+      throw new Error("This test is not available in the current school.");
+    }
+    throw new Error(testRes.error?.message || "Could not load this test.");
+  }
+
   let wordsQuery = supabase.from("test_words").select("*").eq("test_id", state.testId);
-  wordsQuery = applyActiveSchoolFilter(wordsQuery, state.accessContext);
 
   let classQuery = supabase.from("classes").select("id,name").eq("teacher_id", teacherId);
   classQuery = applyActiveSchoolFilter(classQuery, state.accessContext);
@@ -413,19 +416,12 @@ async function loadAll(){
   let assignmentQuery = supabase.from("assignments_v2").select("*").eq("teacher_id", teacherId).eq("test_id", state.testId);
   assignmentQuery = applyActiveSchoolFilter(assignmentQuery, state.accessContext);
 
-  const [testRes, wordsRes, classRes, assignmentRes] = await Promise.all([
-    testQuery.single(),
+  const [wordsRes, classRes, assignmentRes] = await Promise.all([
     wordsQuery.order("position", { ascending:true }),
     classQuery.order("name", { ascending:true }),
     assignmentQuery,
   ]);
 
-  if(testRes.error || !testRes.data){
-    if(!testRes.data && (!testRes.error || isNoRowsError(testRes.error))){
-      throw new Error("This test is not available in the current school.");
-    }
-    throw new Error(testRes.error?.message || "Could not load this test.");
-  }
   if(wordsRes.error) throw wordsRes.error;
   if(classRes.error) throw classRes.error;
   if(assignmentRes.error) throw assignmentRes.error;
@@ -1204,7 +1200,6 @@ async function persistTestWords(savedQuestionType){
       .filter(Boolean)
   );
   const keptIds = new Set();
-  const activeSchoolId = String(getCurrentSchoolDetails().activeSchoolId || "").trim();
 
   for(const [index, row] of rowsToSave.entries()){
     const payload = buildTestWordPayload(row, index, savedQuestionType);
@@ -1221,7 +1216,6 @@ async function persistTestWords(savedQuestionType){
         .update(payload)
         .eq("id", rowId)
         .eq("test_id", state.testId);
-      if(activeSchoolId) updateQuery = updateQuery.eq("school_id", activeSchoolId);
       const { data:updated, error } = await updateQuery.select("id").single();
       if(error) throw error;
       row.id = updated?.id || rowId;
@@ -1233,7 +1227,7 @@ async function persistTestWords(savedQuestionType){
 
     const { data:inserted, error } = await supabase
       .from("test_words")
-      .insert([withActiveSchoolId({ test_id: state.testId, ...payload }, state.accessContext)])
+      .insert([{ test_id: state.testId, ...payload }])
       .select("id")
       .single();
     if(error) throw error;
@@ -1251,7 +1245,6 @@ async function persistTestWords(savedQuestionType){
       .delete()
       .in("id", deletedIds)
       .eq("test_id", state.testId);
-    if(activeSchoolId) deleteQuery = deleteQuery.eq("school_id", activeSchoolId);
     const { error } = await deleteQuery;
     if(error) throw error;
   }
@@ -1379,8 +1372,6 @@ async function approveRowException(index, button){
       .update(payload)
       .eq("id", row.id)
       .eq("test_id", state.testId);
-    const activeSchoolId = String(getCurrentSchoolDetails().activeSchoolId || "").trim();
-    if(activeSchoolId) updateQuery = updateQuery.eq("school_id", activeSchoolId);
     const { error } = await updateQuery;
     if(error) throw error;
 
@@ -1452,13 +1443,13 @@ async function saveBuilder({ assign=false, silent=false }){
     state.test.analytics_target_words_per_pupil = analyticsSettings.count;
     if(!state.isLocked){
       const savedQuestionType = normalizeStoredQuestionType(state.test.question_type, { title });
-      const { error:testError } = await updateRowsWithAnalyticsFallback("tests", {
+      const { error:testError } = await updateRowsWithAnalyticsFallback("tests", withActiveSchoolId({
         title,
         status: assign ? "published" : "draft",
         question_type: savedQuestionType,
         analytics_target_words_enabled: analyticsSettings.enabled,
         analytics_target_words_per_pupil: analyticsSettings.count,
-      }, withActiveSchoolMatch({ id: state.testId, teacher_id: state.user.id }));
+      }, state.accessContext), { id: state.testId, teacher_id: state.user.id }, { schoolScoped: true });
       if(testError) throw testError;
       await persistTestWords(savedQuestionType);
       const rowsToSave = getRowsForSave();
@@ -1489,11 +1480,11 @@ async function saveBuilder({ assign=false, silent=false }){
         const schoolScopedPayload = withActiveSchoolId(payload, state.accessContext);
         const existingAssignmentId = state.assignmentsByClass[classId]?.assignmentId;
         if(existingAssignmentId){
-          const { error } = await updateRowsWithAnalyticsFallback("assignments_v2", schoolScopedPayload, withActiveSchoolMatch({
+          const { error } = await updateRowsWithAnalyticsFallback("assignments_v2", schoolScopedPayload, {
             id: existingAssignmentId,
             teacher_id: state.user.id,
             test_id: state.testId,
-          }));
+          }, { schoolScoped: true });
           if(error) throw error;
           state.assignmentsByClass[classId] = {
             ...s,
@@ -1559,8 +1550,7 @@ async function saveBuilder({ assign=false, silent=false }){
           .eq("id", assignmentId)
           .eq("teacher_id", state.user.id)
           .eq("test_id", state.testId);
-        const activeSchoolId = String(getCurrentSchoolDetails().activeSchoolId || "").trim();
-        if(activeSchoolId) deleteQuery = deleteQuery.eq("school_id", activeSchoolId);
+        deleteQuery = applyActiveSchoolFilter(deleteQuery, state.accessContext);
         const { error } = await deleteQuery;
         if(error) throw error;
         state.assignmentsByClass[classId] = {

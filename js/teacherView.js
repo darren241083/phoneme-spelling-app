@@ -121,7 +121,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.45";
+} from "./db.js?v=1.46";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -10893,11 +10893,11 @@ async function handleCreateTestFromDashboard(button) {
 
   const { data, error } = await supabase
     .from("tests")
-    .insert({
+    .insert(withActiveSchoolId({
       teacher_id: state.user.id,
       title: "Untitled test",
       question_type: DEFAULT_QUESTION_TYPE,
-    })
+    }, state.accessContext))
     .select()
     .single();
 
@@ -12982,11 +12982,11 @@ async function handleDuplicateTest(testId) {
 
   const { data: newTest, error: insertError } = await supabase
     .from("tests")
-    .insert({
+    .insert(withActiveSchoolId({
       teacher_id: state.user.id,
       title: `${original.title} (copy)`,
       question_type: normalizeStoredQuestionType(original.question_type, { title: original.title }),
-    })
+    }, state.accessContext))
     .select()
     .single();
 
@@ -12997,11 +12997,11 @@ async function handleDuplicateTest(testId) {
     return;
   }
 
-  const { data: originalWords, error: qError } = await supabase
+  let originalWordsQuery = supabase
     .from("test_words")
     .select("*")
-    .eq("test_id", testId)
-    .order("position", { ascending: true });
+    .eq("test_id", testId);
+  const { data: originalWords, error: qError } = await originalWordsQuery.order("position", { ascending: true });
 
   if (!qError && Array.isArray(originalWords) && originalWords.length) {
     const wordRows = originalWords.map((q, index) => ({

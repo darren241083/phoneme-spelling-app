@@ -772,11 +772,22 @@ export function withActiveSchoolId(payload = {}, accessContext = null) {
   return schoolId ? { ...(payload || {}), school_id: schoolId } : { ...(payload || {}) };
 }
 
+function isLegacyDefaultActiveSchool(accessContext = null, schoolId = "") {
+  if (!accessContext || typeof accessContext === "string") return false;
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  if (!safeSchoolId) return false;
+  const { activeSchool } = resolveActiveSchoolDetails(accessContext);
+  return normalizeSchoolId(activeSchool?.id) === safeSchoolId && !!activeSchool?.is_legacy_default;
+}
+
 export function applyActiveSchoolFilter(query, accessContext = null) {
   const schoolId = typeof accessContext === "string"
     ? normalizeSchoolId(accessContext)
     : getActiveSchoolIdFromAccessContext(accessContext);
   if (!schoolId || !query || typeof query.eq !== "function") return query;
+  if (isLegacyDefaultActiveSchool(accessContext, schoolId) && typeof query.or === "function") {
+    return query.or(`school_id.eq.${schoolId},school_id.is.null`);
+  }
   return query.eq("school_id", schoolId);
 }
 

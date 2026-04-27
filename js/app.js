@@ -75,7 +75,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.89");
+      const module = await import("./teacherView.js?v=6.91");
       return module.renderTeacherDashboard;
     },
     () => {
