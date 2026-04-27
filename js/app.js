@@ -419,7 +419,32 @@ btnGoogle?.addEventListener("click", async () => {
 });
 
 btnSignOut?.addEventListener("click", async () => {
+  const role = getRole();
   await stopPupilGameplayAudio();
+
+  if (role === "pupil") {
+    try {
+      const { pupilLogout } = await loadPupilAuth();
+      pupilLogout();
+    } catch (error) {
+      console.warn("pupil sign-out unavailable:", error);
+    }
+
+    clearRole();
+    setBanner("");
+    setNotice(pupilAuthMsg, "");
+    setNotice(teacherAuthMsg, "");
+    showRolePicker();
+
+    try {
+      const supabase = await loadSupabase();
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn("pupil Supabase sign-out unavailable:", error);
+    }
+    return;
+  }
+
   try {
     const supabase = await loadSupabase();
     await supabase.auth.signOut();
