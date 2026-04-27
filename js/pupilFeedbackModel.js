@@ -427,10 +427,10 @@ export function buildPupilProgressCardModel({
   let state = "ready";
   if (!hasAnyEvidence) {
     state = "empty";
-    intro = "Complete a few activities and your progress will appear here.";
+    intro = "You're just getting started. Complete a few activities and your progress will appear here.";
   } else if (!recentResults.length) {
     state = "light";
-    intro = "You're getting started. Each finished activity helps build your progress.";
+    intro = "Your progress will build as you complete more tasks.";
   }
 
   return {

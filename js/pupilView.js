@@ -39,7 +39,7 @@ import {
   buildPupilProgressCardModel,
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
-} from "./pupilFeedbackModel.js?v=1.3";
+} from "./pupilFeedbackModel.js?v=1.4";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -1878,14 +1878,12 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
         return [];
       });
       const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
-      if (dashboardAssignments.length) {
-        const [practiceModel, progress] = await Promise.all([
-          loadPracticeModel(pupilId),
-          loadPupilProgress(pupilId),
-        ]);
-        renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
-        return;
-      }
+      const [practiceModel, progress] = await Promise.all([
+        loadPracticeModel(pupilId),
+        loadPupilProgress(pupilId),
+      ]);
+      renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+      return;
     }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: "waiting",

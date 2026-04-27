@@ -316,8 +316,29 @@ test("progress card shows a positive fallback when there is not enough data", ()
   });
 
   assert.equal(model.state, "empty");
-  assert.equal(model.intro, "Complete a few activities and your progress will appear here.");
+  assert.equal(model.intro, "You're just getting started. Complete a few activities and your progress will appear here.");
   assert.equal(model.blocks.find((item) => item.key === "next_focus")?.text, "Keep practising a mix of words to build confidence.");
+});
+
+test("progress card shows light-state getting-started copy before completed tasks", () => {
+  const model = buildPupilProgressCardModel({
+    assignments: [],
+    practiceModel: null,
+    progress: {
+      attemptHistory: [
+        attempt({
+          testWordId: "w1",
+          word: "rain",
+          correct: true,
+          createdAt: "2026-04-01T09:00:00.000Z",
+        }),
+      ],
+      practiseNext: [],
+    },
+  });
+
+  assert.equal(model.state, "light");
+  assert.equal(model.intro, "Your progress will build as you complete more tasks.");
 });
 
 test("progress card recent results sort newest first and limit to 3", () => {
