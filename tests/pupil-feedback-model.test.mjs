@@ -363,17 +363,29 @@ test("spelling stage returns null when progress is missing", () => {
   assert.equal(buildPupilSpellingStageModel(null), null);
 });
 
-test("spelling stage returns null when responseCount is below 10", () => {
+test("spelling stage returns null when responseCount is below 4", () => {
   const model = buildPupilSpellingStageModel(progress({
-    responseCount: 9,
+    responseCount: 3,
   }));
 
   assert.equal(model, null);
 });
 
-test("spelling stage returns null when evidence is limited or minimal", () => {
-  assert.equal(buildPupilSpellingStageModel(progress({ evidenceKey: "limited" })), null);
+test("spelling stage returns null when evidence is minimal", () => {
   assert.equal(buildPupilSpellingStageModel(progress({ evidenceKey: "minimal" })), null);
+});
+
+test("spelling stage allows limited evidence with 4 or more responses using growing wording", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    responseCount: 4,
+    evidenceKey: "limited",
+    stageKey: "core",
+    performanceKey: "developing",
+  }));
+
+  assert.equal(model.stageLabel, "Core patterns");
+  assert.equal(model.summaryText, "You're building confidence with core patterns.");
+  assert.equal(model.tone, "growing");
 });
 
 test("spelling stage returns null when no attainment band or display label exists", () => {
@@ -447,6 +459,22 @@ test("spelling stage labels map safely for every pupil-facing band", () => {
   ));
 
   assert.deepEqual(labels, ["Foundations", "Core patterns", "Expanding patterns", "Advanced patterns"]);
+});
+
+test("spelling stage model exposes only pupil-safe fields", () => {
+  const model = buildPupilSpellingStageModel(progress({
+    responseCount: 12,
+    evidenceKey: "secure",
+    stageKey: "stretch",
+    performanceKey: "secure",
+  }));
+
+  assert.deepEqual(Object.keys(model).sort(), ["stageKey", "stageLabel", "summaryText", "title", "tone"]);
+  assert.equal("score" in model, false);
+  assert.equal("responseCount" in model, false);
+  assert.equal("evidence" in model, false);
+  assert.equal("scoreRange" in model, false);
+  assert.equal("secureDifficultyScore" in model, false);
 });
 
 test("spelling bee summary returns null when there is no completed Bee result", () => {

@@ -39,7 +39,7 @@ import {
   buildPupilProgressCardModel,
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
-} from "./pupilFeedbackModel.js?v=1.4";
+} from "./pupilFeedbackModel.js?v=1.5";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {

@@ -446,7 +446,7 @@ export function buildPupilSpellingStageModel(progress = null) {
   const indicator = progress?.attainmentIndicator || null;
   const responseCount = Math.max(0, Number(indicator?.responseCount || 0));
   const evidenceKey = normalizeText(indicator?.evidence?.key).toLowerCase();
-  if (!indicator || responseCount < 10 || (evidenceKey !== "secure" && evidenceKey !== "strong")) {
+  if (!indicator || responseCount < 4 || evidenceKey === "minimal") {
     return null;
   }
 
