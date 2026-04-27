@@ -89,7 +89,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.65");
+      const module = await import("./pupilView.js?v=3.66");
       return module.renderPupilView;
     },
     () => {

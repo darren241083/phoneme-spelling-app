@@ -17,7 +17,8 @@ import {
 } from "./db.js?v=1.47";
 import { mountGame } from "./game.js?v=1.41";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
-import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
+import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
+import { buildPreviewModel, renderPhonicsPreviewModel } from "./phonicsRenderer.js?v=1.6";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
 import { renderIcon, renderIconLabel, renderInfoTip } from "./uiIcons.js?v=1.3";
 import {
@@ -48,7 +49,11 @@ const pupilDashboardState = {
     teacher_tasks: false,
   },
   beeLeaderboardOpenByAssignment: {},
+  openNextTeachingFocus: "",
+  openHeroStageHelp: "",
 };
+let pupilHeroStageOutsideClickHandler = null;
+let pupilHeroStageEscapeHandler = null;
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -968,7 +973,7 @@ function buildPupilHeroModel(assignments, practiceModel, progress) {
       ? "You have 1 teacher task to do."
       : `You have ${pendingAssignments.length} teacher tasks to do.`;
   } else if (completedAssignments.length) {
-    summary = "Nice work. Your finished tasks stay here for a little while.";
+    summary = "Nice work. Here's what to focus on next.";
   } else if (practiceCount) {
     summary = "Your teacher tasks are done. Extra practice is ready if you want it.";
   } else if (!wordsChecked) {
@@ -1016,12 +1021,128 @@ function buildPupilHeroModel(assignments, practiceModel, progress) {
   };
 }
 
-function renderPupilHeroGroup(group) {
+function renderPupilHeroGroup(group, context = {}) {
+  const isNextGroup = String(group?.label || "").trim().toLowerCase() === "next";
   return `
     <article class="pupilHeroGroup">
       <div class="pupilHeroGroupLabel">${escapeHtml(group.label)}</div>
-      ${renderProgressChipList(group.items, group.variant, group.formatter)}
+      ${isNextGroup
+        ? renderNextTeachingChipList(group, context)
+        : renderProgressChipList(group.items, group.variant, group.formatter)}
     </article>
+  `;
+}
+
+const PUPIL_HERO_STAGE_INFO_TEXT = "Spelling stage shows the kind of spelling patterns you are currently practising in Wordloom. It is just a guide to the patterns shown here.";
+const PUPIL_HERO_STAGE_STEPS = [
+  {
+    key: "easier",
+    label: "Foundations",
+    helpText: "This stage includes simple sound-to-letter patterns.",
+    examplesText: "Words like: cat, shop, rain",
+  },
+  {
+    key: "core",
+    label: "Core",
+    helpText: "Common spelling patterns you use a lot.",
+    examplesText: "Words like: made, bird, light",
+  },
+  {
+    key: "stretch",
+    label: "Expanding",
+    helpText: "As you build confidence, you'll meet more ways to spell the same sound.",
+    examplesText: "Words like: play, eight, they",
+  },
+  {
+    key: "challenge",
+    label: "Advanced",
+    helpText: "As you move on, you'll meet longer words, word families, and tricky patterns.",
+    examplesText: "Words like: science, decision, information",
+  },
+];
+
+function getPupilHeroStageStep(stageKey) {
+  const safeKey = String(stageKey || "").trim().toLowerCase();
+  return PUPIL_HERO_STAGE_STEPS.find((item) => item.key === safeKey) || null;
+}
+
+function renderPupilHeroStageInfoTip() {
+  return renderInfoTip(PUPIL_HERO_STAGE_INFO_TEXT, {
+    label: "About spelling stage",
+    className: "pupilHeroStageInfo",
+    triggerClassName: "pupilHeroStageInfoTrigger",
+    bubbleClassName: "pupilHeroStageInfoBubble",
+    align: "start",
+  });
+}
+
+function getPupilHeroStageHelpId(stageKey) {
+  const safeKey = String(stageKey || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  return `pupil-hero-stage-help-${safeKey || "stage"}`;
+}
+
+function renderPupilHeroStageBands(activeKey = "") {
+  const safeActiveKey = String(activeKey || "").trim().toLowerCase();
+  const openKey = PUPIL_HERO_STAGE_STEPS.some((item) => item.key === pupilDashboardState.openHeroStageHelp)
+    ? pupilDashboardState.openHeroStageHelp
+    : "";
+  return `
+    <div class="pupilHeroStageBands${openKey ? " pupilHeroStageBands--hasOpen" : ""}" aria-label="Wordloom spelling stage bands">
+      ${PUPIL_HERO_STAGE_STEPS.map((item) => {
+        const isActive = item.key === safeActiveKey;
+        const isOpen = item.key === openKey;
+        const helpId = getPupilHeroStageHelpId(item.key);
+        return `
+          <div class="pupilHeroStageBandTip${isOpen ? " pupilHeroStageBandTip--open" : ""}">
+            <button
+              class="pupilHeroStageBand${isActive ? " pupilHeroStageBand--active" : ""}"
+              type="button"
+              data-action="toggle-hero-stage-help"
+              data-stage-key="${escapeHtml(item.key)}"
+              aria-expanded="${isOpen ? "true" : "false"}"
+              aria-controls="${escapeHtml(helpId)}"
+              aria-label="${escapeHtml(`About ${item.label} spelling stage`)}"
+              ${isActive ? 'aria-current="step"' : ""}
+            >
+              ${escapeHtml(item.label)}
+            </button>
+            <div class="pupilHeroStageBandBubble" id="${escapeHtml(helpId)}" role="note">
+              ${isActive ? `<p>${escapeHtml("This is where you are practising now.")}</p>` : ""}
+              <p>${escapeHtml(item.helpText)}</p>
+              <p class="pupilHeroStageBandExamples">${escapeHtml(item.examplesText)}</p>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPupilHeroStageStrip(progress) {
+  const model = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
+  const isPlaceholder = model?.state === "placeholder";
+  const activeStage = getPupilHeroStageStep(model?.stageKey);
+
+  if (isPlaceholder || !activeStage) {
+    return `
+      <div class="pupilHeroStageStrip pupilHeroStageStrip--placeholder">
+        <div class="pupilHeroStageHead">
+          <span class="pupilHeroStageLabel">Spelling stage</span>
+          ${renderPupilHeroStageInfoTip()}
+        </div>
+        ${renderPupilHeroStageBands()}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pupilHeroStageStrip">
+      <div class="pupilHeroStageHead">
+        <span class="pupilHeroStageLabel">Spelling stage</span>
+        ${renderPupilHeroStageInfoTip()}
+      </div>
+      ${renderPupilHeroStageBands(activeStage.key)}
+    </div>
   `;
 }
 
@@ -1039,9 +1160,11 @@ function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, se
         </div>
       </div>
 
+      ${renderPupilHeroStageStrip(progress)}
+
       ${hero.highlightGroups.length ? `
         <div class="pupilHeroHighlights">
-          ${hero.highlightGroups.map(renderPupilHeroGroup).join("")}
+          ${hero.highlightGroups.map((group) => renderPupilHeroGroup(group, { assignments, practiceModel })).join("")}
         </div>
       ` : ""}
     </section>
@@ -1246,6 +1369,193 @@ function renderProgressChipList(items, variant = "neutral", formatter = (item) =
         <span class="pupilProgressChip pupilProgressChip--${escapeHtml(variant)}">${escapeHtml(formatter(item))}</span>
       `).join("")}
     </div>
+  `;
+}
+
+function normalizeNextTeachingFocus(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z-]/g, "");
+}
+
+function getChoiceObject(row = null) {
+  const choice = row?.choice;
+  if (choice && typeof choice === "object" && !Array.isArray(choice)) return choice;
+  return {};
+}
+
+function normalizeFocusList(value) {
+  const list = Array.isArray(value) ? value : [value];
+  return list
+    .map((item) => normalizeNextTeachingFocus(item))
+    .filter(Boolean);
+}
+
+function getWordFocusGraphemes(row = null) {
+  const choice = getChoiceObject(row);
+  return [
+    ...normalizeFocusList(choice?.focus_graphemes),
+    normalizeNextTeachingFocus(choice?.focus_grapheme || choice?.engine_focus_grapheme || choice?.engineFocusGrapheme || ""),
+  ].filter(Boolean);
+}
+
+function getTeachingExampleWord(row = null) {
+  return String(row?.word || row?.word_text || row?.wordText || row?.correctSpelling || "").trim();
+}
+
+function collectNextTeachingExamples(focus, assignments = [], practiceModel = null) {
+  const safeFocus = normalizeNextTeachingFocus(focus);
+  if (!safeFocus) return [];
+
+  const examples = [];
+  const seen = new Set();
+  const addRows = (rows = []) => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (examples.length >= 5) return;
+      if (!getWordFocusGraphemes(row).includes(safeFocus)) continue;
+      const word = getTeachingExampleWord(row);
+      const key = word.toLowerCase();
+      if (!word || seen.has(key)) continue;
+      seen.add(key);
+      examples.push({
+        word,
+        segments: Array.isArray(row?.segments) ? row.segments : [],
+      });
+    }
+  };
+
+  for (const pack of getPracticePacks(practiceModel)) {
+    addRows(pack?.words || []);
+    if (examples.length >= 5) break;
+  }
+
+  for (const assignment of Array.isArray(assignments) ? assignments : []) {
+    addRows(assignment?.words || []);
+    if (examples.length >= 5) break;
+  }
+
+  return examples.slice(0, 5);
+}
+
+function buildNextTeachingSoundLine(focus) {
+  const phoneme = inferPhonemeFromGrapheme(normalizeNextTeachingFocus(focus), "all");
+  return phoneme
+    ? `This often sounds like ${phoneme}.`
+    : "Look carefully at this spelling pattern.";
+}
+
+function buildNextTeachingCue(focus) {
+  const clean = normalizeNextTeachingFocus(focus);
+  if (clean.includes("-")) return "Look for the letters working across the word.";
+  if (clean.replace(/-/g, "").length <= 1) return "Look for this letter in the word.";
+  return "Look for these letters working together.";
+}
+
+function getNextTeachingCardId(focus) {
+  const clean = normalizeNextTeachingFocus(focus);
+  return `pupil-next-teaching-${clean || "focus"}`;
+}
+
+function buildNextTeachingPreviewModel(focus, examples = []) {
+  const cleanFocus = normalizeNextTeachingFocus(focus);
+  if (!cleanFocus) return null;
+
+  for (const item of Array.isArray(examples) ? examples : []) {
+    const word = String(item?.word || "").trim();
+    const segments = Array.isArray(item?.segments) ? item.segments : [];
+    if (!word || !segments.length) continue;
+    if (!normalizeFocusList(segments).includes(cleanFocus)) continue;
+
+    const model = buildPreviewModel(word, segments);
+    if (!Array.isArray(model?.letters) || !model.letters.length) continue;
+    if (!Array.isArray(model?.marks) || !model.marks.length) continue;
+    return { word, model };
+  }
+
+  return null;
+}
+
+function renderNextTeachingPreview(focus, examples = []) {
+  const preview = buildNextTeachingPreviewModel(focus, examples);
+  if (!preview) return "";
+
+  const previewHtml = renderPhonicsPreviewModel(preview.model);
+  if (!previewHtml) return "";
+
+  return `
+    <div class="pupilNextTeachingPreview" aria-label="${escapeHtml(`Visual phonics preview for ${preview.word}`)}">
+      ${previewHtml}
+    </div>
+  `;
+}
+
+function renderNextTeachingCard(focus, { assignments = [], practiceModel = null } = {}) {
+  const clean = normalizeNextTeachingFocus(focus);
+  if (!clean) return "";
+
+  const examples = collectNextTeachingExamples(clean, assignments, practiceModel);
+  const examplesHtml = examples.length
+    ? `
+      <div class="pupilNextTeachingExamples" aria-label="Example words">
+        ${examples.slice(0, 5).map((item) => `<span class="pupilNextTeachingExample">${escapeHtml(item.word)}</span>`).join("")}
+      </div>
+    `
+    : "";
+
+  return `
+    <div class="pupilNextTeachingCard" id="${escapeHtml(getNextTeachingCardId(clean))}" role="region" aria-label="${escapeHtml(`${clean} spelling help`)}">
+      <div class="pupilNextTeachingHead">
+        <div class="pupilNextTeachingTitle">${escapeHtml(clean)}</div>
+        <button class="pupilNextTeachingClose" type="button" data-action="close-next-teaching">Got it</button>
+      </div>
+      <div class="pupilNextTeachingLine">${escapeHtml(buildNextTeachingSoundLine(clean))}</div>
+      <div class="pupilNextTeachingCue">${escapeHtml(buildNextTeachingCue(clean))}</div>
+      ${examplesHtml}
+      ${renderNextTeachingPreview(clean, examples)}
+    </div>
+  `;
+}
+
+function renderNextTeachingChipList(group, { assignments = [], practiceModel = null } = {}) {
+  const items = Array.isArray(group?.items) ? group.items : [];
+  if (!items.length) {
+    return `<div class="pupilProgressEmpty">Nothing here yet.</div>`;
+  }
+
+  const visibleFocuses = items
+    .map((item) => normalizeNextTeachingFocus(group?.formatter ? group.formatter(item) : item?.target || item))
+    .filter(Boolean);
+  const openFocus = visibleFocuses.includes(normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus))
+    ? normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus)
+    : "";
+
+  return `
+    <div class="pupilProgressChips pupilNextTeachingChips">
+      ${items.map((item) => {
+        const label = String(group?.formatter ? group.formatter(item) : item?.target || item || "").trim();
+        const focus = normalizeNextTeachingFocus(label);
+        if (!focus) {
+          return `<span class="pupilProgressChip pupilProgressChip--${escapeHtml(group?.variant || "practice")}">${escapeHtml(label)}</span>`;
+        }
+        const isOpen = openFocus === focus;
+        return `
+          <button
+            class="pupilProgressChip pupilProgressChip--${escapeHtml(group?.variant || "practice")} pupilNextTeachingChip"
+            type="button"
+            data-action="toggle-next-teaching"
+            data-focus="${escapeHtml(focus)}"
+            aria-expanded="${isOpen ? "true" : "false"}"
+            aria-controls="${escapeHtml(getNextTeachingCardId(focus))}"
+            aria-label="${escapeHtml(`${isOpen ? "Close" : "Open"} ${label || focus} spelling help`)}"
+          >
+            <span class="pupilNextTeachingChipText">${escapeHtml(label || focus)}</span>
+            <span class="pupilNextTeachingChipCue" aria-hidden="true"></span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+    ${openFocus ? renderNextTeachingCard(openFocus, { assignments, practiceModel }) : ""}
   `;
 }
 
@@ -1494,6 +1804,32 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
   `;
 }
 
+function renderRecentTasksSection(assignments, practiceModel, progress) {
+  const model = buildPupilProgressCardModel({ assignments, practiceModel, progress });
+  const recentResults = Array.isArray(model?.recentResults) ? model.recentResults : [];
+
+  return `
+    <section class="card pupilSectionCard pupilRecentTasksCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("chart", "Recent tasks")}</h3>
+        </div>
+      </div>
+      ${
+        recentResults.length
+          ? `
+            <div class="pupilYourProgressTimeline pupilRecentTasksTimeline">
+              <div class="pupilYourProgressTimelineList">
+                ${recentResults.map(renderYourProgressResultRow).join("")}
+              </div>
+            </div>
+          `
+          : `<p class="pupilEmptyText">Finished tasks will show here.</p>`
+      }
+    </section>
+  `;
+}
+
 function renderSpellingBeeSummaryCard(assignments) {
   const model = buildPupilSpellingBeeSummaryModel(assignments);
   if (!model) return "";
@@ -1584,6 +1920,7 @@ function getPracticeEmptyText(practiceModel = null) {
 
 function renderPracticeSection(practiceModel) {
   const practicePacks = getPracticePacks(practiceModel);
+  if (!practicePacks.length) return "";
 
   return `
     <section class="card pupilSectionCard pupilPracticeSection">
@@ -1592,15 +1929,9 @@ function renderPracticeSection(practiceModel) {
           <h3>${renderIconLabel("spark", "Extra practice")}</h3>
         </div>
       </div>
-      ${
-        practicePacks.length
-          ? `
-            <div class="pupilPracticeOptions">
-              ${practicePacks.map((pack, index) => renderPracticeOption(pack, index)).join("")}
-            </div>
-          `
-          : `<p class="pupilEmptyText">${escapeHtml(getPracticeEmptyText(practiceModel))}</p>`
-      }
+      <div class="pupilPracticeOptions">
+        ${practicePacks.map((pack, index) => renderPracticeOption(pack, index)).join("")}
+      </div>
     </section>
   `;
 }
@@ -1801,6 +2132,35 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
     });
   });
 
+  containerEl.querySelectorAll('[data-action="toggle-next-teaching"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const focus = normalizeNextTeachingFocus(button.getAttribute("data-focus") || "");
+      if (!focus) return;
+      pupilDashboardState.openHeroStageHelp = "";
+      pupilDashboardState.openNextTeachingFocus = normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus) === focus
+        ? ""
+        : focus;
+      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="toggle-hero-stage-help"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const stageKey = String(button.getAttribute("data-stage-key") || "").trim().toLowerCase();
+      if (!PUPIL_HERO_STAGE_STEPS.some((item) => item.key === stageKey)) return;
+      pupilDashboardState.openHeroStageHelp = pupilDashboardState.openHeroStageHelp === stageKey ? "" : stageKey;
+      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="close-next-teaching"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      pupilDashboardState.openHeroStageHelp = "";
+      pupilDashboardState.openNextTeachingFocus = "";
+      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    });
+  });
+
   containerEl.querySelectorAll('[data-action="toggle-bee-leaderboard"]').forEach((button) => {
     button.addEventListener("click", () => {
       const assignmentId = String(button.getAttribute("data-assignment-id") || "");
@@ -1813,7 +2173,34 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
     });
   });
 
+  bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress);
   bindAccessibilityControlEvents(containerEl);
+}
+
+function bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress) {
+  if (pupilHeroStageOutsideClickHandler) {
+    document.removeEventListener("click", pupilHeroStageOutsideClickHandler);
+  }
+  if (pupilHeroStageEscapeHandler) {
+    document.removeEventListener("keydown", pupilHeroStageEscapeHandler);
+  }
+
+  pupilHeroStageOutsideClickHandler = (event) => {
+    if (!pupilDashboardState.openHeroStageHelp) return;
+    const target = event?.target;
+    if (target?.closest?.('[data-action="toggle-hero-stage-help"], .pupilHeroStageBandBubble')) return;
+    pupilDashboardState.openHeroStageHelp = "";
+    renderDashboard(containerEl, session, assignments, practiceModel, progress);
+  };
+
+  pupilHeroStageEscapeHandler = (event) => {
+    if (event?.key !== "Escape" || !pupilDashboardState.openHeroStageHelp) return;
+    pupilDashboardState.openHeroStageHelp = "";
+    renderDashboard(containerEl, session, assignments, practiceModel, progress);
+  };
+
+  document.addEventListener("click", pupilHeroStageOutsideClickHandler);
+  document.addEventListener("keydown", pupilHeroStageEscapeHandler);
 }
 
 function bindAccessibilityControlEvents(containerEl) {
@@ -2181,7 +2568,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
-      ${renderYourProgressCard(assignments, practiceModel, progress)}
+      ${renderRecentTasksSection(assignments, practiceModel, progress)}
       ${renderPupilDashboardMiniCards(assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}

@@ -1554,6 +1554,7 @@ body.acc-text-large #viewPupil .spellLoomToken{
 
 .pupilHeroTop,
 .pupilHeroIntro,
+.pupilHeroStageStrip,
 .pupilHeroHighlights{
   position:relative;
   z-index:1;
@@ -1580,14 +1581,272 @@ body.acc-text-large #viewPupil .spellLoomToken{
   line-height:1.4;
 }
 
+.pupilHeroStageStrip{
+  display:grid;
+  grid-template-columns:auto minmax(320px,1fr);
+  align-items:center;
+  gap:10px 12px;
+  width:100%;
+  max-width:none;
+  margin-top:14px;
+  padding:10px 12px;
+  border:1px solid rgba(203,213,225,.82);
+  border-radius:14px;
+  background:rgba(248,250,252,.88);
+}
+
+.pupilHeroStageHead{
+  display:flex;
+  align-items:center;
+  gap:6px 8px;
+  min-width:0;
+}
+
+.pupilHeroStageLabel{
+  color:#475569;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.2;
+}
+
+.pupilHeroStageInfo{
+  display:inline-flex;
+}
+
+.pupilHeroStageInfoTrigger{
+  width:22px;
+  height:22px;
+  border-color:rgba(148,163,184,.48);
+  background:rgba(255,255,255,.78);
+  color:#64748b;
+}
+
+.pupilHeroStageInfoTrigger .uiIcon{
+  width:13px;
+  height:13px;
+}
+
+.pupilHeroStageInfoBubble{
+  width:min(260px, calc(100vw - 52px));
+  font-size:13px;
+  line-height:1.45;
+}
+
+.pupilHeroStageBands{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+  min-width:0;
+  overflow:visible;
+}
+
+.pupilHeroStageBandTip{
+  position:relative;
+  display:block;
+  min-width:0;
+}
+
+.pupilHeroStageBand{
+  appearance:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  min-width:0;
+  min-height:28px;
+  padding:6px 8px;
+  border:1px solid rgba(203,213,225,.9);
+  border-radius:10px;
+  background:rgba(255,255,255,.86);
+  color:#64748b;
+  font-family:inherit;
+  font-size:12px;
+  font-weight:800;
+  line-height:1.15;
+  text-align:center;
+  cursor:help;
+  transition:border-color .16s ease, background-color .16s ease, box-shadow .16s ease, color .16s ease;
+}
+
+.pupilHeroStageBand:hover,
+.pupilHeroStageBandTip:focus-within .pupilHeroStageBand{
+  border-color:#94a3b8;
+  background:#fff;
+}
+
+.pupilHeroStageBand:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(59,130,246,.16);
+}
+
+.pupilHeroStageBand--active{
+  border-color:#86efac;
+  background:#dcfce7;
+  color:#166534;
+  box-shadow:inset 0 0 0 1px rgba(34,197,94,.18);
+}
+
+.pupilHeroStageBand--active:focus-visible{
+  box-shadow:inset 0 0 0 1px rgba(34,197,94,.18), 0 0 0 3px rgba(59,130,246,.16);
+}
+
+.pupilHeroStageBandBubble{
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 8px);
+  width:min(230px, calc(100vw - 52px));
+  padding:9px 10px;
+  border:1px solid rgba(15,23,42,.16);
+  border-radius:12px;
+  background:#0f172a;
+  color:#f8fafc;
+  font-size:12px;
+  font-weight:650;
+  line-height:1.42;
+  text-align:left;
+  white-space:normal;
+  box-shadow:0 16px 40px rgba(15,23,42,.22);
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:translate(-50%,6px);
+  transition:opacity .16s ease, transform .16s ease, visibility .16s ease;
+  z-index:40;
+}
+
+.pupilHeroStageBandBubble::after{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:100%;
+  width:10px;
+  height:10px;
+  background:#0f172a;
+  border-right:1px solid rgba(15,23,42,.16);
+  border-bottom:1px solid rgba(15,23,42,.16);
+  transform:translate(-50%,-50%) rotate(45deg);
+}
+
+.pupilHeroStageBandBubble p{
+  margin:0;
+}
+
+.pupilHeroStageBandExamples{
+  margin-top:5px !important;
+  color:#cbd5e1;
+}
+
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:hover .pupilHeroStageBandBubble,
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:focus-within .pupilHeroStageBandBubble,
+.pupilHeroStageBandTip--open .pupilHeroStageBandBubble{
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+  transform:translate(-50%,0);
+}
+
+.pupilHeroStageBandTip:first-child .pupilHeroStageBandBubble{
+  left:0;
+  transform:translate(0,6px);
+}
+
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:first-child:hover .pupilHeroStageBandBubble,
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:first-child:focus-within .pupilHeroStageBandBubble,
+.pupilHeroStageBandTip:first-child.pupilHeroStageBandTip--open .pupilHeroStageBandBubble{
+  transform:translate(0,0);
+}
+
+.pupilHeroStageBandTip:first-child .pupilHeroStageBandBubble::after{
+  left:18px;
+  transform:translateY(-50%) rotate(45deg);
+}
+
+.pupilHeroStageBandTip:last-child .pupilHeroStageBandBubble{
+  left:auto;
+  right:0;
+  transform:translate(0,6px);
+}
+
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:last-child:hover .pupilHeroStageBandBubble,
+.pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:last-child:focus-within .pupilHeroStageBandBubble,
+.pupilHeroStageBandTip:last-child.pupilHeroStageBandTip--open .pupilHeroStageBandBubble{
+  transform:translate(0,0);
+}
+
+.pupilHeroStageBandTip:last-child .pupilHeroStageBandBubble::after{
+  left:auto;
+  right:18px;
+  transform:translateY(-50%) rotate(45deg);
+}
+
+.pupilHeroStageStrip--placeholder{
+  border-color:rgba(191,219,254,.92);
+  background:rgba(239,246,255,.88);
+}
+
+.pupilHeroStageStrip--placeholder .pupilHeroStageBand{
+  border-color:rgba(147,197,253,.7);
+  background:rgba(255,255,255,.72);
+  color:#64748b;
+}
+
+@media (max-width:760px){
+  .pupilHeroStageStrip{
+    grid-template-columns:1fr;
+    align-items:stretch;
+  }
+
+  .pupilHeroStageBands{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .pupilHeroStageBandTip:nth-child(odd) .pupilHeroStageBandBubble{
+    left:0;
+    right:auto;
+    transform:translate(0,6px);
+  }
+
+  .pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:nth-child(odd):hover .pupilHeroStageBandBubble,
+  .pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:nth-child(odd):focus-within .pupilHeroStageBandBubble,
+  .pupilHeroStageBandTip:nth-child(odd).pupilHeroStageBandTip--open .pupilHeroStageBandBubble{
+    transform:translate(0,0);
+  }
+
+  .pupilHeroStageBandTip:nth-child(odd) .pupilHeroStageBandBubble::after{
+    left:18px;
+    right:auto;
+    transform:translateY(-50%) rotate(45deg);
+  }
+
+  .pupilHeroStageBandTip:nth-child(even) .pupilHeroStageBandBubble{
+    left:auto;
+    right:0;
+    transform:translate(0,6px);
+  }
+
+  .pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:nth-child(even):hover .pupilHeroStageBandBubble,
+  .pupilHeroStageBands:not(.pupilHeroStageBands--hasOpen) .pupilHeroStageBandTip:nth-child(even):focus-within .pupilHeroStageBandBubble,
+  .pupilHeroStageBandTip:nth-child(even).pupilHeroStageBandTip--open .pupilHeroStageBandBubble{
+    transform:translate(0,0);
+  }
+
+  .pupilHeroStageBandTip:nth-child(even) .pupilHeroStageBandBubble::after{
+    left:auto;
+    right:18px;
+    transform:translateY(-50%) rotate(45deg);
+  }
+}
+
 .pupilHeroHighlights{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
   gap:12px;
   margin-top:16px;
+  align-items:start;
 }
 
 .pupilHeroGroup{
+  align-self:start;
   border:1px solid rgba(203,213,225,.92);
   border-radius:18px;
   background:rgba(255,255,255,0.88);
@@ -1866,6 +2125,14 @@ body.acc-text-large #viewPupil .spellLoomToken{
   font-size:13px;
   font-weight:800;
   line-height:1.2;
+}
+
+.pupilRecentTasksCard{
+  padding:18px 20px;
+}
+
+.pupilRecentTasksTimeline{
+  margin-top:12px;
 }
 
 .pupilDashboardMiniCards{
@@ -2392,6 +2659,153 @@ body.acc-text-large #viewPupil .spellLoomToken{
   background:#dbeafe;
   border-color:#93c5fd;
   color:#1d4ed8;
+}
+
+.pupilHeroGroup .pupilNextTeachingChip{
+  appearance:none;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-family:inherit;
+  cursor:pointer;
+  transition:transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+}
+
+.pupilNextTeachingChipText{
+  line-height:1;
+}
+
+.pupilNextTeachingChipCue{
+  flex:0 0 auto;
+  width:5px;
+  height:5px;
+  border-top:2px solid currentColor;
+  border-right:2px solid currentColor;
+  opacity:.58;
+  transform:rotate(45deg);
+  transition:opacity .14s ease, transform .14s ease;
+}
+
+.pupilHeroGroup .pupilNextTeachingChip:hover,
+.pupilHeroGroup .pupilNextTeachingChip:focus-visible{
+  border-color:#fb923c;
+  box-shadow:0 0 0 3px rgba(251,146,60,.18);
+  outline:none;
+  transform:translateY(-1px);
+}
+
+.pupilHeroGroup .pupilNextTeachingChip[aria-expanded="true"]{
+  border-color:#f97316;
+  background:#fed7aa;
+  color:#7c2d12;
+}
+
+.pupilHeroGroup .pupilNextTeachingChip[aria-expanded="true"] .pupilNextTeachingChipCue{
+  opacity:.82;
+  transform:rotate(135deg);
+}
+
+.pupilNextTeachingCard{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-top:8px;
+  padding:10px;
+  border:1px solid #fdba74;
+  border-radius:14px;
+  background:#fff7ed;
+  box-shadow:0 10px 24px rgba(154,52,18,.08);
+}
+
+.pupilNextTeachingHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.pupilNextTeachingTitle{
+  font-size:20px;
+  font-weight:850;
+  line-height:1;
+  color:#7c2d12;
+}
+
+.pupilNextTeachingLine,
+.pupilNextTeachingCue{
+  margin:0;
+  color:#431407;
+  font-size:13px;
+  line-height:1.35;
+}
+
+.pupilNextTeachingCue{
+  color:#9a3412;
+}
+
+.pupilNextTeachingExamples{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.pupilNextTeachingExample{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:4px 8px;
+  border:1px solid #fed7aa;
+  border-radius:999px;
+  background:#fff;
+  color:#7c2d12;
+  font-size:13px;
+  font-weight:750;
+  line-height:1.15;
+}
+
+.pupilNextTeachingPreview{
+  --wl-warning:#c28a3d;
+  --wl-text:#1c1c1c;
+  max-width:100%;
+  margin-top:6px;
+  padding:10px 10px 6px;
+  border:1px solid #fed7aa;
+  border-radius:12px;
+  background:#fff;
+  overflow:hidden;
+}
+
+.pupilNextTeachingPreview .pr-scroll{
+  padding-bottom:4px;
+}
+
+.pupilNextTeachingPreview .pr-cell{
+  font-size:15px;
+}
+
+.pupilNextTeachingPreview .pr-wrap{
+  max-width:none;
+}
+
+.pupilNextTeachingClose{
+  appearance:none;
+  border:1px solid #fdba74;
+  border-radius:999px;
+  background:#fff;
+  color:#9a3412;
+  cursor:pointer;
+  font-family:inherit;
+  font-size:13px;
+  font-weight:800;
+  line-height:1;
+  padding:6px 9px;
+}
+
+.pupilNextTeachingClose:hover,
+.pupilNextTeachingClose:focus-visible{
+  border-color:#f97316;
+  box-shadow:0 0 0 3px rgba(251,146,60,.18);
+  outline:none;
 }
 
 .pupilProgressEmpty{
