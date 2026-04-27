@@ -1831,6 +1831,31 @@ body.acc-text-large #viewPupil .spellLoomToken{
   line-height:1.2;
 }
 
+.pupilBeeSummaryCard{
+  padding:16px 20px;
+  background:
+    radial-gradient(circle at top right, rgba(250,204,21,0.14), transparent 34%),
+    linear-gradient(180deg,#ffffff 0%,#fffbeb 100%);
+}
+
+.pupilBeeSummaryLines{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.pupilBeeSummaryLine{
+  margin:0;
+  color:var(--text);
+  font-size:15px;
+  line-height:1.5;
+}
+
+.pupilBeeSummaryLine--rank{
+  color:#92400e;
+  font-weight:700;
+}
+
 .pupilSectionHead--compact{
   align-items:center;
   margin-bottom:0;

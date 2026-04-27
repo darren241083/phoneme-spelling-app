@@ -35,7 +35,10 @@ import {
 } from "./spellingIndicator.js?v=1.5";
 import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
 import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
-import { buildPupilProgressCardModel } from "./pupilFeedbackModel.js?v=1.1";
+import {
+  buildPupilProgressCardModel,
+  buildPupilSpellingBeeSummaryModel,
+} from "./pupilFeedbackModel.js?v=1.2";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -1462,6 +1465,26 @@ function renderYourProgressCard(assignments, practiceModel, progress) {
   `;
 }
 
+function renderSpellingBeeSummaryCard(assignments) {
+  const model = buildPupilSpellingBeeSummaryModel(assignments);
+  if (!model) return "";
+
+  return `
+    <section class="card pupilBeeSummaryCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("award", model.title || "Spelling Bee")}</h3>
+        </div>
+      </div>
+      <div class="pupilBeeSummaryLines">
+        <p class="pupilBeeSummaryLine">${escapeHtml(model.latestText || "")}</p>
+        <p class="pupilBeeSummaryLine">${escapeHtml(model.bestText || "")}</p>
+        ${model?.rankText ? `<p class="pupilBeeSummaryLine pupilBeeSummaryLine--rank">${escapeHtml(model.rankText)}</p>` : ""}
+      </div>
+    </section>
+  `;
+}
+
 function renderAssignments(assignments) {
   if (!assignments.length) return "";
 
@@ -2121,6 +2144,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
       ${renderYourProgressCard(assignments, practiceModel, progress)}
+      ${renderSpellingBeeSummaryCard(assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}

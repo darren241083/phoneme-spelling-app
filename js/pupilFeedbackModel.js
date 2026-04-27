@@ -137,6 +137,39 @@ function getAssignmentDisplayTitle(item = null) {
   return normalizeText(item?.pupilTitle || item?.pupil_title || item?.title || "Task") || "Task";
 }
 
+function getBeeRoundReached(item = null) {
+  const candidates = [
+    item?.spellingBeeResult?.rounds_attempted,
+    item?.attemptedWordCount,
+    item?.spellingBeeResult?.streak,
+    item?.correctWordCount,
+  ];
+
+  for (const value of candidates) {
+    const roundReached = Math.max(0, Number(value) || 0);
+    if (roundReached > 0) return roundReached;
+  }
+
+  return 0;
+}
+
+function compareBeeRows(a = null, b = null, mode = "latest") {
+  const aCompletedAtMs = parseDateMs(a?.completedAt || a?.completed_at || a?.created_at);
+  const bCompletedAtMs = parseDateMs(b?.completedAt || b?.completed_at || b?.created_at);
+  const aRoundReached = getBeeRoundReached(a);
+  const bRoundReached = getBeeRoundReached(b);
+
+  if (mode === "best") {
+    if (bRoundReached !== aRoundReached) return bRoundReached - aRoundReached;
+    if (bCompletedAtMs !== aCompletedAtMs) return bCompletedAtMs - aCompletedAtMs;
+  } else {
+    if (bCompletedAtMs !== aCompletedAtMs) return bCompletedAtMs - aCompletedAtMs;
+    if (bRoundReached !== aRoundReached) return bRoundReached - aRoundReached;
+  }
+
+  return normalizeText(b?.id || "").localeCompare(normalizeText(a?.id || ""));
+}
+
 function buildNextFocusModel(practiceModel = null, progress = null) {
   const rawFocus = normalizeText(
     practiceModel?.focusGrapheme
@@ -373,5 +406,33 @@ export function buildPupilProgressCardModel({
     intro,
     blocks,
     recentResults,
+  };
+}
+
+export function buildPupilSpellingBeeSummaryModel(assignments = []) {
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const completedBeeRows = safeAssignments
+    .filter((item) => !!item?.isSpellingBee && !!item?.completed)
+    .map((item) => ({
+      ...item,
+      roundReached: getBeeRoundReached(item),
+    }))
+    .filter((item) => item.roundReached > 0);
+
+  if (!completedBeeRows.length) return null;
+
+  const latestBee = completedBeeRows.slice().sort((a, b) => compareBeeRows(a, b, "latest"))[0] || null;
+  const bestBee = completedBeeRows.slice().sort((a, b) => compareBeeRows(a, b, "best"))[0] || null;
+  if (!latestBee || !bestBee) return null;
+
+  const rank = Math.max(0, Number(latestBee?.spellingBeeRank || 0)) || null;
+
+  return {
+    title: "Spelling Bee",
+    latestText: `Latest Bee: You reached round ${latestBee.roundReached}.`,
+    bestText: `Best result: Round ${bestBee.roundReached}.`,
+    rankText: latestBee?.spellingBeeEventClosed && rank
+      ? `Your rank: #${rank}`
+      : "",
   };
 }

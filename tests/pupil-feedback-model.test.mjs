@@ -5,6 +5,7 @@ const {
   buildPupilAttemptFeedbackSignals,
   buildPupilFeedbackCardModel,
   buildPupilProgressCardModel,
+  buildPupilSpellingBeeSummaryModel,
 } = await loadBrowserModule("../js/pupilFeedbackModel.js", import.meta.url);
 
 const TESTS = [];
@@ -42,6 +43,10 @@ function assignment({
   isBaseline = false,
   isSpellingBee = false,
   attemptSource = "teacher_assigned",
+  attemptedWordCount = 0,
+  spellingBeeResult = null,
+  spellingBeeEventClosed = false,
+  spellingBeeRank = null,
 } = {}) {
   return {
     id,
@@ -55,6 +60,10 @@ function assignment({
     isBaseline,
     isSpellingBee,
     attempt_source: attemptSource,
+    attemptedWordCount,
+    spellingBeeResult,
+    spellingBeeEventClosed,
+    spellingBeeRank,
   };
 }
 
@@ -307,6 +316,107 @@ test("progress card recent results sort newest first and limit to 3", () => {
   });
 
   assert.deepEqual(model.recentResults.map((item) => item.title), ["Task 2", "Task 3", "Task 4"]);
+});
+
+test("spelling bee summary returns null when there is no completed Bee result", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completed: false,
+      spellingBeeResult: { rounds_attempted: 3 },
+    }),
+  ]);
+
+  assert.equal(model, null);
+});
+
+test("spelling bee summary uses the newest completed Bee as the latest result", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completedAt: "2026-04-02T09:00:00.000Z",
+      attemptedWordCount: 4,
+    }),
+    assignment({
+      id: "bee-2",
+      isSpellingBee: true,
+      completedAt: "2026-04-05T09:00:00.000Z",
+      attemptedWordCount: 6,
+    }),
+  ]);
+
+  assert.equal(model.latestText, "Latest Bee: You reached round 6.");
+});
+
+test("spelling bee summary uses the highest round as the best result", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completedAt: "2026-04-05T09:00:00.000Z",
+      attemptedWordCount: 4,
+    }),
+    assignment({
+      id: "bee-2",
+      isSpellingBee: true,
+      completedAt: "2026-04-03T09:00:00.000Z",
+      spellingBeeResult: { rounds_attempted: 7 },
+    }),
+  ]);
+
+  assert.equal(model.bestText, "Best result: Round 7.");
+});
+
+test("spelling bee summary hides rank when the event is not closed", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completedAt: "2026-04-05T09:00:00.000Z",
+      attemptedWordCount: 5,
+      spellingBeeEventClosed: false,
+      spellingBeeRank: 3,
+    }),
+  ]);
+
+  assert.equal(model.rankText, "");
+});
+
+test("spelling bee summary shows rank only when the event is closed and rank data exists", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completedAt: "2026-04-05T09:00:00.000Z",
+      attemptedWordCount: 5,
+      spellingBeeEventClosed: true,
+      spellingBeeRank: 3,
+    }),
+  ]);
+
+  assert.equal(model.rankText, "Your rank: #3");
+});
+
+test("spelling bee summary ignores normal non-Bee assignments", () => {
+  const model = buildPupilSpellingBeeSummaryModel([
+    assignment({
+      id: "task-1",
+      title: "Friday task",
+      completedAt: "2026-04-06T09:00:00.000Z",
+      attemptedWordCount: 9,
+    }),
+    assignment({
+      id: "bee-1",
+      isSpellingBee: true,
+      completedAt: "2026-04-05T09:00:00.000Z",
+      attemptedWordCount: 5,
+    }),
+  ]);
+
+  assert.equal(model.latestText, "Latest Bee: You reached round 5.");
+  assert.equal(model.bestText, "Best result: Round 5.");
 });
 
 let failures = 0;
