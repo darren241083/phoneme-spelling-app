@@ -744,6 +744,12 @@ function getAccessCapabilities() {
     : createDefaultAccessContext(state.user?.id || "").capabilities;
 }
 
+function hasTeacherAuthoringAccess() {
+  const accessContext = getAccessContext();
+  const legacyRole = String(accessContext?.legacy?.teacher_app_role || "").trim().toLowerCase();
+  return !!accessContext?.roles?.teacher || legacyRole === "teacher";
+}
+
 function canManageAutomation() {
   return !!getAccessCapabilities()?.can_manage_automation;
 }
@@ -766,19 +772,19 @@ function canManageRoles() {
 }
 
 function canCreateClasses() {
-  return !!getAccessCapabilities()?.can_create_classes;
+  return !!getAccessCapabilities()?.can_create_classes || hasTeacherAuthoringAccess();
 }
 
 function canCreateTests() {
-  return !!getAccessCapabilities()?.can_create_tests;
+  return !!getAccessCapabilities()?.can_create_tests || hasTeacherAuthoringAccess();
 }
 
 function canAssignTests() {
-  return !!getAccessCapabilities()?.can_assign_tests;
+  return !!getAccessCapabilities()?.can_assign_tests || hasTeacherAuthoringAccess();
 }
 
 function canManageOwnContent() {
-  return !!getAccessCapabilities()?.can_manage_own_content;
+  return !!getAccessCapabilities()?.can_manage_own_content || hasTeacherAuthoringAccess();
 }
 
 function getCurrentTeacherId() {
@@ -878,9 +884,7 @@ function getDashboardTitle() {
   const roles = getAccessContext()?.roles || {};
 
   if (canManageAutomation() || roles.admin) return "Admin dashboard";
-  if (!roles.teacher && roles.hoy) return "Head of Year dashboard";
-  if (!roles.teacher && !roles.hoy && roles.hod) return "Head of Department dashboard";
-  if (roles.teacher || canCreateClasses() || canCreateTests() || canAssignTests() || canManageOwnContent()) {
+  if (hasTeacherAuthoringAccess() || canCreateClasses() || canCreateTests() || canAssignTests() || canManageOwnContent()) {
     return "Teacher dashboard";
   }
   if (roles.hoy) return "Head of Year dashboard";
@@ -22460,6 +22464,7 @@ function renderSectionTestsLegacy() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${renderTestLibraryCreateAction()}
           <div class="td-search-row">
             <input
               class="td-input"
@@ -22478,13 +22483,13 @@ function renderSectionTestsLegacy() {
                 : `
                 <div class="td-empty">
                   <strong>No matching tests.</strong>
-                  <p>Try a different search term.</p>
+                  <p>${escapeHtml(getNoMatchingTestsMessage())}</p>
                 </div>
               `
               : `
             <div class="td-empty">
-              <strong>You haven’t created any tests yet.</strong>
-              <p>Use + Create test above to build your first one.</p>
+              <strong>${escapeHtml(getEmptyTestLibraryTitle())}</strong>
+              <p>${escapeHtml(getEmptyTestLibraryMessage())}</p>
             </div>
           `
           }
@@ -22561,6 +22566,33 @@ function renderTestLibrarySummary(groups, filteredCount) {
       </div>
     </div>
   `;
+}
+
+function renderTestLibraryCreateAction() {
+  if (!canCreateTests()) return "";
+  return `
+    <div class="td-test-library-action-row">
+      <button class="td-btn td-btn--primary td-btn--small" type="button" data-action="create-test">+ Create test</button>
+    </div>
+  `;
+}
+
+function getNoMatchingTestsMessage() {
+  return canCreateTests()
+    ? "Try a different search term, or create a new test."
+    : "Try a different search term.";
+}
+
+function getEmptyTestLibraryMessage() {
+  return canCreateTests()
+    ? "Use Create test to build your first one."
+    : "No tests are available for your current access.";
+}
+
+function getEmptyTestLibraryTitle() {
+  return canCreateTests()
+    ? "You have not created any tests yet."
+    : "No tests available.";
 }
 
 function renderTestBulkActions() {
@@ -22640,6 +22672,7 @@ function renderSectionTests() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${renderTestLibraryCreateAction()}
           <div class="td-search-row">
             <input
               class="td-input"
@@ -22684,13 +22717,13 @@ function renderSectionTests() {
                 : `
                 <div class="td-empty">
                   <strong>No matching tests.</strong>
-                  <p>Try a different search term.</p>
+                  <p>${escapeHtml(getNoMatchingTestsMessage())}</p>
                 </div>
               `
               : `
             <div class="td-empty">
-              <strong>You haven’t created any tests yet.</strong>
-              <p>Use + Create test above to build your first one.</p>
+              <strong>${escapeHtml(getEmptyTestLibraryTitle())}</strong>
+              <p>${escapeHtml(getEmptyTestLibraryMessage())}</p>
             </div>
           `
           }
@@ -29908,6 +29941,12 @@ function injectStyles() {
       flex-wrap:wrap;
       gap:10px;
       margin-bottom:14px;
+    }
+
+    .td-test-library-action-row{
+      display:flex;
+      justify-content:flex-end;
+      margin-bottom:12px;
     }
 
     .td-test-bulk-row{
