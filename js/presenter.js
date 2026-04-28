@@ -421,17 +421,28 @@ function renderBuilder() {
   const wordCount = clampSampleWordCount(builder.wordCount);
 
   appEl.innerHTML = `
-    <div class="presentBuilderShell">
-      <section class="card presentBuilderCard">
+    <div class="presentBuilderShell presentPublicShell">
+      <header class="presentPublicTopbar">
+        <a class="presentPublicWordmark" href="./index.html" aria-label="Wordloom homepage">
+          <span class="presentPublicWordmarkMark" aria-hidden="true">W</span>
+          <span>WORDLOOM</span>
+        </a>
+        <nav class="presentPublicNav" aria-label="Sample test navigation">
+          <a href="./index.html">Back to homepage</a>
+          <a href="./login.html">Log in</a>
+        </nav>
+      </header>
+      <section class="card presentBuilderCard presentPublicCard">
         <div class="row presentBuilderTopRow">
           <button class="btn secondary" type="button" data-action="go-home">Back</button>
         </div>
+        <span class="presentPublicEyebrow">Wordloom sample</span>
         <h1>Set up a sample test</h1>
-        <p class="presentLead">Pick a focus, adjust the words, then launch. Nothing is saved.</p>
+        <p class="presentLead">Choose a sample format, adjust the words, then launch a no-save test.</p>
         ${state.error ? `<p class="presentError">${escapeHtml(state.error)}</p>` : ""}
         <form id="presentBuilderForm" class="presentBuilderForm">
           <input type="hidden" name="starter_id" value="${escapeHtml(builder.starterId || "")}" />
-          <div class="presentFieldGrid">
+          <div class="presentFieldGrid presentPublicFormGrid">
             <label class="presentField">
               <span>Test type</span>
               <select class="select" name="question_type">
@@ -644,13 +655,77 @@ function injectStyles() {
   style.id = "presenterStyles";
   style.textContent = `
     .presentPageBody{
-      background:var(--wl-bg-soft);
+      background:
+        linear-gradient(180deg, rgba(var(--wl-accent-rgb),.08), rgba(255,255,255,0) 46%),
+        var(--wl-bg-soft);
       min-height:100vh;
     }
     .presentApp{
       width:min(1440px, 100%);
       margin:0 auto;
       padding:24px 16px 40px;
+    }
+    .presentPublicShell{
+      width:min(980px, 100%);
+      margin:0 auto;
+      gap:22px;
+    }
+    .presentPublicTopbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      padding:12px 0 18px;
+      border-bottom:1px solid rgba(var(--wl-accent-rgb),.14);
+    }
+    .presentPublicWordmark{
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      color:var(--wl-text);
+      font-size:16px;
+      font-weight:850;
+      letter-spacing:0;
+      text-decoration:none;
+      white-space:nowrap;
+    }
+    .presentPublicWordmarkMark{
+      display:inline-flex;
+      width:36px;
+      height:36px;
+      align-items:center;
+      justify-content:center;
+      border:1px solid var(--wl-border);
+      border-radius:8px;
+      background:#fff;
+      color:var(--wl-accent);
+      font-weight:900;
+      box-shadow:0 8px 24px rgba(28,28,28,.06);
+    }
+    .presentPublicNav{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .presentPublicNav a{
+      display:inline-flex;
+      min-height:38px;
+      align-items:center;
+      justify-content:center;
+      border:1px solid var(--wl-border);
+      border-radius:999px;
+      padding:8px 14px;
+      background:#fff;
+      color:var(--wl-text-muted);
+      font-size:13px;
+      font-weight:800;
+      text-decoration:none;
+    }
+    .presentPublicNav a:hover{
+      border-color:rgba(var(--wl-accent-rgb),.28);
+      color:var(--wl-text);
     }
     .presentBuilderShell{
       display:grid;
@@ -659,23 +734,52 @@ function injectStyles() {
     .presentBuilderCard{
       padding:24px;
     }
+    .presentPublicCard{
+      border:1px solid rgba(var(--wl-accent-rgb),.14);
+      border-radius:14px;
+      padding:28px;
+      background:#fff;
+      box-shadow:0 22px 60px rgba(28,28,28,.08);
+    }
     .presentBuilderTopRow{
       justify-content:flex-start;
+      margin-bottom:14px;
+    }
+    .presentPublicEyebrow{
+      display:block;
       margin-bottom:10px;
+      color:var(--wl-accent);
+      font-size:12px;
+      font-weight:850;
+      letter-spacing:0;
+      text-transform:uppercase;
+    }
+    .presentPublicCard h1{
+      margin-top:0;
+      margin-bottom:10px;
+      color:var(--wl-text);
+      font-size:38px;
+      line-height:1.08;
     }
     .presentLead{
       max-width:70ch;
-      color:var(--muted);
-      margin-bottom:20px;
+      color:var(--wl-text-muted);
+      margin-top:0;
+      margin-bottom:22px;
+      font-size:17px;
+      line-height:1.55;
     }
     .presentBuilderForm{
       display:grid;
-      gap:16px;
+      gap:18px;
     }
     .presentFieldGrid{
       display:grid;
       grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
       gap:14px;
+    }
+    .presentPublicFormGrid{
+      grid-template-columns:repeat(2, minmax(220px, 1fr));
     }
     .presentField{
       display:flex;
@@ -700,6 +804,10 @@ function injectStyles() {
       color:var(--text);
       font-weight:700;
       cursor:pointer;
+    }
+    .presentStarterButton:hover{
+      border-color:rgba(var(--wl-accent-rgb),.28);
+      background:var(--wl-bg-soft);
     }
     .presentStarterButton.is-active{
       border-color:rgba(var(--wl-accent-rgb),.36);
@@ -730,8 +838,22 @@ function injectStyles() {
       .presentApp{
         padding:18px 12px 28px;
       }
+      .presentPublicTopbar{
+        align-items:flex-start;
+        flex-direction:column;
+      }
+      .presentPublicNav{
+        width:100%;
+        justify-content:flex-start;
+      }
       .presentBuilderCard{
         padding:18px;
+      }
+      .presentPublicCard h1{
+        font-size:32px;
+      }
+      .presentPublicFormGrid{
+        grid-template-columns:1fr;
       }
     }
   `;
