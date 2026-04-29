@@ -56,6 +56,7 @@ const STAFF_PENDING_ACCESS_CANCEL_FUNCTION = "cancel_staff_pending_access_approv
 const STAFF_ARCHIVE_FUNCTION = "archive_staff_directory_record";
 const STAFF_RESTORE_FUNCTION = "restore_staff_directory_record";
 const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
+const TEACHER_PUPIL_GROUP_VALUES_TABLE = "teacher_pupil_group_values";
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
@@ -63,6 +64,24 @@ export const ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
 export const CLASS_TYPE_FORM = "form";
 export const CLASS_TYPE_SUBJECT = "subject";
 export const CLASS_TYPE_INTERVENTION = "intervention";
+
+const INTERVENTION_DIRECTORY_ATTRIBUTE_TYPES = [
+  "pp",
+  "is_pp",
+  "pupil_premium",
+  "pupil premium",
+  "sen",
+  "has_sen",
+  "sen_status",
+  "eal",
+  "has_eal",
+  "gender",
+  "gender_group",
+];
+const INTERVENTION_POSITIVE_PP_VALUES = new Set(["1", "true", "yes", "y", "pp", "pupil_premium", "pupil premium", "premium", "eligible"]);
+const INTERVENTION_POSITIVE_SEN_VALUES = new Set(["1", "true", "yes", "y", "sen", "sen_support", "support", "ehcp", "k", "e"]);
+const INTERVENTION_POSITIVE_EAL_VALUES = new Set(["1", "true", "yes", "y", "eal"]);
+const INTERVENTION_IGNORED_GENDER_VALUES = new Set(["", "unknown", "not_known", "not known", "prefer_not_to_say", "prefer not to say"]);
 
 let latestStaffProfileSyncNotice = null;
 
@@ -2755,6 +2774,128 @@ export async function createInterventionGroup({
   }
 }
 
+function normalizeInterventionDirectoryAttributeType(value = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (normalized === "pp" || normalized === "is pp" || normalized === "pupil premium") return "pp";
+  if (normalized === "sen" || normalized === "has sen" || normalized === "sen status") return "sen";
+  if (normalized === "eal" || normalized === "has eal") return "eal";
+  if (normalized === "gender" || normalized === "gender group") return "gender";
+  return "";
+}
+
+function normalizeInterventionDirectoryAttributeValue(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/[-_]+/g, "_").replace(/\s+/g, "_");
+}
+
+function getInterventionDirectoryAttributeValues(attributes = {}, type = "") {
+  const safeType = normalizeInterventionDirectoryAttributeType(type);
+  if (!safeType) return [];
+  const value = attributes?.[safeType];
+  return [...new Set(
+    (Array.isArray(value) ? value : (value ? [value] : []))
+      .map((item) => normalizeInterventionDirectoryAttributeValue(item))
+      .filter(Boolean)
+  )];
+}
+
+function hasPositiveInterventionDirectoryAttribute(attributes = {}, type = "") {
+  const safeType = normalizeInterventionDirectoryAttributeType(type);
+  const values = getInterventionDirectoryAttributeValues(attributes, safeType);
+  if (!values.length) return false;
+  if (safeType === "pp") return values.some((item) => INTERVENTION_POSITIVE_PP_VALUES.has(item) || INTERVENTION_POSITIVE_PP_VALUES.has(item.replace(/_/g, " ")));
+  if (safeType === "sen") return values.some((item) => INTERVENTION_POSITIVE_SEN_VALUES.has(item) || INTERVENTION_POSITIVE_SEN_VALUES.has(item.replace(/_/g, " ")));
+  if (safeType === "eal") return values.some((item) => INTERVENTION_POSITIVE_EAL_VALUES.has(item) || INTERVENTION_POSITIVE_EAL_VALUES.has(item.replace(/_/g, " ")));
+  return false;
+}
+
+function normalizeInterventionDirectoryStatusFilter(value = "") {
+  const [rawType = "", rawValue = ""] = String(value || "").trim().toLowerCase().split(":");
+  const type = normalizeInterventionDirectoryAttributeType(rawType);
+  const statusValue = normalizeInterventionDirectoryAttributeValue(rawValue);
+  if (!type) return null;
+  if (["pp", "sen", "eal"].includes(type)) return { type, value: "positive" };
+  if (type === "gender" && statusValue && !INTERVENTION_IGNORED_GENDER_VALUES.has(statusValue)) {
+    return { type, value: statusValue };
+  }
+  return null;
+}
+
+function doesInterventionDirectoryPupilMatchStatus(attributes = {}, statusFilter = null) {
+  if (!statusFilter?.type) return true;
+  if (["pp", "sen", "eal"].includes(statusFilter.type)) {
+    return hasPositiveInterventionDirectoryAttribute(attributes, statusFilter.type);
+  }
+  if (statusFilter.type === "gender") {
+    return getInterventionDirectoryAttributeValues(attributes, "gender").includes(statusFilter.value);
+  }
+  return true;
+}
+
+function buildInterventionDirectoryAttributesByPupil(rows = []) {
+  const byPupil = new Map();
+  for (const row of rows || []) {
+    const pupilId = String(row?.pupil_id || "").trim();
+    const type = normalizeInterventionDirectoryAttributeType(row?.group_type);
+    const value = normalizeInterventionDirectoryAttributeValue(row?.group_value);
+    if (!pupilId || !type || !value) continue;
+    const attributes = byPupil.get(pupilId) || {};
+    const values = Array.isArray(attributes[type]) ? attributes[type] : [];
+    if (!values.includes(value)) values.push(value);
+    attributes[type] = values.sort((a, b) => a.localeCompare(b));
+    byPupil.set(pupilId, attributes);
+  }
+  return byPupil;
+}
+
+function buildInterventionDirectoryStatusOptions(attributesByPupil = new Map()) {
+  let ppCount = 0;
+  let senCount = 0;
+  let ealCount = 0;
+  const genderCounts = new Map();
+
+  for (const attributes of attributesByPupil.values()) {
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "pp")) ppCount += 1;
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "sen")) senCount += 1;
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "eal")) ealCount += 1;
+    for (const value of getInterventionDirectoryAttributeValues(attributes, "gender")) {
+      if (INTERVENTION_IGNORED_GENDER_VALUES.has(value) || INTERVENTION_IGNORED_GENDER_VALUES.has(value.replace(/_/g, " "))) continue;
+      genderCounts.set(value, (genderCounts.get(value) || 0) + 1);
+    }
+  }
+
+  const options = [];
+  if (ppCount > 0) options.push({ value: "pp:positive", group_type: "pp", group_value: "positive", count: ppCount });
+  if (senCount > 0) options.push({ value: "sen:positive", group_type: "sen", group_value: "positive", count: senCount });
+  if (ealCount > 0) options.push({ value: "eal:positive", group_type: "eal", group_value: "positive", count: ealCount });
+  for (const [value, count] of [...genderCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    options.push({ value: `gender:${value}`, group_type: "gender", group_value: value, count });
+  }
+  return options;
+}
+
+async function loadInterventionDirectoryGroupValueRows({ pupilIds = [], teacherId = "", accessContext = null } = {}) {
+  const safePupilIds = normalizeIdList(pupilIds);
+  const safeTeacherId = String(teacherId || "").trim();
+  if (!safePupilIds.length || !safeTeacherId) return [];
+
+  const rows = [];
+  for (let index = 0; index < safePupilIds.length; index += 200) {
+    const chunk = safePupilIds.slice(index, index + 200);
+    let query = supabase
+      .from(TEACHER_PUPIL_GROUP_VALUES_TABLE)
+      .select("pupil_id, group_type, group_value")
+      .eq("teacher_id", safeTeacherId)
+      .in("pupil_id", chunk)
+      .in("group_type", INTERVENTION_DIRECTORY_ATTRIBUTE_TYPES);
+    query = applyActiveSchoolFilter(query, accessContext);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
 export async function listTeacherPupilDirectoryForInterventionGroups() {
   const context = await requireCentralOwnerContext({
     message: "Admin access is required to view the intervention group directory.",
@@ -2766,13 +2907,21 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
   const safeYearGroup = String(options?.year_group || "").trim();
   const safeSourceClassId = String(options?.source_class_id || "").trim();
   const safeSearch = String(options?.search || "").trim();
+  const statusFilter = normalizeInterventionDirectoryStatusFilter(options?.status || "");
+  const includeStatusOptions = options?.include_status_options === true || options?.metadata_only === true;
+  const metadataOnly = options?.metadata_only === true;
+  const allowBroad = options?.allow_broad === true;
+  const resultLimit = Math.max(1, Math.min(500, Number(options?.limit || 100)));
   const teacherId = context.teacherId;
 
-  if (!safeYearGroup && !safeSourceClassId && !safeSearch) {
+  if (!safeYearGroup && !safeSourceClassId && !safeSearch && !statusFilter && !includeStatusOptions && !metadataOnly && !allowBroad) {
     return {
       classes: [],
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2800,6 +2949,9 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
       classes: [],
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2816,6 +2968,31 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
       classes: candidateClasses,
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
+    };
+  }
+
+  const shouldLoadGroupValues = includeStatusOptions || metadataOnly || !!statusFilter;
+  const groupValueRows = shouldLoadGroupValues
+    ? await loadInterventionDirectoryGroupValueRows({
+        pupilIds: candidatePupilIds,
+        teacherId,
+        accessContext: context.accessContext,
+      })
+    : [];
+  const attributesByPupil = buildInterventionDirectoryAttributesByPupil(groupValueRows);
+  const statusOptions = shouldLoadGroupValues ? buildInterventionDirectoryStatusOptions(attributesByPupil) : [];
+
+  if (metadataOnly) {
+    return {
+      classes: candidateClasses,
+      pupils: [],
+      resultCount: 0,
+      statusOptions,
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2881,8 +3058,10 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
         display_name: displayName,
         year_groups: yearGroups,
         classes: memberships,
+        attributes: attributesByPupil.get(pupilId) || {},
       };
     })
+    .filter((pupil) => doesInterventionDirectoryPupilMatchStatus(pupil?.attributes || {}, statusFilter))
     .filter((pupil) => {
       if (!safeSearch) return true;
       const haystack = [
@@ -2894,10 +3073,16 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
     })
     .sort((a, b) => String(a?.display_name || "").localeCompare(String(b?.display_name || "")));
 
+  const resultCount = directory.length;
+  const limitedDirectory = directory.slice(0, resultLimit);
+
   return {
     classes: candidateClasses,
-    pupils: directory,
-    resultCount: directory.length,
+    pupils: limitedDirectory,
+    resultCount,
+    statusOptions,
+    displayLimit: resultLimit,
+    isLimited: resultCount > limitedDirectory.length,
   };
 }
 

@@ -247,6 +247,9 @@ const AUTOMATION_NEW_POLICY_KEY = "__new__";
 const ANALYTICS_ASSISTANT_INTRO =
   "Ask about intervention priorities, weak graphemes, class or year comparisons, or what an individual pupil may need next.";
 const GROUP_COMPARISON_MIN_COHORT_SIZE = 5;
+const INTERVENTION_PUPIL_SEARCH_MIN_CHARS = 2;
+const INTERVENTION_PUPIL_DISPLAY_LIMIT = 100;
+const INTERVENTION_FILTER_DEBOUNCE_MS = 250;
 const GROUP_COMPARISON_GROUP_OPTIONS = [
   { value: "pp", label: "PP" },
   { value: "sen", label: "SEN" },
@@ -317,6 +320,8 @@ const GROUP_COMPARISON_PAIR_FALLBACKS = {
 const AUTOMATION_TARGET_YEAR_ALL = "__all_year_groups__";
 const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM]);
 const AUTOMATION_CLASS_TYPE_FALLBACK = CLASS_TYPE_SUBJECT;
+let interventionFilterApplyTimer = null;
+let interventionFilterRequestToken = 0;
 
 function createDefaultGroupComparisonState() {
   return {
@@ -360,14 +365,21 @@ function createDefaultAnalyticsExportState() {
 function createDefaultInterventionGroupState() {
   return {
     status: "idle",
-    message: "Choose a filter to find pupils.",
+    message: "Choose a year, group, status, or search to find pupils.",
     pupils: [],
+    statusOptions: [],
+    statusOptionsStatus: "idle",
+    statusOptionsMessage: "",
+    groupName: "",
+    displayLimit: INTERVENTION_PUPIL_DISPLAY_LIMIT,
+    isLimited: false,
     selectedPupilIds: [],
     selectedPupilsById: {},
     resultCount: 0,
     filters: {
       yearGroup: "",
       sourceClassId: "",
+      status: "",
       search: "",
     },
   };
@@ -1131,6 +1143,89 @@ function syncInterventionBuilderSourceClassFilter({ yearGroup = state.interventi
 
   state.interventionGroup.filters.sourceClassId = "";
   return true;
+}
+
+function normalizeInterventionStatusOptionValue(value = "") {
+  const [rawType = "", rawValue = ""] = String(value || "").trim().toLowerCase().split(":");
+  const type = rawType.replace(/[-_]+/g, "_");
+  const statusValue = rawValue.replace(/[-_]+/g, "_").replace(/\s+/g, "_");
+  if (type === "pp") return "pp:positive";
+  if (type === "sen") return "sen:positive";
+  if (type === "eal") return "eal:positive";
+  if (type === "gender" && statusValue) return `gender:${statusValue}`;
+  return "";
+}
+
+function normalizeInterventionStatusOptions(options = []) {
+  const byValue = new Map();
+  for (const option of Array.isArray(options) ? options : []) {
+    const value = normalizeInterventionStatusOptionValue(option?.value);
+    if (!value) continue;
+    byValue.set(value, {
+      value,
+      group_type: String(option?.group_type || value.split(":")[0] || "").trim().toLowerCase(),
+      group_value: String(option?.group_value || value.split(":")[1] || "").trim().toLowerCase(),
+      count: Math.max(0, Number(option?.count || 0)),
+    });
+  }
+  return [...byValue.values()].sort((a, b) => {
+    const order = { pp: 1, sen: 2, eal: 3, gender: 4 };
+    const aType = String(a?.group_type || "").trim().toLowerCase();
+    const bType = String(b?.group_type || "").trim().toLowerCase();
+    const typeDelta = (order[aType] || 99) - (order[bType] || 99);
+    if (typeDelta !== 0) return typeDelta;
+    return getInterventionStatusOptionLabel(a).localeCompare(getInterventionStatusOptionLabel(b));
+  });
+}
+
+function getInterventionBuilderStatusOptions() {
+  return normalizeInterventionStatusOptions(state.interventionGroup?.statusOptions || []);
+}
+
+function getInterventionGenderStatusLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-_]+/g, " ");
+  if (["f", "female", "girl", "girls"].includes(normalized)) return "Girls";
+  if (["m", "male", "boy", "boys"].includes(normalized)) return "Boys";
+  if (normalized === "non binary") return "Non-binary";
+  if (normalized === "other" || normalized === "mixed") return "Mixed/Other";
+  return normalized
+    ? normalized.replace(/\b\w/g, (char) => char.toUpperCase())
+    : "Gender group";
+}
+
+function getInterventionStatusOptionLabel(optionOrValue = "") {
+  const option = typeof optionOrValue === "string"
+    ? { value: normalizeInterventionStatusOptionValue(optionOrValue) }
+    : (optionOrValue || {});
+  const value = normalizeInterventionStatusOptionValue(option?.value);
+  const [type = "", statusValue = ""] = value.split(":");
+  if (type === "pp") return "Pupil Premium";
+  if (type === "sen") return "SEN";
+  if (type === "eal") return "EAL";
+  if (type === "gender") return getInterventionGenderStatusLabel(option?.group_value || statusValue);
+  return "Status";
+}
+
+function getInterventionSelectedStatusLabel(value = "") {
+  const normalizedValue = normalizeInterventionStatusOptionValue(value);
+  if (!normalizedValue) return "";
+  const option = getInterventionBuilderStatusOptions().find((item) => item.value === normalizedValue);
+  return getInterventionStatusOptionLabel(option || normalizedValue);
+}
+
+function setInterventionBuilderStatusOptions(options = []) {
+  state.interventionGroup.statusOptions = normalizeInterventionStatusOptions(options);
+  const currentStatus = normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "");
+  if (currentStatus && !state.interventionGroup.statusOptions.some((option) => option.value === currentStatus)) {
+    state.interventionGroup.filters.status = "";
+    scheduleInterventionFilterApply();
+  }
+}
+
+function resetInterventionBuilderStatusFilter() {
+  if (!normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "")) return;
+  state.interventionGroup.filters.status = "";
+  scheduleInterventionFilterApply();
 }
 
 function getStaffAccessState() {
@@ -3328,6 +3423,94 @@ function getInterventionBuilderVisiblePupils() {
   return getInterventionBuilderPupils();
 }
 
+function getInterventionPupilYearLabels(pupil = null) {
+  return [...new Set(
+    (Array.isArray(pupil?.year_groups) ? pupil.year_groups : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function getInterventionPupilGroupLabels(pupil = null) {
+  return [...new Set(
+    (Array.isArray(pupil?.classes) ? pupil.classes : [])
+      .filter((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_INTERVENTION)
+      .map((item) => String(item?.class_name || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function buildInterventionVisiblePupilContext({
+  pupils = [],
+  yearGroup = "",
+  sourceClassId = "",
+  sourceClasses = [],
+  statusLabel = "",
+} = {}) {
+  const visiblePupils = Array.isArray(pupils) ? pupils : [];
+  const visibleCount = visiblePupils.length;
+  const safeYearGroup = String(yearGroup || "").trim();
+  const safeSourceClassId = String(sourceClassId || "").trim();
+  const safeStatusLabel = String(statusLabel || "").trim();
+  const selectedSourceClass = safeSourceClassId
+    ? (Array.isArray(sourceClasses) ? sourceClasses : []).find((item) => String(item?.id || "").trim() === safeSourceClassId)
+    : null;
+  const selectedSourceClassName = String(selectedSourceClass?.name || "").trim();
+
+  const yearSets = visiblePupils.map((pupil) => getInterventionPupilYearLabels(pupil));
+  const groupSets = visiblePupils.map((pupil) => getInterventionPupilGroupLabels(pupil));
+  const uniqueYears = [...new Set(yearSets.flat())].sort((a, b) => a.localeCompare(b));
+  const uniqueGroups = [...new Set(groupSets.flat())].sort((a, b) => a.localeCompare(b));
+  const firstYear = uniqueYears[0] || "";
+  const firstGroup = uniqueGroups[0] || "";
+  const allShareSingleYear = !!visibleCount
+    && firstYear
+    && yearSets.every((items) => items.length === 1 && items[0] === firstYear);
+  const allShareSingleGroup = !!visibleCount
+    && firstGroup
+    && groupSets.every((items) => items.length === 1 && items[0] === firstGroup);
+
+  const parts = [];
+  if (visibleCount) {
+    if (safeYearGroup) {
+      parts.push(safeYearGroup);
+    } else if (allShareSingleYear) {
+      parts.push(firstYear);
+    } else if (uniqueYears.length > 1) {
+      parts.push(`${uniqueYears.length} year groups`);
+    } else if (!uniqueYears.length) {
+      parts.push("No year group");
+    } else {
+      parts.push(`${uniqueYears.length} year group`);
+    }
+
+    if (selectedSourceClassName) {
+      parts.push(selectedSourceClassName);
+    } else if (allShareSingleGroup) {
+      parts.push(firstGroup);
+    } else if (uniqueGroups.length > 1) {
+      parts.push(`${uniqueGroups.length} current groups`);
+    } else if (uniqueGroups.length === 1) {
+      parts.push(`${uniqueGroups.length} current group`);
+    }
+  }
+
+  if (safeStatusLabel) parts.push(safeStatusLabel);
+  parts.push(`${visibleCount} pupil${visibleCount === 1 ? "" : "s"} shown`);
+
+  return {
+    summary: parts.join(" | "),
+    showYearMeta: !!visibleCount && !safeYearGroup && !allShareSingleYear,
+    showGroupMeta: !!visibleCount && !safeSourceClassId && !allShareSingleGroup,
+  };
+}
+
+function shouldShowInterventionPupilMeta(context = null, metaKind = "") {
+  if (metaKind === "year") return context?.showYearMeta === true;
+  if (metaKind === "group") return context?.showGroupMeta === true;
+  return false;
+}
+
 function getInterventionBuilderSelectedSummary() {
   const selectedIds = getInterventionBuilderSelectedPupilIds();
   if (!selectedIds.length) return "No pupils selected yet.";
@@ -3339,11 +3522,31 @@ function getInterventionBuilderSelectedSummary() {
   return `${selectedPupils.length} pupils selected: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
 }
 
-function hasMeaningfulInterventionFilters(filters = state.interventionGroup?.filters || {}) {
+function getInterventionPupilSearchText(filters = state.interventionGroup?.filters || {}) {
+  return String(filters?.search || "").trim();
+}
+
+function isInterventionPupilSearchTooShort(filters = state.interventionGroup?.filters || {}) {
+  const search = getInterventionPupilSearchText(filters);
+  return search.length > 0 && search.length < INTERVENTION_PUPIL_SEARCH_MIN_CHARS;
+}
+
+function hasAnyInterventionFilterInput(filters = state.interventionGroup?.filters || {}) {
   return !!(
     String(filters?.yearGroup || "").trim()
     || String(filters?.sourceClassId || "").trim()
-    || String(filters?.search || "").trim()
+    || normalizeInterventionStatusOptionValue(filters?.status || "")
+    || getInterventionPupilSearchText(filters)
+  );
+}
+
+function hasMeaningfulInterventionFilters(filters = state.interventionGroup?.filters || {}) {
+  if (isInterventionPupilSearchTooShort(filters)) return false;
+  return !!(
+    String(filters?.yearGroup || "").trim()
+    || String(filters?.sourceClassId || "").trim()
+    || normalizeInterventionStatusOptionValue(filters?.status || "")
+    || getInterventionPupilSearchText(filters).length >= INTERVENTION_PUPIL_SEARCH_MIN_CHARS
   );
 }
 
@@ -3351,9 +3554,12 @@ function markInterventionFiltersPending() {
   state.interventionGroup.status = "idle";
   state.interventionGroup.resultCount = 0;
   state.interventionGroup.pupils = [];
+  state.interventionGroup.isLimited = false;
   state.interventionGroup.message = hasMeaningfulInterventionFilters()
-    ? "Apply filters to load matching pupils."
-    : "Choose a filter to find pupils.";
+    ? "Loading matching pupils..."
+    : (isInterventionPupilSearchTooShort()
+      ? `Enter at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters to search pupils.`
+      : "Choose a year, group, status, or search to find pupils.");
 }
 
 function sortAutomationRunClassIds(classIds = []) {
@@ -4741,40 +4947,116 @@ async function initialiseUser() {
   state.accessContext = createDefaultAccessContext(data.user.id || "");
 }
 
-async function applyInterventionGroupFilters({ force = false } = {}) {
+async function ensureInterventionGroupStatusOptionsLoaded({ force = false } = {}) {
   if (!canManageInterventionGroups()) return;
-  if (!force && state.interventionGroup.status === "loading") return;
+  const currentStatus = String(state.interventionGroup?.statusOptionsStatus || "idle");
+  if (!force && currentStatus === "ready") return;
+  if (currentStatus === "loading") return;
 
+  state.interventionGroup.statusOptionsStatus = "loading";
+  state.interventionGroup.statusOptionsMessage = "";
+  state.interventionGroup.statusOptions = [];
+  if (rootEl?.isConnected) paint();
+
+  try {
+    const directory = await listTeacherPupilDirectoryForInterventionGroups({
+      include_status_options: true,
+      metadata_only: true,
+    });
+    setInterventionBuilderStatusOptions(directory?.statusOptions || []);
+    state.interventionGroup.statusOptionsStatus = "ready";
+    state.interventionGroup.statusOptionsMessage = state.interventionGroup.statusOptions.length
+      ? ""
+      : "No status filters are available for the loaded pupil data.";
+  } catch (error) {
+    console.error("load intervention status filters error:", error);
+    state.interventionGroup.statusOptionsStatus = "error";
+    state.interventionGroup.statusOptionsMessage = "Status filters unavailable.";
+  }
+
+  if (rootEl?.isConnected) paint();
+}
+
+function clearScheduledInterventionFilterApply() {
+  if (!interventionFilterApplyTimer) return;
+  clearTimeout(interventionFilterApplyTimer);
+  interventionFilterApplyTimer = null;
+}
+
+function scheduleInterventionFilterApply({ debounce = false } = {}) {
+  clearScheduledInterventionFilterApply();
   if (!hasMeaningfulInterventionFilters()) {
+    interventionFilterRequestToken += 1;
     markInterventionFiltersPending();
     if (rootEl?.isConnected) paint();
     return;
   }
 
+  const run = () => {
+    interventionFilterApplyTimer = null;
+    void applyInterventionGroupFilters({ force: true });
+  };
+
+  if (debounce) {
+    interventionFilterApplyTimer = setTimeout(run, INTERVENTION_FILTER_DEBOUNCE_MS);
+  } else {
+    run();
+  }
+}
+
+async function applyInterventionGroupFilters({ force = false, allowBroad = false } = {}) {
+  if (!canManageInterventionGroups()) return;
+  if (!force && state.interventionGroup.status === "loading") return;
+
+  const hasMeaningfulFilters = hasMeaningfulInterventionFilters();
+  if (!hasMeaningfulFilters && !allowBroad) {
+    markInterventionFiltersPending();
+    if (rootEl?.isConnected) paint();
+    return;
+  }
+
+  clearScheduledInterventionFilterApply();
+  const requestToken = ++interventionFilterRequestToken;
   state.interventionGroup.status = "loading";
   state.interventionGroup.message = "";
   state.interventionGroup.resultCount = 0;
+  state.interventionGroup.isLimited = false;
   if (rootEl?.isConnected) paint();
 
   try {
     const directory = await listTeacherPupilDirectoryForInterventionGroups({
       year_group: state.interventionGroup.filters?.yearGroup,
       source_class_id: state.interventionGroup.filters?.sourceClassId,
-      search: state.interventionGroup.filters?.search,
+      status: state.interventionGroup.filters?.status,
+      search: getInterventionPupilSearchText().length >= INTERVENTION_PUPIL_SEARCH_MIN_CHARS
+        ? state.interventionGroup.filters?.search
+        : "",
+      allow_broad: allowBroad,
+      limit: INTERVENTION_PUPIL_DISPLAY_LIMIT,
     });
+    if (requestToken !== interventionFilterRequestToken) return;
+    if (Array.isArray(directory?.statusOptions) && directory.statusOptions.length) {
+      setInterventionBuilderStatusOptions(directory.statusOptions);
+      state.interventionGroup.statusOptionsStatus = "ready";
+      state.interventionGroup.statusOptionsMessage = "";
+    }
     state.interventionGroup.status = "ready";
     state.interventionGroup.message = (Number(directory?.resultCount || 0) || 0) > 0
       ? `${Number(directory?.resultCount || 0)} pupil${Number(directory?.resultCount || 0) === 1 ? "" : "s"} found.`
       : "No pupils match the current filters.";
     state.interventionGroup.resultCount = Math.max(0, Number(directory?.resultCount || 0));
     state.interventionGroup.pupils = Array.isArray(directory?.pupils) ? directory.pupils : [];
+    state.interventionGroup.displayLimit = Math.max(1, Number(directory?.displayLimit || INTERVENTION_PUPIL_DISPLAY_LIMIT));
+    state.interventionGroup.isLimited = directory?.isLimited === true;
     setInterventionBuilderSelectedPupilIds(state.interventionGroup.selectedPupilIds);
   } catch (error) {
+    if (requestToken !== interventionFilterRequestToken) return;
     console.error("load intervention group directory error:", error);
     state.interventionGroup.status = "error";
     state.interventionGroup.message = error?.message || "Could not load pupils for intervention groups.";
     state.interventionGroup.resultCount = 0;
     state.interventionGroup.pupils = [];
+    state.interventionGroup.isLimited = false;
   }
 
   if (rootEl?.isConnected) paint();
@@ -9171,13 +9453,17 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="intervention-group-name"]')) {
+    state.interventionGroup.groupName = target.value || "";
+    return;
+  }
+
   if (target.matches('[data-field="intervention-pupil-search"]')) {
     const nextValue = target.value || "";
     const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
     const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
     state.interventionGroup.filters.search = nextValue;
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply({ debounce: true });
     requestAnimationFrame(() => {
       const input = rootEl?.querySelector('[data-field="intervention-pupil-search"]');
       if (!(input instanceof HTMLInputElement)) return;
@@ -9381,15 +9667,22 @@ function onRootChange(event) {
     const nextYearGroup = String(target.value || "").trim();
     state.interventionGroup.filters.yearGroup = nextYearGroup;
     syncInterventionBuilderSourceClassFilter({ yearGroup: nextYearGroup });
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply();
     return;
   }
 
   if (target.matches('[data-field="intervention-source-class"]')) {
     state.interventionGroup.filters.sourceClassId = String(target.value || "").trim();
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply();
+    return;
+  }
+
+  if (target.matches('[data-field="intervention-status-filter"]')) {
+    const nextStatus = normalizeInterventionStatusOptionValue(target.value || "");
+    state.interventionGroup.filters.status = getInterventionBuilderStatusOptions().some((option) => option.value === nextStatus)
+      ? nextStatus
+      : "";
+    scheduleInterventionFilterApply();
     return;
   }
 
@@ -10556,8 +10849,9 @@ async function onRootClick(event) {
       state.createClassOpen = false;
       state.createBaselineOpen = false;
       state.createAutoAssignOpen = false;
+      resetInterventionBuilderStatusFilter();
       if (!state.interventionGroup.pupils.length && !state.interventionGroup.message) {
-        state.interventionGroup.message = "Choose a filter to find pupils.";
+        state.interventionGroup.message = "Choose a year, group, status, or search to find pupils.";
       }
       paint();
     } else {
@@ -10569,12 +10863,16 @@ async function onRootClick(event) {
         const input = rootEl.querySelector("#tdInterventionGroupNameInput");
         if (input instanceof HTMLInputElement) input.focus();
       });
+      void ensureInterventionGroupStatusOptionsLoaded({ force: true });
     }
     return;
   }
 
   if (action === "apply-intervention-filters") {
-    void applyInterventionGroupFilters({ force: true });
+    void applyInterventionGroupFilters({
+      force: true,
+      allowBroad: button.dataset.allowBroad === "true",
+    });
     return;
   }
 
@@ -14819,6 +15117,20 @@ function renderCreateBar() {
   const interventionYearGroup = String(state.interventionGroup?.filters?.yearGroup || "").trim();
   const interventionSourceClasses = getInterventionBuilderAvailableSourceClasses({ yearGroup: interventionYearGroup });
   const interventionSourceClassId = String(state.interventionGroup?.filters?.sourceClassId || "").trim();
+  const interventionStatusOptions = getInterventionBuilderStatusOptions();
+  const interventionStatusFilter = normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "");
+  const interventionStatusLoading = state.interventionGroup?.statusOptionsStatus === "loading";
+  const interventionStatusMessage = String(state.interventionGroup?.statusOptionsMessage || "").trim();
+  const interventionHasAnyFilterInput = hasAnyInterventionFilterInput();
+  const interventionSearchTooShort = isInterventionPupilSearchTooShort();
+  const showInterventionShowAllAction = !interventionHasAnyFilterInput;
+  const interventionPupilContext = buildInterventionVisiblePupilContext({
+    pupils: interventionVisiblePupils,
+    yearGroup: interventionYearGroup,
+    sourceClassId: interventionSourceClassId,
+    sourceClasses: interventionSourceClasses,
+    statusLabel: getInterventionSelectedStatusLabel(interventionStatusFilter),
+  });
   const ownedClasses = getOwnedClasses();
 
   return `
@@ -14872,7 +15184,7 @@ function renderCreateBar() {
           <form data-form="create-intervention-group" class="td-form-stack td-form-stack--intervention">
             <div class="td-automation-run-head">
               <div class="td-action-inline-copy">
-                Create a separate intervention group with filtered pupils. Choose a filter first, then apply it to load matching pupils.
+                Create a separate intervention group with filtered pupils. Choose a year, group, status, or search to show matching pupils.
               </div>
             </div>
 
@@ -14883,7 +15195,9 @@ function renderCreateBar() {
                 class="td-input"
                 type="text"
                 name="group_name"
+                data-field="intervention-group-name"
                 placeholder="Intervention group name"
+                value="${escapeAttr(String(state.interventionGroup?.groupName || ""))}"
                 autocomplete="off"
                 required
               />
@@ -14893,7 +15207,7 @@ function renderCreateBar() {
               <div class="td-automation-class-picker-head td-automation-class-picker-head--intervention">
                 <div>
                   <strong>Filter pupils</strong>
-                  <div class="td-action-inline-copy">Choose at least one filter, then apply it to load matching pupils.</div>
+                  <div class="td-action-inline-copy">Pupils load automatically once a filter is narrow enough. Search needs at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters.</div>
                 </div>
               </div>
 
@@ -14922,6 +15236,24 @@ function renderCreateBar() {
                   </select>
                 </label>
 
+                <label class="td-field">
+                  <span>Status</span>
+                  <select class="td-input" data-field="intervention-status-filter" ${interventionStatusLoading ? "disabled" : ""}>
+                    <option value="" ${interventionStatusFilter ? "" : "selected"}>All statuses</option>
+                    ${interventionStatusLoading ? `<option value="" disabled>Loading statuses...</option>` : ""}
+                    ${!interventionStatusLoading && interventionStatusMessage && !interventionStatusOptions.length
+                      ? `<option value="" disabled>${escapeHtml(interventionStatusMessage)}</option>`
+                      : ""}
+                    ${interventionStatusOptions
+                      .map((option) => `
+                        <option value="${escapeAttr(option.value)}" ${interventionStatusFilter === option.value ? "selected" : ""}>
+                          ${escapeHtml(getInterventionStatusOptionLabel(option))}
+                        </option>
+                      `)
+                      .join("")}
+                  </select>
+                </label>
+
                 <label class="td-field td-field--intervention-search">
                   <span>Search pupils</span>
                   <input
@@ -14935,84 +15267,107 @@ function renderCreateBar() {
               </div>
 
               <div class="td-automation-run-actions td-automation-run-actions--intervention">
-                <button
-                  class="td-btn td-btn--ghost"
-                  type="button"
-                  data-action="apply-intervention-filters"
-                  ${hasMeaningfulInterventionFilters() ? "" : "disabled"}
-                >
-                  Apply filters
-                </button>
+                ${showInterventionShowAllAction ? `
+                  <button
+                    class="td-btn td-btn--ghost"
+                    type="button"
+                    data-action="apply-intervention-filters"
+                    data-allow-broad="true"
+                    ${state.interventionGroup.status === "loading" ? "disabled" : ""}
+                  >
+                    Show all pupils
+                  </button>
+                ` : interventionSearchTooShort ? `<div class="td-action-inline-copy">Enter at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters to search pupils.</div>` : ""}
               </div>
             </div>
 
             <div class="td-automation-class-picker">
-              <div class="td-automation-class-picker-head">
-                <div>
-                  <strong>Select pupils</strong>
-                  <div class="td-action-inline-copy">${escapeHtml(getInterventionBuilderSelectedSummary())}</div>
+              <div class="td-intervention-selection-panel td-intervention-selection-panel--selected">
+                <div class="td-intervention-selection-head">
+                  <div>
+                    <strong>Selected pupils</strong>
+                    <div class="td-action-inline-copy">${escapeHtml(getInterventionBuilderSelectedSummary())}</div>
+                  </div>
                 </div>
-                <div class="td-automation-class-picker-actions">
-                  <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-filtered-intervention-pupils" ${interventionVisiblePupils.length ? "" : "disabled"}>Select all</button>
-                  <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-intervention-pupil-selection" ${interventionSelectedPupilIds.length ? "" : "disabled"}>Clear</button>
-                </div>
+                ${interventionSelectedPupilIds.length ? `
+                  <div class="td-intervention-selected-pupils">
+                    ${getInterventionBuilderSelectedPupils()
+                      .map((item) => `
+                        <button
+                          class="td-selection-chip"
+                          type="button"
+                          data-action="remove-intervention-pupil"
+                          data-pupil-id="${escapeAttr(item.id)}"
+                        >
+                          <span>${escapeHtml(item.display_name || item.username || "Unknown pupil")}</span>
+                          <span aria-hidden="true">&times;</span>
+                        </button>
+                      `)
+                      .join("")}
+                  </div>
+                ` : ""}
               </div>
 
-              ${interventionSelectedPupilIds.length ? `
-                <div class="td-intervention-selected-pupils">
-                  ${getInterventionBuilderSelectedPupils()
-                    .map((item) => `
-                      <button
-                        class="td-selection-chip"
-                        type="button"
-                        data-action="remove-intervention-pupil"
-                        data-pupil-id="${escapeAttr(item.id)}"
-                      >
-                        <span>${escapeHtml(item.display_name || item.username || "Unknown pupil")}</span>
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    `)
-                    .join("")}
+              <div class="td-intervention-selection-panel">
+                <div class="td-automation-class-picker-head">
+                  <div>
+                    <strong>Available pupils</strong>
+                    <div class="td-action-inline-copy">${escapeHtml(interventionPupilContext.summary)}</div>
+                  </div>
+                  <div class="td-automation-class-picker-actions">
+                    <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-filtered-intervention-pupils" ${interventionVisiblePupils.length ? "" : "disabled"}>Select all</button>
+                    <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-intervention-pupil-selection" ${interventionSelectedPupilIds.length ? "" : "disabled"}>Clear</button>
+                  </div>
                 </div>
-              ` : ""}
 
-              ${
-                state.interventionGroup.status === "loading"
-                  ? `<div class="td-empty td-empty--compact"><strong>Loading pupils...</strong></div>`
-                  : state.interventionGroup.status === "error"
-                    ? `<div class="td-empty td-empty--compact"><strong>Could not load pupils.</strong><p>${escapeHtml(state.interventionGroup.message || "Please try again.")}</p></div>`
-                    : state.interventionGroup.status === "idle"
-                      ? `<div class="td-empty td-empty--compact"><strong>${escapeHtml(state.interventionGroup.message || "Choose a filter to find pupils.")}</strong></div>`
-                    : `
+                ${state.interventionGroup.isLimited ? `
+                  <div class="td-empty td-empty--compact td-empty--notice">
+                    <strong>Showing first ${escapeHtml(String(state.interventionGroup.displayLimit || INTERVENTION_PUPIL_DISPLAY_LIMIT))} matching pupils.</strong>
+                    <p>Narrow the filters to see fewer results.</p>
+                  </div>
+                ` : ""}
+
                 ${
-                  interventionVisiblePupils.length
-                    ? `<div class="td-intervention-pupil-grid">
-                        ${interventionVisiblePupils.map((pupil) => {
-                          const pupilId = String(pupil?.id || "").trim();
-                          const pupilClasses = (Array.isArray(pupil?.classes) ? pupil.classes : [])
-                            .filter((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_INTERVENTION)
-                            .map((item) => String(item?.class_name || "").trim())
-                            .filter(Boolean);
-                          return `
-                            <label class="td-automation-class-option td-automation-class-option--pupil ${interventionSelectedPupilIds.includes(pupilId) ? "is-selected" : ""}">
-                              <input
-                                type="checkbox"
-                                value="${escapeAttr(pupilId)}"
-                                data-field="intervention-pupil-toggle"
-                                ${interventionSelectedPupilIds.includes(pupilId) ? "checked" : ""}
-                              />
-                              <span>
-                                <strong>${escapeHtml(pupil.display_name || pupil.username || "Unknown pupil")}</strong>
-                                <small>${escapeHtml((Array.isArray(pupil?.year_groups) && pupil.year_groups.length) ? pupil.year_groups.join(", ") : "No year group")}</small>
-                                ${pupilClasses.length ? `<small>${escapeHtml(pupilClasses.join(", "))}</small>` : ""}
-                              </span>
-                            </label>
-                          `;
-                        }).join("")}
-                      </div>`
-                    : `<div class="td-empty td-empty--compact"><strong>No pupils match the current filters.</strong></div>`
+                  state.interventionGroup.status === "loading"
+                    ? `<div class="td-empty td-empty--compact"><strong>Loading pupils...</strong></div>`
+                    : state.interventionGroup.status === "error"
+                      ? `<div class="td-empty td-empty--compact"><strong>Could not load pupils.</strong><p>${escapeHtml(state.interventionGroup.message || "Please try again.")}</p></div>`
+                      : state.interventionGroup.status === "idle"
+                        ? `<div class="td-empty td-empty--compact"><strong>${escapeHtml(state.interventionGroup.message || "Choose a year, group, status, or search to find pupils.")}</strong></div>`
+                      : interventionVisiblePupils.length
+                        ? `<div class="td-intervention-pupil-list">
+                            ${interventionVisiblePupils.map((pupil) => {
+                              const pupilId = String(pupil?.id || "").trim();
+                              const pupilYears = getInterventionPupilYearLabels(pupil);
+                              const pupilGroups = getInterventionPupilGroupLabels(pupil);
+                              const metaParts = [
+                                shouldShowInterventionPupilMeta(interventionPupilContext, "year")
+                                  ? (pupilYears.length ? pupilYears.join(", ") : "No year group")
+                                  : "",
+                                shouldShowInterventionPupilMeta(interventionPupilContext, "group")
+                                  ? (pupilGroups.length ? pupilGroups.join(", ") : "No current group")
+                                  : "",
+                              ].filter(Boolean);
+                              const checked = interventionSelectedPupilIds.includes(pupilId);
+                              return `
+                                <label class="td-intervention-pupil-row ${checked ? "is-selected" : ""}">
+                                  <input
+                                    type="checkbox"
+                                    value="${escapeAttr(pupilId)}"
+                                    data-field="intervention-pupil-toggle"
+                                    ${checked ? "checked" : ""}
+                                  />
+                                  <span class="td-intervention-pupil-row-main">
+                                    <strong>${escapeHtml(pupil.display_name || pupil.username || "Unknown pupil")}</strong>
+                                    ${metaParts.length ? `<small>${escapeHtml(metaParts.join(" | "))}</small>` : ""}
+                                  </span>
+                                </label>
+                              `;
+                            }).join("")}
+                          </div>`
+                        : `<div class="td-empty td-empty--compact"><strong>No pupils match the current filters.</strong></div>`
                 }
-              `}
+              </div>
             </div>
 
             <div class="td-form-actions">
@@ -26247,7 +26602,7 @@ function injectStyles() {
     }
 
     .td-automation-run-grid--intervention{
-      grid-template-columns:repeat(3,minmax(0,1fr));
+      grid-template-columns:repeat(4,minmax(0,1fr));
     }
 
     .td-intervention-filter-section{
@@ -26258,6 +26613,15 @@ function injectStyles() {
 
     .td-field--intervention-name{
       max-width:420px;
+    }
+
+    .td-field--intervention-search .td-input{
+      appearance:none;
+      -webkit-appearance:none;
+      min-height:46px;
+      border-radius:12px;
+      padding:11px 12px;
+      line-height:1.2;
     }
 
     .td-field--automation-checkbox{
@@ -26821,6 +27185,29 @@ function injectStyles() {
       line-height:1.45;
     }
 
+    .td-intervention-selection-panel{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-intervention-selection-panel--selected{
+      padding-bottom:2px;
+    }
+
+    .td-intervention-selection-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+
+    .td-intervention-selection-head strong{
+      color:#0f172a;
+      font-size:0.96rem;
+      line-height:1.3;
+    }
+
     .td-intervention-selected-pupils{
       display:flex;
       flex-wrap:wrap;
@@ -26847,14 +27234,72 @@ function injectStyles() {
       background:#f8fafc;
     }
 
-    .td-intervention-pupil-grid{
-      display:grid;
-      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-      gap:10px;
+    .td-intervention-pupil-list{
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      border:1px solid #dbe3ee;
+      border-radius:10px;
+      background:#fff;
     }
 
-    .td-automation-class-option--pupil{
-      min-height:86px;
+    .td-intervention-pupil-row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:42px;
+      padding:8px 10px;
+      border-bottom:1px solid #eef2f7;
+      color:#0f172a;
+      cursor:pointer;
+    }
+
+    .td-intervention-pupil-row:last-child{
+      border-bottom:none;
+    }
+
+    .td-intervention-pupil-row:hover{
+      background:#f8fafc;
+    }
+
+    .td-intervention-pupil-row.is-selected{
+      background:var(--wl-accent-tint);
+    }
+
+    .td-intervention-pupil-row input{
+      flex:0 0 auto;
+      margin:0;
+    }
+
+    .td-intervention-pupil-row-main{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:12px;
+      min-width:0;
+      width:100%;
+    }
+
+    .td-intervention-pupil-row-main strong{
+      min-width:0;
+      overflow:hidden;
+      color:#0f172a;
+      font-size:0.9rem;
+      line-height:1.25;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .td-intervention-pupil-row-main small{
+      flex:0 1 auto;
+      min-width:0;
+      overflow:hidden;
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.2;
+      text-align:right;
+      text-overflow:ellipsis;
+      white-space:nowrap;
     }
 
     .td-form-stack{
@@ -34009,6 +34454,17 @@ function injectStyles() {
 
       .td-automation-class-grid{
         grid-template-columns:1fr;
+      }
+
+      .td-intervention-pupil-row-main{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:3px;
+      }
+
+      .td-intervention-pupil-row-main small{
+        text-align:left;
+        white-space:normal;
       }
 
       .td-automation-summary-grid{
