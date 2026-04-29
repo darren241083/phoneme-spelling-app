@@ -121,7 +121,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.46";
+} from "./db.js?v=1.47";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -151,7 +151,6 @@ import {
   doPersonalisedAutomationPolicyWindowsOverlap,
   derivePersonalisedAutomationDeadline,
   formatPersonalisedAutomationWeekdayList,
-  getAutoAssignSupportPresetLabel,
   getAutomationPolicyTypeLabel,
   getPersonalisedAutomationPolicyLifecycle,
   normalizeAutoAssignPolicy,
@@ -315,7 +314,9 @@ const GROUP_COMPARISON_PAIR_FALLBACKS = {
     { value: "other", label: "Other" },
   ],
 };
-const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION]);
+const AUTOMATION_TARGET_YEAR_ALL = "__all_year_groups__";
+const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM]);
+const AUTOMATION_CLASS_TYPE_FALLBACK = CLASS_TYPE_SUBJECT;
 
 function createDefaultGroupComparisonState() {
   return {
@@ -511,6 +512,8 @@ function createDefaultPupilOnboardingState() {
 function createDefaultAutomationTargetFilters() {
   return {
     yearGroup: "",
+    yearGroups: [],
+    allYearGroups: false,
     classType: "all",
   };
 }
@@ -520,9 +523,8 @@ function deriveAutomationTargetFiltersFromPolicy(rawPolicy = null) {
   const selectedIds = normalizeIdList(policy.target_class_ids);
   if (!selectedIds.length) return createDefaultAutomationTargetFilters();
 
-  const eligibleById = new Map(
-    getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item])
-  );
+  const targetableClasses = getAutomationTargetableClasses();
+  const eligibleById = new Map(targetableClasses.map((item) => [String(item?.id || "").trim(), item]));
   const selectedClasses = selectedIds
     .map((classId) => eligibleById.get(classId) || null)
     .filter(Boolean);
@@ -533,15 +535,18 @@ function deriveAutomationTargetFiltersFromPolicy(rawPolicy = null) {
       .map((item) => String(item?.year_group || "").trim())
       .filter(Boolean)
   )];
-  const classTypes = [...new Set(
-    selectedClasses
-      .map((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }))
-      .filter((item) => [CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION].includes(item))
-  )];
+  if (!yearGroups.length) return createDefaultAutomationTargetFilters();
+  const allTargetableIds = new Set(targetableClasses.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectedEligibleIds = new Set(selectedClasses.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectsAllEligibleForms = allTargetableIds.size > 0
+    && selectedEligibleIds.size === allTargetableIds.size
+    && [...allTargetableIds].every((classId) => selectedEligibleIds.has(classId));
 
   return {
-    yearGroup: yearGroups.length === 1 ? yearGroups[0] : "",
-    classType: classTypes.length === 1 ? classTypes[0] : "all",
+    yearGroup: selectsAllEligibleForms ? AUTOMATION_TARGET_YEAR_ALL : yearGroups[0],
+    yearGroups: selectsAllEligibleForms ? getAutomationTargetYearGroupOptions() : yearGroups,
+    allYearGroups: selectsAllEligibleForms,
+    classType: "all",
   };
 }
 
@@ -692,6 +697,7 @@ const state = {
   automationSelectionOpenedThisSession: false,
   automationDraftsByKey: {},
   automationAction: createDefaultAutomationActionState(),
+  automationDismissedPolicyAlertKeys: [],
   interventionGroup: createDefaultInterventionGroupState(),
   staffAccess: createDefaultStaffAccessState(),
   pupilOnboarding: createDefaultPupilOnboardingState(),
@@ -900,7 +906,7 @@ function getBaselineActionTooltipText() {
 
 function getGeneratePersonalisedActionTooltipText() {
   return isCentralOwnerAppRole()
-    ? "Manage named automation policies for selected form and intervention groups, then run one saved policy now. Pupils without the required baseline or with an active automated personalised test will be skipped."
+    ? "Manage named automation policies for year and form groups, then run one saved policy now. Pupils without the required baseline or with an active automated personalised test will be skipped."
     : "Personalised automation is now run from the central-owner control.";
 }
 
@@ -1075,7 +1081,7 @@ function getClassRemovalTargetClasses(sourceClass = null) {
 
 function isAutomationEligibleClass(item) {
   return AUTOMATION_ELIGIBLE_CLASS_TYPES.has(
-    getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM })
+    getNormalizedClassType(item?.class_type, { legacyFallback: AUTOMATION_CLASS_TYPE_FALLBACK })
   );
 }
 
@@ -1083,10 +1089,8 @@ function getAutomationEligibleClasses() {
   return (state.classes || [])
     .filter((item) => canEditClassRecord(item) && isAutomationEligibleClass(item))
     .sort((a, b) => {
-      const typeDelta =
-        (getNormalizedClassType(a?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1)
-        - (getNormalizedClassType(b?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1);
-      if (typeDelta !== 0) return typeDelta;
+      const yearDelta = String(a?.year_group || "").localeCompare(String(b?.year_group || ""));
+      if (yearDelta !== 0) return yearDelta;
       return String(a?.name || "").localeCompare(String(b?.name || ""));
     });
 }
@@ -3357,9 +3361,8 @@ function sortAutomationRunClassIds(classIds = []) {
   return normalizeIdList(classIds).sort((a, b) => {
     const aClass = classesById.get(a) || null;
     const bClass = classesById.get(b) || null;
-    const aRank = getNormalizedClassType(aClass?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1;
-    const bRank = getNormalizedClassType(bClass?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1;
-    if (aRank !== bRank) return aRank - bRank;
+    const yearDelta = String(aClass?.year_group || "").localeCompare(String(bClass?.year_group || ""));
+    if (yearDelta !== 0) return yearDelta;
     return String(aClass?.name || "").localeCompare(String(bClass?.name || ""));
   });
 }
@@ -3372,12 +3375,57 @@ function normalizeIdList(items = []) {
   )];
 }
 
+function getAutomationTargetableClasses() {
+  return getAutomationEligibleClasses().filter((item) => String(item?.year_group || "").trim());
+}
+
+function getAutomationFormGroupsMissingYearGroup() {
+  return getAutomationEligibleClasses().filter((item) => !String(item?.year_group || "").trim());
+}
+
+function getAutomationTargetYearGroupOptions() {
+  return [...new Set(
+    getAutomationTargetableClasses()
+      .map((item) => String(item?.year_group || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeAutomationTargetYearGroups(items = [], { availableYearGroups = null } = {}) {
+  const available = Array.isArray(availableYearGroups)
+    ? availableYearGroups.map((item) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const availableSet = available ? new Set(available) : null;
+  const values = [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").trim())
+      .filter((item) =>
+        item
+        && item !== AUTOMATION_TARGET_YEAR_ALL
+        && item !== "all"
+        && (!availableSet || availableSet.has(item))
+      )
+  )];
+  if (!available) return values.sort((a, b) => a.localeCompare(b));
+  return values.sort((a, b) => available.indexOf(a) - available.indexOf(b));
+}
+
 function normalizeAutomationTargetFilters(rawFilters = null) {
   const source = rawFilters && typeof rawFilters === "object" ? rawFilters : {};
-  const classType = String(source.classType || "all").trim().toLowerCase();
+  const yearGroup = String(source.yearGroup || "").trim();
+  const rawYearGroups = Array.isArray(source.yearGroups) ? source.yearGroups : [];
+  const selectedYearGroups = normalizeAutomationTargetYearGroups([
+    ...rawYearGroups,
+    ...(yearGroup && yearGroup !== AUTOMATION_TARGET_YEAR_ALL && yearGroup !== "all" ? [yearGroup] : []),
+  ]);
+  const allYearGroups = source.allYearGroups === true
+    || yearGroup === AUTOMATION_TARGET_YEAR_ALL
+    || yearGroup === "all";
   return {
-    yearGroup: String(source.yearGroup || "").trim(),
-    classType: [CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION, "all"].includes(classType) ? classType : "all",
+    yearGroup: allYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (selectedYearGroups[0] || ""),
+    yearGroups: allYearGroups ? getAutomationTargetYearGroupOptions() : selectedYearGroups,
+    allYearGroups,
+    classType: "all",
   };
 }
 
@@ -3479,6 +3527,44 @@ function getAutomationPolicyLifecycleNote(policy) {
   return "This policy stays usable until you archive it or add an end date.";
 }
 
+function buildAutomationPolicyAlertDismissKey(policy, lifecycle = null) {
+  const policyId = String(policy?.id || "").trim();
+  if (!policyId) return "";
+  const effectiveLifecycle = lifecycle || getPersonalisedAutomationPolicyLifecycle(policy);
+  return [
+    policyId,
+    String(effectiveLifecycle?.state || "").trim(),
+    String(policy?.end_date || "").trim(),
+  ].join(":");
+}
+
+function getDismissedAutomationPolicyAlertKeys() {
+  return new Set(
+    (Array.isArray(state.automationDismissedPolicyAlertKeys) ? state.automationDismissedPolicyAlertKeys : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function isAutomationPolicyAlertDismissed(alertKey = "") {
+  const safeAlertKey = String(alertKey || "").trim();
+  if (!safeAlertKey) return false;
+  return getDismissedAutomationPolicyAlertKeys().has(safeAlertKey);
+}
+
+function dismissAutomationPolicyAlert(policyId = "", alertKey = "") {
+  const policy = getSavedAutomationPolicyById(policyId);
+  if (!policy) return false;
+  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+  const currentAlertKey = buildAutomationPolicyAlertDismissKey(policy, lifecycle);
+  const safeAlertKey = String(alertKey || currentAlertKey || "").trim();
+  if (!safeAlertKey || safeAlertKey !== currentAlertKey) return false;
+  const nextKeys = getDismissedAutomationPolicyAlertKeys();
+  nextKeys.add(safeAlertKey);
+  state.automationDismissedPolicyAlertKeys = [...nextKeys];
+  return true;
+}
+
 function buildAutomationPolicyAlertEntries() {
   return getAutomationPolicies()
     .map((policy) => {
@@ -3487,10 +3573,15 @@ function buildAutomationPolicyAlertEntries() {
       if (!policyId || lifecycle.archived || (!lifecycle.expired && !lifecycle.expiringSoon)) {
         return null;
       }
+      const alertKey = buildAutomationPolicyAlertDismissKey(policy, lifecycle);
+      if (isAutomationPolicyAlertDismissed(alertKey)) {
+        return null;
+      }
       return {
         policy,
         lifecycle,
         policyId,
+        alertKey,
         title: lifecycle.expired
           ? `${getAutomationPolicyDisplayName(policy)} expired`
           : `${getAutomationPolicyDisplayName(policy)} expires soon`,
@@ -3853,7 +3944,17 @@ function startNewAutomationPolicyDraft({ policy = null, duplicateSourcePolicyId 
     }),
   };
   state.automationSelectedPolicyKey = AUTOMATION_NEW_POLICY_KEY;
+  state.automationSelectionExplicit = true;
+  state.automationSelectionOpenedThisSession = true;
   persistAutomationPolicyDraft();
+}
+
+function ensureDefaultAutomationPolicyDraftSelected() {
+  if (getExplicitAutomationSelectedPolicyKey()) return;
+  startNewAutomationPolicyDraft({
+    policy: createBlankAutomationPolicyDraft(),
+    duplicateSourcePolicyId: "",
+  });
 }
 
 function discardNewAutomationPolicyDraft() {
@@ -3919,40 +4020,84 @@ function scrollAutomationPolicyViewToTop({ behavior = "auto" } = {}) {
   });
 }
 
+function scrollDashboardNoticeIntoView({ behavior = "smooth" } = {}) {
+  requestAnimationFrame(() => {
+    const notice = rootEl?.querySelector('[data-role="dashboard-notice"]');
+    const target = notice || rootEl?.querySelector(".td-shell");
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView?.({ block: "start", behavior });
+    if (notice instanceof HTMLElement) {
+      try {
+        notice.focus({ preventScroll: true });
+      } catch {
+        notice.focus?.();
+      }
+    }
+  });
+}
+
 function getAutomationRunSelectedClassIds() {
-  const availableIds = new Set(getAutomationEligibleClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const availableIds = new Set(getAutomationTargetableClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
   return normalizeIdList(getAutomationRunPolicy()?.target_class_ids || []).filter((classId) => availableIds.has(classId));
+}
+
+function getAutomationRunUnavailableTargetClassIds(policy = getAutomationRunPolicy()) {
+  const availableIds = new Set(getAutomationTargetableClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  return normalizeIdList(policy?.target_class_ids || []).filter((classId) => !availableIds.has(classId));
 }
 
 function setAutomationRunSelectedClassIds(nextClassIds = []) {
   const filteredIds = sortAutomationRunClassIds(
     normalizeIdList(nextClassIds)
-      .filter((classId) => getAutomationEligibleClasses().some((item) => String(item?.id || "").trim() === classId))
+      .filter((classId) => getAutomationTargetableClasses().some((item) => String(item?.id || "").trim() === classId))
   );
   setAutomationRunPolicy({ target_class_ids: filteredIds });
 }
 
-function toggleAutomationRunSelectedClassId(classId, checked) {
-  const safeClassId = String(classId || "").trim();
-  if (!safeClassId) return;
-  const current = new Set(getAutomationRunSelectedClassIds());
-  if (checked) current.add(safeClassId);
-  else current.delete(safeClassId);
-  setAutomationRunSelectedClassIds([...current]);
+function getAutomationClassesForTargetYearGroups(yearGroups = getAutomationTargetFilters().yearGroups, { allYearGroups = getAutomationTargetFilters().allYearGroups } = {}) {
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const selectedYearGroups = allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(yearGroups, { availableYearGroups });
+  if (!selectedYearGroups.length) return [];
+  const selectedYearGroupSet = new Set(selectedYearGroups);
+  return getAutomationTargetableClasses().filter((item) => {
+    return selectedYearGroupSet.has(String(item?.year_group || "").trim());
+  });
 }
 
-function setAutomationTargetFilters(nextFilters = null) {
+function setAutomationTargetYearGroups(yearGroups = [], { allYearGroups = false } = {}) {
   const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
   const currentEntry = getCurrentAutomationDraftEntry();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const selectedYearGroups = allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(yearGroups, { availableYearGroups });
+  const selectsAllYearGroups = !!allYearGroups
+    || (availableYearGroups.length > 0
+      && selectedYearGroups.length === availableYearGroups.length
+      && availableYearGroups.every((yearGroup) => selectedYearGroups.includes(yearGroup)));
+  const nextTargetClassIds = sortAutomationRunClassIds(
+    getAutomationClassesForTargetYearGroups(selectedYearGroups, { allYearGroups: selectsAllYearGroups })
+      .map((item) => String(item?.id || "").trim())
+  );
   state.automationDraftsByKey = {
     ...state.automationDraftsByKey,
     [selectedKey]: buildAutomationDraftEntry({
       ...currentEntry,
+      policy: {
+        ...currentEntry.policy,
+        target_class_ids: nextTargetClassIds,
+      },
       targetFilters: {
         ...currentEntry.targetFilters,
-        ...(nextFilters && typeof nextFilters === "object" ? nextFilters : {}),
+        yearGroup: selectsAllYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (selectedYearGroups[0] || ""),
+        yearGroups: selectsAllYearGroups ? availableYearGroups : selectedYearGroups,
+        allYearGroups: selectsAllYearGroups,
+        classType: "all",
       },
       targetFiltersTouched: true,
+      dirty: true,
     }, {
       basePolicy: selectedKey === AUTOMATION_NEW_POLICY_KEY
         ? buildDefaultPersonalisedAutomationPolicy()
@@ -3962,20 +4107,107 @@ function setAutomationTargetFilters(nextFilters = null) {
   persistAutomationPolicyDraft();
 }
 
-function getFilteredAutomationEligibleClasses() {
-  const filters = getAutomationTargetFilters();
-  return getAutomationEligibleClasses().filter((item) => {
-    const yearGroup = String(item?.year_group || "").trim();
-    const classType = getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM });
-    if (filters.yearGroup && filters.yearGroup !== yearGroup) return false;
-    if (filters.classType !== "all" && filters.classType !== classType) return false;
-    return true;
+function setAutomationTargetClassIdsForCurrentFilters(nextClassIds = [], nextFilters = null) {
+  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  const currentEntry = getCurrentAutomationDraftEntry();
+  const safeFilters = nextFilters && typeof nextFilters === "object"
+    ? normalizeAutomationTargetFilters(nextFilters)
+    : currentEntry.targetFilters;
+  const nextTargetClassIds = sortAutomationRunClassIds(
+    normalizeIdList(nextClassIds)
+      .filter((classId) => getAutomationTargetableClasses().some((item) => String(item?.id || "").trim() === classId))
+  );
+  state.automationDraftsByKey = {
+    ...state.automationDraftsByKey,
+    [selectedKey]: buildAutomationDraftEntry({
+      ...currentEntry,
+      policy: {
+        ...currentEntry.policy,
+        target_class_ids: nextTargetClassIds,
+      },
+      targetFilters: safeFilters,
+      targetFiltersTouched: true,
+      dirty: true,
+    }, {
+      basePolicy: selectedKey === AUTOMATION_NEW_POLICY_KEY
+        ? buildDefaultPersonalisedAutomationPolicy()
+        : (getSavedAutomationPolicyById(selectedKey) || buildDefaultPersonalisedAutomationPolicy()),
+    }),
+  };
+  persistAutomationPolicyDraft();
+}
+
+function toggleAutomationTargetYearGroup(yearGroup = "", checked = false) {
+  const safeYearGroup = String(yearGroup || "").trim();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  if (!safeYearGroup) return;
+  if (safeYearGroup === AUTOMATION_TARGET_YEAR_ALL) {
+    setAutomationTargetYearGroups(checked ? availableYearGroups : [], { allYearGroups: checked });
+    return;
+  }
+
+  const currentFilters = getAutomationTargetFilters();
+  const currentYearGroups = currentFilters.allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(currentFilters.yearGroups, { availableYearGroups });
+  const nextYearGroups = checked
+    ? normalizeAutomationTargetYearGroups([...currentYearGroups, safeYearGroup], { availableYearGroups })
+    : currentYearGroups.filter((item) => item !== safeYearGroup);
+  const nextAllYearGroups = availableYearGroups.length > 0
+    && nextYearGroups.length === availableYearGroups.length
+    && availableYearGroups.every((item) => nextYearGroups.includes(item));
+  const currentSelectedIds = new Set(getAutomationRunSelectedClassIds());
+  const toggledYearClassIds = getAutomationClassesForTargetYearGroups([safeYearGroup])
+    .map((item) => String(item?.id || "").trim())
+    .filter(Boolean);
+  if (checked) {
+    toggledYearClassIds.forEach((classId) => currentSelectedIds.add(classId));
+  } else {
+    toggledYearClassIds.forEach((classId) => currentSelectedIds.delete(classId));
+  }
+  setAutomationTargetClassIdsForCurrentFilters([...currentSelectedIds], {
+    ...currentFilters,
+    yearGroup: nextAllYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (nextYearGroups[0] || ""),
+    yearGroups: nextAllYearGroups ? availableYearGroups : nextYearGroups,
+    allYearGroups: nextAllYearGroups,
+    classType: "all",
+  });
+}
+
+function toggleAutomationTargetFormGroup(classId = "", checked = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  const targetableClass = getAutomationTargetableClasses()
+    .find((item) => String(item?.id || "").trim() === safeClassId);
+  if (!targetableClass) return;
+  const current = new Set(getAutomationRunSelectedClassIds());
+  if (checked) current.add(safeClassId);
+  else current.delete(safeClassId);
+
+  const currentFilters = getAutomationTargetFilters();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const classYearGroup = String(targetableClass?.year_group || "").trim();
+  const currentYearGroups = currentFilters.allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(currentFilters.yearGroups, { availableYearGroups });
+  const nextYearGroups = normalizeAutomationTargetYearGroups([...currentYearGroups, classYearGroup], {
+    availableYearGroups,
+  });
+  setAutomationTargetClassIdsForCurrentFilters([...current], {
+    ...currentFilters,
+    yearGroup: currentFilters.allYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (nextYearGroups[0] || ""),
+    yearGroups: currentFilters.allYearGroups ? availableYearGroups : nextYearGroups,
+    allYearGroups: availableYearGroups.length > 0
+      && currentFilters.allYearGroups === true,
+    classType: "all",
   });
 }
 
 function getAutomationRunPolicyValidation() {
+  const rawPolicy = getAutomationRunPolicy();
+  const unavailableTargetClassIds = getAutomationRunUnavailableTargetClassIds(rawPolicy);
   const policy = normalizePersonalisedAutomationPolicy({
-    ...getAutomationRunPolicy(),
+    ...rawPolicy,
     target_class_ids: getAutomationRunSelectedClassIds(),
   });
   const errors = [];
@@ -4002,6 +4234,9 @@ function getAutomationRunPolicyValidation() {
   }
   if (policy.end_date && policy.end_date < policy.start_date) {
     errors.push("End date must be on or after the start date.");
+  }
+  if (unavailableTargetClassIds.length) {
+    errors.push("This policy includes older non-form or incomplete targets. Choose year groups again before saving or running.");
   }
   if (!String(policy.archived_at || "").trim() && selectedClassIds.length) {
     const overlappingPolicies = getAutomationPolicies()
@@ -4030,7 +4265,7 @@ function getAutomationRunPolicyValidation() {
         overlappingPolicies.map((item) => getAutomationPolicyDisplayName(item.policy))
       )];
       errors.push(
-        `These target groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`
+        `These form groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`
       );
     }
   }
@@ -4056,7 +4291,7 @@ function getSavedAutomationRunReadyState() {
     return {
       ready: false,
       actionLabel: "Run now",
-      message: "Choose at least one form or intervention group before you run this policy.",
+      message: "Choose at least one year group before you run this policy.",
     };
   }
   if (lifecycle.archived) {
@@ -4093,7 +4328,7 @@ function getSavedAutomationRunReadyState() {
 
 function getAutomationPolicyTargetLabels(targetIds = []) {
   const eligibleById = new Map(
-    getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item])
+    getAutomationTargetableClasses().map((item) => [String(item?.id || "").trim(), item])
   );
   return normalizeIdList(targetIds)
     .map((classId) => eligibleById.get(classId) || null)
@@ -4103,11 +4338,11 @@ function getAutomationPolicyTargetLabels(targetIds = []) {
 
 function getAutomationPolicyTargetSummary(targetIds = []) {
   const labels = getAutomationPolicyTargetLabels(targetIds);
-  if (!labels.length) return "No target groups selected yet.";
-  if (labels.length === 1) return `1 target group: ${labels[0]}.`;
+  if (!labels.length) return "No form groups selected yet.";
+  if (labels.length === 1) return `1 form group: ${labels[0]}.`;
   const preview = labels.slice(0, 3).join(", ");
   const extraCount = Math.max(0, labels.length - 3);
-  return `${labels.length} target groups: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
+  return `${labels.length} form groups: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
 }
 
 function getAutomationPolicyDueDatePreview(policy) {
@@ -4134,6 +4369,15 @@ function joinAutomationSummaryParts(parts = []) {
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join(" · ");
+}
+
+function formatAutomationYearGroupList(yearGroups = [], { allYearGroups = false } = {}) {
+  if (allYearGroups) return "all year groups";
+  const values = normalizeAutomationTargetYearGroups(yearGroups);
+  if (!values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 function formatAutomationCompactDate(value) {
@@ -4195,12 +4439,19 @@ function getAutomationPolicyCompactDateRange(policy) {
 function getAutomationSupportPresetShortDescription(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "independent_first") {
-    return "Keeps tests as independent as possible.";
+    return "Uses independent typing wherever possible.";
   }
   if (normalized === "more_support_when_needed") {
-    return "Adds support sooner when evidence is limited.";
+    return "Uses supported tile questions sooner when evidence is limited or weaker.";
   }
-  return "Normal mix of independent and supported items.";
+  return "Mixes independent typing with supported tile questions when useful.";
+}
+
+function getAutomationQuestionSupportLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "independent_first") return "Mostly independent";
+  if (normalized === "more_support_when_needed") return "More supported practice";
+  return "Balanced";
 }
 
 function openDashboardSection(sectionKey) {
@@ -9120,12 +9371,6 @@ function onRootChange(event) {
     return;
   }
 
-  if (target.matches('[data-field="automation-run-class"]')) {
-    toggleAutomationRunSelectedClassId(target.value, !!target.checked);
-    paint();
-    return;
-  }
-
   if (target.matches('[data-field="intervention-pupil-toggle"]')) {
     toggleInterventionBuilderPupilId(target.value, !!target.checked);
     paint();
@@ -9172,14 +9417,14 @@ function onRootChange(event) {
     return;
   }
 
-  if (target.matches('[data-field="automation-target-year-group"]')) {
-    setAutomationTargetFilters({ yearGroup: String(target.value || "").trim() });
+  if (target.matches('[data-field="automation-target-year-toggle"]')) {
+    toggleAutomationTargetYearGroup(String(target.value || "").trim(), !!target.checked);
     paint();
     return;
   }
 
-  if (target.matches('[data-field="automation-target-class-type"]')) {
-    setAutomationTargetFilters({ classType: String(target.value || "").trim().toLowerCase() });
+  if (target.matches('[data-field="automation-target-form-group"]')) {
+    toggleAutomationTargetFormGroup(String(target.value || "").trim(), !!target.checked);
     paint();
     return;
   }
@@ -10344,6 +10589,7 @@ async function onRootClick(event) {
       state.createClassOpen = false;
       state.createInterventionGroupOpen = false;
       state.createBaselineOpen = false;
+      ensureDefaultAutomationPolicyDraftSelected();
     }
     paint();
     return;
@@ -10379,6 +10625,11 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "dismiss-automation-policy-alert") {
+    handleDismissAutomationPolicyAlert(button.dataset.policyId || "", button.dataset.alertKey || "");
+    return;
+  }
+
   if (action === "delete-automation-policy") {
     await handleDeleteAutomationPolicy(button.dataset.policyId || "");
     return;
@@ -10410,15 +10661,13 @@ async function onRootClick(event) {
   }
 
   if (action === "select-all-automation-classes") {
-    setAutomationRunSelectedClassIds(
-      getFilteredAutomationEligibleClasses().map((item) => String(item?.id || "").trim()).filter(Boolean)
-    );
+    setAutomationTargetYearGroups(getAutomationTargetYearGroupOptions(), { allYearGroups: true });
     paint();
     return;
   }
 
   if (action === "clear-automation-classes") {
-    setAutomationRunSelectedClassIds([]);
+    setAutomationTargetYearGroups([]);
     paint();
     return;
   }
@@ -11991,7 +12240,7 @@ async function handleRunNowPersonalisedGeneration() {
     : "Generating personalised tests for this policy...";
 
   if (!selectedClassIds.length) {
-    showNotice("Select at least one form or intervention group before you run this policy.", "error");
+    showNotice("Choose at least one year group before you run this policy.", "error");
     paint();
     return;
   }
@@ -12004,6 +12253,7 @@ async function handleRunNowPersonalisedGeneration() {
   paint();
 
   let runRecord = null;
+  let shouldScrollToRunResult = false;
 
   try {
     if (draftEntry.dirty || !String(effectivePolicy.id || "").trim()) {
@@ -12101,6 +12351,7 @@ async function handleRunNowPersonalisedGeneration() {
         `Released Spelling Bee competition to ${selectedClassIds.length} group${selectedClassIds.length === 1 ? "" : "s"}.`,
         "success",
       );
+      shouldScrollToRunResult = true;
       paint();
       return;
     }
@@ -12121,6 +12372,7 @@ async function handleRunNowPersonalisedGeneration() {
     let includedPupilCount = 0;
     let skippedPupilCount = 0;
     let errorCount = 0;
+    const pupilIdsIncludedThisRun = new Set();
 
     for (const classId of selectedClassIds) {
       const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
@@ -12154,7 +12406,7 @@ async function handleRunNowPersonalisedGeneration() {
           });
           continue;
         }
-        if (activeAutomationByPupil.has(pupilId)) {
+        if (pupilIdsIncludedThisRun.has(pupilId) || activeAutomationByPupil.has(pupilId)) {
           skippedRows.push({
             runId: runRecord.id,
             classId,
@@ -12217,6 +12469,7 @@ async function handleRunNowPersonalisedGeneration() {
         await upsertPersonalisedGenerationRunPupilRows([...includedRows, ...skippedRows]);
 
         for (const pupilId of includedPupilIds) {
+          pupilIdsIncludedThisRun.add(pupilId);
           activeAutomationByPupil.set(pupilId, {
             assignmentId: created.assignmentId,
             classId,
@@ -12292,6 +12545,7 @@ async function handleRunNowPersonalisedGeneration() {
       }),
       runStatus === "failed" ? "error" : (errorCount > 0 ? "info" : "success"),
     );
+    shouldScrollToRunResult = true;
     paint();
   } catch (error) {
     console.error("run now personalised generation error:", error);
@@ -12310,9 +12564,13 @@ async function handleRunNowPersonalisedGeneration() {
       });
     }
     showNotice(error?.message || "Could not run personalised generation.", "error");
+    shouldScrollToRunResult = true;
   } finally {
     clearAutomationActionState();
     paint();
+    if (shouldScrollToRunResult) {
+      scrollDashboardNoticeIntoView({ behavior: "smooth" });
+    }
   }
 }
 
@@ -12378,6 +12636,12 @@ function handleExtendAutomationPolicy(policyId) {
   state.createAutoAssignOpen = true;
   paint();
   focusAutomationPolicyScheduleField();
+}
+
+function handleDismissAutomationPolicyAlert(policyId, alertKey) {
+  if (!canManageAutomation()) return;
+  dismissAutomationPolicyAlert(policyId, alertKey);
+  paint();
 }
 
 function handleDuplicateAutomationPolicy(policyId) {
@@ -14136,9 +14400,10 @@ function syncTableScrollShells() {
 
 function renderNotice() {
   if (!state.notice) return "";
+  const role = state.noticeType === "error" ? "alert" : "status";
 
   return `
-    <div class="td-notice td-notice--${state.noticeType}">
+    <div class="td-notice td-notice--${state.noticeType}" data-role="dashboard-notice" role="${role}" tabindex="-1">
       <span>${escapeHtml(state.notice)}</span>
       <button class="td-notice-close" data-action="dismiss-notice" type="button" aria-label="Dismiss message">×</button>
     </div>
@@ -14175,8 +14440,6 @@ function renderCreateBar() {
   const automationPoliciesArchived = automationPolicies.filter((policy) => !!String(policy?.archived_at || "").trim());
   const selectedAutomationPolicyKey = getExplicitAutomationSelectedPolicyKey();
   const hasAutomationSelection = !!selectedAutomationPolicyKey;
-  const showAutomationEditingSummary = hasAutomationSelection
-    && state.automationSelectionOpenedThisSession === true;
   const automationRunPolicy = hasAutomationSelection
     ? getAutomationRunPolicy()
     : buildDefaultPersonalisedAutomationPolicy();
@@ -14190,13 +14453,21 @@ function renderCreateBar() {
   const automationRunReadyState = hasAutomationSelection
     ? getSavedAutomationRunReadyState()
     : { ready: false, actionLabel: "Run now", message: "Create or select a policy first." };
-  const automationEligibleClasses = getAutomationEligibleClasses();
+  const automationTargetableClasses = getAutomationTargetableClasses();
+  const automationMissingYearGroupCount = getAutomationFormGroupsMissingYearGroup().length;
   const automationTargetFilters = hasAutomationSelection
     ? getAutomationTargetFilters()
     : createDefaultAutomationTargetFilters();
-  const filteredAutomationEligibleClasses = hasAutomationSelection
-    ? getFilteredAutomationEligibleClasses()
-    : [];
+  const automationEligibleClassesById = new Map(
+    automationTargetableClasses.map((item) => [String(item?.id || "").trim(), item])
+  );
+  const selectedAutomationClasses = selectedAutomationClassIds
+    .map((classId) => automationEligibleClassesById.get(classId) || null)
+    .filter(Boolean);
+  const selectedAutomationClassIdSet = new Set(selectedAutomationClassIds);
+  const automationUnavailableTargetCount = hasAutomationSelection
+    ? getAutomationRunUnavailableTargetClassIds(automationRunPolicy).length
+    : 0;
   const automationIsNewDraft = selectedAutomationPolicyKey === AUTOMATION_NEW_POLICY_KEY;
   const automationLifecycle = getPersonalisedAutomationPolicyLifecycle(automationRunPolicy, {
     warningDays: PERSONALISED_AUTOMATION_EXPIRY_WARNING_DAYS,
@@ -14226,29 +14497,45 @@ function renderCreateBar() {
   const automationStatusBadge = getAutomationPolicyStatusBadgeMeta(automationRunPolicy, {
     isDraft: automationIsNewDraft && !savedAutomationPolicy,
   });
-  const automationYearGroupOptions = [...new Set(
-    automationEligibleClasses
-      .map((item) => String(item?.year_group || "").trim())
-      .filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b));
-  const automationMetaSummary = getAutomationPolicyCompactMetaLine(automationRunPolicy, {
-    savedAt: savedAutomationPolicy?.updated_at || "",
-    isDraft: automationIsNewDraft && !savedAutomationPolicy,
-  });
+  const automationYearGroupOptions = getAutomationTargetYearGroupOptions();
+  const automationSelectedYearGroups = automationTargetFilters.allYearGroups
+    ? automationYearGroupOptions
+    : normalizeAutomationTargetYearGroups(automationTargetFilters.yearGroups, {
+      availableYearGroups: automationYearGroupOptions,
+    });
+  const automationAllYearGroupsInScope = automationYearGroupOptions.length > 0
+    && (automationTargetFilters.allYearGroups
+      || (automationSelectedYearGroups.length === automationYearGroupOptions.length
+        && automationYearGroupOptions.every((item) => automationSelectedYearGroups.includes(item))));
+  const automationCandidateFormClasses = hasAutomationSelection
+    ? getAutomationClassesForTargetYearGroups(automationSelectedYearGroups, {
+      allYearGroups: automationAllYearGroupsInScope,
+    })
+    : [];
+  const automationTargetableClassIds = automationTargetableClasses
+    .map((item) => String(item?.id || "").trim())
+    .filter(Boolean);
+  const automationAllYearGroupsChecked = automationTargetableClassIds.length > 0
+    && automationTargetableClassIds.every((classId) => selectedAutomationClassIdSet.has(classId));
+  const automationAllYearGroupsPartial = automationAllYearGroupsInScope && !automationAllYearGroupsChecked;
   const automationCadenceLabel = PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
     (option) => option.value === automationRunPolicy.frequency
   )?.label || "Weekly";
   const automationReleasePatternLabel = automationRunPolicy.frequency === "fortnightly"
     ? `Week 1: ${formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays_week_1)} | Week 2: ${automationRunPolicy.selected_weekdays_week_2.length ? formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays_week_2) : "Not selected"}`
     : formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays);
-  const automationScheduleWindowLabel = automationRunPolicy.end_date
-    ? `${formatShortDate(automationRunPolicy.start_date)}-${formatShortDate(automationRunPolicy.end_date)}`
-    : `From ${formatShortDate(automationRunPolicy.start_date)}`;
   const automationAlertEntries = buildAutomationPolicyAlertEntries();
   const automationCanDiscardChanges = automationDraftDirty;
   const automationShowDiscardChanges = automationCanDiscardChanges;
-  const automationSaveDisabled = !automationDraftDirty || automationActionBusy || automationBeeManagementLocked;
-  const automationSaveLabel = automationActionMode === "saving" ? "Saving..." : "Save";
+  const automationSaveValidationMessage = automationPolicyValidation.errors[0] || "";
+  const automationDisplayValidationMessage = automationSaveValidationMessage === "Give this automation policy a name."
+    ? "Add a policy name before saving or running this policy."
+    : automationSaveValidationMessage;
+  const automationSaveDisabled = !automationDraftDirty
+    || !!automationSaveValidationMessage
+    || automationActionBusy
+    || automationBeeManagementLocked;
+  const automationSaveLabel = automationActionMode === "saving" ? "Saving..." : "Save policy";
   const automationShowRunNowButton = automationActionMode === "running"
     || (!automationDraftDirty && automationActionMode !== "saving_and_running");
   const automationPrimaryRunLabel = automationActionMode === "saving_and_running"
@@ -14259,8 +14546,15 @@ function renderCreateBar() {
   const automationPrimaryRunDisabled = automationActionBusy
     || automationBeeManagementLocked
     || (automationShowRunNowButton ? !automationRunReadyState.ready : (!automationDraftDirty || !automationRunReadyState.ready));
-  const automationShowRunReadyMessage = !automationRunReadyState.ready
-    && !!String(automationRunReadyState.message || "").trim();
+  const automationSaveStatusMessage = automationDisplayValidationMessage
+    || (automationActionBusy ? (automationBusyStatusMessage || "Wait for the current action to finish.") : "")
+    || (!automationDraftDirty ? "Make a valid change before saving." : "Ready to save.");
+  const automationRunStatusMessage = automationRunReadyState.message
+    || (automationRunReadyState.ready ? "Ready to run now." : "Complete the policy before running.");
+  const automationReviewGuidance = automationDisplayValidationMessage
+    || (!automationRunReadyState.ready ? automationRunReadyState.message : "")
+    || (automationDraftDirty ? "Review the policy, then save or run it now." : automationRunReadyState.message);
+  const automationShowReviewStatusGrid = !automationDisplayValidationMessage;
   const automationAlertsHtml = automationAlertEntries.length
     ? `
       <div class="td-automation-alerts">
@@ -14269,9 +14563,12 @@ function renderCreateBar() {
             <div class="td-automation-alert-copy">
               <strong>${escapeHtml(entry.title)}</strong>
               <p>${escapeHtml(entry.message)}</p>
+              <small>Extend dates keeps it available. Archive removes it from active policy management. Close hides this warning for now.</small>
             </div>
             <div class="td-automation-alert-actions">
               <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="extend-automation-policy" data-policy-id="${escapeAttr(entry.policyId)}" ${automationStructuralControlsDisabled ? "disabled" : ""}>Extend dates</button>
+              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="archive-automation-policy" data-policy-id="${escapeAttr(entry.policyId)}" ${automationStructuralControlsDisabled ? "disabled" : ""}>Archive</button>
+              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="dismiss-automation-policy-alert" data-policy-id="${escapeAttr(entry.policyId)}" data-alert-key="${escapeAttr(entry.alertKey)}">Close</button>
             </div>
           </div>
         `).join("")}
@@ -14289,7 +14586,7 @@ function renderCreateBar() {
         value: buildSpellingBeeLengthModeSummary(automationRunPolicy),
       },
       {
-        label: "Support",
+        label: "Question support",
         value: "No assistance",
       },
       {
@@ -14302,17 +14599,21 @@ function renderCreateBar() {
       },
       {
         label: "Groups",
-        value: `${selectedAutomationClassIds.length} selected`,
+        value: `${selectedAutomationClassIds.length} form group${selectedAutomationClassIds.length === 1 ? "" : "s"}`,
       },
     ]
     : [
       {
-        label: "Word count",
+        label: "Policy type",
+        value: getAutomationPolicyTypeLabel(automationRunPolicy.policy_type),
+      },
+      {
+        label: "Length",
         value: `${automationRunPolicy.assignment_length} words`,
       },
       {
-        label: "Support preset",
-        value: getAutoAssignSupportPresetLabel(automationRunPolicy.support_preset),
+        label: "Question support",
+        value: getAutomationQuestionSupportLabel(automationRunPolicy.support_preset),
       },
       {
         label: "Frequency",
@@ -14323,12 +14624,8 @@ function renderCreateBar() {
         value: automationReleasePatternLabel,
       },
       {
-        label: "Dates",
-        value: automationScheduleWindowLabel,
-      },
-      {
         label: "Groups",
-        value: `${selectedAutomationClassIds.length} selected`,
+        value: `${selectedAutomationClassIds.length} form group${selectedAutomationClassIds.length === 1 ? "" : "s"}`,
       },
     ];
   const buildAutomationWeekdayCheckboxGridHtml = ({ title, weekKey, selectedWeekdays }) => `
@@ -14370,57 +14667,83 @@ function renderCreateBar() {
       weekKey: "weekly",
       selectedWeekdays: automationRunPolicy.selected_weekdays,
     });
-  const automationYearGroupOptionsHtml = automationYearGroupOptions
-    .map((item) => `<option value="${escapeAttr(item)}" ${automationTargetFilters.yearGroup === item ? "selected" : ""}>${escapeHtml(item)}</option>`)
-    .join("");
-  const automationSelectedGroupSummary = joinAutomationSummaryParts([
-    `${selectedAutomationClassIds.length} selected`,
-    `${filteredAutomationEligibleClasses.length} shown`,
-  ]);
-  const automationBottomPrimarySummary = automationIsSpellingBee
-    ? joinAutomationSummaryParts([
-      getAutomationPolicyTypeLabel(automationPolicyValidation.policy.policy_type),
-      buildSpellingBeeLengthModeSummary(automationPolicyValidation.policy),
-      "No assistance",
-      `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
-    ])
-    : joinAutomationSummaryParts([
-      `${automationPolicyValidation.policy.assignment_length} words`,
-      getAutoAssignSupportPresetLabel(automationPolicyValidation.policy.support_preset),
-      PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
-        (option) => option.value === automationPolicyValidation.policy.frequency
-      )?.label || "Weekly",
-      `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
-    ]);
+  const automationYearGroupOptionsHtml = automationYearGroupOptions.length
+    ? `
+      <div class="td-automation-year-group-options">
+        <label class="td-automation-year-group-option ${automationAllYearGroupsChecked ? "is-selected" : ""} ${automationAllYearGroupsPartial ? "is-partial" : ""}">
+          <input
+            type="checkbox"
+            value="${escapeAttr(AUTOMATION_TARGET_YEAR_ALL)}"
+            data-field="automation-target-year-toggle"
+            ${automationAllYearGroupsChecked ? "checked" : ""}
+            ${automationEditorLocked ? "disabled" : ""}
+          />
+          <span>All year groups</span>
+          ${automationAllYearGroupsPartial ? `<small>${selectedAutomationClassIds.length} of ${automationTargetableClassIds.length}</small>` : ""}
+        </label>
+        ${automationYearGroupOptions
+          .map((item) => {
+            const yearGroupClasses = automationTargetableClasses.filter((cls) => String(cls?.year_group || "").trim() === item);
+            const selectedCount = yearGroupClasses.filter((cls) => selectedAutomationClassIdSet.has(String(cls?.id || "").trim())).length;
+            const inScope = automationSelectedYearGroups.includes(item);
+            const selected = yearGroupClasses.length > 0 && selectedCount === yearGroupClasses.length;
+            const partial = inScope && !selected;
+            return `
+              <label class="td-automation-year-group-option ${selected ? "is-selected" : ""} ${partial ? "is-partial" : ""}">
+                <input
+                  type="checkbox"
+                  value="${escapeAttr(item)}"
+                  data-field="automation-target-year-toggle"
+                  ${selected ? "checked" : ""}
+                  ${automationEditorLocked ? "disabled" : ""}
+                />
+                <span>${escapeHtml(item)}</span>
+                ${partial ? `<small>${selectedCount} of ${yearGroupClasses.length}</small>` : ""}
+              </label>
+            `;
+          })
+          .join("")}
+      </div>
+    `
+    : `<div class="td-empty td-empty--compact"><strong>No year groups with form groups are available.</strong></div>`;
+  const automationSelectedYearGroupLabel = formatAutomationYearGroupList(automationSelectedYearGroups, {
+    allYearGroups: automationAllYearGroupsInScope,
+  });
+  const automationSelectedGroupSummary = selectedAutomationClasses.length
+    ? `${selectedAutomationClasses.length} form group${selectedAutomationClasses.length === 1 ? "" : "s"} included${automationSelectedYearGroupLabel ? ` from ${automationSelectedYearGroupLabel}` : ""}.`
+    : "No form groups included yet.";
+  const automationMissingYearGroupMessage = automationMissingYearGroupCount
+    ? `${automationMissingYearGroupCount} form group${automationMissingYearGroupCount === 1 ? " is" : "s are"} missing a year group and ${automationMissingYearGroupCount === 1 ? "is" : "are"} not included.`
+    : "";
   const automationBottomSecondarySummary = joinAutomationSummaryParts([
     getAutomationPolicyCompactDateRange(automationPolicyValidation.policy),
     getAutomationPolicyCompactStateLabel(automationPolicyValidation.policy, {
       isDraft: automationIsNewDraft && !savedAutomationPolicy,
     }),
   ]);
-  const automationTargetClassOptionsHtml = filteredAutomationEligibleClasses.length
-    ? filteredAutomationEligibleClasses
+  const automationTargetClassOptionsHtml = automationCandidateFormClasses.length
+    ? automationCandidateFormClasses
       .map((cls) => {
-        const classId = String(cls?.id || "");
-        const checked = selectedAutomationClassIds.includes(classId);
+        const classId = String(cls?.id || "").trim();
+        const checked = selectedAutomationClassIdSet.has(classId);
         return `
-          <label class="td-automation-class-option ${checked ? "is-selected" : ""}">
+          <label class="td-automation-included-form-group ${checked ? "is-selected" : ""}">
             <input
               type="checkbox"
               value="${escapeAttr(classId)}"
-              data-field="automation-run-class"
+              data-field="automation-target-form-group"
               ${checked ? "checked" : ""}
+              ${automationEditorLocked ? "disabled" : ""}
             />
             <span>
-              <strong>${escapeHtml(cls?.name || "Untitled class")}</strong>
-              <small>${escapeHtml(getClassTypeDisplayLabel(cls?.class_type))}</small>
+              <strong>${escapeHtml(cls?.name || "Untitled form group")}</strong>
               ${cls?.year_group ? `<small>${escapeHtml(cls.year_group)}</small>` : ""}
             </span>
           </label>
         `;
       })
       .join("")
-    : `<div class="td-empty td-empty--compact"><strong>No eligible groups match the current filters.</strong></div>`;
+    : `<div class="td-empty td-empty--compact"><strong>${automationSelectedYearGroups.length ? "No form groups match the selected year groups." : "Choose year groups to include their form groups."}</strong></div>`;
   const automationPresetGuideHtml = AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS
     .map((option) => `
       <label class="td-automation-preset-guide-item ${automationRunPolicy.support_preset === option.value ? "is-current" : ""}">
@@ -14432,7 +14755,7 @@ function renderCreateBar() {
           ${automationRunPolicy.support_preset === option.value ? "checked" : ""}
         />
         <span>
-        <strong>${escapeHtml(option.label)}</strong>
+        <strong>${escapeHtml(getAutomationQuestionSupportLabel(option.value))}</strong>
           <small>${escapeHtml(getAutomationSupportPresetShortDescription(option.value))}</small>
         </span>
       </label>
@@ -14473,12 +14796,7 @@ function renderCreateBar() {
     return `<option value="${escapeAttr(policyId)}" ${isSelected ? "selected" : ""}>${escapeHtml(`${getAutomationPolicyDisplayName(policy)} · ${statusLabel}${hasDirtyDraft ? " · Unsaved draft" : ""}`)}</option>`;
   };
   const automationPolicySelectorOptionsHtml = [
-    !hasAutomationSelection
-      ? `<option value="" selected>Choose a policy...</option>`
-      : "",
-    automationIsNewDraft
-      ? `<option value="${escapeAttr(AUTOMATION_NEW_POLICY_KEY)}" selected>New policy draft</option>`
-      : "",
+    `<option value="" ${selectedAutomationPolicyId ? "" : "selected"} disabled>Choose existing policy...</option>`,
     automationPoliciesCurrentOrScheduled.length
       ? `<optgroup label="Current and scheduled policies">
           ${automationPoliciesCurrentOrScheduled.map(buildAutomationPolicyOptionHtml).join("")}
@@ -14735,7 +15053,7 @@ function renderCreateBar() {
               <div class="td-automation-run-head">
                 <div class="td-automation-panel-title-block">
                   <strong class="td-automation-panel-title">Automation policy</strong>
-                  <div class="td-automation-panel-intro">Manage personalised test policies for form and intervention groups.</div>
+                  <div class="td-automation-panel-intro">Manage personalised test policies for year and form groups.</div>
                 </div>
               </div>
 
@@ -14748,31 +15066,22 @@ function renderCreateBar() {
                   </div>
                 ` : `
                   ${automationAlertsHtml}
-                  <div class="td-automation-policy-topbar">
-                    <div class="td-automation-policy-strip-head">
-                      <div>
-                        <strong>Current automation policy</strong>
+                  <div class="td-automation-panel-section td-automation-panel-section--policy-select">
+                    <div class="td-automation-panel-section-head">
+                      <div class="td-automation-step-headline">
+                        <div class="td-automation-step-title">
+                          <span>1</span>
+                          <strong>Select existing or create new</strong>
+                        </div>
                         <div class="td-automation-inline-copy-row">
-                          <div class="td-action-inline-copy">Select a policy to edit or run.</div>
-                          ${renderInfoTip("A group can only belong to one active policy in the same date window.", {
-                            label: "About policy overlap",
-                            className: "td-action-info-tip",
-                            triggerClassName: "td-action-info-tip-trigger",
-                            bubbleClassName: "td-action-info-tip-bubble",
-                            align: "start",
-                          })}
+                          <div class="td-action-inline-copy">Choose an existing policy to edit, or start a new policy draft.</div>
                         </div>
                       </div>
                     </div>
 
-                    <div class="td-automation-policy-strip-controls">
-                      <div class="td-automation-policy-switcher-group">
-                        <label class="td-field td-automation-policy-select-shell">
-                          <span>Policy</span>
-                          <select class="td-input td-automation-policy-selector" data-field="automation-selected-policy" ${automationStructuralControlsDisabled ? "disabled" : ""}>
-                            ${automationPolicySelectorOptionsHtml}
-                          </select>
-                        </label>
+                    <div class="td-automation-policy-topbar">
+                      <div class="td-automation-policy-controls-label">Policy</div>
+                      <div class="td-automation-policy-strip-controls">
                         <button
                           class="td-btn td-btn--ghost td-btn--small"
                           type="button"
@@ -14781,8 +15090,9 @@ function renderCreateBar() {
                         >
                           New policy
                         </button>
-                      </div>
-                      <div class="td-automation-policy-toolbar td-automation-policy-toolbar--structural">
+                        <select class="td-input td-automation-policy-selector" aria-label="Policy" data-field="automation-selected-policy" ${automationStructuralControlsDisabled ? "disabled" : ""}>
+                          ${automationPolicySelectorOptionsHtml}
+                        </select>
                         <button
                           class="td-btn td-btn--ghost td-btn--small"
                           type="button"
@@ -14812,40 +15122,6 @@ function renderCreateBar() {
                         </button>
                       </div>
                     </div>
-
-                    <div class="td-automation-selected-summary">
-                      <div class="td-automation-selected-summary-head">
-                        <div class="td-automation-selected-summary-main">
-                          <strong>${escapeHtml(selectedAutomationPolicyName)}</strong>
-                        </div>
-                        <div class="td-automation-policy-status-badges">
-                          <span class="td-automation-policy-status-badge ${automationStatusBadge.className}">${escapeHtml(automationStatusBadge.label)}</span>
-                          ${automationDraftDirty
-                            ? `<span class="td-automation-policy-status-badge is-dirty">Unsaved changes</span>`
-                            : ""}
-                        </div>
-                      </div>
-
-                      ${automationRunPolicy.description ? `<div class="td-action-inline-copy">${escapeHtml(automationRunPolicy.description)}</div>` : ""}
-
-                      <div class="td-automation-summary-grid">
-                        ${automationSummaryMetrics
-                          .map((item) => `
-                            <div class="td-automation-summary-item">
-                              <span>${escapeHtml(item.label)}</span>
-                              <strong>${escapeHtml(item.value)}</strong>
-                            </div>
-                          `)
-                          .join("")}
-                      </div>
-
-                      <div class="td-automation-selected-summary-foot">
-                        <div class="td-action-inline-copy">${escapeHtml(automationMetaSummary)}</div>
-                        ${automationShowRunReadyMessage
-                          ? `<div class="td-field-error">${escapeHtml(automationRunReadyState.message)}</div>`
-                          : ""}
-                      </div>
-                    </div>
                   </div>
 
                   <div class="td-automation-editor-shell td-automation-editor-shell--full">
@@ -14853,7 +15129,11 @@ function renderCreateBar() {
                       <fieldset class="td-automation-editor-fieldset" ${automationEditorLocked ? "disabled" : ""}>
                                             <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Policy type</strong>
+                          <div class="td-automation-step-title">
+                            <span>2</span>
+                            <strong>Choose policy type</strong>
+                          </div>
+                          <p>Pick the kind of work this policy should create.</p>
                         </div>
                         <div class="td-automation-policy-type-grid">
                           ${automationPolicyTypeCardsHtml}
@@ -14863,7 +15143,11 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Policy details</strong>
+                          <div class="td-automation-step-title">
+                            <span>3</span>
+                            <strong>Add policy details</strong>
+                          </div>
+                          <p>Give this policy a clear name and an optional note.</p>
                         </div>
                         <div class="td-automation-run-grid td-automation-run-grid--policy-details">
                           <label class="td-field">
@@ -14891,7 +15175,11 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Schedule</strong>
+                          <div class="td-automation-step-title">
+                            <span>4</span>
+                            <strong>Set the schedule</strong>
+                          </div>
+                          <p>Choose when this policy starts, ends, and releases work.</p>
                         </div>
                         <div class="td-automation-run-grid">
                           <label class="td-field">
@@ -14932,38 +15220,32 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Target groups</strong>
+                          <div class="td-automation-step-title">
+                            <span>5</span>
+                            <strong>Choose target groups</strong>
+                          </div>
+                          <p>Select one or more year groups. The policy will include all form groups in those years.</p>
                         </div>
-                        <div class="td-automation-run-grid td-automation-run-grid--target-filters">
-                          <label class="td-field">
-                            <span>Year group</span>
-                            <select class="td-input" data-field="automation-target-year-group">
-                              <option value="">All year groups</option>
-                              ${automationYearGroupOptionsHtml}
-                            </select>
-                          </label>
-                          <label class="td-field">
-                            <span>Group type</span>
-                            <select class="td-input" data-field="automation-target-class-type">
-                              <option value="all" ${automationTargetFilters.classType === "all" ? "selected" : ""}>All eligible groups</option>
-                              <option value="${CLASS_TYPE_FORM}" ${automationTargetFilters.classType === CLASS_TYPE_FORM ? "selected" : ""}>Form only</option>
-                              <option value="${CLASS_TYPE_INTERVENTION}" ${automationTargetFilters.classType === CLASS_TYPE_INTERVENTION ? "selected" : ""}>Intervention only</option>
-                            </select>
-                          </label>
+                        <div class="td-automation-target-years">
+                          <div class="td-automation-inline-label-row">
+                            <strong>Target year groups</strong>
+                          </div>
+                          ${automationYearGroupOptionsHtml}
                         </div>
+                        ${automationUnavailableTargetCount ? `<div class="td-action-inline-copy td-automation-target-warning">This policy includes older non-form or incomplete targets. Choose year groups again before saving or running.</div>` : ""}
+                        ${automationMissingYearGroupMessage ? `<div class="td-action-inline-copy td-automation-target-warning">${escapeHtml(automationMissingYearGroupMessage)}</div>` : ""}
 
                         <div class="td-automation-class-picker">
                           <div class="td-automation-class-picker-head">
                             <div>
-                              <strong>Selected groups</strong>
+                              <strong>Included form groups</strong>
                               <div class="td-action-inline-copy">${escapeHtml(automationSelectedGroupSummary)}</div>
                             </div>
                             <div class="td-automation-class-picker-actions">
-                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-automation-classes">Select visible</button>
-                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-automation-classes" ${selectedAutomationClassIds.length ? "" : "disabled"}>Clear</button>
+                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-automation-classes" ${selectedAutomationClassIds.length || automationSelectedYearGroups.length ? "" : "disabled"}>Clear</button>
                             </div>
                           </div>
-                          <div class="td-automation-class-grid">
+                          <div class="td-automation-included-form-grid">
                             ${automationTargetClassOptionsHtml}
                           </div>
                         </div>
@@ -14971,7 +15253,11 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Generation settings</strong>
+                          <div class="td-automation-step-title">
+                            <span>6</span>
+                            <strong>Set generation options</strong>
+                          </div>
+                          <p>Set the length and, for regular personalised policies, the question support.</p>
                         </div>
                         ${automationIsSpellingBee ? `
                           <div class="td-automation-run-grid td-automation-run-grid--generation">
@@ -14998,35 +15284,69 @@ function renderCreateBar() {
                             <div class="td-field td-field--checkbox td-field--automation-checkbox" style="grid-column: span 2;">
                               <span class="td-automation-inline-label">
                                 <span>Starter fallback</span>
-                                ${renderInfoTip("Uses the starter catalog when pupil evidence is limited.", { label: "About starter fallback", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
+                                ${renderInfoTip("Uses the starter catalogue when pupil evidence is limited.", { label: "About starter fallback", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
                               </span>
                               <label class="td-checkbox-row">
                                 <input type="checkbox" data-field="automation-run-starter-fallback" ${automationRunPolicy.allow_starter_fallback ? "checked" : ""} />
-                                <span>Use starter catalog</span>
+                                <span>Use starter catalogue</span>
                               </label>
                             </div>
                           </div>
                           <div class="td-automation-inline-label-row">
-                            <strong>Support preset</strong>
-                            ${renderInfoTip("Controls how much support generated tests use.", { label: "About support preset", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
+                            <strong>Question support</strong>
                           </div>
+                          <div class="td-action-inline-copy">Controls how often pupils get supported tile questions instead of independent typing.</div>
                           <div class="td-automation-preset-guide">
                             ${automationPresetGuideHtml}
                           </div>
                         `}
                       </div>
-                      </div>
                       </fieldset>
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Editor actions</strong>
+                          <div class="td-automation-step-title">
+                            <span>7</span>
+                            <strong>Review and save</strong>
+                          </div>
+                          <p>Check the summary, then save or run the policy when it is ready.</p>
                         </div>
                         <div class="td-automation-policy-summary td-automation-policy-summary--draft">
-                          <strong>${escapeHtml(getAutomationPolicyDisplayName(automationRunPolicy, automationIsNewDraft ? "New policy draft" : "Selected policy"))}</strong>
-                          <div>${escapeHtml(automationBottomPrimarySummary)}</div>
+                          <div class="td-automation-policy-status-row">
+                            <div class="td-automation-policy-status-main">
+                              <strong>${escapeHtml(selectedAutomationPolicyName)}</strong>
+                            </div>
+                            <div class="td-automation-policy-status-badges">
+                              <span class="td-automation-policy-status-badge ${automationStatusBadge.className}">${escapeHtml(automationStatusBadge.label)}</span>
+                              ${automationDraftDirty
+                                ? `<span class="td-automation-policy-status-badge is-dirty">Unsaved changes</span>`
+                                : ""}
+                            </div>
+                          </div>
+                          <div class="td-automation-summary-grid">
+                            ${automationSummaryMetrics
+                              .map((item) => `
+                                <div class="td-automation-summary-item">
+                                  <span>${escapeHtml(item.label)}</span>
+                                  <strong>${escapeHtml(item.value)}</strong>
+                                </div>
+                              `)
+                              .join("")}
+                          </div>
                           ${automationBottomSecondarySummary ? `<div>${escapeHtml(automationBottomSecondarySummary)}</div>` : ""}
-                          ${automationPolicyValidation.errors.length ? `<div class="td-field-error">${escapeHtml(automationPolicyValidation.errors[0])}</div>` : ""}
+                          <div class="td-automation-review-guidance">${escapeHtml(automationReviewGuidance)}</div>
+                          ${automationShowReviewStatusGrid ? `
+                            <div class="td-automation-review-status-grid">
+                              <div>
+                                <span>Save</span>
+                                <strong>${escapeHtml(automationSaveStatusMessage)}</strong>
+                              </div>
+                              <div>
+                                <span>Run now</span>
+                                <strong>${escapeHtml(automationRunStatusMessage)}</strong>
+                              </div>
+                            </div>
+                          ` : ""}
                         </div>
 
                         <div class="td-automation-policy-actions">
@@ -25681,6 +26001,12 @@ function injectStyles() {
       line-height:1.5;
     }
 
+    .td-automation-alert-copy small{
+      color:#64748b;
+      font-size:0.82rem;
+      line-height:1.45;
+    }
+
     .td-automation-alert-actions{
       display:flex;
       flex-wrap:wrap;
@@ -25702,7 +26028,7 @@ function injectStyles() {
     .td-automation-policy-topbar{
       display:flex;
       flex-direction:column;
-      gap:14px;
+      gap:10px;
       padding:16px;
       border:1px solid #dbe3ee;
       border-radius:18px;
@@ -25710,58 +26036,34 @@ function injectStyles() {
       box-shadow:0 8px 20px rgba(15,23,42,0.04);
     }
 
-    .td-automation-policy-strip-head{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      flex-wrap:wrap;
-      gap:12px 18px;
-    }
-
-    .td-automation-policy-strip-head strong{
+    .td-automation-policy-controls-label{
       color:#0f172a;
-      font-size:0.98rem;
+      font-size:0.88rem;
+      font-weight:700;
       line-height:1.3;
     }
 
     .td-automation-policy-strip-controls{
       display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap:12px 16px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-policy-switcher-group{
-      display:flex;
-      align-items:flex-end;
+      align-items:center;
+      justify-content:flex-start;
       gap:8px;
       flex-wrap:wrap;
-      flex:1 1 420px;
-      min-width:0;
-    }
-
-    .td-automation-policy-select-shell{
-      flex:1 1 320px;
-      max-width:420px;
-      min-width:260px;
+      width:100%;
     }
 
     .td-automation-policy-selector{
+      flex:1 1 320px;
+      max-width:460px;
       min-width:240px;
+      height:42px;
+      box-sizing:border-box;
     }
 
-    .td-automation-policy-toolbar{
-      display:flex;
-      align-items:flex-end;
-      justify-content:flex-end;
-      gap:8px;
-      flex-wrap:wrap;
-      flex:1 1 360px;
-    }
-
-    .td-automation-policy-toolbar--structural{
-      flex:0 1 auto;
+    .td-automation-policy-strip-controls .td-btn--small{
+      height:42px;
+      box-sizing:border-box;
+      flex:0 0 auto;
     }
 
     .td-automation-policy-run-form{
@@ -25776,37 +26078,6 @@ function injectStyles() {
       margin:0;
       padding:0;
       border:0;
-    }
-
-    .td-automation-selected-summary{
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-      padding:16px;
-      border:1px solid #dbe3ee;
-      border-radius:16px;
-      background:#f8fafc;
-    }
-
-    .td-automation-selected-summary-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px 18px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-selected-summary-main{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-selected-summary-main strong{
-      color:#0f172a;
-      font-size:1rem;
-      line-height:1.3;
     }
 
     .td-automation-summary-grid{
@@ -25841,15 +26112,6 @@ function injectStyles() {
       word-break:break-word;
     }
 
-    .td-automation-selected-summary-foot{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-      color:#475569;
-      font-size:0.92rem;
-      line-height:1.5;
-    }
-
     .td-empty--automation-policy{
       align-items:flex-start;
       text-align:left;
@@ -25859,11 +26121,16 @@ function injectStyles() {
       display:flex;
       flex-direction:column;
       gap:12px;
-      padding-top:6px;
+      padding-top:18px;
       border-top:1px solid #e2eaf3;
     }
 
     .td-automation-panel-section:first-child{
+      padding-top:0;
+      border-top:none;
+    }
+
+    .td-automation-panel-section--policy-select{
       padding-top:0;
       border-top:none;
     }
@@ -25874,10 +26141,67 @@ function injectStyles() {
       gap:6px;
     }
 
+    .td-automation-panel-section-head p{
+      margin:0;
+      color:#64748b;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-step-title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .td-automation-step-headline{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+
+    .td-automation-step-title span{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 28px;
+      width:28px;
+      height:28px;
+      border-radius:999px;
+      background:#e0f2fe;
+      color:#075985;
+      font-size:0.82rem;
+      font-weight:800;
+      line-height:1;
+    }
+
+    .td-automation-step-title strong,
     .td-automation-panel-section-head strong{
       color:#0f172a;
       font-size:0.98rem;
       line-height:1.3;
+    }
+
+    .td-automation-subsection-head{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      padding-top:4px;
+    }
+
+    .td-automation-subsection-head strong{
+      color:#0f172a;
+      font-size:0.94rem;
+      line-height:1.35;
+    }
+
+    .td-automation-subsection-head p{
+      margin:0;
+      color:#64748b;
+      font-size:0.88rem;
+      line-height:1.45;
     }
 
     .td-automation-inline-copy-row,
@@ -26013,6 +26337,58 @@ function injectStyles() {
       padding-top:4px;
     }
 
+    .td-automation-target-years{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-automation-year-group-options{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .td-automation-year-group-option{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:40px;
+      padding:9px 12px;
+      border:1px solid #dbe3ee;
+      border-radius:10px;
+      background:#fff;
+      color:#0f172a;
+      font-size:0.9rem;
+      font-weight:700;
+      line-height:1.2;
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .td-automation-year-group-option input{
+      margin:0;
+      flex:0 0 auto;
+    }
+
+    .td-automation-year-group-option small{
+      color:#64748b;
+      font-size:0.72rem;
+      font-weight:700;
+      line-height:1.2;
+    }
+
+    .td-automation-year-group-option.is-selected{
+      border-color:#94a3b8;
+      background:var(--wl-accent-tint);
+      box-shadow:inset 0 0 0 1px rgba(148,163,184,0.14);
+    }
+
+    .td-automation-year-group-option.is-partial{
+      border-color:#cbd5e1;
+      background:#f8fafc;
+    }
+
     .td-automation-class-picker-head{
       display:flex;
       gap:12px;
@@ -26042,6 +26418,73 @@ function injectStyles() {
       grid-template-columns:repeat(auto-fill,minmax(280px,280px));
       gap:10px;
       justify-content:flex-start;
+    }
+
+    .td-automation-included-form-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+      gap:6px;
+    }
+
+    .td-automation-included-form-group{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:36px;
+      padding:7px 9px;
+      border:1px solid #dbe3ee;
+      border-radius:8px;
+      background:#fff;
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.25;
+      cursor:pointer;
+    }
+
+    .td-automation-included-form-group input{
+      margin:0;
+      flex:0 0 auto;
+    }
+
+    .td-automation-included-form-group span{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
+      width:100%;
+    }
+
+    .td-automation-included-form-group strong{
+      display:block;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:0.86rem;
+      line-height:1.25;
+    }
+
+    .td-automation-included-form-group small{
+      display:block;
+      flex:0 0 auto;
+      color:#64748b;
+      font-size:0.76rem;
+      line-height:1.2;
+      white-space:nowrap;
+    }
+
+    .td-automation-included-form-group.is-selected{
+      border-color:#cbd5e1;
+      background:#f8fafc;
+    }
+
+    .td-automation-target-warning{
+      color:#92400e;
+      background:#fffbeb;
+      border:1px solid #fde68a;
+      border-radius:10px;
+      padding:10px 12px;
     }
 
     .td-automation-class-option{
@@ -26117,6 +26560,45 @@ function injectStyles() {
       color:#0f172a;
       font-size:0.95rem;
       line-height:1.3;
+    }
+
+    .td-automation-review-guidance{
+      color:#334155;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-review-status-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;
+      margin-top:4px;
+    }
+
+    .td-automation-review-status-grid div{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#f8fafc;
+    }
+
+    .td-automation-review-status-grid span{
+      color:#64748b;
+      font-size:0.74rem;
+      font-weight:800;
+      letter-spacing:0.04em;
+      line-height:1.2;
+      text-transform:uppercase;
+    }
+
+    .td-automation-review-status-grid strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.4;
     }
 
     .td-automation-policy-actions{
@@ -33202,14 +33684,20 @@ function injectStyles() {
       .td-automation-policy-toolbar,
       .td-automation-alert,
       .td-automation-policy-actions,
-      .td-automation-selected-summary-head,
-      .td-automation-selected-summary-main{
+      .td-automation-policy-status-row,
+      .td-automation-policy-status-main{
         flex-direction:column;
         align-items:stretch;
       }
 
       .td-automation-policy-actions-group--primary{
         margin-left:0;
+      }
+
+      .td-automation-policy-selector,
+      .td-automation-policy-strip-controls .td-btn--small{
+        width:100%;
+        max-width:none;
       }
 
       .td-field--automation-description{
@@ -33230,6 +33718,10 @@ function injectStyles() {
 
       .td-automation-class-grid{
         grid-template-columns:repeat(auto-fill,minmax(220px,220px));
+      }
+
+      .td-automation-included-form-grid{
+        grid-template-columns:1fr;
       }
 
       .td-automation-summary-grid{
@@ -33520,6 +34012,10 @@ function injectStyles() {
       }
 
       .td-automation-summary-grid{
+        grid-template-columns:1fr;
+      }
+
+      .td-automation-review-status-grid{
         grid-template-columns:1fr;
       }
 

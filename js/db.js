@@ -1471,20 +1471,22 @@ async function validateAutomationEligibleClassIds(teacherId, classIds = [], acce
   }
   if (error) throw error;
 
-  const rows = (data || []).map((row) => normalizeClassRow(row, { legacyFallback: CLASS_TYPE_FORM })).filter(Boolean);
+  // Automation policy targets must be explicit form groups. Missing legacy class_type values
+  // are treated as ineligible so subject/intervention groups cannot be accepted by fallback.
+  const rows = (data || []).map((row) => normalizeClassRow(row, { legacyFallback: CLASS_TYPE_SUBJECT })).filter(Boolean);
   if (rows.length !== safeClassIds.length) {
-    throw new Error("Choose only your own form or intervention groups for automation.");
+    throw new Error("Choose only your own form groups for automation.");
   }
 
   const eligibleIds = rows
     .filter((row) => {
-      const classType = normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM });
-      return classType === CLASS_TYPE_FORM || classType === CLASS_TYPE_INTERVENTION;
+      const classType = normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_SUBJECT });
+      return classType === CLASS_TYPE_FORM;
     })
     .map((row) => String(row?.id || "").trim());
 
   if (eligibleIds.length !== safeClassIds.length) {
-    throw new Error("Automated personalised tests can only target form or intervention groups.");
+    throw new Error("Automated personalised tests can only target form groups.");
   }
 
   return safeClassIds.filter((classId) => eligibleIds.includes(classId));
