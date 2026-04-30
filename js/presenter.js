@@ -8,6 +8,13 @@ import {
 } from "./questionTypes.js";
 import { inferPattern, parseWordList, splitWordToGraphemes } from "./wordParser.js?v=1.5";
 import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
+import {
+  getSpellingContextSupport,
+  hasMeaningSupport,
+  hasSentenceSupport,
+  isForcedSentenceWord,
+  normalizeContextWord,
+} from "./spellingContextSupport.js?v=1.0";
 
 const appEl = document.getElementById("app");
 const params = new URLSearchParams(window.location.search);
@@ -79,6 +86,103 @@ const SAMPLE_WORD_BANK = {
   mixed: ["night", "teacher", "shout", "rain", "cake", "green", "phone", "quick", "star", "toy"],
 };
 
+const SAMPLE_CONTEXT_SUPPORT = {
+  train: {
+    sentence: "The train pulled into the station.",
+    meaning: "A vehicle that travels on tracks and carries people or goods.",
+  },
+  snail: {
+    sentence: "The snail moved slowly across the path.",
+    meaning: "A small animal with a soft body and a shell.",
+  },
+  paint: {
+    sentence: "She used blue paint for the sky.",
+    meaning: "Coloured liquid used to cover or decorate a surface.",
+  },
+  chain: {
+    sentence: "The chain rattled in the box.",
+    meaning: "Connected metal rings used for holding or pulling things.",
+  },
+  rain: {
+    sentence: "The rain tapped on the window.",
+    meaning: "Water that falls from clouds.",
+  },
+  sail: {
+    sentence: "The sail filled with wind.",
+    meaning: "A piece of cloth that helps move a boat.",
+  },
+  brain: {
+    sentence: "Your brain helps you think and remember.",
+    meaning: "The part inside your head that helps you think.",
+  },
+  plain: {
+    sentence: "The answer was written in plain English.",
+    meaning: "Simple and easy to understand.",
+  },
+  wait: {
+    sentence: "Please wait by the door.",
+    meaning: "To stay somewhere until something happens.",
+  },
+  tail: {
+    sentence: "The dog wagged its tail.",
+    meaning: "The part at the back of an animal's body.",
+  },
+  plane: {
+    sentence: "The plane landed safely at the airport.",
+    meaning: "An aircraft that flies through the sky.",
+  },
+  see: {
+    sentence: "I can see the tree from here.",
+    meaning: "To notice something with your eyes.",
+  },
+  right: {
+    sentence: "The right answer was circled.",
+    meaning: "Correct, or the side opposite left.",
+  },
+  flower: {
+    sentence: "The flower opened in the sunshine.",
+    meaning: "The colourful part of a plant that can make seeds.",
+  },
+  night: {
+    sentence: "The stars shone at night.",
+    meaning: "The dark time between evening and morning.",
+  },
+  teacher: {
+    sentence: "The teacher smiled at the class.",
+    meaning: "A person who helps others learn.",
+  },
+  shout: {
+    sentence: "Do not shout in the library.",
+    meaning: "To speak very loudly.",
+  },
+  cake: {
+    sentence: "The cake was shared after lunch.",
+    meaning: "A sweet baked food often eaten for a celebration.",
+  },
+  green: {
+    sentence: "The green jumper was warm.",
+    meaning: "The colour of grass and many leaves.",
+  },
+  phone: {
+    sentence: "The phone buzzed on the desk.",
+    meaning: "A device used to talk to someone far away.",
+  },
+  quick: {
+    sentence: "The quick runner reached the gate first.",
+    meaning: "Fast.",
+  },
+  star: {
+    sentence: "A bright star appeared in the sky.",
+    meaning: "A bright object seen in the night sky.",
+  },
+  toy: {
+    sentence: "The toy car rolled under the chair.",
+    meaning: "An object children play with.",
+  },
+};
+
+const SAMPLE_CONTEXT_STATUS = "teacher_edited";
+
 const STARTER_SETS = [
   { id: "ai_words", title: "ai sample test", questionType: "focus_sound", focus: "ai", words: SAMPLE_WORD_BANK.ai },
   { id: "magic_e", title: "magic e sample test", questionType: "spell_loom", focus: "a-e", words: SAMPLE_WORD_BANK["a-e"] },
@@ -91,6 +195,7 @@ const state = {
   builder: getInitialBuilderState(),
   session: null,
   result: null,
+  sampleContextController: null,
 };
 
 boot();
@@ -244,6 +349,73 @@ function buildChoice(questionType, segments, focusOverride) {
   return choice;
 }
 
+function buildSampleContextSupport(word) {
+  const normalizedWord = normalizeContextWord(word);
+  const stored = SAMPLE_CONTEXT_SUPPORT[normalizedWord];
+  if (!stored) return null;
+
+  const sentence = String(stored.sentence || "").trim();
+  const meaning = String(stored.meaning || "").trim();
+  const forcedSentence = isForcedSentenceWord(normalizedWord);
+  const contextSupport = {};
+
+  if (sentence) {
+    contextSupport.sentence = sentence;
+    contextSupport.sentence_status = SAMPLE_CONTEXT_STATUS;
+  }
+
+  if (meaning) {
+    contextSupport.meaning = meaning;
+    contextSupport.meaning_status = SAMPLE_CONTEXT_STATUS;
+    contextSupport.meaning_enabled = true;
+  }
+
+  if (forcedSentence) {
+    contextSupport.sentence_required = true;
+  }
+
+  return Object.keys(contextSupport).length ? contextSupport : null;
+}
+
+function getVisibleSampleSentence(context, item) {
+  const sentence = String(context?.sentence || "").trim();
+  if (!sentence) return "";
+  return maskTargetWordInText(sentence, item?.word || context?.word || "");
+}
+
+function getVisibleSampleMeaning(context, item) {
+  const meaning = String(context?.meaning || "").trim();
+  if (!meaning || targetWordAppearsInText(meaning, item?.word || context?.word || "")) return "";
+  return meaning;
+}
+
+function maskTargetWordInText(text, word) {
+  const pattern = buildTargetWordPattern(word);
+  const value = String(text || "").trim();
+  if (!value || !pattern) return value;
+  return value.replace(pattern, "$1____");
+}
+
+function targetWordAppearsInText(text, word) {
+  const pattern = buildTargetWordPattern(word);
+  if (!pattern) return false;
+  return pattern.test(String(text || ""));
+}
+
+function buildTargetWordPattern(word) {
+  const normalizedWord = normalizeContextWord(word);
+  if (!normalizedWord) return null;
+  const wordPattern = normalizedWord
+    .split("")
+    .map((letter) => (letter === "'" ? "['\u2019\u2018`]" : escapeRegExpLiteral(letter)))
+    .join("");
+  return new RegExp(`(^|[^A-Za-z'\u2019\u2018])(${wordPattern})(?=$|[^A-Za-z'\u2019\u2018])`, "gi");
+}
+
+function escapeRegExpLiteral(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function buildPublicSession(builder) {
   const questionType = normalizeStoredQuestionType(builder.questionType || DEFAULT_QUESTION_TYPE, {});
   const focus = normalizeFocusValue(builder.focus);
@@ -255,13 +427,18 @@ function buildPublicSession(builder) {
 
   const words = rawWords.map((word, index) => {
     const segments = splitWordToGraphemes(word);
+    const choice = buildChoice(questionType, segments, focus);
+    const contextSupport = buildSampleContextSupport(word);
+    if (contextSupport) {
+      choice.context_support = contextSupport;
+    }
+
     return {
       id: `public-${index + 1}`,
       position: index + 1,
       word,
-      sentence: "",
       segments,
-      choice: buildChoice(questionType, segments, focus),
+      choice,
     };
   });
 
@@ -357,6 +534,7 @@ async function loadSavedTest(testId) {
 }
 
 function launchSession(session) {
+  cleanupSampleContextController();
   state.error = "";
   state.session = session;
   state.result = null;
@@ -395,6 +573,172 @@ function launchSession(session) {
       renderComplete();
     },
   });
+
+  if (session.source === "public") {
+    state.sampleContextController = attachPublicSampleContextControls(host, session);
+  }
+}
+
+function cleanupSampleContextController() {
+  if (!state.sampleContextController) return;
+  try {
+    state.sampleContextController.cleanup?.();
+  } catch {
+    // Presenter-owned sample controls are disposable; cleanup should never block navigation.
+  }
+  state.sampleContextController = null;
+}
+
+function attachPublicSampleContextControls(host, session) {
+  if (!(host instanceof HTMLElement) || session?.source !== "public") return null;
+
+  const btnListen = host.querySelector("#btnListen");
+  const actionRow = host.querySelector(".gameActionRow");
+  const sentenceLine = host.querySelector("#sentenceLine");
+  const wordNumber = host.querySelector("#wNum");
+
+  if (
+    !(btnListen instanceof HTMLButtonElement)
+    || !(actionRow instanceof HTMLElement)
+    || !(sentenceLine instanceof HTMLElement)
+    || !(wordNumber instanceof HTMLElement)
+  ) {
+    return null;
+  }
+
+  btnListen.textContent = "Replay word";
+
+  const sentenceButton = document.createElement("button");
+  sentenceButton.className = "btn secondary presentContextButton";
+  sentenceButton.type = "button";
+  sentenceButton.textContent = "Sentence";
+
+  const meaningButton = document.createElement("button");
+  meaningButton.className = "btn secondary presentContextButton";
+  meaningButton.type = "button";
+  meaningButton.textContent = "Meaning";
+
+  const insertAnchor = btnListen.nextSibling;
+  actionRow.insertBefore(sentenceButton, insertAnchor);
+  actionRow.insertBefore(meaningButton, insertAnchor);
+
+  const meaningLine = document.createElement("div");
+  meaningLine.id = "presentSampleMeaningLine";
+  meaningLine.className = "muted presentContextMeaningLine";
+  meaningLine.setAttribute("aria-live", "polite");
+  meaningLine.style.display = "none";
+  sentenceLine.insertAdjacentElement("afterend", meaningLine);
+
+  let lastWordIndex = -1;
+
+  const getCurrentIndex = () => {
+    const parsed = Number.parseInt(String(wordNumber.textContent || "1"), 10);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.min((session.words || []).length - 1, parsed - 1));
+  };
+
+  const getCurrentItem = () => (session.words || [])[getCurrentIndex()] || null;
+
+  const clearMeaningLine = () => {
+    meaningLine.textContent = "";
+    meaningLine.style.display = "none";
+    meaningButton.classList.remove("is-active");
+  };
+
+  const showForcedSentenceIfNeeded = (context, item) => {
+    const visibleSentence = getVisibleSampleSentence(context, item);
+    if (!context?.sentenceRequired || !visibleSentence) return;
+    sentenceLine.textContent = visibleSentence;
+    sentenceLine.style.display = "block";
+  };
+
+  const refreshControls = () => {
+    const index = getCurrentIndex();
+    const item = getCurrentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleSampleSentence(context, item);
+    const visibleMeaning = getVisibleSampleMeaning(context, item);
+    const sentenceAvailable = hasSentenceSupport(item) && !!visibleSentence;
+    const meaningAvailable = hasMeaningSupport(item) && !!visibleMeaning;
+    const showSentenceControl = sentenceAvailable || context.sentenceRequired;
+
+    sentenceButton.hidden = !showSentenceControl;
+    sentenceButton.disabled = !sentenceAvailable;
+    sentenceButton.title = !sentenceAvailable && context.sentenceRequired
+      ? "Sentence support is needed for this word, but no sample sentence is stored."
+      : "";
+    meaningButton.hidden = !meaningAvailable;
+    meaningButton.disabled = !meaningAvailable;
+
+    if (index !== lastWordIndex) {
+      clearMeaningLine();
+      meaningButton.classList.remove("is-active");
+      lastWordIndex = index;
+    }
+
+    showForcedSentenceIfNeeded(context, item);
+  };
+
+  const onSentenceClick = () => {
+    const item = getCurrentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleSampleSentence(context, item);
+    if (!context.sentence || !visibleSentence) return;
+    sentenceLine.textContent = visibleSentence;
+    sentenceLine.style.display = "block";
+    speakSampleSupportText(context.sentence);
+  };
+
+  const onMeaningClick = () => {
+    const item = getCurrentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleMeaning = getVisibleSampleMeaning(context, item);
+    if (!visibleMeaning) return;
+    meaningLine.textContent = visibleMeaning;
+    meaningLine.style.display = "block";
+    meaningButton.classList.add("is-active");
+    speakSampleSupportText(visibleMeaning);
+  };
+
+  sentenceButton.addEventListener("click", onSentenceClick);
+  meaningButton.addEventListener("click", onMeaningClick);
+
+  const observer = new MutationObserver(refreshControls);
+  observer.observe(wordNumber, { childList: true, characterData: true, subtree: true });
+  refreshControls();
+
+  return {
+    cleanup() {
+      observer.disconnect();
+      sentenceButton.removeEventListener("click", onSentenceClick);
+      meaningButton.removeEventListener("click", onMeaningClick);
+      sentenceButton.remove();
+      meaningButton.remove();
+      meaningLine.remove();
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    },
+  };
+}
+
+function speakSampleSupportText(text) {
+  const cleanText = String(text || "").trim();
+  if (!cleanText || !("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance === "undefined") return;
+
+  window.speechSynthesis.cancel();
+  const utterance = new window.SpeechSynthesisUtterance(cleanText);
+  utterance.rate = 0.9;
+  const voices = window.speechSynthesis.getVoices?.() || [];
+  const preferredVoice =
+    voices.find((voice) => /en-GB/i.test(voice.lang)) ||
+    voices.find((voice) => /^en/i.test(voice.lang));
+  if (preferredVoice) utterance.voice = preferredVoice;
+  try {
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    // Support text remains visible even if browser speech playback is unavailable.
+  }
 }
 
 function renderLoading(message) {
@@ -415,6 +759,7 @@ function renderError(message, allowPublicBuilder = false) {
 }
 
 function renderBuilder() {
+  cleanupSampleContextController();
   state.result = null;
   document.title = "Sample test builder";
   const builder = state.builder;
@@ -494,12 +839,14 @@ function renderBuilder() {
 }
 
 function renderComplete() {
+  cleanupSampleContextController();
   const result = state.result || {};
   const totalWords = Number(result?.totalWords || 0);
   const totalCorrect = Number(result?.totalCorrect || 0);
   const incorrectCount = Math.max(0, totalWords - totalCorrect);
   const averageAttempts = Number(result?.averageAttempts || 0);
   const isSaved = state.session?.source === "saved";
+  const meaningReview = renderSampleMeaningReview(state.session);
 
   appEl.innerHTML = `
     <div class="pupil-header">
@@ -525,10 +872,38 @@ function renderComplete() {
           <div class="resultSummaryValue">${escapeHtml(averageAttempts.toFixed(1))}</div>
         </div>
       </div>
+      ${meaningReview}
       <div class="row presentActions">
         <button class="btn" type="button" data-action="restart-session">Run again</button>
         <button class="btn secondary" type="button" data-action="${isSaved ? "go-home" : "edit-builder"}">${isSaved ? "Back to tests" : "Edit sample"}</button>
       </div>
+    </section>
+  `;
+}
+
+function renderSampleMeaningReview(session) {
+  if (session?.source !== "public") return "";
+
+  const items = (Array.isArray(session.words) ? session.words : [])
+    .map((item) => ({
+      word: String(item?.word || "").trim(),
+      context: getSpellingContextSupport(item),
+    }))
+    .filter((item) => item.word && item.context.meaning);
+
+  if (!items.length) return "";
+
+  return `
+    <section class="presentMeaningReview" aria-label="What these words mean">
+      <h3>What these words mean</h3>
+      <dl class="presentMeaningList">
+        ${items.map(({ word, context }) => `
+          <div class="presentMeaningRow">
+            <dt>${escapeHtml(word)}</dt>
+            <dd>${escapeHtml(context.meaning)}</dd>
+          </div>
+        `).join("")}
+      </dl>
     </section>
   `;
 }
@@ -641,6 +1016,7 @@ function onClick(event) {
 }
 
 function leavePresenter() {
+  cleanupSampleContextController();
   if (window.history.length > 1) {
     window.history.back();
     return;
@@ -834,6 +1210,53 @@ function injectStyles() {
       flex-wrap:wrap;
       gap:12px;
     }
+    .gameShell--present .presentContextButton{
+      min-width:112px;
+    }
+    .gameShell--present .presentContextButton.is-active{
+      border-color:rgba(var(--wl-accent-rgb),.36);
+      background:var(--wl-accent-tint);
+      color:var(--wl-text);
+    }
+    .presentContextMeaningLine{
+      max-width:680px;
+      margin:6px auto 0;
+      text-align:center;
+      font-size:15px;
+      line-height:1.45;
+      color:var(--wl-text-muted);
+    }
+    .presentMeaningReview{
+      margin:20px 0 0;
+      padding-top:18px;
+      border-top:1px solid var(--wl-border);
+    }
+    .presentMeaningReview h3{
+      margin:0 0 12px;
+      color:var(--wl-text);
+      font-size:18px;
+      line-height:1.25;
+    }
+    .presentMeaningList{
+      display:grid;
+      gap:10px;
+      margin:0;
+    }
+    .presentMeaningRow{
+      display:grid;
+      grid-template-columns:minmax(92px, 150px) 1fr;
+      gap:10px 16px;
+      align-items:start;
+    }
+    .presentMeaningRow dt{
+      color:var(--wl-text);
+      font-weight:850;
+    }
+    .presentMeaningRow dd{
+      margin:0;
+      color:var(--wl-text-muted);
+      line-height:1.45;
+    }
     @media (max-width: 720px){
       .presentApp{
         padding:18px 12px 28px;
@@ -854,6 +1277,13 @@ function injectStyles() {
       }
       .presentPublicFormGrid{
         grid-template-columns:1fr;
+      }
+      .gameShell--present .presentContextButton{
+        min-width:0;
+      }
+      .presentMeaningRow{
+        grid-template-columns:1fr;
+        gap:3px;
       }
     }
   `;
