@@ -21,6 +21,11 @@ import {
 } from "./phonicsRenderer.js?v=1.6";
 import { shouldBlockDuplicateIncorrectSubmission } from "./pupilAttemptGuard.js?v=1.0";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
+import {
+  getSpellingContextSupport,
+  hasMeaningSupport,
+  hasSentenceSupport,
+} from "./spellingContextSupport.js?v=1.2";
 
 const LOOM_DECOY_COUNTS = {
   none: 0,
@@ -222,6 +227,19 @@ export function mountGame({
       .gameShell--present .gameSentenceLine{
         font-size:clamp(18px, 1.7vw, 24px);
         max-width:40ch;
+      }
+      .gameContextMeaningLine{
+        max-width:680px;
+        margin:6px auto 0;
+        text-align:center;
+        font-size:15px;
+        line-height:1.45;
+        color:var(--wl-text-muted, #64748b);
+      }
+      .gameContextButton.is-active{
+        border-color:rgba(var(--wl-accent-rgb),.36);
+        background:var(--wl-accent-tint);
+        color:var(--wl-text);
       }
       .gameShell--present .guidedPrompt{
         font-size:13px;
@@ -818,6 +836,7 @@ export function mountGame({
     <div class="center">
       <div id="promptLine" class="muted gamePromptLine" style="text-align:center;"></div>
       <div id="sentenceLine" class="muted gameSentenceLine" style="text-align:center; display:none;"></div>
+      <div id="contextMeaningLine" class="muted gameContextMeaningLine" style="display:none;" aria-live="polite"></div>
 
       <div class="wordProgress">
         <div class="wordProgressBar"><span id="wordProgressFill"></span></div>
@@ -837,7 +856,9 @@ export function mountGame({
       <div id="main"></div>
 
       <div class="row gameActionRow">
-        <button id="btnListen" class="btn secondary" type="button">🔊 Listen</button>
+        <button id="btnListen" class="btn secondary" type="button">Replay word</button>
+        <button id="btnContextSentence" class="btn secondary gameContextButton" type="button" style="display:none;">Sentence</button>
+        <button id="btnContextMeaning" class="btn secondary gameContextButton" type="button" style="display:none;">Meaning</button>
         <button id="btnCheck" class="btn" type="button">Check word</button>
         <button id="btnNext" class="btn secondary" type="button" style="display:none;">Next</button>
       </div>
@@ -864,6 +885,7 @@ export function mountGame({
   const modeText = $("modeText");
   const promptLine = $("promptLine");
   const sentenceLine = $("sentenceLine");
+  const contextMeaningLine = $("contextMeaningLine");
   const wordProgressFill = $("wordProgressFill");
   const wordProgressText = $("wordProgressText");
   const beeTimer = $("beeTimer");
@@ -875,6 +897,8 @@ export function mountGame({
   const gameShell = $("gameShell");
   const feedback = $("feedback");
   const btnListen = $("btnListen");
+  const btnContextSentence = $("btnContextSentence");
+  const btnContextMeaning = $("btnContextMeaning");
   const btnCheck = $("btnCheck");
   const btnNext = $("btnNext");
   const btnExit = $("btnExit");
@@ -1466,6 +1490,8 @@ export function mountGame({
     stopAudioPlayback();
     btnExit.disabled = true;
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnNext.disabled = true;
     const item = currentItem();
@@ -1527,6 +1553,8 @@ export function mountGame({
     stopAudioPlayback();
     btnExit.disabled = true;
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnNext.disabled = true;
     btnNext.textContent = "Finishing...";
@@ -1901,6 +1929,154 @@ export function mountGame({
   function isHintsEnabled() {
     if (isCompetitionMode) return false;
     return testMeta?.hints_enabled !== false && testMeta?.hintsEnabled !== false;
+  }
+
+  function shouldUseNativeContextSupport() {
+    return !isSampleMode && !isCompetitionMode && isHintsEnabled();
+  }
+
+  function isBaselineContextSession() {
+    const source = String(
+      testMeta?.attempt_source
+      || testMeta?.attemptSource
+      || testMeta?.assignment_origin
+      || testMeta?.assignmentOrigin
+      || ""
+    ).trim().toLowerCase();
+    return source === "baseline" || source === "baseline_v1" || source === "baseline_v2";
+  }
+
+  function isBaselineContext(context) {
+    return context?.baselineLike === true || isBaselineContextSession();
+  }
+
+  function clearContextMeaningLine() {
+    if (contextMeaningLine) {
+      contextMeaningLine.textContent = "";
+      contextMeaningLine.style.display = "none";
+    }
+    btnContextMeaning?.classList.remove("is-active");
+  }
+
+  function hideNativeContextControls() {
+    if (btnContextSentence) {
+      btnContextSentence.style.display = "none";
+      btnContextSentence.disabled = true;
+      btnContextSentence.title = "";
+    }
+    if (btnContextMeaning) {
+      btnContextMeaning.style.display = "none";
+      btnContextMeaning.disabled = true;
+      btnContextMeaning.title = "";
+    }
+    clearContextMeaningLine();
+  }
+
+  function buildContextTargetWordPattern(word) {
+    const normalizedWord = String(word ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\u2019\u2018`\u00B4]/g, "'")
+      .replace(/[^a-z']/g, "")
+      .replace(/^'+|'+$/g, "");
+    if (!normalizedWord) return null;
+    const wordPattern = normalizedWord
+      .split("")
+      .map((letter) => (letter === "'" ? "['\u2019\u2018`]" : escapeContextRegExpLiteral(letter)))
+      .join("");
+    return new RegExp(`(^|[^A-Za-z'\u2019\u2018])(${wordPattern})(?=$|[^A-Za-z'\u2019\u2018])`, "gi");
+  }
+
+  function escapeContextRegExpLiteral(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function maskContextTargetWord(text, word) {
+    const value = String(text || "").trim();
+    const pattern = buildContextTargetWordPattern(word);
+    if (!value || !pattern) return value;
+    return value.replace(pattern, "$1____");
+  }
+
+  function contextTargetWordAppears(text, word) {
+    const pattern = buildContextTargetWordPattern(word);
+    if (!pattern) return false;
+    return pattern.test(String(text || ""));
+  }
+
+  function getVisibleContextSentence(context, item) {
+    const sentence = String(context?.sentence || "").trim();
+    if (!sentence) return "";
+    return maskContextTargetWord(sentence, context?.word || item?.word || "");
+  }
+
+  function getVisibleContextMeaning(context, item) {
+    const meaning = String(context?.meaning || "").trim();
+    if (!meaning || contextTargetWordAppears(meaning, context?.word || item?.word || "")) return "";
+    return meaning;
+  }
+
+  function isContextSentenceAllowed(context) {
+    if (!context?.hasSentence) return false;
+    if (!isBaselineContext(context)) return true;
+    return context.explicitSentenceRequired === true;
+  }
+
+  function shouldAutoShowContextSentence(context) {
+    if (!context?.hasSentence) return false;
+    if (isBaselineContext(context)) return context.explicitSentenceRequired === true;
+    return context.sentenceRequired === true;
+  }
+
+  function refreshNativeContextControls(item = currentItem()) {
+    hideNativeContextControls();
+    if (!shouldUseNativeContextSupport() || !item) return;
+
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    const sentenceAvailable = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
+    const meaningAvailable = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
+
+    if (btnContextSentence && sentenceAvailable) {
+      btnContextSentence.style.display = "inline-block";
+      btnContextSentence.disabled = false;
+    }
+
+    if (btnContextMeaning && meaningAvailable) {
+      btnContextMeaning.style.display = "inline-block";
+      btnContextMeaning.disabled = false;
+    }
+
+    if (sentenceAvailable && shouldAutoShowContextSentence(context)) {
+      sentenceLine.textContent = visibleSentence;
+      sentenceLine.style.display = "block";
+    }
+  }
+
+  function showCurrentContextSentence() {
+    if (!shouldUseNativeContextSupport() || locked) return;
+    const item = currentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    if (!hasSentenceSupport(item) || !isContextSentenceAllowed(context) || !visibleSentence) return;
+    sentenceLine.textContent = visibleSentence;
+    sentenceLine.style.display = "block";
+    speak(context.sentence);
+  }
+
+  function showCurrentContextMeaning() {
+    if (!shouldUseNativeContextSupport() || locked) return;
+    const item = currentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    if (!hasMeaningSupport(item) || isBaselineContext(context) || !visibleMeaning) return;
+    if (contextMeaningLine) {
+      contextMeaningLine.textContent = visibleMeaning;
+      contextMeaningLine.style.display = "block";
+    }
+    btnContextMeaning?.classList.add("is-active");
+    speak(visibleMeaning);
   }
 
   function shouldRevealOnFinalWrong(item) {
@@ -2350,6 +2526,8 @@ export function mountGame({
     locked = true;
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -3998,6 +4176,7 @@ export function mountGame({
     promptLine.textContent = "";
     sentenceLine.style.display = "none";
     sentenceLine.textContent = "";
+    hideNativeContextControls();
 
     if (currentModeKind === "focus_sound") {
       promptLine.textContent = presentationMode
@@ -4010,7 +4189,7 @@ export function mountGame({
         : shouldUseFocusOnlyMultipleChoice(item)
           ? "Choose the correct grapheme for the focus sound."
           : "Choose the graphemes to spell the word.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -4019,7 +4198,7 @@ export function mountGame({
       promptLine.textContent = presentationMode
         ? "Build the word."
         : "Listen and build the word on the rail.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -4030,7 +4209,7 @@ export function mountGame({
         : getTargetParts(item).length > 1
           ? "Listen and arrange the graphemes to spell the word."
           : "Listen and type the spelling.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -4044,12 +4223,14 @@ export function mountGame({
       promptLine.textContent = presentationMode
         ? "Spell the word you hear."
         : "Listen and type the spelling.";
-      if (isHintsEnabled() && !normalizeTestLevelQuestionType(testMeta?.question_type) && item?.sentence && questionType === "full_recall") {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && !normalizeTestLevelQuestionType(testMeta?.question_type) && item?.sentence && questionType === "full_recall") {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
       renderFullRecall();
     }
+
+    refreshNativeContextControls(item);
 
     if (hasPendingFinalWrongReveal(getProgressEntry(item))) {
       showFinalWrongRevealState(item);
@@ -4139,6 +4320,8 @@ export function mountGame({
     clearCompetitionTimer();
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -4643,6 +4826,14 @@ export function mountGame({
   btnListen.addEventListener("click", () => {
     stopAudioPlayback();
     playCurrentAudio();
+  });
+  btnContextSentence?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showCurrentContextSentence();
+  });
+  btnContextMeaning?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showCurrentContextMeaning();
   });
   btnCheck.addEventListener("click", check);
   btnNext.addEventListener("click", () => {

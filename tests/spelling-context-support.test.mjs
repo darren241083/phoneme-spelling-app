@@ -60,6 +60,7 @@ test("reads missing and empty context as safe defaults", () => {
   assert.equal(context.meaning, "");
   assert.equal(context.sentenceStatus, "");
   assert.equal(context.meaningStatus, "");
+  assert.equal(context.explicitSentenceRequired, false);
   assert.equal(context.sentenceRequired, false);
   assert.equal(context.forcedSentence, false);
   assert.equal(context.meaningEnabled, false);
@@ -85,6 +86,67 @@ test("reads context from supported item shapes", () => {
   assert.equal(context.meaningEnabled, true);
   assert.equal(hasSentenceSupport(item), true);
   assert.equal(hasMeaningSupport(item), true);
+});
+
+test("reads sentences from runtime item wrappers", () => {
+  assert.equal(getSpellingContextSupport({
+    word: "train",
+    choice: {
+      sentence: "The train arrived at the station.",
+    },
+  }).sentence, "The train arrived at the station.");
+
+  assert.equal(getSpellingContextSupport({
+    word: "snail",
+    test_word: {
+      sentence: "The snail moved slowly across the path.",
+    },
+  }).sentence, "The snail moved slowly across the path.");
+
+  assert.equal(getSpellingContextSupport({
+    word: {
+      word: "paint",
+      sentence: "She used paint for the sky.",
+    },
+  }).sentence, "She used paint for the sky.");
+
+  assert.equal(getSpellingContextSupport({
+    word: "chain",
+    test_word: {
+      context_support: {
+        sentence: "The chain rattled in the box.",
+        sentence_status: "teacher_edited",
+      },
+    },
+  }).sentence, "The chain rattled in the box.");
+});
+
+test("distinguishes explicit and forced sentence requirements", () => {
+  const forcedOnly = getSpellingContextSupport({
+    word: "plain",
+    choice: {
+      context_support: {
+        sentence: "The plain shirt had no pattern.",
+        sentence_status: "teacher_edited",
+      },
+    },
+  });
+  assert.equal(forcedOnly.forcedSentence, true);
+  assert.equal(forcedOnly.sentenceRequired, true);
+  assert.equal(forcedOnly.explicitSentenceRequired, false);
+
+  const explicitRequired = getSpellingContextSupport({
+    word: "train",
+    choice: {
+      context_support: {
+        sentence: "The train arrived at the station.",
+        sentence_required: true,
+      },
+    },
+  });
+  assert.equal(explicitRequired.forcedSentence, false);
+  assert.equal(explicitRequired.sentenceRequired, true);
+  assert.equal(explicitRequired.explicitSentenceRequired, true);
 });
 
 test("blocks unavailable meaning statuses", () => {

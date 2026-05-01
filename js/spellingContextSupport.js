@@ -40,14 +40,30 @@ export function isForcedSentenceWord(word) {
 export function getSpellingContextSupport(item = null) {
   const source = item && typeof item === "object" ? item : {};
   const choice = getPlainObject(source.choice);
+  const testWord = getPlainObject(source.test_word || source.testWord);
+  const wordRow = getPlainObject(source.word);
   const context = mergeContextSources([
+    getPlainObject(wordRow.contextSupport),
+    getPlainObject(wordRow.context_support),
+    getPlainObject(testWord.contextSupport),
+    getPlainObject(testWord.context_support),
     getPlainObject(source.contextSupport),
     getPlainObject(source.context_support),
     getPlainObject(choice.contextSupport),
     getPlainObject(choice.context_support),
   ]);
 
-  const word = normalizeContextWord(source.word || source.word_text || source.correctSpelling || "");
+  const word = normalizeContextWord(
+    readWordText(source.word)
+    || readWordText(source.word_text)
+    || readWordText(source.correctSpelling)
+    || readWordText(choice.word)
+    || readWordText(testWord.word)
+    || readWordText(testWord.word_text)
+    || readWordText(wordRow.word)
+    || readWordText(wordRow.word_text)
+    || ""
+  );
   const forcedSentence = isForcedSentenceWord(word);
   const sentenceStatus = normalizeStatus(readStatus(context, "sentence"));
   const meaningStatus = normalizeStatus(readStatus(context, "meaning"));
@@ -56,18 +72,37 @@ export function getSpellingContextSupport(item = null) {
     context.sentence_required,
     context.sentenceRequired,
     context.sentence?.required,
+    source.sentence_required,
+    source.sentenceRequired,
     choice.sentence_required,
     choice.sentenceRequired,
+    testWord.sentence_required,
+    testWord.sentenceRequired,
+    wordRow.sentence_required,
+    wordRow.sentenceRequired,
   );
   const sentenceRequired = forcedSentence || explicitSentenceRequired === true;
   const sentenceText = cleanSupportText(
-    readText(context.sentence) || readText(context.sentence_text) || readText(context.sentenceText) || source.sentence
+    readText(context.sentence)
+    || readText(context.sentence_text)
+    || readText(context.sentenceText)
+    || readText(source.sentence)
+    || readText(choice.sentence)
+    || readText(testWord.sentence)
+    || readText(wordRow.sentence)
   );
   const meaningEnabled = baselineLike
     ? false
     : resolveMeaningEnabled(context, context.meaning_enabled, context.meaningEnabled, context.meaning?.enabled);
   const rawMeaningText = cleanSupportText(
-    readText(context.meaning) || readText(context.definition) || readText(context.meaning_text) || readText(context.meaningText)
+    readText(context.meaning)
+    || readText(context.definition)
+    || readText(context.meaning_text)
+    || readText(context.meaningText)
+    || readText(source.meaning)
+    || readText(choice.meaning)
+    || readText(testWord.meaning)
+    || readText(wordRow.meaning)
   );
   const meaningValidation = validateMeaningSupportText(rawMeaningText, word);
 
@@ -83,6 +118,7 @@ export function getSpellingContextSupport(item = null) {
     meaning: meaningAvailable ? meaningValidation.text : "",
     sentenceStatus,
     meaningStatus,
+    explicitSentenceRequired: explicitSentenceRequired === true,
     sentenceRequired,
     forcedSentence,
     meaningEnabled,
@@ -158,6 +194,13 @@ function readText(value) {
   if (typeof value === "string") return value;
   const source = getPlainObject(value);
   return source.text ?? source.value ?? source.copy ?? "";
+}
+
+function readWordText(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  const source = getPlainObject(value);
+  return source.word ?? source.word_text ?? source.wordText ?? source.text ?? source.value ?? "";
 }
 
 function readStatus(context, key) {

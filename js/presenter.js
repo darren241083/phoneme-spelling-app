@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { applyActiveSchoolFilter, readStaffAccessContext, resolveActiveSchoolDetails } from "./db.js?v=1.45";
-import { mountGame } from "./game.js?v=1.41";
+import { mountGame } from "./game.js?v=1.43";
 import {
   DEFAULT_QUESTION_TYPE,
   getQuestionTypeDisplayLabel,
@@ -14,7 +14,7 @@ import {
   hasSentenceSupport,
   isForcedSentenceWord,
   normalizeContextWord,
-} from "./spellingContextSupport.js?v=1.0";
+} from "./spellingContextSupport.js?v=1.2";
 
 const appEl = document.getElementById("app");
 const params = new URLSearchParams(window.location.search);
@@ -380,12 +380,12 @@ function buildSampleContextSupport(word) {
 function getVisibleSampleSentence(context, item) {
   const sentence = String(context?.sentence || "").trim();
   if (!sentence) return "";
-  return maskTargetWordInText(sentence, item?.word || context?.word || "");
+  return maskTargetWordInText(sentence, context?.word || item?.word || "");
 }
 
 function getVisibleSampleMeaning(context, item) {
   const meaning = String(context?.meaning || "").trim();
-  if (!meaning || targetWordAppearsInText(meaning, item?.word || context?.word || "")) return "";
+  if (!meaning || targetWordAppearsInText(meaning, context?.word || item?.word || "")) return "";
   return meaning;
 }
 
