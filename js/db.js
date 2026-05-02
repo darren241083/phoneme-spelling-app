@@ -22,6 +22,10 @@ import {
   normalizeAutoAssignPolicy,
   normalizePersonalisedAutomationPolicy,
 } from "./autoAssignPolicy.js?v=1.9";
+import {
+  buildTestWordContextSnapshot,
+  normalizeContextWord,
+} from "./spellingContextSupport.js?v=1.2";
 
 const ASSIGNMENT_TARGET_TABLE = "assignment_pupil_target_words";
 const ASSIGNMENT_STATUS_TABLE = "assignment_pupil_statuses";
@@ -57,6 +61,8 @@ const STAFF_ARCHIVE_FUNCTION = "archive_staff_directory_record";
 const STAFF_RESTORE_FUNCTION = "restore_staff_directory_record";
 const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
 const TEACHER_PUPIL_GROUP_VALUES_TABLE = "teacher_pupil_group_values";
+const WORD_CONTEXT_SUPPORT_TABLE = "word_context_support";
+const WORD_CONTEXT_SUPPORT_SELECT = "id, school_id, normalized_word, display_word, context_key, sentence, meaning, sentence_required, meaning_enabled_by_default, sentence_status, meaning_status, source, quality_flags, created_by, updated_by, created_at, updated_at";
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
@@ -82,6 +88,8 @@ const INTERVENTION_POSITIVE_PP_VALUES = new Set(["1", "true", "yes", "y", "pp", 
 const INTERVENTION_POSITIVE_SEN_VALUES = new Set(["1", "true", "yes", "y", "sen", "sen_support", "support", "ehcp", "k", "e"]);
 const INTERVENTION_POSITIVE_EAL_VALUES = new Set(["1", "true", "yes", "y", "eal"]);
 const INTERVENTION_IGNORED_GENDER_VALUES = new Set(["", "unknown", "not_known", "not known", "prefer_not_to_say", "prefer not to say"]);
+const WORD_CONTEXT_SUPPORT_STATUSES = new Set(["ai_generated", "auto_approved", "teacher_entered", "teacher_edited", "hidden", "needs_review"]);
+const WORD_CONTEXT_SUPPORT_SOURCES = new Set(["teacher", "ai", "system", "import"]);
 
 let latestStaffProfileSyncNotice = null;
 
@@ -808,6 +816,238 @@ export function applyActiveSchoolFilter(query, accessContext = null) {
     return query.or(`school_id.eq.${schoolId},school_id.is.null`);
   }
   return query.eq("school_id", schoolId);
+}
+
+export function normalizeContextWordForDb(word) {
+  return normalizeContextWord(word);
+}
+
+function normalizeWordContextSupportContextKey(value = "") {
+  return String(value || "default").trim().toLowerCase() || "default";
+}
+
+function normalizeWordContextSupportStatus(value = "", fallback = "hidden", label = "context status") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_") || fallback;
+  if (!WORD_CONTEXT_SUPPORT_STATUSES.has(normalized)) {
+    throw new Error(`Unsupported ${label}: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeWordContextSupportSource(value = "", fallback = "teacher") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_") || fallback;
+  if (!WORD_CONTEXT_SUPPORT_SOURCES.has(normalized)) {
+    throw new Error(`Unsupported context source: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeWordContextSupportQualityFlags(value, fallback = {}) {
+  if (value === undefined) return fallback && typeof fallback === "object" && !Array.isArray(fallback) ? fallback : {};
+  if (value == null) return {};
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // Fall through to the explicit validation error below.
+    }
+  }
+  throw new Error("Context quality_flags must be a plain object.");
+}
+
+function normalizeWordContextSupportBoolean(value, fallback = false) {
+  if (value === undefined) return !!fallback;
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return !!fallback;
+}
+
+function normalizeWordContextSupportText(value, fallback = null) {
+  if (value === undefined) return fallback ?? null;
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function readWordContextSupportPatchValue(source = {}, keys = []) {
+  const object = source && typeof source === "object" ? source : {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(object, key)) return object[key];
+  }
+  return undefined;
+}
+
+function normalizeWordContextSupportRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const normalizedWord = normalizeContextWordForDb(row.normalized_word || row.normalizedWord || row.display_word || row.displayWord);
+  if (!normalizedWord) return null;
+  const contextKey = normalizeWordContextSupportContextKey(row.context_key || row.contextKey || "default");
+  return {
+    id: String(row.id || "").trim(),
+    school_id: normalizeSchoolId(row.school_id || row.schoolId),
+    normalized_word: normalizedWord,
+    display_word: String(row.display_word || row.displayWord || normalizedWord).trim() || normalizedWord,
+    context_key: contextKey,
+    sentence: row.sentence == null ? null : String(row.sentence),
+    meaning: row.meaning == null ? null : String(row.meaning),
+    sentence_required: !!(row.sentence_required ?? row.sentenceRequired),
+    meaning_enabled_by_default: !!(row.meaning_enabled_by_default ?? row.meaningEnabledByDefault),
+    sentence_status: normalizeWordContextSupportStatus(row.sentence_status || row.sentenceStatus, "hidden", "sentence status"),
+    meaning_status: normalizeWordContextSupportStatus(row.meaning_status || row.meaningStatus, "hidden", "meaning status"),
+    source: normalizeWordContextSupportSource(row.source, "teacher"),
+    quality_flags: normalizeWordContextSupportQualityFlags(row.quality_flags ?? row.qualityFlags, {}),
+    created_by: String(row.created_by || row.createdBy || "").trim() || null,
+    updated_by: String(row.updated_by || row.updatedBy || "").trim() || null,
+    created_at: row.created_at || row.createdAt || null,
+    updated_at: row.updated_at || row.updatedAt || null,
+  };
+}
+
+function normalizeWordContextSupportOptions(options = {}) {
+  const source = options && typeof options === "object" ? options : {};
+  return {
+    contextKey: normalizeWordContextSupportContextKey(source.context_key || source.contextKey || "default"),
+    includeUnavailable: source.includeUnavailable === true || source.include_unavailable === true,
+  };
+}
+
+async function requireWordContextSupportActiveSchoolContext() {
+  const context = await getSignedInTeacherContext();
+  const schoolId = normalizeSchoolId(context?.schoolId);
+  if (!schoolId) {
+    throw new Error("Choose an active school before using spelling context support.");
+  }
+  return {
+    ...context,
+    schoolId,
+  };
+}
+
+function hasWordContextSupportWriteAccess(accessContext = null) {
+  return !!accessContext?.roles?.admin
+    || !!accessContext?.roles?.teacher
+    || !!accessContext?.legacy?.is_legacy_central_owner
+    || ["central_owner", "teacher"].includes(String(accessContext?.legacy?.teacher_app_role || "").trim().toLowerCase());
+}
+
+async function readWordContextSupportCacheRow({
+  schoolId = "",
+  normalizedWord = "",
+  contextKey = "default",
+} = {}) {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  const safeWord = normalizeContextWordForDb(normalizedWord);
+  const safeContextKey = normalizeWordContextSupportContextKey(contextKey);
+  if (!safeSchoolId || !safeWord) return null;
+
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .eq("school_id", safeSchoolId)
+    .eq("normalized_word", safeWord)
+    .eq("context_key", safeContextKey)
+    .maybeSingle();
+
+  if (error) throw error;
+  return normalizeWordContextSupportRow(data);
+}
+
+export async function listWordContextSupportByWords(words, options = {}) {
+  const requestedWords = Array.isArray(words) ? words : [words];
+  const normalizedWords = [...new Set(requestedWords.map((word) => normalizeContextWordForDb(word)).filter(Boolean))];
+  if (!normalizedWords.length) return {};
+
+  const context = await requireWordContextSupportActiveSchoolContext();
+  const { contextKey, includeUnavailable } = normalizeWordContextSupportOptions(options);
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .eq("school_id", context.schoolId)
+    .eq("context_key", contextKey)
+    .in("normalized_word", normalizedWords);
+
+  if (error) throw error;
+
+  const byWord = {};
+  for (const rawRow of data || []) {
+    const row = normalizeWordContextSupportRow(rawRow);
+    if (!row?.normalized_word) continue;
+    if (!includeUnavailable && !buildTestWordContextSnapshot(row.display_word || row.normalized_word, row)) continue;
+    byWord[row.normalized_word] = row;
+  }
+  return byWord;
+}
+
+export async function getWordContextSupport(word, options = {}) {
+  const normalizedWord = normalizeContextWordForDb(word);
+  if (!normalizedWord) return null;
+  const rowsByWord = await listWordContextSupportByWords([word], options);
+  return rowsByWord[normalizedWord] || null;
+}
+
+export async function upsertWordContextSupport(entry, options = {}) {
+  const source = entry && typeof entry === "object" ? entry : {};
+  const context = await requireWordContextSupportActiveSchoolContext();
+  if (!hasWordContextSupportWriteAccess(context.accessContext)) {
+    throw new Error("Teacher or admin access is required to update spelling context support.");
+  }
+
+  const normalizedWord = normalizeContextWordForDb(
+    readWordContextSupportPatchValue(source, ["word", "normalized_word", "normalizedWord", "display_word", "displayWord"])
+  );
+  if (!normalizedWord) throw new Error("A word is required for spelling context support.");
+
+  const optionContextKey = normalizeWordContextSupportOptions(options).contextKey;
+  const contextKey = normalizeWordContextSupportContextKey(
+    readWordContextSupportPatchValue(source, ["context_key", "contextKey"]) || optionContextKey
+  );
+  const existing = await readWordContextSupportCacheRow({
+    schoolId: context.schoolId,
+    normalizedWord,
+    contextKey,
+  });
+  const displayWordPatch = readWordContextSupportPatchValue(source, ["display_word", "displayWord"]);
+  const displayWord = String(displayWordPatch ?? existing?.display_word ?? source.word ?? normalizedWord).trim() || normalizedWord;
+  const sentencePatch = readWordContextSupportPatchValue(source, ["sentence"]);
+  const meaningPatch = readWordContextSupportPatchValue(source, ["meaning"]);
+  const sentenceRequiredPatch = readWordContextSupportPatchValue(source, ["sentence_required", "sentenceRequired"]);
+  const meaningEnabledPatch = readWordContextSupportPatchValue(source, ["meaning_enabled_by_default", "meaningEnabledByDefault"]);
+  const sentenceStatusPatch = readWordContextSupportPatchValue(source, ["sentence_status", "sentenceStatus"]);
+  const meaningStatusPatch = readWordContextSupportPatchValue(source, ["meaning_status", "meaningStatus"]);
+  const sourcePatch = readWordContextSupportPatchValue(source, ["source"]);
+  const qualityFlagsPatch = readWordContextSupportPatchValue(source, ["quality_flags", "qualityFlags"]);
+
+  const payload = {
+    school_id: context.schoolId,
+    normalized_word: normalizedWord,
+    display_word: displayWord,
+    context_key: contextKey,
+    sentence: normalizeWordContextSupportText(sentencePatch, existing?.sentence ?? null),
+    meaning: normalizeWordContextSupportText(meaningPatch, existing?.meaning ?? null),
+    sentence_required: normalizeWordContextSupportBoolean(sentenceRequiredPatch, existing?.sentence_required ?? false),
+    meaning_enabled_by_default: normalizeWordContextSupportBoolean(meaningEnabledPatch, existing?.meaning_enabled_by_default ?? false),
+    sentence_status: normalizeWordContextSupportStatus(sentenceStatusPatch, existing?.sentence_status || "hidden", "sentence status"),
+    meaning_status: normalizeWordContextSupportStatus(meaningStatusPatch, existing?.meaning_status || "hidden", "meaning status"),
+    source: normalizeWordContextSupportSource(sourcePatch, existing?.source || "teacher"),
+    quality_flags: normalizeWordContextSupportQualityFlags(qualityFlagsPatch, existing?.quality_flags || {}),
+    updated_by: context.teacherId,
+  };
+
+  if (!existing?.id) {
+    payload.created_by = context.teacherId;
+  }
+
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .upsert([payload], { onConflict: "school_id,normalized_word,context_key" })
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .single();
+
+  if (error) throw error;
+  return normalizeWordContextSupportRow(data || payload);
 }
 
 function normalizeRoleScopes(value = {}, fallback = {}) {

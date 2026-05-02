@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  buildTestWordContextSnapshot,
   getSpellingContextSupport,
   hasMeaningSupport,
   hasSentenceSupport,
@@ -185,6 +186,109 @@ test("baseline-like items disable meaning support", () => {
   assert.equal(context.meaning, "");
   assert.equal(hasMeaningSupport(item), false);
   assert.equal(hasSentenceSupport(item), true);
+});
+
+test("builds pupil snapshot for auto-approved context cache rows", () => {
+  const snapshot = buildTestWordContextSnapshot("train", {
+    id: "context-1",
+    normalized_word: "train",
+    display_word: "Train",
+    context_key: "default",
+    sentence: "The train stopped at the station.",
+    meaning: "A vehicle that travels on tracks.",
+    sentence_required: true,
+    meaning_enabled_by_default: true,
+    sentence_status: "auto_approved",
+    meaning_status: "auto_approved",
+    quality_flags: {
+      ambiguity_kind: "homophone",
+      homophone_set: ["train", "trane"],
+    },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), {
+    sentence: "The train stopped at the station.",
+    meaning: "A vehicle that travels on tracks.",
+    sentence_required: true,
+    meaning_enabled: true,
+    sentence_status: "auto_approved",
+    meaning_status: "auto_approved",
+    source_context_id: "context-1",
+    context_key: "default",
+    ambiguity_kind: "homophone",
+    homophone_set: ["train", "trane"],
+  });
+});
+
+test("treats teacher-entered cache rows as pupil-usable", () => {
+  const snapshot = buildTestWordContextSnapshot("plain", {
+    id: "context-teacher",
+    context_key: "default",
+    sentence: "The plain shirt had no pattern.",
+    meaning: "Plain means simple or not decorated.",
+    meaning_enabled_by_default: true,
+    sentence_status: "teacher_entered",
+    meaning_status: "teacher_entered",
+  });
+
+  assert.equal(snapshot.sentence, "The plain shirt had no pattern.");
+  assert.equal(snapshot.meaning, "Plain means simple or not decorated.");
+});
+
+test("keeps ai-generated cache rows out of pupil snapshots until promoted", () => {
+  assert.equal(buildTestWordContextSnapshot("train", {
+    sentence: "The train stopped at the station.",
+    meaning: "A vehicle that travels on tracks.",
+    meaning_enabled_by_default: true,
+    sentence_status: "ai_generated",
+    meaning_status: "ai_generated",
+  }), null);
+});
+
+test("keeps hidden and review cache rows out of pupil snapshots", () => {
+  assert.equal(buildTestWordContextSnapshot("train", {
+    sentence: "The train stopped at the station.",
+    meaning: "A vehicle that travels on tracks.",
+    meaning_enabled_by_default: true,
+    sentence_status: "hidden",
+    meaning_status: "needs_review",
+  }), null);
+});
+
+test("excludes unsafe meanings from cache snapshots", () => {
+  const snapshot = buildTestWordContextSnapshot("train", {
+    sentence: "The train stopped at the station.",
+    meaning: "Train has the ai sound in the middle.",
+    meaning_enabled_by_default: true,
+    sentence_status: "teacher_edited",
+    meaning_status: "teacher_edited",
+  });
+
+  assert.equal(snapshot.sentence, "The train stopped at the station.");
+  assert.equal(snapshot.meaning, "");
+});
+
+test("returns null when no cache support is pupil-usable", () => {
+  assert.equal(buildTestWordContextSnapshot("train", {
+    sentence: "",
+    meaning: "",
+    meaning_enabled_by_default: false,
+    sentence_status: "teacher_edited",
+    meaning_status: "teacher_edited",
+  }), null);
+});
+
+test("allows meaning snapshot when an override explicitly enables it", () => {
+  const snapshot = buildTestWordContextSnapshot("train", {
+    meaning: "A vehicle that travels on tracks.",
+    meaning_enabled_by_default: false,
+    meaning_status: "teacher_edited",
+  }, {
+    meaning_enabled: true,
+  });
+
+  assert.equal(snapshot.meaning, "A vehicle that travels on tracks.");
+  assert.equal(snapshot.meaning_enabled, true);
 });
 
 let failures = 0;

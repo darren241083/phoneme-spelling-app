@@ -14,7 +14,8 @@ const FORCED_SENTENCE_WORD_GROUPS = [
 
 const FORCED_SENTENCE_WORDS = new Set(FORCED_SENTENCE_WORD_GROUPS.flat().map(normalizeContextWord));
 const UNAVAILABLE_CONTENT_STATUSES = new Set(["hidden", "needs_review", "ai_generated"]);
-const APPROVED_CONTENT_STATUSES = new Set(["", "auto_approved", "teacher_edited", "approved"]);
+const APPROVED_CONTENT_STATUSES = new Set(["", "auto_approved", "teacher_entered", "teacher_edited", "approved"]);
+const PUPIL_USABLE_CONTEXT_CACHE_STATUSES = new Set(["auto_approved", "teacher_entered", "teacher_edited"]);
 const MAX_MEANING_CHARACTERS = 180;
 const MAX_MEANING_WORDS = 32;
 
@@ -170,6 +171,63 @@ export function validateMeaningSupportText(meaning, word = "") {
   };
 }
 
+export function buildTestWordContextSnapshot(word, cacheRow, overrides = {}) {
+  const row = getPlainObject(cacheRow);
+  const override = getPlainObject(overrides);
+  const qualityFlags = normalizeQualityFlags(override.quality_flags ?? override.qualityFlags ?? row.quality_flags ?? row.qualityFlags);
+  const normalizedWord = normalizeContextWord(word || row.display_word || row.displayWord || row.normalized_word || row.normalizedWord || "");
+  const sentenceStatus = normalizeStatus(readFirstDefined(
+    override.sentence_status,
+    override.sentenceStatus,
+    row.sentence_status,
+    row.sentenceStatus,
+  ));
+  const meaningStatus = normalizeStatus(readFirstDefined(
+    override.meaning_status,
+    override.meaningStatus,
+    row.meaning_status,
+    row.meaningStatus,
+  ));
+  const sentenceText = cleanSupportText(readFirstDefined(override.sentence, row.sentence));
+  const meaningText = cleanSupportText(readFirstDefined(override.meaning, row.meaning));
+  const meaningEnabledOverride = readBoolean(
+    override.meaning_enabled,
+    override.meaningEnabled,
+    override.meaning_enabled_by_default,
+    override.meaningEnabledByDefault,
+  );
+  const meaningEnabled = meaningEnabledOverride === null
+    ? readBoolean(row.meaning_enabled_by_default, row.meaningEnabledByDefault) === true
+    : meaningEnabledOverride === true;
+  const sentenceRequired = readBoolean(
+    override.sentence_required,
+    override.sentenceRequired,
+    row.sentence_required,
+    row.sentenceRequired,
+  ) === true;
+  const meaningValidation = validateMeaningSupportText(meaningText, normalizedWord);
+  const sentenceUsable = !!sentenceText && isPupilUsableContextCacheStatus(sentenceStatus);
+  const meaningUsable = !!meaningText
+    && meaningEnabled
+    && isPupilUsableContextCacheStatus(meaningStatus)
+    && meaningValidation.valid;
+
+  if (!sentenceUsable && !meaningUsable) return null;
+
+  return {
+    sentence: sentenceUsable ? sentenceText : "",
+    meaning: meaningUsable ? meaningValidation.text : "",
+    sentence_required: sentenceRequired,
+    meaning_enabled: meaningEnabled,
+    sentence_status: sentenceStatus,
+    meaning_status: meaningStatus,
+    source_context_id: String(readFirstDefined(row.id, override.source_context_id, override.sourceContextId, row.source_context_id, row.sourceContextId) || "").trim() || null,
+    context_key: normalizeContextKey(readFirstDefined(override.context_key, override.contextKey, row.context_key, row.contextKey)),
+    ambiguity_kind: String(readFirstDefined(qualityFlags.ambiguity_kind, qualityFlags.ambiguityKind) || "").trim().toLowerCase(),
+    homophone_set: normalizeHomophoneSet(readFirstDefined(qualityFlags.homophone_set, qualityFlags.homophoneSet)),
+  };
+}
+
 function getPlainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -180,6 +238,35 @@ function mergeContextSources(sources = []) {
 
 function cleanSupportText(value) {
   return collapseWhitespace(String(value ?? ""));
+}
+
+function normalizeContextKey(value = "") {
+  return String(value || "default").trim().toLowerCase() || "default";
+}
+
+function normalizeQualityFlags(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function normalizeHomophoneSet(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function readFirstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 function collapseWhitespace(value) {
@@ -240,6 +327,10 @@ function isContentStatusAvailable(status) {
   const normalized = normalizeStatus(status);
   if (UNAVAILABLE_CONTENT_STATUSES.has(normalized)) return false;
   return APPROVED_CONTENT_STATUSES.has(normalized) || !normalized;
+}
+
+function isPupilUsableContextCacheStatus(status) {
+  return PUPIL_USABLE_CONTEXT_CACHE_STATUSES.has(normalizeStatus(status));
 }
 
 function isBaselineLikeItem(item, choice) {
