@@ -5,11 +5,18 @@ import { createAutosave } from "./autosave.js";
 import {
   applyActiveSchoolFilter,
   isDeveloperSchoolSwitchEnabled,
+  listWordContextSupportByWords,
+  normalizeContextWordForDb,
   readStaffAccessContext,
   resolveActiveSchoolDetails,
   storeActiveSchoolId,
+  upsertWordContextSupport,
   withActiveSchoolId,
-} from "./db.js?v=1.46";
+} from "./db.js?v=1.48";
+import {
+  buildTestWordContextSnapshot,
+  validateMeaningSupportText,
+} from "./spellingContextSupport.js?v=1.3";
 import { parseWordList, splitWordToGraphemes, inferPattern, formatGraphemesForInput, parseGraphemeInput, detectMisspellingWarning } from "./wordParser.js?v=1.5";
 import { buildWordFromGraphemes, renderPhonicsPreview } from "./phonicsRenderer.js?v=1.6";
 import { getPhonemeAlternativeOptions } from "./data/phonemeHelpers.js";
@@ -68,6 +75,10 @@ const LOOM_DECOY_LEVEL_OPTIONS = [
 const ATTEMPT_OPTIONS = ["1", "2", "3", "5", "10", "unlimited"];
 const DEFAULT_ASSIGN = { maxAttempts:"2", deadline:"", audioEnabled:true, hintsEnabled:true };
 const MAX_TEST_WORDS = 20;
+const CONTEXT_SUPPORT_HELPER_TEXT = "Optional. Helps pupils understand the word during spelling tasks.";
+const CONTEXT_KEY_DEFAULT = "default";
+const CONTEXT_STATUS_TEACHER_ENTERED = "teacher_entered";
+const CONTEXT_STATUS_TEACHER_EDITED = "teacher_edited";
 
 const state = {
   loading:true,
@@ -182,8 +193,10 @@ async function boot(){
 
   try {
     await loadAll();
-    state.loading = false;
     baselineHash = buildStateHash();
+    const contextPrefilled = await prefillRowsFromContextCache(state.rows);
+    state.loading = false;
+    state.isDirty = !!contextPrefilled;
     paint();
     if(!eventsBound){ bindEvents(); eventsBound = true; }
     autosave = createAutosave({ intervalMs: 15000, onSave: async()=>{ if(state.isDirty && !state.isLocked && !state.saving && !state.assigning) await saveBuilder({ assign:false, silent:true }); }});
@@ -255,6 +268,263 @@ function normalizeFocusValue(value){
 
 function isTeacherManualRow(row){
   return String(row?.source || "").trim().toLowerCase() === "teacher";
+}
+
+function getBuilderPlainObject(value = null){
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function cleanContextSupportText(value){
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function readContextSupportText(value){
+  if(typeof value === "string") return value;
+  const source = getBuilderPlainObject(value);
+  return source.text ?? source.value ?? source.copy ?? "";
+}
+
+function normalizeBuilderContextKey(value = ""){
+  return String(value || CONTEXT_KEY_DEFAULT).trim().toLowerCase() || CONTEXT_KEY_DEFAULT;
+}
+
+function normalizeBuilderContextStatus(value = ""){
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isPupilUsableBuilderContextStatus(status = ""){
+  return ["auto_approved", "teacher_entered", "teacher_edited"].includes(normalizeBuilderContextStatus(status));
+}
+
+function createEmptyContextSupportState(){
+  return {
+    meaning:"",
+    meaningWarning:"",
+    contextKey:CONTEXT_KEY_DEFAULT,
+    contextSourceContextId:"",
+    contextSentenceStatus:"",
+    contextMeaningStatus:"",
+    contextCacheRow:null,
+    contextHadSnapshot:false,
+    contextSentenceTouched:false,
+    contextMeaningTouched:false,
+    contextSentencePrefilled:false,
+    contextMeaningPrefilled:false,
+  };
+}
+
+function readChoiceContextSupport(choice = null){
+  const source = getBuilderPlainObject(choice);
+  return getBuilderPlainObject(source.context_support || source.contextSupport);
+}
+
+function buildContextSupportStateFromDbRow(row = {}){
+  const context = readChoiceContextSupport(row?.choice);
+  const snapshotSentence = cleanContextSupportText(readContextSupportText(context.sentence));
+  const sentence = cleanContextSupportText(row?.sentence) || snapshotSentence;
+  const meaning = cleanContextSupportText(readContextSupportText(context.meaning));
+  const contextState = {
+    ...createEmptyContextSupportState(),
+    meaning,
+    contextKey: normalizeBuilderContextKey(context.context_key || context.contextKey),
+    contextSourceContextId: String(context.source_context_id || context.sourceContextId || "").trim(),
+    contextSentenceStatus: normalizeBuilderContextStatus(context.sentence_status || context.sentenceStatus),
+    contextMeaningStatus: normalizeBuilderContextStatus(context.meaning_status || context.meaningStatus),
+    contextHadSnapshot: Object.keys(context).length > 0,
+  };
+  contextState.meaningWarning = buildMeaningWarning({ word: row?.word || "", meaning });
+  return {
+    sentence,
+    ...contextState,
+  };
+}
+
+function resetRowContextSourceForWordChange(row){
+  if(!row) return;
+  if(row.contextSentencePrefilled && !row.contextSentenceTouched) row.sentence = "";
+  if(row.contextMeaningPrefilled && !row.contextMeaningTouched) row.meaning = "";
+  row.contextCacheRow = null;
+  row.contextSourceContextId = "";
+  row.contextSentenceStatus = "";
+  row.contextMeaningStatus = "";
+  row.contextHadSnapshot = false;
+  row.contextSentencePrefilled = false;
+  row.contextMeaningPrefilled = false;
+  row.contextKey = CONTEXT_KEY_DEFAULT;
+  row.meaningWarning = buildMeaningWarning(row);
+}
+
+function buildMeaningWarning(row = {}){
+  const meaning = cleanContextSupportText(row?.meaning);
+  if(!meaning) return "";
+  const validation = validateMeaningSupportText(meaning, row?.word || "");
+  if(validation.valid) return "";
+  return "Meaning should be short, plain text, and avoid spelling patterns, letters, graphemes, phonemes or sounds.";
+}
+
+function validateBuilderContextSupport(rows = getRowsForSave()){
+  const issues = [];
+  for(const [index, row] of rows.entries()){
+    row.meaningWarning = buildMeaningWarning(row);
+    if(row.meaningWarning){
+      issues.push(`Word ${index + 1} "${row.word}" has an unsafe meaning. Fix it or clear it.`);
+    }
+  }
+  return issues;
+}
+
+function contextSnapshotHasText(snapshot, key, text){
+  return !!snapshot && cleanContextSupportText(snapshot[key]) === cleanContextSupportText(text);
+}
+
+function rowContextHasUsableSource(row, key, text, cacheSnapshot = null){
+  if(!cleanContextSupportText(text)) return true;
+  if(contextSnapshotHasText(cacheSnapshot, key, text)) return true;
+  const statusKey = key === "sentence" ? "contextSentenceStatus" : "contextMeaningStatus";
+  return !!row?.contextSourceContextId && isPupilUsableBuilderContextStatus(row?.[statusKey]);
+}
+
+function shouldUpsertRowContextSupport(row, {
+  sentence = "",
+  meaning = "",
+  cacheSnapshot = null,
+} = {}){
+  const hasSentence = !!cleanContextSupportText(sentence);
+  const hasMeaning = !!cleanContextSupportText(meaning);
+  if(!hasSentence && !hasMeaning) return false;
+  if(hasSentence && row.contextSentenceTouched) return true;
+  if(hasMeaning && row.contextMeaningTouched) return true;
+  if(hasSentence && !rowContextHasUsableSource(row, "sentence", sentence, cacheSnapshot)) return true;
+  if(hasMeaning && !rowContextHasUsableSource(row, "meaning", meaning, cacheSnapshot)) return true;
+  return false;
+}
+
+function buildRowContextSnapshot(row, cacheRow = row?.contextCacheRow || null){
+  const sentence = cleanContextSupportText(row?.sentence);
+  const meaning = cleanContextSupportText(row?.meaning);
+  if(!sentence && !meaning) return null;
+
+  const cacheSnapshot = cacheRow ? buildTestWordContextSnapshot(row.word, cacheRow) : null;
+  const sourceContextId = String(cacheRow?.id || row?.contextSourceContextId || "").trim();
+  const hasExistingSource = !!(sourceContextId || row?.contextHadSnapshot);
+  const fallbackStatus = hasExistingSource ? CONTEXT_STATUS_TEACHER_EDITED : CONTEXT_STATUS_TEACHER_ENTERED;
+  const sentenceStatus = sentence
+    ? (contextSnapshotHasText(cacheSnapshot, "sentence", sentence) && !row.contextSentenceTouched
+      ? cacheSnapshot.sentence_status
+      : (row.contextSentenceStatus || fallbackStatus))
+    : "hidden";
+  const meaningStatus = meaning
+    ? (contextSnapshotHasText(cacheSnapshot, "meaning", meaning) && !row.contextMeaningTouched
+      ? cacheSnapshot.meaning_status
+      : (row.contextMeaningStatus || fallbackStatus))
+    : "hidden";
+
+  return buildTestWordContextSnapshot(row.word, {
+    id: sourceContextId || null,
+    context_key: normalizeBuilderContextKey(row.contextKey || cacheRow?.context_key),
+    sentence,
+    meaning,
+    sentence_required: false,
+    meaning_enabled_by_default: !!meaning,
+    sentence_status: sentenceStatus,
+    meaning_status: meaningStatus,
+    quality_flags: getBuilderPlainObject(cacheRow?.quality_flags),
+  }, {
+    meaning_enabled: !!meaning,
+  });
+}
+
+async function prefillRowsFromContextCache(rows = state.rows){
+  if(state.isLocked) return false;
+  const safeRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.word);
+  const words = [...new Set(safeRows.map((row) => normalizeContextWordForDb(row.word)).filter(Boolean))];
+  if(!words.length) return false;
+
+  let rowsByWord = {};
+  try {
+    rowsByWord = await listWordContextSupportByWords(words, { includeUnavailable:true });
+  } catch (error) {
+    console.warn("Could not prefill spelling context support:", error);
+    return false;
+  }
+
+  let changed = false;
+  for(const row of safeRows){
+    const cacheRow = rowsByWord[normalizeContextWordForDb(row.word)];
+    if(!cacheRow) continue;
+    row.contextCacheRow = cacheRow;
+    row.contextKey = normalizeBuilderContextKey(row.contextKey || cacheRow.context_key);
+    const snapshot = buildTestWordContextSnapshot(row.word, cacheRow);
+    if(!snapshot) continue;
+    if(!row.contextSourceContextId) row.contextSourceContextId = String(snapshot.source_context_id || "").trim();
+    if(!row.contextSentenceStatus && contextSnapshotHasText(snapshot, "sentence", row.sentence)){
+      row.contextSentenceStatus = normalizeBuilderContextStatus(snapshot.sentence_status);
+    }
+    if(!row.contextMeaningStatus && contextSnapshotHasText(snapshot, "meaning", row.meaning)){
+      row.contextMeaningStatus = normalizeBuilderContextStatus(snapshot.meaning_status);
+    }
+
+    if(!cleanContextSupportText(row.sentence) && !row.contextSentenceTouched && snapshot.sentence){
+      row.sentence = snapshot.sentence;
+      row.contextSentenceStatus = normalizeBuilderContextStatus(snapshot.sentence_status);
+      row.contextSentencePrefilled = true;
+      changed = true;
+    }
+    if(!cleanContextSupportText(row.meaning) && !row.contextMeaningTouched && snapshot.meaning){
+      row.meaning = snapshot.meaning;
+      row.contextMeaningStatus = normalizeBuilderContextStatus(snapshot.meaning_status);
+      row.contextMeaningPrefilled = true;
+      changed = true;
+    }
+    row.meaningWarning = buildMeaningWarning(row);
+  }
+  return changed;
+}
+
+async function prepareRowContextSupportForSave(row){
+  row.meaningWarning = buildMeaningWarning(row);
+  if(row.meaningWarning){
+    throw new Error(`Fix or clear the meaning for "${row.word}" before saving.`);
+  }
+
+  const sentence = cleanContextSupportText(row.sentence);
+  const meaning = cleanContextSupportText(row.meaning);
+  let cacheRow = row.contextCacheRow || null;
+  const cacheSnapshot = cacheRow ? buildTestWordContextSnapshot(row.word, cacheRow) : null;
+
+  if(shouldUpsertRowContextSupport(row, { sentence, meaning, cacheSnapshot })){
+    const hasExistingSource = !!(row.contextSourceContextId || cacheRow?.id || row.contextHadSnapshot);
+    const status = hasExistingSource ? CONTEXT_STATUS_TEACHER_EDITED : CONTEXT_STATUS_TEACHER_ENTERED;
+    const entry = {
+      word: row.word,
+      display_word: row.word,
+      context_key: normalizeBuilderContextKey(row.contextKey),
+      source: "teacher",
+    };
+    if(sentence){
+      entry.sentence = sentence;
+      entry.sentence_status = status;
+      entry.sentence_required = false;
+    }
+    if(meaning){
+      entry.meaning = meaning;
+      entry.meaning_status = status;
+      entry.meaning_enabled_by_default = true;
+    }
+    cacheRow = await upsertWordContextSupport(entry);
+    row.contextCacheRow = cacheRow;
+    row.contextSourceContextId = String(cacheRow?.id || row.contextSourceContextId || "").trim();
+    row.contextKey = normalizeBuilderContextKey(cacheRow?.context_key || row.contextKey);
+    row.contextSentenceStatus = normalizeBuilderContextStatus(cacheRow?.sentence_status || row.contextSentenceStatus);
+    row.contextMeaningStatus = normalizeBuilderContextStatus(cacheRow?.meaning_status || row.contextMeaningStatus);
+    row.contextHadSnapshot = true;
+    row.contextSentenceTouched = false;
+    row.contextMeaningTouched = false;
+    row.contextSentencePrefilled = false;
+    row.contextMeaningPrefilled = false;
+  }
+
+  return buildRowContextSnapshot(row, cacheRow);
 }
 
 function buildResolutionSnapshot(resolution = {}, fallbackWord = ""){
@@ -476,6 +746,7 @@ async function loadAll(){
 function rowFromDb(row, index){
   const graphemes = Array.isArray(row.segments) ? row.segments : splitWordToGraphemes(row.word || "");
   const meta = inferPattern(graphemes);
+  const contextState = buildContextSupportStateFromDbRow(row);
   const isAnalyticsTarget = !!row?.choice?.targeted_support || String(row?.choice?.source || "").trim().toLowerCase() === "analytics_target";
   const classificationSource = String(row?.choice?.classification_source || "").trim().toLowerCase()
     || (String(row?.choice?.source || "").trim().toLowerCase() === "teacher"
@@ -485,7 +756,8 @@ function rowFromDb(row, index){
   return {
     id: row.id || `temp-${index}`,
     word: row.word || "",
-    sentence: row.sentence || "",
+    sentence: contextState.sentence,
+    ...contextState,
     graphemesText: formatGraphemesForInput(graphemes),
     focusPattern: row.choice?.focus_graphemes?.[0] || meta.focusGrapheme || "",
     source: isAnalyticsTarget ? "analytics_target" : (row.choice?.source || "teacher"),
@@ -541,6 +813,50 @@ function onFocusOut(event){
     markDirty();
     return;
   }
+}
+
+function handleRowWordEdited(index, sourceEl = null){
+  const row = state.rows[index];
+  if(!row) return;
+
+  const previousWord = normalizeContextWordForDb(row.word);
+  row.word = String(sourceEl?.value || "").toLowerCase().trim();
+  const nextWord = normalizeContextWordForDb(row.word);
+  if(previousWord !== nextWord){
+    resetRowContextSourceForWordChange(row);
+  }
+  row.warning = detectMisspellingWarning(row.word);
+  if(isTeacherManualRow(row)){
+    row.classificationSource = PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride;
+    row.approvedExceptionId = "";
+    row.approvedExceptionActive = false;
+  }
+  applyAutoFillFromWord(index);
+  syncWordListTextFromRows();
+  updateRowDom(index, sourceEl);
+
+  if(row.word){
+    const expectedWord = row.word;
+    const expectedId = row.id;
+    const shouldUpdateAfterResolve = !isTeacherManualRow(row);
+    const resolvePromise = isTeacherManualRow(row)
+      ? resolveRowsAgainstSources([row], {
+        replaceText:false,
+        updateBaseline:true,
+        preserveCurrentState:true,
+      })
+      : resolveSingleRowFromWord(row);
+    void resolvePromise
+      .then(() => prefillRowsFromContextCache([row]))
+      .then((contextChanged) => {
+        if(row.word !== expectedWord || row.id !== expectedId) return;
+        if(contextChanged || shouldUpdateAfterResolve){
+          updateRowDom(index, sourceEl);
+          markDirty();
+        }
+      });
+  }
+  markDirty();
 }
 
 async function onClick(event){
@@ -636,37 +952,29 @@ function onInput(event){
   }
   if(target.matches('[data-field="row-word"]')){
     const i = Number(target.dataset.index);
-    if(!state.rows[i]) return;
-    state.rows[i].word = String(target.value || "").toLowerCase().trim();
-    state.rows[i].warning = detectMisspellingWarning(state.rows[i].word);
-    if(isTeacherManualRow(state.rows[i])){
-      state.rows[i].classificationSource = PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride;
-      state.rows[i].approvedExceptionId = "";
-      state.rows[i].approvedExceptionActive = false;
-    }
-    applyAutoFillFromWord(i);
-    syncWordListTextFromRows();
-    updateRowDom(i, target);
-    if(state.rows[i]?.word && isTeacherManualRow(state.rows[i])){
-      void resolveRowsAgainstSources([state.rows[i]], {
-        replaceText:false,
-        updateBaseline:true,
-        preserveCurrentState:true,
-      });
-    }
-    if(state.rows[i]?.word && !isTeacherManualRow(state.rows[i])){
-      void resolveSingleRowFromWord(state.rows[i]).then(() => {
-        updateRowDom(i, target);
-        markDirty();
-      });
-    }
-    markDirty();
+    handleRowWordEdited(i, target);
     return;
   }
   if(target.matches('[data-field="row-sentence"]')){
     const i = Number(target.dataset.index);
     if(!state.rows[i]) return;
     state.rows[i].sentence = target.value || "";
+    state.rows[i].contextSentenceTouched = true;
+    state.rows[i].contextSentencePrefilled = false;
+    markDirty();
+    return;
+  }
+  if(target.matches('[data-field="row-meaning"]')){
+    const i = Number(target.dataset.index);
+    if(!state.rows[i]) return;
+    const beforeWarning = state.rows[i].meaningWarning || "";
+    state.rows[i].meaning = target.value || "";
+    state.rows[i].contextMeaningTouched = true;
+    state.rows[i].contextMeaningPrefilled = false;
+    state.rows[i].meaningWarning = buildMeaningWarning(state.rows[i]);
+    if(beforeWarning !== state.rows[i].meaningWarning){
+      updateRowDom(i, target);
+    }
     markDirty();
     return;
   }
@@ -725,31 +1033,7 @@ function onChange(event){
   }
   if(target.matches('[data-field="row-word"]')){
     const i = Number(target.dataset.index);
-    if(!state.rows[i]) return;
-    state.rows[i].word = String(target.value || "").toLowerCase().trim();
-    state.rows[i].warning = detectMisspellingWarning(state.rows[i].word);
-    if(isTeacherManualRow(state.rows[i])){
-      state.rows[i].classificationSource = PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride;
-      state.rows[i].approvedExceptionId = "";
-      state.rows[i].approvedExceptionActive = false;
-    }
-    applyAutoFillFromWord(i);
-    syncWordListTextFromRows();
-    updateRowDom(i, target);
-    if(state.rows[i]?.word && isTeacherManualRow(state.rows[i])){
-      void resolveRowsAgainstSources([state.rows[i]], {
-        replaceText:false,
-        updateBaseline:true,
-        preserveCurrentState:true,
-      });
-    }
-    if(state.rows[i]?.word && !isTeacherManualRow(state.rows[i])){
-      void resolveSingleRowFromWord(state.rows[i]).then(() => {
-        updateRowDom(i, target);
-        markDirty();
-      });
-    }
-    markDirty();
+    handleRowWordEdited(i, target);
     return;
   }
   if(target.matches('[data-field="row-graphemes"]')){
@@ -897,6 +1181,7 @@ function rebuildRowsFromWordList(options = {}){
       id: createLocalRowId(),
       word,
       sentence:"",
+      ...createEmptyContextSupportState(),
       graphemesText: formatGraphemesForInput(gs),
       focusPattern: meta.focusGrapheme || "",
       source: targetWordSet?.has(word) ? "analytics_target" : "rule_engine",
@@ -929,6 +1214,8 @@ function rebuildRowsFromWordList(options = {}){
   }
   replaceRowsDom();
   void resolveRowsAgainstSources(state.rows, { replaceText:true, updateBaseline:true }).then(() => {
+    return prefillRowsFromContextCache(state.rows);
+  }).then(() => {
     replaceRowsDom();
     markDirty();
   });
@@ -944,6 +1231,7 @@ function addWord(){
     id:createLocalRowId(),
     word:"",
     sentence:"",
+    ...createEmptyContextSupportState(),
     graphemesText:"",
     focusPattern:"",
     source:"teacher",
@@ -1094,6 +1382,7 @@ async function suggestSentences(){
       if(!row.word || row.sentence) continue;
       const res = await aiSuggest(`Write one short child-friendly sentence using the word "${row.word}". Return only the sentence.`);
       row.sentence = String(res || "").trim();
+      row.contextSentenceTouched = !!row.sentence;
     }
     replaceRowsDom();
     markDirty();
@@ -1151,7 +1440,7 @@ function getRowFocusPatternForSave(row, savedQuestionType, segments){
   return validRequested || inferPattern(segments).focusGrapheme || "";
 }
 
-function buildTestWordPayload(row, index, savedQuestionType){
+function buildTestWordPayload(row, index, savedQuestionType, { contextSnapshot = undefined } = {}){
   const segments = getRowSegmentsForSave(row);
   const focusPattern = getRowFocusPatternForSave(row, savedQuestionType, segments);
   const difficulty = buildPersistedDifficultyPayload({
@@ -1159,6 +1448,9 @@ function buildTestWordPayload(row, index, savedQuestionType){
     graphemes: segments,
     trickyWord: !!row.trickyWord,
   });
+  const resolvedContextSnapshot = contextSnapshot === undefined
+    ? buildRowContextSnapshot(row)
+    : contextSnapshot;
   return {
     position: index + 1,
     word: row.word,
@@ -1187,6 +1479,9 @@ function buildTestWordPayload(row, index, savedQuestionType){
       if(savedQuestionType === "segmented_spelling"){
         choice.visual_aids_mode = state.segmentedVisualAidsMode === "phonics" ? "phonics" : "none";
       }
+      if(resolvedContextSnapshot){
+        choice.context_support = resolvedContextSnapshot;
+      }
       return choice;
     })(),
   };
@@ -1202,7 +1497,8 @@ async function persistTestWords(savedQuestionType){
   const keptIds = new Set();
 
   for(const [index, row] of rowsToSave.entries()){
-    const payload = buildTestWordPayload(row, index, savedQuestionType);
+    const contextSnapshot = await prepareRowContextSupportForSave(row);
+    const payload = buildTestWordPayload(row, index, savedQuestionType, { contextSnapshot });
     row.graphemesText = formatGraphemesForInput(payload.segments);
     row.focusPattern = payload.choice?.focus_graphemes?.[0] || "";
     row.classificationSource = String(payload.choice?.classification_source || row.classificationSource || PHONICS_CLASSIFICATION_SOURCES.ruleEngine).trim().toLowerCase();
@@ -1408,6 +1704,10 @@ function validateBuilderForAssign(){
     issues.push("Choose at least one class change before assigning.");
   }
 
+  if(!state.isLocked){
+    issues.push(...validateBuilderContextSupport(words));
+  }
+
   for(const [index, row] of words.entries()){
     const segments = getRowSegmentsForSave(row);
     if(!segments.length){
@@ -1436,6 +1736,19 @@ async function saveBuilder({ assign=false, silent=false }){
   state.assigning = assign;
   paintBottomBar();
   try {
+    const contextIssues = state.isLocked ? [] : validateBuilderContextSupport();
+    if(contextIssues.length){
+      if(!silent){
+        state.notice = contextIssues.length === 1
+          ? contextIssues[0]
+          : `${contextIssues[0]} ${contextIssues.length - 1} more issue${contextIssues.length - 1 === 1 ? "" : "s"} found.`;
+        state.noticeType = "error";
+        paint();
+        appEl.querySelector("#editWordsSection")?.scrollIntoView({ block:"start", behavior:"smooth" });
+      }
+      return;
+    }
+
     const title = String(state.test.title || "").trim() || "Untitled test";
     const analyticsSettings = getAnalyticsTargetSettingsForSave();
     state.test.title = title;
@@ -1691,7 +2004,7 @@ function buildStateHash(){
     segmented_visual_aids_mode: state.segmentedVisualAidsMode === "phonics" ? "phonics" : "none",
     analytics_target_words_enabled: !!state.generator.analyticsEnabled,
     analytics_target_words_per_pupil: getStoredAnalyticsTargetWordCount(state.generator.analyticsCount),
-    rows: state.rows.map(r => [r.word, r.sentence, r.graphemesText, r.focusPattern, r.source, !!r.trickyWord, (r.targetedFocuses || []).join(",")]),
+    rows: state.rows.map(r => [r.word, r.sentence, r.meaning, r.graphemesText, r.focusPattern, r.source, !!r.trickyWord, (r.targetedFocuses || []).join(",")]),
     selected:[...state.selectedClassIds].sort(),
     assign: state.assignmentsByClass,
   });
@@ -1749,7 +2062,7 @@ function renderLayout(){
 
     <section class="tb-card" id="editWordsSection">
       <div class="tb-section-head">
-        <div><div class="tb-step">2</div><h2>Edit words</h2><p>Review words, sentences, graphemes and preview.</p></div>
+        <div><div class="tb-step">2</div><h2>Edit words</h2><p>Review words, context support, graphemes and preview.</p></div>
       </div>
       ${renderDifficultyOverview()}
       <div class="tb-table-tools">
@@ -1761,7 +2074,7 @@ function renderLayout(){
         <div></div>
         <div></div>
       </div>
-      <div class="tb-table-head"><div>Word</div><div>Sentence</div><div>Grapheme structure</div><div>Focus pattern</div><div>Preview</div><div>Difficulty</div><div>Actions</div></div>
+      <div class="tb-table-head"><div>Word</div><div>Context support</div><div>Grapheme structure</div><div>Focus pattern</div><div>Preview</div><div>Difficulty</div><div>Actions</div></div>
       <div id="tbRowsHost">${renderRows()}</div>
       <div class="tb-table-footer"><button type="button" class="tb-btn tb-btn-black" data-action="add-word" ${(state.isLocked || atWordLimit())?"disabled":""}>+ Add word</button></div>
     </section>
@@ -1887,6 +2200,23 @@ function renderWordDifficultyCell(row, index){
   `;
 }
 
+function renderContextSupportCell(row, index){
+  return `
+    <div class="tb-context-cell">
+      <label>
+        <span class="tb-context-label">Sentence</span>
+        <input class="tb-input tb-context-input" data-field="row-sentence" data-index="${index}" value="${esc(row.sentence)}" placeholder="Optional sentence" ${state.isLocked?"disabled":""}>
+      </label>
+      <label>
+        <span class="tb-context-label">Meaning</span>
+        <input class="tb-input tb-context-input" data-field="row-meaning" data-index="${index}" value="${esc(row.meaning)}" placeholder="Optional meaning" ${state.isLocked?"disabled":""}>
+      </label>
+      <div class="tb-context-helper">${esc(CONTEXT_SUPPORT_HELPER_TEXT)}</div>
+      ${row.meaningWarning ? `<div class="tb-warning tb-context-warning">${esc(row.meaningWarning)}</div>` : ""}
+    </div>
+  `;
+}
+
 function renderRow(row, index){
   const graphemes = parseGraphemeInput(row.graphemesText);
   const exceptionNote = row.approvedExceptionActive
@@ -1894,7 +2224,7 @@ function renderRow(row, index){
     : "";
   return `<div class="tb-word-row" data-row-index="${index}">
     <div><input class="tb-input" data-field="row-word" data-index="${index}" value="${esc(row.word)}" ${state.isLocked?"disabled":""}>${row.warning?`<div class="tb-warning">${esc(row.warning)}</div>`:""}</div>
-    <div><input class="tb-input" data-field="row-sentence" data-index="${index}" value="${esc(row.sentence)}" placeholder="Optional sentence" ${state.isLocked?"disabled":""}></div>
+    ${renderContextSupportCell(row, index)}
     <div><input class="tb-input" data-field="row-graphemes" data-index="${index}" value="${esc(row.graphemesText)}" ${state.isLocked?"disabled":""}></div>
     <div><input class="tb-input" data-field="row-focus" data-index="${index}" value="${esc(row.focusPattern)}" ${state.isLocked?"disabled":""}></div>
     <div class="tb-preview-cell">${renderPhonicsPreview(row.word, graphemes)}</div>
@@ -2119,9 +2449,10 @@ function injectStyles(){
     .tb-btn-black{background:var(--tb-black);color:#fff}.tb-btn-ghost{background:#fff;border:1px solid var(--tb-line);color:var(--tb-text)}.tb-btn-small{height:38px;padding:0 14px}
     .tb-actions-row{display:flex;gap:10px;flex-wrap:wrap}.tb-actions-top{margin-top:14px}
     .tb-helper{border:1px dashed var(--tb-line);border-radius:18px;padding:14px;background:#fbfdff;margin-bottom:14px}.tb-helper-grid,.tb-test-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tb-helper-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.tb-generator-analytics-row{display:grid;grid-template-columns:minmax(240px,1.4fr) minmax(180px,.8fr);gap:12px;align-items:end;margin-top:12px}
-    .tb-table-tools,.tb-table-head,.tb-word-row{display:grid;grid-template-columns:180px minmax(220px,1.3fr) minmax(220px,1.05fr) 120px minmax(220px,.95fr) minmax(210px,.88fr) minmax(156px,.62fr);gap:12px;align-items:start}
+    .tb-table-tools,.tb-table-head,.tb-word-row{display:grid;grid-template-columns:180px minmax(240px,1.3fr) minmax(220px,1.05fr) 120px minmax(220px,.95fr) minmax(210px,.88fr) minmax(156px,.62fr);gap:12px;align-items:start}
     .tb-table-tools{margin-bottom:10px}.tb-col-action{display:flex;justify-content:flex-start}
     .tb-table-head{font-weight:800;color:#64748b;border-bottom:1px solid var(--tb-line);padding:0 4px 10px}.tb-word-row{padding:12px 4px;border-bottom:1px solid var(--tb-line)}
+    .tb-context-cell{display:flex;flex-direction:column;gap:8px;min-width:0}.tb-context-cell label{display:block}.tb-context-label{font-size:11px;color:#64748b;font-weight:800;margin:0 0 4px;text-transform:uppercase;letter-spacing:.04em}.tb-context-input{padding:10px 12px;border-radius:12px}.tb-context-helper{font-size:12px;line-height:1.35;color:#64748b}.tb-context-warning{margin-top:0}
     .tb-preview-cell{min-height:74px;display:flex;align-items:center;overflow:hidden}.tb-actions-cell{display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;gap:8px;min-height:44px;min-width:0;width:min(168px,100%);margin-left:auto}.tb-actions-cell .tb-btn{width:100%;max-width:100%;white-space:normal;text-align:center;justify-content:center;line-height:1.15;padding:10px 12px}
     .tb-difficulty-panel{border:1px solid var(--tb-line);border-radius:20px;padding:16px 18px;background:#f8fbff;margin-bottom:16px}
     .tb-difficulty-panel-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
