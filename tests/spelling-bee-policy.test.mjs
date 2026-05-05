@@ -3,9 +3,11 @@ import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
   buildSpellingBeeApprovedBank,
+  buildSpellingBeeExposurePlan,
   buildSpellingBeeLadder,
   calculateSpellingBeeTimeLimitMs,
   getSpellingBeeTargetDifficulty,
+  SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
   SPELLING_BEE_UNTIL_WRONG_SAFETY_ROUNDS,
 } = await loadBrowserModule("../js/spellingBeePolicy.js", import.meta.url);
 
@@ -44,6 +46,10 @@ function bank(count = 12) {
     score: 12 + (index * 8),
     segments: ["w", "or", "d", String(index + 1)],
   }));
+}
+
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 test("approved bank excludes non-teacher/generated/baseline words", () => {
@@ -166,6 +172,77 @@ test("timer formula clamps at min and max", () => {
     score: 80,
     segments: Array.from({ length: 20 }, (_item, index) => String(index)),
   })), 11000);
+});
+
+test("duplicate pupil across two selected form groups is exposed once", () => {
+  const plan = buildSpellingBeeExposurePlan({
+    classIds: ["form-a", "form-b"],
+    pupilIdsByClassId: new Map([
+      ["form-a", ["pupil-1"]],
+      ["form-b", ["pupil-1"]],
+    ]),
+  });
+
+  assert.deepEqual(plain(plan.releaseClassIds), ["form-a"]);
+  assert.deepEqual(plain(plan.includedRows), [{ classId: "form-a", pupilId: "pupil-1" }]);
+  assert.equal(plan.includedPupilCount, 1);
+});
+
+test("first selected class wins for duplicate Spelling Bee memberships", () => {
+  const plan = buildSpellingBeeExposurePlan({
+    classIds: ["form-b", "form-a"],
+    pupilIdsByClassId: {
+      "form-a": ["pupil-1"],
+      "form-b": ["pupil-1"],
+    },
+  });
+
+  assert.deepEqual(plain(plan.includedRows), [{ classId: "form-b", pupilId: "pupil-1" }]);
+  assert.deepEqual(plain(plan.skippedRows), [{
+    classId: "form-a",
+    pupilId: "pupil-1",
+    skipReason: SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+  }]);
+});
+
+test("duplicate membership is skipped with duplicate_pupil_in_run", () => {
+  const plan = buildSpellingBeeExposurePlan({
+    classIds: ["form-a", "form-b", "form-c"],
+    pupilIdsByClassId: new Map([
+      ["form-a", ["pupil-1"]],
+      ["form-b", ["pupil-1"]],
+      ["form-c", ["pupil-1"]],
+    ]),
+  });
+
+  assert.equal(plan.includedPupilCount, 1);
+  assert.equal(plan.skippedPupilCount, 2);
+  assert.deepEqual(plain(plan.skippedRows.map((row) => row.skipReason)), [
+    "duplicate_pupil_in_run",
+    "duplicate_pupil_in_run",
+  ]);
+});
+
+test("mixed Spelling Bee classes keep unique pupils and skip duplicates", () => {
+  const plan = buildSpellingBeeExposurePlan({
+    classIds: ["form-a", "form-b"],
+    pupilIdsByClassId: new Map([
+      ["form-a", ["pupil-1", "pupil-2"]],
+      ["form-b", ["pupil-2", "pupil-3"]],
+    ]),
+  });
+
+  assert.deepEqual(plain(plan.releaseClassIds), ["form-a", "form-b"]);
+  assert.deepEqual(plain(plan.classPlans.map((item) => ({
+    classId: item.classId,
+    includedPupilIds: item.includedPupilIds,
+    duplicatePupilIds: item.duplicatePupilIds,
+  }))), [
+    { classId: "form-a", includedPupilIds: ["pupil-1", "pupil-2"], duplicatePupilIds: [] },
+    { classId: "form-b", includedPupilIds: ["pupil-3"], duplicatePupilIds: ["pupil-2"] },
+  ]);
+  assert.equal(plan.includedPupilCount, 3);
+  assert.equal(plan.skippedPupilCount, 1);
 });
 
 for (const { name, fn } of TESTS) {

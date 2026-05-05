@@ -14,6 +14,88 @@ export const SPELLING_BEE_RESULT_REASONS = Object.freeze([
 export const SPELLING_BEE_TIMER_MIN_MS = 4500;
 export const SPELLING_BEE_TIMER_MAX_MS = 11000;
 export const SPELLING_BEE_UNTIL_WRONG_SAFETY_ROUNDS = 50;
+export const SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON = "duplicate_pupil_in_run";
+
+function normalizeIdList(items = []) {
+  return [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function readPupilIdsForClass(pupilIdsByClassId = null, classId = "") {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId || !pupilIdsByClassId) return [];
+  if (typeof pupilIdsByClassId.get === "function") {
+    return normalizeIdList(pupilIdsByClassId.get(safeClassId) || []);
+  }
+  if (typeof pupilIdsByClassId === "object") {
+    return normalizeIdList(pupilIdsByClassId[safeClassId] || []);
+  }
+  return [];
+}
+
+export function buildSpellingBeeExposurePlan({
+  classIds = [],
+  pupilIdsByClassId = null,
+} = {}) {
+  const safeClassIds = normalizeIdList(classIds);
+  const seenPupilIds = new Set();
+  const classPlans = [];
+  const includedRows = [];
+  const skippedRows = [];
+
+  for (const classId of safeClassIds) {
+    const pupilIds = readPupilIdsForClass(pupilIdsByClassId, classId);
+    const includedPupilIds = [];
+    const duplicatePupilIds = [];
+
+    for (const pupilId of pupilIds) {
+      if (seenPupilIds.has(pupilId)) {
+        duplicatePupilIds.push(pupilId);
+        skippedRows.push({
+          classId,
+          pupilId,
+          skipReason: SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+        });
+        continue;
+      }
+      seenPupilIds.add(pupilId);
+      includedPupilIds.push(pupilId);
+      includedRows.push({
+        classId,
+        pupilId,
+      });
+    }
+
+    classPlans.push({
+      classId,
+      pupilIds,
+      includedPupilIds,
+      duplicatePupilIds,
+      includedCount: includedPupilIds.length,
+      skippedCount: duplicatePupilIds.length,
+      skipReasons: duplicatePupilIds.length
+        ? { [SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON]: duplicatePupilIds.length }
+        : {},
+    });
+  }
+
+  return {
+    classIds: safeClassIds,
+    releaseClassIds: classPlans
+      .filter((classPlan) => classPlan.includedPupilIds.length > 0)
+      .map((classPlan) => classPlan.classId),
+    classPlans,
+    includedRows,
+    skippedRows,
+    includedPupilIds: includedRows.map((row) => row.pupilId),
+    duplicatePupilIds: skippedRows.map((row) => row.pupilId),
+    includedPupilCount: includedRows.length,
+    skippedPupilCount: skippedRows.length,
+  };
+}
 
 export function clampSpellingBeeTimerMs(value) {
   const numeric = Number(value);

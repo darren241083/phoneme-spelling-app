@@ -163,7 +163,11 @@ import {
   PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS,
   PERSONALISED_AUTOMATION_WEEKDAY_OPTIONS,
 } from "./autoAssignPolicy.js?v=1.9";
-import { buildSpellingBeeLadder } from "./spellingBeePolicy.js?v=1.0";
+import {
+  SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+  buildSpellingBeeExposurePlan,
+  buildSpellingBeeLadder,
+} from "./spellingBeePolicy.js?v=1.0";
 
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
@@ -12613,20 +12617,109 @@ async function handleRunNowPersonalisedGeneration() {
         throw new Error(ladderResult.error || "Not enough teacher-approved words are available for a fair Spelling Bee.");
       }
 
-      const createdBeeRelease = await createSpellingBeeCompetitionRelease({
+      const { pupilIdsByClassId } = await readActivePupilIdsByClass(selectedClassIds);
+      const exposurePlan = buildSpellingBeeExposurePlan({
         classIds: selectedClassIds,
+        pupilIdsByClassId,
+      });
+      if (!exposurePlan.includedPupilCount) {
+        throw new Error("No active pupils were available for this Spelling Bee run.");
+      }
+
+      const createdBeeRelease = await createSpellingBeeCompetitionRelease({
+        classIds: exposurePlan.releaseClassIds,
         deadlineIso,
         ladder: ladderResult.words,
         policy: effectivePolicy,
         runRecord,
       });
-      const classResults = createdBeeRelease.classResults || [];
+      const generatedResultByClassId = new Map(
+        (createdBeeRelease.classResults || [])
+          .map((item) => [String(item?.classId || "").trim(), item])
+          .filter(([classId]) => !!classId)
+      );
+      const assignmentIdByClassId = new Map(
+        (createdBeeRelease.classResults || [])
+          .map((item) => [String(item?.classId || "").trim(), String(item?.assignmentId || "").trim()])
+          .filter(([classId, assignmentId]) => !!classId && !!assignmentId)
+      );
+      const runPupilRows = [];
+      for (const row of exposurePlan.includedRows) {
+        const assignmentId = assignmentIdByClassId.get(String(row?.classId || "").trim()) || "";
+        if (!assignmentId) {
+          throw new Error("Could not link a Spelling Bee pupil exposure to its assignment.");
+        }
+        runPupilRows.push({
+          runId: runRecord.id,
+          classId: row.classId,
+          pupilId: row.pupilId,
+          assignmentId,
+          status: "included",
+          skipReason: null,
+        });
+      }
+      for (const row of exposurePlan.skippedRows) {
+        runPupilRows.push({
+          runId: runRecord.id,
+          classId: row.classId,
+          pupilId: row.pupilId,
+          assignmentId: null,
+          status: "skipped",
+          skipReason: SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+        });
+      }
+      if (runPupilRows.length) {
+        await upsertPersonalisedGenerationRunPupilRows(runPupilRows);
+      }
+
+      const classPlanByClassId = new Map(
+        exposurePlan.classPlans.map((item) => [String(item?.classId || "").trim(), item])
+      );
+      const classResults = selectedClassIds.map((classId) => {
+        const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
+        const className = String(selectedClass?.name || "Class").trim() || "Class";
+        const classPlan = classPlanByClassId.get(classId) || {
+          pupilIds: [],
+          includedPupilIds: [],
+          duplicatePupilIds: [],
+          skipReasons: {},
+        };
+        const generatedResult = generatedResultByClassId.get(classId) || null;
+        if (generatedResult) {
+          return {
+            ...generatedResult,
+            includedCount: classPlan.includedPupilIds.length,
+            skippedCount: classPlan.duplicatePupilIds.length,
+            skipReasons: classPlan.skipReasons || {},
+          };
+        }
+        if (!classPlan.pupilIds.length) {
+          return {
+            classId,
+            className,
+            status: "no_active_pupils",
+            assignmentId: "",
+            includedCount: 0,
+            skippedCount: 0,
+            skipReasons: {},
+          };
+        }
+        return {
+          classId,
+          className,
+          status: "skipped",
+          assignmentId: "",
+          includedCount: 0,
+          skippedCount: classPlan.duplicatePupilIds.length,
+          skipReasons: classPlan.skipReasons || {},
+        };
+      });
       await updatePersonalisedGenerationRun({
         runId: runRecord.id,
         status: "completed",
         classCount: selectedClassIds.length,
-        includedPupilCount: 0,
-        skippedPupilCount: 0,
+        includedPupilCount: exposurePlan.includedPupilCount,
+        skippedPupilCount: exposurePlan.skippedPupilCount,
         summary: {
           classes: classResults,
           errorCount: 0,
@@ -12646,7 +12739,7 @@ async function handleRunNowPersonalisedGeneration() {
       state.createAutoAssignOpen = false;
       state.activePanel = null;
       showNotice(
-        `Released Spelling Bee competition to ${selectedClassIds.length} group${selectedClassIds.length === 1 ? "" : "s"}.`,
+        `Released Spelling Bee competition to ${exposurePlan.releaseClassIds.length} group${exposurePlan.releaseClassIds.length === 1 ? "" : "s"}.`,
         "success",
       );
       shouldScrollToRunResult = true;
