@@ -17,7 +17,7 @@ import {
   buildTestWordContextSnapshot,
   validateMeaningSupportText,
 } from "./spellingContextSupport.js?v=1.3";
-import { parseWordList, splitWordToGraphemes, inferPattern, formatGraphemesForInput, parseGraphemeInput, detectMisspellingWarning } from "./wordParser.js?v=1.5";
+import { normaliseWord, parseWordList, splitWordToGraphemes, inferPattern, formatGraphemesForInput, parseGraphemeInput, detectMisspellingWarning } from "./wordParser.js?v=1.5";
 import { buildWordFromGraphemes, renderPhonicsPreview } from "./phonicsRenderer.js?v=1.6";
 import { getPhonemeAlternativeOptions } from "./data/phonemeHelpers.js";
 import {
@@ -75,16 +75,19 @@ const LOOM_DECOY_LEVEL_OPTIONS = [
 const ATTEMPT_OPTIONS = ["1", "2", "3", "5", "10", "unlimited"];
 const DEFAULT_ASSIGN = { maxAttempts:"2", deadline:"", audioEnabled:true, hintsEnabled:true };
 const MAX_TEST_WORDS = 20;
-const CONTEXT_SUPPORT_HELPER_TEXT = "Optional. Helps pupils understand the word during spelling tasks.";
+const UK_ENGLISH_AI_INSTRUCTION = "Use UK English and UK school-appropriate wording.";
+const UK_ENGLISH_AI_AVOIDANCE = "Avoid US terms and spellings such as mom, color, favorite, center or organize; use mum, colour, favourite, centre and organise where needed.";
 const CONTEXT_KEY_DEFAULT = "default";
 const CONTEXT_STATUS_TEACHER_ENTERED = "teacher_entered";
 const CONTEXT_STATUS_TEACHER_EDITED = "teacher_edited";
+const DUPLICATE_WORD_WARNING = "This word is already in this test.";
 
 const state = {
   loading:true,
   saving:false,
   assigning:false,
   aiWorking:false,
+  aiWorkingAction:"",
   user:null,
   accessContext:null,
   activeSchool:null,
@@ -278,6 +281,109 @@ function cleanContextSupportText(value){
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeBuilderWordForCompare(value){
+  return normaliseWord(String(value || "").replace(/\s+/g, " "));
+}
+
+function getDuplicateWordIndex(word, currentIndex, rows = state.rows){
+  const normalized = normalizeBuilderWordForCompare(word);
+  if(!normalized) return -1;
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return safeRows.findIndex((row, index) => index !== currentIndex && normalizeBuilderWordForCompare(row?.word) === normalized);
+}
+
+function buildRowWordWarning(row, index, rows = state.rows){
+  if(getDuplicateWordIndex(row?.word || "", index, rows) >= 0) return DUPLICATE_WORD_WARNING;
+  return detectMisspellingWarning(row?.word || "");
+}
+
+function refreshWordWarnings(rows = state.rows){
+  const changedIndexes = [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  safeRows.forEach((row, index) => {
+    if(!row) return;
+    const nextWarning = buildRowWordWarning(row, index, safeRows);
+    if(row.warning !== nextWarning){
+      row.warning = nextWarning;
+      changedIndexes.push(index);
+    }
+  });
+  return changedIndexes;
+}
+
+function validateBuilderWordList(rows = getRowsForSave()){
+  const issues = [];
+  refreshWordWarnings(state.rows);
+  const seen = new Map();
+  for(const row of Array.isArray(rows) ? rows : []){
+    const normalized = normalizeBuilderWordForCompare(row?.word);
+    if(!normalized) continue;
+    if(seen.has(normalized)){
+      issues.push(`"${row.word}" is already in this test.`);
+      continue;
+    }
+    seen.set(normalized, row);
+  }
+  return issues;
+}
+
+function parseBuilderWordList(raw){
+  const compact = String(raw || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[;,]+/g, "\n");
+  const rough = compact
+    .split(/\n+/)
+    .flatMap((line) => line.split(/\s+/))
+    .map((word) => normalizeBuilderWordForCompare(word))
+    .filter(Boolean)
+    .filter((word) => word.length <= 24);
+
+  const seen = new Set();
+  const duplicateSeen = new Set();
+  const words = [];
+  const duplicates = [];
+  for(const word of rough){
+    if(seen.has(word)){
+      if(!duplicateSeen.has(word)){
+        duplicateSeen.add(word);
+        duplicates.push(word);
+      }
+      continue;
+    }
+    seen.add(word);
+    words.push(word);
+  }
+  return { words, duplicates, rawCount: rough.length };
+}
+
+function formatDuplicateWordsMessage(duplicates = []){
+  const safeDuplicates = (Array.isArray(duplicates) ? duplicates : []).filter(Boolean);
+  if(!safeDuplicates.length) return "";
+  const shown = safeDuplicates.slice(0, 5).join(", ");
+  const extra = safeDuplicates.length > 5 ? `, and ${safeDuplicates.length - 5} more` : "";
+  return `Skipped ${safeDuplicates.length} duplicate word${safeDuplicates.length === 1 ? "" : "s"}: ${shown}${extra}.`;
+}
+
+function escapeRegExpLiteral(value){
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildTargetWordPattern(word){
+  const normalizedWord = normalizeContextWordForDb(word);
+  if(!normalizedWord) return null;
+  const pattern = normalizedWord
+    .split("")
+    .map((letter) => (letter === "'" ? "['\\u2019\\u2018\\u0060]" : escapeRegExpLiteral(letter)))
+    .join("");
+  return new RegExp(`(^|[^A-Za-z'\\u2019\\u2018\\u0060])${pattern}(?=$|[^A-Za-z'\\u2019\\u2018\\u0060])`, "i");
+}
+
+function textContainsTargetWord(text, word){
+  const pattern = buildTargetWordPattern(word);
+  return !!pattern && pattern.test(String(text || ""));
+}
+
 function readContextSupportText(value){
   if(typeof value === "string") return value;
   const source = getBuilderPlainObject(value);
@@ -292,20 +398,19 @@ function normalizeBuilderContextStatus(value = ""){
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function isPupilUsableBuilderContextStatus(status = ""){
-  return ["auto_approved", "teacher_entered", "teacher_edited"].includes(normalizeBuilderContextStatus(status));
-}
-
 function createEmptyContextSupportState(){
   return {
     meaning:"",
     meaningWarning:"",
+    meaningSuggestionWarning:"",
+    contextDefaultWarning:"",
     contextKey:CONTEXT_KEY_DEFAULT,
     contextSourceContextId:"",
     contextSentenceStatus:"",
     contextMeaningStatus:"",
     contextCacheRow:null,
     contextHadSnapshot:false,
+    contextDefaultConflict:false,
     contextSentenceTouched:false,
     contextMeaningTouched:false,
     contextSentencePrefilled:false,
@@ -341,8 +446,10 @@ function buildContextSupportStateFromDbRow(row = {}){
 
 function resetRowContextSourceForWordChange(row){
   if(!row) return;
-  if(row.contextSentencePrefilled && !row.contextSentenceTouched) row.sentence = "";
-  if(row.contextMeaningPrefilled && !row.contextMeaningTouched) row.meaning = "";
+  row.sentence = "";
+  row.meaning = "";
+  row.contextSentenceTouched = false;
+  row.contextMeaningTouched = false;
   row.contextCacheRow = null;
   row.contextSourceContextId = "";
   row.contextSentenceStatus = "";
@@ -351,7 +458,24 @@ function resetRowContextSourceForWordChange(row){
   row.contextSentencePrefilled = false;
   row.contextMeaningPrefilled = false;
   row.contextKey = CONTEXT_KEY_DEFAULT;
+  row.contextDefaultConflict = false;
+  row.contextDefaultWarning = "";
+  row.meaningSuggestionWarning = "";
   row.meaningWarning = buildMeaningWarning(row);
+}
+
+function resetRowGraphemeStateForWordChange(row){
+  if(!row) return;
+  row.graphemesText = "";
+  row.focusPattern = "";
+  row.source = "rule_engine";
+  row.classificationSource = PHONICS_CLASSIFICATION_SOURCES.ruleEngine;
+  row.approvedExceptionId = "";
+  row.approvedExceptionActive = false;
+  row.graphemeCustomTouched = false;
+  row.autoFillFromWord = true;
+  row.resolvedBaseline = null;
+  row.lastSavedCorrectionKey = "";
 }
 
 function buildMeaningWarning(row = {}){
@@ -366,6 +490,7 @@ function validateBuilderContextSupport(rows = getRowsForSave()){
   const issues = [];
   for(const [index, row] of rows.entries()){
     row.meaningWarning = buildMeaningWarning(row);
+    if(!cleanContextSupportText(row.meaning)) row.meaningSuggestionWarning = "";
     if(row.meaningWarning){
       issues.push(`Word ${index + 1} "${row.word}" has an unsafe meaning. Fix it or clear it.`);
     }
@@ -377,26 +502,77 @@ function contextSnapshotHasText(snapshot, key, text){
   return !!snapshot && cleanContextSupportText(snapshot[key]) === cleanContextSupportText(text);
 }
 
-function rowContextHasUsableSource(row, key, text, cacheSnapshot = null){
-  if(!cleanContextSupportText(text)) return true;
-  if(contextSnapshotHasText(cacheSnapshot, key, text)) return true;
-  const statusKey = key === "sentence" ? "contextSentenceStatus" : "contextMeaningStatus";
-  return !!row?.contextSourceContextId && isPupilUsableBuilderContextStatus(row?.[statusKey]);
+function rowHasContextSupportText(row = {}){
+  return !!(cleanContextSupportText(row?.sentence) || cleanContextSupportText(row?.meaning));
 }
 
-function shouldUpsertRowContextSupport(row, {
-  sentence = "",
-  meaning = "",
-  cacheSnapshot = null,
-} = {}){
-  const hasSentence = !!cleanContextSupportText(sentence);
-  const hasMeaning = !!cleanContextSupportText(meaning);
-  if(!hasSentence && !hasMeaning) return false;
-  if(hasSentence && row.contextSentenceTouched) return true;
-  if(hasMeaning && row.contextMeaningTouched) return true;
-  if(hasSentence && !rowContextHasUsableSource(row, "sentence", sentence, cacheSnapshot)) return true;
-  if(hasMeaning && !rowContextHasUsableSource(row, "meaning", meaning, cacheSnapshot)) return true;
-  return false;
+function getContextDefaultConflictRows(rows = state.rows){
+  return (Array.isArray(rows) ? rows : []).filter((row) => !!row?.contextDefaultConflict);
+}
+
+function getActionButtonLabel(action = ""){
+  const labels = {
+    "generate-words": ["Generate words", "Generating..."],
+    "suggest-sentences": ["Fill sentences", "Generating..."],
+    "suggest-meanings": ["Fill meanings", "Generating..."],
+    "suggest-splits": ["Fill splits", "Refreshing..."],
+  }[action];
+  if(!labels) return "";
+  return state.aiWorkingAction === action ? labels[1] : labels[0];
+}
+
+function isBusyAction(action = ""){
+  return ["generate-words", "suggest-sentences", "suggest-meanings", "suggest-splits"].includes(action);
+}
+
+function isActionButtonDisabled(action = ""){
+  return state.isLocked || (state.aiWorking && state.aiWorkingAction === action);
+}
+
+function beginAiAction(action){
+  state.aiWorking = true;
+  state.aiWorkingAction = action;
+  updateActionButtons();
+}
+
+function endAiAction(){
+  state.aiWorking = false;
+  state.aiWorkingAction = "";
+  updateActionButtons();
+}
+
+function contextCacheRowsDiffer(loadedRow = null, latestRow = null){
+  const loadedId = String(loadedRow?.id || "").trim();
+  const latestId = String(latestRow?.id || "").trim();
+  if(!loadedId && !latestId) return false;
+  if(loadedId !== latestId) return true;
+  return String(loadedRow?.updated_at || "").trim() !== String(latestRow?.updated_at || "").trim();
+}
+
+function applyRowContextCacheMetadata(row, cacheRow = null){
+  if(!row) return;
+  row.contextCacheRow = cacheRow || null;
+  if(!cacheRow) return;
+
+  row.contextKey = normalizeBuilderContextKey(cacheRow.context_key || row.contextKey);
+  const snapshot = buildTestWordContextSnapshot(row.word, cacheRow);
+  if(!snapshot) return;
+
+  row.contextSourceContextId = String(snapshot.source_context_id || "").trim();
+  if(contextSnapshotHasText(snapshot, "sentence", row.sentence)){
+    row.contextSentenceStatus = normalizeBuilderContextStatus(snapshot.sentence_status);
+  }
+  if(contextSnapshotHasText(snapshot, "meaning", row.meaning)){
+    row.contextMeaningStatus = normalizeBuilderContextStatus(snapshot.meaning_status);
+  }
+}
+
+async function fetchLatestRowContextCache(row){
+  const word = normalizeContextWordForDb(row?.word || "");
+  if(!word) return null;
+  const contextKey = normalizeBuilderContextKey(row?.contextKey);
+  const rowsByWord = await listWordContextSupportByWords([word], { includeUnavailable:true, contextKey });
+  return rowsByWord[word] || null;
 }
 
 function buildRowContextSnapshot(row, cacheRow = row?.contextCacheRow || null){
@@ -481,7 +657,13 @@ async function prefillRowsFromContextCache(rows = state.rows){
   return changed;
 }
 
-async function prepareRowContextSupportForSave(row){
+function shouldUpdateRowContextSupportCache(row, { sentence = "", meaning = "", updateSchoolDefault = false } = {}){
+  if(!updateSchoolDefault) return false;
+  if(!sentence && !meaning) return false;
+  return (!!sentence && !!row.contextSentenceTouched) || (!!meaning && !!row.contextMeaningTouched);
+}
+
+async function prepareRowContextSupportForSave(row, { updateSchoolDefault = false } = {}){
   row.meaningWarning = buildMeaningWarning(row);
   if(row.meaningWarning){
     throw new Error(`Fix or clear the meaning for "${row.word}" before saving.`);
@@ -490,9 +672,24 @@ async function prepareRowContextSupportForSave(row){
   const sentence = cleanContextSupportText(row.sentence);
   const meaning = cleanContextSupportText(row.meaning);
   let cacheRow = row.contextCacheRow || null;
-  const cacheSnapshot = cacheRow ? buildTestWordContextSnapshot(row.word, cacheRow) : null;
 
-  if(shouldUpsertRowContextSupport(row, { sentence, meaning, cacheSnapshot })){
+  row.contextDefaultConflict = false;
+  if(!sentence && !meaning){
+    row.contextDefaultWarning = "";
+    return buildRowContextSnapshot(row, cacheRow);
+  }
+
+  const shouldUpdateSchoolDefault = shouldUpdateRowContextSupportCache(row, { sentence, meaning, updateSchoolDefault });
+
+  if(shouldUpdateSchoolDefault){
+    const latestCacheRow = await fetchLatestRowContextCache(row);
+    if(contextCacheRowsDiffer(cacheRow, latestCacheRow)){
+      applyRowContextCacheMetadata(row, latestCacheRow);
+      row.contextDefaultConflict = true;
+      row.contextDefaultWarning = "This school default was changed by another user. Review before replacing it.";
+      return buildRowContextSnapshot(row, row.contextCacheRow || null);
+    }
+
     const hasExistingSource = !!(row.contextSourceContextId || cacheRow?.id || row.contextHadSnapshot);
     const status = hasExistingSource ? CONTEXT_STATUS_TEACHER_EDITED : CONTEXT_STATUS_TEACHER_ENTERED;
     const entry = {
@@ -512,11 +709,7 @@ async function prepareRowContextSupportForSave(row){
       entry.meaning_enabled_by_default = true;
     }
     cacheRow = await upsertWordContextSupport(entry);
-    row.contextCacheRow = cacheRow;
-    row.contextSourceContextId = String(cacheRow?.id || row.contextSourceContextId || "").trim();
-    row.contextKey = normalizeBuilderContextKey(cacheRow?.context_key || row.contextKey);
-    row.contextSentenceStatus = normalizeBuilderContextStatus(cacheRow?.sentence_status || row.contextSentenceStatus);
-    row.contextMeaningStatus = normalizeBuilderContextStatus(cacheRow?.meaning_status || row.contextMeaningStatus);
+    applyRowContextCacheMetadata(row, cacheRow);
     row.contextHadSnapshot = true;
     row.contextSentenceTouched = false;
     row.contextMeaningTouched = false;
@@ -524,6 +717,8 @@ async function prepareRowContextSupportForSave(row){
     row.contextMeaningPrefilled = false;
   }
 
+  row.contextDefaultWarning = "";
+  row.contextDefaultConflict = false;
   return buildRowContextSnapshot(row, cacheRow);
 }
 
@@ -593,6 +788,7 @@ function applyResolvedValueToRow(row, resolution, {
     row.graphemesText = formatGraphemesForInput(snapshot.segments);
     row.focusPattern = snapshot.focusGrapheme || "";
     if(nextSource) row.source = nextSource;
+    row.graphemeCustomTouched = false;
   }
   if(updateBaseline){
     setRowResolvedBaseline(row, snapshot);
@@ -603,35 +799,44 @@ function getRowsForSave(){
   return limitWords(state.rows.filter((row) => row.word));
 }
 
-function shouldPreserveManualResolution(row, replaceText){
-  return !!replaceText && isTeacherManualRow(row);
+function shouldPreserveManualResolution(row, replaceText, preserveManualResolution = true){
+  return !!preserveManualResolution && !!replaceText && isTeacherManualRow(row);
 }
 
 async function resolveRowsAgainstSources(rows, {
   replaceText = true,
   updateBaseline = true,
   preserveCurrentState = false,
+  preserveManualResolution = true,
+  applyFallbackOnError = true,
 } = {}){
   const safeRows = Array.isArray(rows) ? rows.filter((row) => row?.word) : [];
-  if(!safeRows.length || !state.user?.id) return;
+  if(!safeRows.length || !state.user?.id) return { updatedRows:[], failed:false };
 
   const runId = ++state.rowResolutionRun;
-  const results = await resolvePhonicsBatch({
-    teacherId: state.user.id,
-    items: safeRows.map((row) => ({
-      word: row.word,
-      excludeTestWordId: row.persisted ? row.id : "",
-    })),
-  }).catch((error) => {
+  let failed = false;
+  let results = null;
+  try {
+    results = await resolvePhonicsBatch({
+      teacherId: state.user.id,
+      items: safeRows.map((row) => ({
+        word: row.word,
+        excludeTestWordId: row.persisted ? row.id : "",
+      })),
+    });
+  } catch (error) {
     console.warn("resolve rows fallback:", error);
-    return safeRows.map((row) => buildRuleEngineResolution(row.word));
-  });
+    failed = true;
+    if(!applyFallbackOnError) return { updatedRows:[], failed:true };
+    results = safeRows.map((row) => buildRuleEngineResolution(row.word));
+  }
 
-  if(runId !== state.rowResolutionRun) return;
+  if(runId !== state.rowResolutionRun) return { updatedRows:[], failed };
 
+  const updatedRows = [];
   safeRows.forEach((row, index) => {
     const resolution = results[index] || buildRuleEngineResolution(row.word);
-    if((preserveCurrentState && !replaceText) || shouldPreserveManualResolution(row, replaceText)){
+    if((preserveCurrentState && !replaceText) || shouldPreserveManualResolution(row, replaceText, preserveManualResolution)){
       if(updateBaseline) setRowResolvedBaseline(row, resolution);
       return;
     }
@@ -640,7 +845,9 @@ async function resolveRowsAgainstSources(rows, {
       nextSource: replaceText ? (String(row.source || "").trim().toLowerCase() === "analytics_target" ? "analytics_target" : "rule_engine") : null,
       updateBaseline,
     });
+    updatedRows.push(row);
   });
+  return { updatedRows, failed:false };
 }
 
 async function resolveSingleRowFromWord(row){
@@ -712,6 +919,7 @@ async function loadAll(){
 
   state.rows = (wordsRes.data || []).map((row, index) => rowFromDb(row, index));
   await resolveRowsAgainstSources(state.rows, { replaceText:false, updateBaseline:true, preserveCurrentState:true });
+  refreshWordWarnings(state.rows);
   state.persistedWordIds = new Set(
     state.rows
       .map((row) => String(row?.id || "").trim())
@@ -769,6 +977,7 @@ function rowFromDb(row, index){
       : [],
     trickyWord: !!row?.choice?.difficulty?.flags?.tricky_word,
     warning: detectMisspellingWarning(row.word || ""),
+    graphemeCustomTouched: classificationSource === PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride,
     autoFillFromWord: false,
     persisted: true,
     resolvedBaseline: buildResolutionSnapshot({
@@ -813,6 +1022,12 @@ function onFocusOut(event){
     markDirty();
     return;
   }
+  if(target.matches('[data-field="word-list"]')){
+    state.wordListText = target.value || "";
+    window.clearTimeout(wordListTimer);
+    processWordListInput({ reportDuplicates:true });
+    return;
+  }
 }
 
 function handleRowWordEdited(index, sourceEl = null){
@@ -820,10 +1035,14 @@ function handleRowWordEdited(index, sourceEl = null){
   if(!row) return;
 
   const previousWord = normalizeContextWordForDb(row.word);
-  row.word = String(sourceEl?.value || "").toLowerCase().trim();
+  row.word = normaliseWord(sourceEl?.value || "");
+  if(sourceEl instanceof HTMLInputElement && sourceEl.value !== row.word){
+    sourceEl.value = row.word;
+  }
   const nextWord = normalizeContextWordForDb(row.word);
   if(previousWord !== nextWord){
     resetRowContextSourceForWordChange(row);
+    resetRowGraphemeStateForWordChange(row);
   }
   row.warning = detectMisspellingWarning(row.word);
   if(isTeacherManualRow(row)){
@@ -833,7 +1052,19 @@ function handleRowWordEdited(index, sourceEl = null){
   }
   applyAutoFillFromWord(index);
   syncWordListTextFromRows();
+  const warningChanges = refreshWordWarnings();
+  const duplicateIndex = getDuplicateWordIndex(row.word, index);
   updateRowDom(index, sourceEl);
+  for(const changedIndex of warningChanges){
+    if(changedIndex !== index) updateRowDom(changedIndex);
+  }
+
+  if(duplicateIndex >= 0){
+    showFloating(DUPLICATE_WORD_WARNING);
+    highlightRow(duplicateIndex);
+    markDirty();
+    return;
+  }
 
   if(row.word){
     const expectedWord = row.word;
@@ -860,7 +1091,11 @@ function handleRowWordEdited(index, sourceEl = null){
 }
 
 async function onClick(event){
-  const btn = event.target.closest("[data-action]");
+  const clickedEl = event.target instanceof Element ? event.target : null;
+  const activeDifficultyPopover = clickedEl?.closest(".tb-difficulty-popover") || null;
+  closeDifficultyPopovers(activeDifficultyPopover);
+
+  const btn = clickedEl?.closest("[data-action]");
   if(!btn) return;
   const action = btn.dataset.action;
 
@@ -877,11 +1112,22 @@ async function onClick(event){
       const ok = window.confirm("Leave without saving?");
       if(!ok) return;
     }
-    window.location.href = "./";
+    try {
+      localStorage.setItem("ps_role_v1", "teacher");
+    } catch (error) {
+      console.warn("Could not set teacher dashboard role before navigation:", error);
+    }
+    window.location.href = "./login.html";
+    return;
+  }
+  if(state.aiWorking && isBusyAction(action)){
+    showFloating("Finish the current suggestion first.");
     return;
   }
   if(action === "generate-words"){ await generateWords(); return; }
+  if(action === "update-word-list"){ processWordListInput({ reportDuplicates:true }); return; }
   if(action === "suggest-sentences"){ await suggestSentences(); return; }
+  if(action === "suggest-meanings"){ await suggestMeanings(); return; }
   if(action === "suggest-splits"){ await suggestSplits(); return; }
   if(action === "add-word"){ addWord(); return; }
   if(action === "delete-word"){ deleteWord(Number(btn.dataset.index)); return; }
@@ -926,6 +1172,10 @@ async function onClick(event){
 async function onKeyDown(event){
   const target = event.target;
   if(!(target instanceof HTMLElement)) return;
+  if(event.key === "Escape"){
+    closeDifficultyPopovers();
+    return;
+  }
   if(event.key !== "Enter") return;
   if(!target.matches('[data-field="generator-prompt"]')) return;
   if(state.isLocked || state.aiWorking) return;
@@ -946,7 +1196,9 @@ function onInput(event){
   if(target.matches('[data-field="word-list"]')){
     state.wordListText = target.value || "";
     window.clearTimeout(wordListTimer);
-    wordListTimer = window.setTimeout(rebuildRowsFromWordList, 250);
+    if(typeof InputEvent !== "undefined" && event instanceof InputEvent && ["insertFromPaste", "insertFromDrop"].includes(event.inputType)){
+      wordListTimer = window.setTimeout(() => processWordListInput({ reportDuplicates:true }), 0);
+    }
     markDirty();
     return;
   }
@@ -958,9 +1210,15 @@ function onInput(event){
   if(target.matches('[data-field="row-sentence"]')){
     const i = Number(target.dataset.index);
     if(!state.rows[i]) return;
+    const beforeDefaultWarning = state.rows[i].contextDefaultWarning || "";
     state.rows[i].sentence = target.value || "";
     state.rows[i].contextSentenceTouched = true;
     state.rows[i].contextSentencePrefilled = false;
+    state.rows[i].contextDefaultConflict = false;
+    state.rows[i].contextDefaultWarning = "";
+    if(beforeDefaultWarning){
+      updateRowDom(i, target);
+    }
     markDirty();
     return;
   }
@@ -968,11 +1226,16 @@ function onInput(event){
     const i = Number(target.dataset.index);
     if(!state.rows[i]) return;
     const beforeWarning = state.rows[i].meaningWarning || "";
+    const beforeSuggestionWarning = state.rows[i].meaningSuggestionWarning || "";
+    const beforeDefaultWarning = state.rows[i].contextDefaultWarning || "";
     state.rows[i].meaning = target.value || "";
     state.rows[i].contextMeaningTouched = true;
     state.rows[i].contextMeaningPrefilled = false;
+    state.rows[i].contextDefaultConflict = false;
+    state.rows[i].contextDefaultWarning = "";
+    state.rows[i].meaningSuggestionWarning = "";
     state.rows[i].meaningWarning = buildMeaningWarning(state.rows[i]);
-    if(beforeWarning !== state.rows[i].meaningWarning){
+    if(beforeWarning !== state.rows[i].meaningWarning || beforeSuggestionWarning || beforeDefaultWarning){
       updateRowDom(i, target);
     }
     markDirty();
@@ -987,6 +1250,7 @@ function onInput(event){
     state.rows[i].classificationSource = PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride;
     state.rows[i].approvedExceptionId = "";
     state.rows[i].approvedExceptionActive = false;
+    state.rows[i].graphemeCustomTouched = true;
     const meta = inferPattern(parseGraphemeInput(state.rows[i].graphemesText));
     state.rows[i].focusPattern = meta.focusGrapheme || state.rows[i].focusPattern || "";
     updateRowDom(i, target);
@@ -1045,6 +1309,7 @@ function onChange(event){
     state.rows[i].classificationSource = PHONICS_CLASSIFICATION_SOURCES.teacherManualOverride;
     state.rows[i].approvedExceptionId = "";
     state.rows[i].approvedExceptionActive = false;
+    state.rows[i].graphemeCustomTouched = true;
     const meta = inferPattern(parseGraphemeInput(state.rows[i].graphemesText));
     state.rows[i].focusPattern = meta.focusGrapheme || state.rows[i].focusPattern || "";
     updateRowDom(i, target);
@@ -1133,6 +1398,16 @@ function scrollBuilderToTop(){
   }
 }
 
+function highlightRow(index){
+  const rowEl = appEl.querySelector(`[data-row-index="${index}"]`);
+  if(!(rowEl instanceof HTMLElement)) return;
+  rowEl.classList.add("tb-row-highlight");
+  rowEl.scrollIntoView({ block:"nearest", behavior:"smooth" });
+  window.setTimeout(() => {
+    rowEl.classList.remove("tb-row-highlight");
+  }, 1800);
+}
+
 function showFloating(message){
   state.floating = message;
   clearTimeout(state.floatingTimeout);
@@ -1140,6 +1415,7 @@ function showFloating(message){
     state.floating = "";
     paint();
   }, 4000);
+  paintFloating();
 }
 
 function setBusy(button, isBusy, busyText = "Saving..."){
@@ -1157,16 +1433,24 @@ function setBusy(button, isBusy, busyText = "Saving..."){
   }
 }
 
+function processWordListInput({ reportDuplicates = true } = {}){
+  window.clearTimeout(wordListTimer);
+  const textarea = appEl.querySelector('[data-field="word-list"]');
+  if(textarea instanceof HTMLTextAreaElement) state.wordListText = textarea.value || "";
+  rebuildRowsFromWordList({ reportDuplicates });
+}
+
 function rebuildRowsFromWordList(options = {}){
   const targetWordSet = options?.targetWordSet instanceof Set ? options.targetWordSet : null;
+  const reportDuplicates = options?.reportDuplicates !== false;
   const targetedFocuses = Array.isArray(options?.targetedFocuses)
     ? options.targetedFocuses.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
     : [];
-  const parsedWords = parseWordList(state.wordListText);
-  const words = limitWords(parsedWords);
+  const parsed = parseBuilderWordList(state.wordListText);
+  const words = limitWords(parsed.words);
   const next = [];
   for(const word of words){
-    const existing = state.rows.find(r => r.word === word);
+    const existing = state.rows.find(r => normalizeBuilderWordForCompare(r.word) === word);
     if(existing){
       if(targetWordSet?.has(word)){
         existing.source = "analytics_target";
@@ -1191,6 +1475,7 @@ function rebuildRowsFromWordList(options = {}){
       targetedFocuses: targetWordSet?.has(word) ? [...targetedFocuses] : [],
       trickyWord: false,
       warning: detectMisspellingWarning(word),
+      graphemeCustomTouched: false,
       autoFillFromWord: false,
       persisted: false,
       resolvedBaseline: buildResolutionSnapshot({
@@ -1204,8 +1489,12 @@ function rebuildRowsFromWordList(options = {}){
     });
   }
   state.rows = next;
+  refreshWordWarnings(state.rows);
   state.wordListText = next.map(r => r.word).filter(Boolean).join("\n");
-  if(parsedWords.length > MAX_TEST_WORDS){
+  const duplicateMessage = reportDuplicates ? formatDuplicateWordsMessage(parsed.duplicates) : "";
+  if(duplicateMessage){
+    showFloating(duplicateMessage);
+  } else if(parsed.words.length > MAX_TEST_WORDS){
     showFloating(`Word limit reached. Maximum ${MAX_TEST_WORDS} words allowed.`);
   }
   const textarea = appEl.querySelector('[data-field="word-list"]');
@@ -1240,6 +1529,7 @@ function addWord(){
     approvedExceptionActive:false,
     trickyWord:false,
     warning:"",
+    graphemeCustomTouched:false,
     autoFillFromWord:true,
     persisted:false,
     resolvedBaseline:null,
@@ -1259,6 +1549,7 @@ function deleteWord(index){
   if(index < 0 || index >= state.rows.length) return;
   state.rows.splice(index, 1);
   syncWordListTextFromRows();
+  refreshWordWarnings(state.rows);
   replaceRowsDom();
   markDirty();
 }
@@ -1296,7 +1587,7 @@ function getAssignmentDialogWordCounts(){
 }
 
 async function generateWords(){
-  state.aiWorking = true; updateActionButtons();
+  beginAiAction("generate-words");
   try {
     const targetDifficulty = getDifficultyTargetOption(state.generator.difficultyTarget);
     const promptRequestedCount = detectPromptRequestedWordCount(state.generator.prompt);
@@ -1370,17 +1661,23 @@ async function generateWords(){
     state.notice = "Could not generate words.";
     state.noticeType = "error";
   } finally {
-    state.aiWorking = false; updateActionButtons(); paintFloating();
+    endAiAction(); paintFloating();
   }
 }
 
 async function suggestSentences(){
   if(!state.rows.length) return;
-  state.aiWorking = true; updateActionButtons();
+  beginAiAction("suggest-sentences");
   try {
     for(const row of state.rows){
       if(!row.word || row.sentence) continue;
-      const res = await aiSuggest(`Write one short child-friendly sentence using the word "${row.word}". Return only the sentence.`);
+      const prompt = [
+        `Write one short pupil-friendly sentence using the word "${row.word}".`,
+        UK_ENGLISH_AI_INSTRUCTION,
+        UK_ENGLISH_AI_AVOIDANCE,
+        `Return only the sentence.`,
+      ].join(" ");
+      const res = await aiSuggest(prompt);
       row.sentence = String(res || "").trim();
       row.contextSentenceTouched = !!row.sentence;
     }
@@ -1398,21 +1695,115 @@ async function suggestSentences(){
     state.noticeType = "error";
     paintNotice();
   } finally {
-    state.aiWorking = false; updateActionButtons(); paintFloating();
+    endAiAction(); paintFloating();
+  }
+}
+
+function buildMeaningSuggestionPrompt(word){
+  return [
+    `Write one short pupil-friendly meaning for the spelling word "${word}".`,
+    UK_ENGLISH_AI_INSTRUCTION,
+    UK_ENGLISH_AI_AVOIDANCE,
+    `Return only the meaning.`,
+    `Do not use the target word "${word}" in the meaning.`,
+    `Do not mention spelling patterns, letters, graphemes, phonemes or sounds.`,
+    `Do not explain how the word is spelled or pronounced.`,
+    `Use plain text and keep it under 20 words.`,
+  ].join(" ");
+}
+
+function isSafeSuggestedMeaning(candidate, word){
+  const validation = validateMeaningSupportText(candidate, word);
+  return validation.valid && !textContainsTargetWord(validation.text, word)
+    ? validation.text
+    : "";
+}
+
+async function suggestMeanings(){
+  const rows = state.rows.filter((row) => cleanContextSupportText(row?.word) && !cleanContextSupportText(row?.meaning));
+  if(!rows.length){
+    showFloating("No blank meanings to suggest.");
+    return;
+  }
+
+  beginAiAction("suggest-meanings");
+  const suggestions = new Map();
+  try {
+    for(const row of rows){
+      const word = row.word;
+      const res = await aiSuggest(buildMeaningSuggestionPrompt(word));
+      const candidate = cleanContextSupportText(res);
+      suggestions.set(row, isSafeSuggestedMeaning(candidate, word));
+    }
+
+    let added = 0;
+    let rejected = 0;
+    for(const row of rows){
+      if(!cleanContextSupportText(row?.word) || cleanContextSupportText(row?.meaning)) continue;
+      const suggestion = suggestions.get(row) || "";
+      if(suggestion){
+        row.meaning = suggestion;
+        row.meaningWarning = "";
+        row.meaningSuggestionWarning = "";
+        row.contextMeaningTouched = true;
+        row.contextMeaningPrefilled = false;
+        added += 1;
+      } else {
+        row.meaning = "";
+        row.meaningWarning = buildMeaningWarning(row);
+        row.meaningSuggestionWarning = "AI could not add a safe meaning. You can type one manually.";
+        rejected += 1;
+      }
+    }
+
+    replaceRowsDom();
+    if(added) markDirty();
+    if(added && rejected){
+      showFloating(`Meanings added for ${added} row${added === 1 ? "" : "s"}. ${rejected} suggestion${rejected === 1 ? " was" : "s were"} skipped.`);
+    } else if(added){
+      showFloating("Meanings added.");
+    } else {
+      showFloating("No safe meanings returned. You can type meanings manually.");
+    }
+  } catch (error) {
+    console.error(error);
+    state.notice = "Could not suggest meanings. Existing meanings were left unchanged.";
+    state.noticeType = "error";
+    paintNotice();
+  } finally {
+    endAiAction(); paintFloating();
   }
 }
 
 async function suggestSplits(){
-  await resolveRowsAgainstSources(state.rows, { replaceText:true, updateBaseline:true });
-  replaceRowsDom();
-  markDirty();
-  state.floating = "Splits refreshed.";
-  clearTimeout(state.floatingTimeout);
-  state.floatingTimeout = setTimeout(() => {
-    state.floating = "";
-    paint();
-  }, 4000);
-  paintFloating();
+  beginAiAction("suggest-splits");
+  try {
+    const result = await resolveRowsAgainstSources(state.rows, {
+      replaceText:true,
+      updateBaseline:true,
+      preserveManualResolution:false,
+      applyFallbackOnError:false,
+    });
+    if(result?.failed){
+      showFloating("Could not refresh splits.");
+      return;
+    }
+    if(!result?.updatedRows?.length){
+      showFloating("No splits refreshed.");
+      return;
+    }
+    replaceRowsDom();
+    markDirty();
+    state.floating = "Splits refreshed.";
+    clearTimeout(state.floatingTimeout);
+    state.floatingTimeout = setTimeout(() => {
+      state.floating = "";
+      paint();
+    }, 4000);
+    paintFloating();
+  } finally {
+    endAiAction(); paintFloating();
+  }
 }
 
 function getAssignmentModeFromTestType(){
@@ -1487,8 +1878,9 @@ function buildTestWordPayload(row, index, savedQuestionType, { contextSnapshot =
   };
 }
 
-async function persistTestWords(savedQuestionType){
+async function persistTestWords(savedQuestionType, { updateSchoolDefaults = false } = {}){
   const rowsToSave = getRowsForSave();
+  const contextDefaultConflicts = [];
   const knownPersistedIds = new Set(
     [...state.persistedWordIds]
       .map((value) => String(value || "").trim())
@@ -1497,7 +1889,8 @@ async function persistTestWords(savedQuestionType){
   const keptIds = new Set();
 
   for(const [index, row] of rowsToSave.entries()){
-    const contextSnapshot = await prepareRowContextSupportForSave(row);
+    const contextSnapshot = await prepareRowContextSupportForSave(row, { updateSchoolDefault: updateSchoolDefaults });
+    if(row.contextDefaultConflict) contextDefaultConflicts.push(row);
     const payload = buildTestWordPayload(row, index, savedQuestionType, { contextSnapshot });
     row.graphemesText = formatGraphemesForInput(payload.segments);
     row.focusPattern = payload.choice?.focus_graphemes?.[0] || "";
@@ -1546,6 +1939,7 @@ async function persistTestWords(savedQuestionType){
   }
 
   state.persistedWordIds = keptIds;
+  return { contextDefaultConflicts };
 }
 
 function buildCorrectionCompareKey(snapshot = {}){
@@ -1677,7 +2071,7 @@ async function approveRowException(index, button){
       approvedExceptionId: row.approvedExceptionId,
     });
 
-    showFloating("Approved exception saved.");
+    showFloating("Accepted split saved.");
     updateRowDom(index);
   } catch (error) {
     console.error(error);
@@ -1699,6 +2093,7 @@ function validateBuilderForAssign(){
   if(!words.length){
     issues.push("Add at least one word before assigning this test.");
   }
+  issues.push(...validateBuilderWordList(words));
 
   if(!getSelectedAssignableClassIds().length && !getDeselectedAssignedClassIds().length && !getUpdatedAssignedClassIds().length){
     issues.push("Choose at least one class change before assigning.");
@@ -1736,6 +2131,19 @@ async function saveBuilder({ assign=false, silent=false }){
   state.assigning = assign;
   paintBottomBar();
   try {
+    const wordIssues = state.isLocked ? [] : validateBuilderWordList();
+    if(wordIssues.length){
+      if(!silent){
+        state.notice = wordIssues.length === 1
+          ? wordIssues[0]
+          : `${wordIssues[0]} ${wordIssues.length - 1} more issue${wordIssues.length - 1 === 1 ? "" : "s"} found.`;
+        state.noticeType = "error";
+        paint();
+        appEl.querySelector("#editWordsSection")?.scrollIntoView({ block:"start", behavior:"smooth" });
+      }
+      return;
+    }
+
     const contextIssues = state.isLocked ? [] : validateBuilderContextSupport();
     if(contextIssues.length){
       if(!silent){
@@ -1758,16 +2166,36 @@ async function saveBuilder({ assign=false, silent=false }){
       const savedQuestionType = normalizeStoredQuestionType(state.test.question_type, { title });
       const { error:testError } = await updateRowsWithAnalyticsFallback("tests", withActiveSchoolId({
         title,
-        status: assign ? "published" : "draft",
+        status: "draft",
         question_type: savedQuestionType,
         analytics_target_words_enabled: analyticsSettings.enabled,
         analytics_target_words_per_pupil: analyticsSettings.count,
       }, state.accessContext), { id: state.testId, teacher_id: state.user.id }, { schoolScoped: true });
       if(testError) throw testError;
-      await persistTestWords(savedQuestionType);
+      state.test.status = "draft";
+      const persistResult = await persistTestWords(savedQuestionType, { updateSchoolDefaults: !silent });
       const rowsToSave = getRowsForSave();
       await persistBuilderCorrectionLogs(rowsToSave, savedQuestionType);
       syncRowSaveBaselines(rowsToSave, savedQuestionType);
+      const contextDefaultConflicts = persistResult?.contextDefaultConflicts || getContextDefaultConflictRows(rowsToSave);
+      if(contextDefaultConflicts.length){
+        if(!silent){
+          state.notice = contextDefaultConflicts.length === 1
+            ? "This school default was changed by another user. Review before replacing it."
+            : `${contextDefaultConflicts.length} school defaults were changed by another user. Review before replacing them.`;
+          state.noticeType = "error";
+          paint();
+          appEl.querySelector("#editWordsSection")?.scrollIntoView({ block:"start", behavior:"smooth" });
+        }
+        return;
+      }
+      if(assign){
+        const { error:publishError } = await updateRowsWithAnalyticsFallback("tests", withActiveSchoolId({
+          status: "published",
+        }, state.accessContext), { id: state.testId, teacher_id: state.user.id }, { schoolScoped: true });
+        if(publishError) throw publishError;
+        state.test.status = "published";
+      }
     }
 
     if(assign){
@@ -1973,6 +2401,12 @@ function syncWordListTextFromRows(){
   if(textarea && document.activeElement != textarea) textarea.value = state.wordListText;
 }
 
+function closeDifficultyPopovers(except = null){
+  for(const details of appEl.querySelectorAll(".tb-difficulty-popover[open]")){
+    if(details !== except) details.removeAttribute("open");
+  }
+}
+
 function applyAutoFillFromWord(index){
   const row = state.rows[index];
   if(!row || !(row.autoFillFromWord || row.source === "rule_engine")) return;
@@ -1982,6 +2416,7 @@ function applyAutoFillFromWord(index){
     row.classificationSource = PHONICS_CLASSIFICATION_SOURCES.ruleEngine;
     row.approvedExceptionId = "";
     row.approvedExceptionActive = false;
+    row.graphemeCustomTouched = false;
     return;
   }
 
@@ -1992,6 +2427,7 @@ function applyAutoFillFromWord(index){
   row.classificationSource = PHONICS_CLASSIFICATION_SOURCES.ruleEngine;
   row.approvedExceptionId = "";
   row.approvedExceptionActive = false;
+  row.graphemeCustomTouched = false;
 }
 
 function buildStateHash(){
@@ -2056,8 +2492,8 @@ function renderLayout(){
       </div>
       <div class="tb-subtle">Target difficulty is applied after generation using the in-app research-based word scoring model. Current target: ${esc(targetDifficulty.label)}.</div>
       <div class="tb-subtle">When assigned, these are added automatically for each pupil using their analytics. They stay out of the edit list and only show up through pupil results.</div>
-      <div class="tb-actions-row tb-actions-top"><button type="button" class="tb-btn tb-btn-black" data-action="generate-words" ${state.isLocked||state.aiWorking?"disabled":""}>${state.aiWorking?"Generating...":"Generate words"}</button></div></div>
-      <label class="tb-field-wide"><span>Add or paste words</span><textarea class="tb-textarea" data-field="word-list" ${state.isLocked?"disabled":""}>${esc(state.wordListText)}</textarea><div class="tb-subtle">Maximum 20 words.</div></label>
+      <div class="tb-actions-row tb-actions-top"><button type="button" class="tb-btn tb-btn-black" data-action="generate-words" ${isActionButtonDisabled("generate-words")?"disabled":""}>${esc(getActionButtonLabel("generate-words"))}</button></div></div>
+      <label class="tb-field-wide"><span>Add or paste words</span><textarea class="tb-textarea" data-field="word-list" ${state.isLocked?"disabled":""}>${esc(state.wordListText)}</textarea><div class="tb-word-list-actions"><button type="button" class="tb-btn tb-btn-ghost tb-btn-small" data-action="update-word-list" ${state.isLocked?"disabled":""}>Update list</button><div class="tb-subtle">Maximum 20 words.</div></div></label>
     </section>
 
     <section class="tb-card" id="editWordsSection">
@@ -2065,16 +2501,24 @@ function renderLayout(){
         <div><div class="tb-step">2</div><h2>Edit words</h2><p>Review words, context support, graphemes and preview.</p></div>
       </div>
       ${renderDifficultyOverview()}
-      <div class="tb-table-tools">
-        <div></div>
-        <div class="tb-col-action"><button type="button" class="tb-btn tb-btn-black" data-action="suggest-sentences" ${state.isLocked||state.aiWorking?"disabled":""}>${state.aiWorking?"Generating...":"Suggest sentences"}</button></div>
-        <div class="tb-col-action"><button type="button" class="tb-btn tb-btn-black" data-action="suggest-splits" ${state.isLocked||state.aiWorking?"disabled":""}>${state.aiWorking?"Generating...":"Suggest splits"}</button></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
+      <div class="tb-table-head">
+        <div class="tb-head-cell"><span>Word</span></div>
+        <div class="tb-head-cell tb-head-cell-tools">
+          <span>Context</span>
+          <div class="tb-head-tools">
+            <button type="button" class="tb-btn tb-btn-ghost tb-btn-mini" data-action="suggest-sentences" ${isActionButtonDisabled("suggest-sentences")?"disabled":""}>${esc(getActionButtonLabel("suggest-sentences"))}</button>
+            <button type="button" class="tb-btn tb-btn-ghost tb-btn-mini" data-action="suggest-meanings" ${isActionButtonDisabled("suggest-meanings")?"disabled":""}>${esc(getActionButtonLabel("suggest-meanings"))}</button>
+          </div>
+        </div>
+        <div class="tb-head-cell tb-head-cell-tools">
+          <span>Grapheme structure</span>
+          <div class="tb-head-tools"><button type="button" class="tb-btn tb-btn-ghost tb-btn-mini" data-action="suggest-splits" ${isActionButtonDisabled("suggest-splits")?"disabled":""}>${esc(getActionButtonLabel("suggest-splits"))}</button></div>
+        </div>
+        <div class="tb-head-cell"><span>Focus pattern</span></div>
+        <div class="tb-head-cell"><span>Preview</span></div>
+        <div class="tb-head-cell"><span>Difficulty</span></div>
+        <div class="tb-head-cell"><span>Actions</span></div>
       </div>
-      <div class="tb-table-head"><div>Word</div><div>Context support</div><div>Grapheme structure</div><div>Focus pattern</div><div>Preview</div><div>Difficulty</div><div>Actions</div></div>
       <div id="tbRowsHost">${renderRows()}</div>
       <div class="tb-table-footer"><button type="button" class="tb-btn tb-btn-black" data-action="add-word" ${(state.isLocked || atWordLimit())?"disabled":""}>+ Add word</button></div>
     </section>
@@ -2184,14 +2628,16 @@ function renderWordDifficultyCell(row, index){
 
   const difficulty = getWordDifficultyViewModel(row);
   const displayBand = getDifficultyDisplayBand(difficulty.band);
-  const difficultyReasons = [...(difficulty.reasons || []), ...(difficulty.modifierReasons || [])];
+  const difficultyDescription = [...(difficulty.reasons || []), ...(difficulty.modifierReasons || [])].join(", ") || "Mostly familiar spelling structure";
   return `
     <div class="tb-difficulty-cell">
-      <div class="tb-difficulty-pill is-${esc(difficulty.band.tone)}">
-        <strong>${esc(String(difficulty.score))}</strong>
-        <span>${esc(displayBand?.label || difficulty.band.label)}</span>
-      </div>
-      <div class="tb-difficulty-note">${esc(difficultyReasons.join(", ") || "Mostly familiar spelling structure")}</div>
+      <details class="tb-difficulty-popover">
+        <summary class="tb-difficulty-pill is-${esc(difficulty.band.tone)}" title="${esc(difficultyDescription)}" aria-label="${esc(`Difficulty ${difficulty.score}, ${displayBand?.label || difficulty.band.label}. ${difficultyDescription}`)}">
+          <strong>${esc(String(difficulty.score))}</strong>
+          <span>${esc(displayBand?.label || difficulty.band.label)}</span>
+        </summary>
+        <div class="tb-difficulty-popover-body">${esc(difficultyDescription)}</div>
+      </details>
       <label class="tb-mini-check">
         <input type="checkbox" data-field="row-tricky" data-index="${index}" ${row.trickyWord ? "checked" : ""} ${state.isLocked?"disabled":""}>
         <span>Mark as tricky word</span>
@@ -2203,36 +2649,44 @@ function renderWordDifficultyCell(row, index){
 function renderContextSupportCell(row, index){
   return `
     <div class="tb-context-cell">
-      <label>
-        <span class="tb-context-label">Sentence</span>
-        <input class="tb-input tb-context-input" data-field="row-sentence" data-index="${index}" value="${esc(row.sentence)}" placeholder="Optional sentence" ${state.isLocked?"disabled":""}>
-      </label>
-      <label>
-        <span class="tb-context-label">Meaning</span>
-        <input class="tb-input tb-context-input" data-field="row-meaning" data-index="${index}" value="${esc(row.meaning)}" placeholder="Optional meaning" ${state.isLocked?"disabled":""}>
-      </label>
-      <div class="tb-context-helper">${esc(CONTEXT_SUPPORT_HELPER_TEXT)}</div>
+      <input class="tb-input tb-context-input" data-field="row-sentence" data-index="${index}" value="${esc(row.sentence)}" placeholder="Sentence" ${state.isLocked?"disabled":""} aria-label="Sentence">
+      <input class="tb-input tb-context-input tb-context-input-secondary" data-field="row-meaning" data-index="${index}" value="${esc(row.meaning)}" placeholder="Meaning" ${state.isLocked?"disabled":""} aria-label="Meaning">
       ${row.meaningWarning ? `<div class="tb-warning tb-context-warning">${esc(row.meaningWarning)}</div>` : ""}
+      ${!row.meaningWarning && row.meaningSuggestionWarning ? `<div class="tb-warning tb-context-warning">${esc(row.meaningSuggestionWarning)}</div>` : ""}
+      ${row.contextDefaultWarning ? `<div class="tb-warning tb-context-warning">${esc(row.contextDefaultWarning)}</div>` : ""}
+    </div>
+  `;
+}
+
+function getGraphemeStatusText(row = {}){
+  if(row.approvedExceptionActive) return "Accepted split";
+  if(cleanContextSupportText(row.word) && row.graphemeCustomTouched && cleanContextSupportText(row.graphemesText)){
+    return "Custom split";
+  }
+  return "";
+}
+
+function renderGraphemeStructureCell(row, index){
+  const statusText = getGraphemeStatusText(row);
+  return `
+    <div class="tb-grapheme-cell">
+      <input class="tb-input" data-field="row-graphemes" data-index="${index}" value="${esc(row.graphemesText)}" ${state.isLocked?"disabled":""}>
+      ${statusText ? `<div class="tb-field-status">${esc(statusText)}</div>` : ""}
     </div>
   `;
 }
 
 function renderRow(row, index){
   const graphemes = parseGraphemeInput(row.graphemesText);
-  const exceptionNote = row.approvedExceptionActive
-    ? `<div class="tb-subtle">Approved exception</div>`
-    : "";
   return `<div class="tb-word-row" data-row-index="${index}">
     <div><input class="tb-input" data-field="row-word" data-index="${index}" value="${esc(row.word)}" ${state.isLocked?"disabled":""}>${row.warning?`<div class="tb-warning">${esc(row.warning)}</div>`:""}</div>
     ${renderContextSupportCell(row, index)}
-    <div><input class="tb-input" data-field="row-graphemes" data-index="${index}" value="${esc(row.graphemesText)}" ${state.isLocked?"disabled":""}></div>
+    ${renderGraphemeStructureCell(row, index)}
     <div><input class="tb-input" data-field="row-focus" data-index="${index}" value="${esc(row.focusPattern)}" ${state.isLocked?"disabled":""}></div>
     <div class="tb-preview-cell">${renderPhonicsPreview(row.word, graphemes)}</div>
     ${renderWordDifficultyCell(row, index)}
     <div class="tb-actions-cell">
       <button type="button" class="tb-btn tb-btn-black tb-btn-small" data-action="delete-word" data-index="${index}" ${state.isLocked?"disabled":""}>Delete</button>
-      <button type="button" class="tb-btn tb-btn-black tb-btn-small" data-action="approve-exception" data-index="${index}" ${state.isLocked || !row.word || !row.persisted ? "disabled" : ""}>${row.approvedExceptionActive ? "Approved" : "Approve exception"}</button>
-      ${exceptionNote}
     </div>
   </div>`;
 }
@@ -2309,8 +2763,10 @@ function paintDifficultyOverview(){
 }
 
 function updateActionButtons(){
-  for(const btn of appEl.querySelectorAll('[data-action="generate-words"],[data-action="suggest-sentences"],[data-action="suggest-splits"]')){
-    btn.disabled = state.isLocked || state.aiWorking;
+  for(const btn of appEl.querySelectorAll('[data-action="generate-words"],[data-action="suggest-sentences"],[data-action="suggest-meanings"],[data-action="suggest-splits"]')){
+    btn.disabled = isActionButtonDisabled(btn.dataset.action || "");
+    const label = getActionButtonLabel(btn.dataset.action || "");
+    if(label) btn.textContent = label;
   }
 }
 
@@ -2446,13 +2902,15 @@ function injectStyles(){
     .tb-input:focus,.tb-textarea:focus{border-color:#93c5fd;box-shadow:0 0 0 4px rgba(59,130,246,.12)}
     .tb-textarea{min-height:140px;resize:vertical}
     .tb-btn{display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 16px;border-radius:14px;border:none;font-weight:800;cursor:pointer}.tb-btn:disabled{opacity:.6;cursor:not-allowed}
-    .tb-btn-black{background:var(--tb-black);color:#fff}.tb-btn-ghost{background:#fff;border:1px solid var(--tb-line);color:var(--tb-text)}.tb-btn-small{height:38px;padding:0 14px}
+    .tb-btn-black{background:var(--tb-black);color:#fff}.tb-btn-ghost{background:#fff;border:1px solid var(--tb-line);color:var(--tb-text)}.tb-btn-small{height:38px;padding:0 14px}.tb-btn-compact{height:38px;padding:0 12px;border-radius:12px;font-size:13px}.tb-btn-mini{height:30px;padding:0 9px;border-radius:10px;font-size:12px}.tb-btn-quiet{height:30px;padding:0 9px;font-size:12px;color:#475569;background:#fff}
     .tb-actions-row{display:flex;gap:10px;flex-wrap:wrap}.tb-actions-top{margin-top:14px}
+    .tb-word-list-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px}
     .tb-helper{border:1px dashed var(--tb-line);border-radius:18px;padding:14px;background:#fbfdff;margin-bottom:14px}.tb-helper-grid,.tb-test-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tb-helper-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.tb-generator-analytics-row{display:grid;grid-template-columns:minmax(240px,1.4fr) minmax(180px,.8fr);gap:12px;align-items:end;margin-top:12px}
-    .tb-table-tools,.tb-table-head,.tb-word-row{display:grid;grid-template-columns:180px minmax(240px,1.3fr) minmax(220px,1.05fr) 120px minmax(220px,.95fr) minmax(210px,.88fr) minmax(156px,.62fr);gap:12px;align-items:start}
-    .tb-table-tools{margin-bottom:10px}.tb-col-action{display:flex;justify-content:flex-start}
-    .tb-table-head{font-weight:800;color:#64748b;border-bottom:1px solid var(--tb-line);padding:0 4px 10px}.tb-word-row{padding:12px 4px;border-bottom:1px solid var(--tb-line)}
-    .tb-context-cell{display:flex;flex-direction:column;gap:8px;min-width:0}.tb-context-cell label{display:block}.tb-context-label{font-size:11px;color:#64748b;font-weight:800;margin:0 0 4px;text-transform:uppercase;letter-spacing:.04em}.tb-context-input{padding:10px 12px;border-radius:12px}.tb-context-helper{font-size:12px;line-height:1.35;color:#64748b}.tb-context-warning{margin-top:0}
+    .tb-table-head,.tb-word-row{display:grid;grid-template-columns:150px minmax(300px,1.6fr) minmax(160px,.85fr) 110px minmax(170px,.75fr) minmax(170px,.78fr) minmax(120px,.5fr);gap:12px;align-items:start}
+    .tb-table-head{font-weight:800;color:#64748b;border-bottom:1px solid var(--tb-line);padding:0 4px 10px;align-items:stretch}.tb-head-cell{display:flex;flex-direction:column;gap:7px;min-height:32px}.tb-head-cell>span{font-size:12px;line-height:1.25}.tb-head-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.tb-word-row{padding:12px 4px;border-bottom:1px solid var(--tb-line)}
+    .tb-word-row.tb-row-highlight{background:#fff7ed;box-shadow:inset 3px 0 0 #f59e0b}
+    .tb-context-cell{display:flex;flex-direction:column;gap:6px;min-width:0}.tb-context-input{height:44px;padding:10px 12px;border-radius:12px}.tb-context-input-secondary{height:40px;font-size:14px}.tb-context-warning{margin-top:0}
+    .tb-grapheme-cell{display:flex;flex-direction:column;gap:6px;min-width:0}.tb-field-status{display:inline-flex;align-self:flex-start;padding:3px 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:11px;font-weight:800;line-height:1.2}
     .tb-preview-cell{min-height:74px;display:flex;align-items:center;overflow:hidden}.tb-actions-cell{display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;gap:8px;min-height:44px;min-width:0;width:min(168px,100%);margin-left:auto}.tb-actions-cell .tb-btn{width:100%;max-width:100%;white-space:normal;text-align:center;justify-content:center;line-height:1.15;padding:10px 12px}
     .tb-difficulty-panel{border:1px solid var(--tb-line);border-radius:20px;padding:16px 18px;background:#f8fbff;margin-bottom:16px}
     .tb-difficulty-panel-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
@@ -2473,8 +2931,9 @@ function injectStyles(){
     .tb-difficulty-detail-grid ul{margin:0;padding-left:18px;color:#334155;line-height:1.6}
     .tb-difficulty-detail-grid a{color:#1d4ed8;text-decoration:none}
     .tb-difficulty-detail-grid a:hover,.tb-difficulty-detail-grid a:focus-visible{text-decoration:underline}
-    .tb-difficulty-cell{display:flex;flex-direction:column;gap:8px;min-height:74px}
+    .tb-difficulty-cell{position:relative;display:flex;flex-direction:column;gap:8px;min-height:74px}
     .tb-difficulty-note{color:#64748b;font-size:.84rem;line-height:1.45}
+    .tb-difficulty-popover{position:relative;width:fit-content;max-width:100%}.tb-difficulty-popover summary{list-style:none;cursor:pointer}.tb-difficulty-popover summary::-webkit-details-marker{display:none}.tb-difficulty-popover-body{display:none;position:absolute;left:0;top:calc(100% + 8px);z-index:25;width:max-content;max-width:260px;padding:9px 10px;border-radius:12px;background:#0f172a;color:#fff;font-size:12px;font-weight:700;line-height:1.35;box-shadow:var(--tb-shadow)}.tb-difficulty-popover[open] .tb-difficulty-popover-body,.tb-difficulty-popover:hover .tb-difficulty-popover-body,.tb-difficulty-popover:focus-within .tb-difficulty-popover-body{display:block}
     .tb-mini-check{display:inline-flex;gap:8px;align-items:flex-start;color:#334155;font-size:.85rem;font-weight:700}
     .tb-mini-check input{margin-top:2px}
     .tb-table-footer{padding-top:14px;display:flex;justify-content:flex-end}
@@ -2489,7 +2948,7 @@ function injectStyles(){
     .tb-floating{position:sticky;top:16px;z-index:30;display:flex;justify-content:space-between;align-items:center;gap:12px;background:#0f766e;color:#fff;padding:12px 16px;border-radius:16px;margin-bottom:14px;box-shadow:var(--tb-shadow)}
     .tb-floating button,.tb-notice button{background:transparent;border:none;font-size:20px;cursor:pointer;color:inherit}
     .pr-scroll{overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:2px}.pr-wrap{display:inline-grid;grid-template-rows:auto auto;row-gap:6px;min-width:max-content}.pr-letters,.pr-marks{display:grid;grid-template-columns:repeat(var(--pr-cols),minmax(24px,24px));column-gap:8px;align-items:start}.pr-cell{text-align:center;font-weight:800;font-size:18px;min-width:24px}.pr-dot{width:10px;height:10px;border-radius:999px;background:var(--tb-grey);justify-self:center;align-self:start;margin-top:1px}.pr-dot-orange{background:var(--tb-orange);margin-top:1px}.pr-underline{height:4px;background:var(--tb-orange);border-radius:999px;align-self:start;margin-top:5px}.pr-bridge{height:16px;border-bottom:4px solid var(--tb-orange);border-left:4px solid var(--tb-orange);border-right:4px solid var(--tb-orange);border-bottom-left-radius:14px;border-bottom-right-radius:14px;align-self:start;margin-top:1px}
-    @media (max-width:1280px){.tb-helper-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tb-generator-analytics-row,.tb-assign-grid,.tb-difficulty-detail-grid{grid-template-columns:1fr 1fr}.tb-table-tools,.tb-table-head,.tb-word-row{grid-template-columns:1fr}}
+    @media (max-width:1280px){.tb-helper-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tb-generator-analytics-row,.tb-assign-grid,.tb-difficulty-detail-grid{grid-template-columns:1fr 1fr}.tb-table-head,.tb-word-row{grid-template-columns:1fr}}
     @media (max-width:760px){.tb-wrap{padding:14px 14px 120px}.tb-topbar,.tb-section-head,.tb-lock-banner,.tb-difficulty-panel-head{flex-direction:column;align-items:stretch}.tb-bottom-bar{flex-direction:column;align-items:stretch}.tb-bottom-actions{width:100%}.tb-bottom-actions .tb-btn{flex:1}.tb-helper-grid,.tb-test-settings-grid,.tb-generator-analytics-row,.tb-assign-grid,.tb-difficulty-detail-grid{grid-template-columns:1fr}.tb-table-footer{justify-content:stretch}}
   `;
   document.head.appendChild(style);
