@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import {
+  ensureBaselineAssignmentsForGate,
   markAssignmentComplete,
   markAssignmentSessionOpened,
   normalizeSchoolSummary,
@@ -14,7 +15,7 @@ import {
   saveAssignmentProgress,
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
-} from "./db.js?v=1.47";
+} from "./db.js?v=1.48";
 import { mountGame } from "./game.js?v=1.43";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
@@ -54,6 +55,7 @@ const pupilDashboardState = {
 };
 let pupilHeroStageOutsideClickHandler = null;
 let pupilHeroStageEscapeHandler = null;
+const baselineProvisionAttemptKeys = new Set();
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -882,29 +884,36 @@ function renderBaselineGateState(name, {
   const isStart = mode === "start";
   const isRuntimeInactive = mode === "waiting" && waitingReason === "runtime_inactive";
   const isMissingCurrentForm = mode === "waiting" && waitingReason === "no_active_form_membership";
+  const isProvisioning = mode === "waiting" && waitingReason === "baseline_setup";
   const title = isResume
     ? "Finish your baseline test first"
     : isStart
       ? "Start your baseline test first"
-      : isRuntimeInactive
-        ? "This pupil login is no longer active"
-        : isMissingCurrentForm
-          ? "You're not in a current form yet"
-          : "Baseline test not ready yet";
+      : isProvisioning
+        ? "Your baseline test is being set up"
+        : isRuntimeInactive
+          ? "This pupil login is no longer active"
+          : isMissingCurrentForm
+            ? "You're not in a current form yet"
+            : "Baseline test not ready yet";
   const text = isResume
     ? "Complete your baseline test before you move into your normal tasks."
     : isStart
       ? "Complete your baseline test before you move into your normal tasks."
-      : isRuntimeInactive
-        ? "Please ask a teacher for help."
-        : isMissingCurrentForm
-          ? "A teacher needs to place you in your current form before your baseline test can begin."
-          : "Your teacher will set your baseline test soon.";
+      : isProvisioning
+        ? "This usually takes a moment. Keep this page open."
+        : isRuntimeInactive
+          ? "Please ask a teacher for help."
+          : isMissingCurrentForm
+            ? "A teacher needs to place you in your current form before your baseline test can begin."
+            : "Your baseline test is not ready yet. Please ask your teacher.";
   const subtitle = isRuntimeInactive
     ? "Please ask a teacher for help."
     : isMissingCurrentForm
       ? "Your teacher is still setting things up."
-      : "Your baseline test comes first.";
+      : isProvisioning
+        ? "Your baseline test comes first."
+        : "Your baseline test comes first.";
   const buttonHtml = assignment
     ? `<button class="btn primary start-test-btn" type="button" data-action="open-gated-baseline" data-assignment-id="${escapeHtml(String(assignment?.id || ""))}">${isResume ? "Continue baseline test" : "Start baseline test"}</button>`
     : "";
@@ -925,6 +934,30 @@ function renderBaselineGateState(name, {
       ${renderReadingHelpSection()}
     </div>
   `;
+}
+
+function buildBaselineProvisionAttemptKey(pupilId = "", gateState = null) {
+  const formClassIds = Array.isArray(gateState?.formClassIds)
+    ? gateState.formClassIds
+    : (Array.isArray(gateState?.form_class_ids) ? gateState.form_class_ids : []);
+  const normalizedFormClassIds = [...new Set(
+    formClassIds
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort();
+  return `${String(pupilId || "").trim()}::${normalizedFormClassIds.join(",")}`;
+}
+
+function canTryBaselineProvisionForGate(pupilId = "", gateState = null) {
+  const key = buildBaselineProvisionAttemptKey(pupilId, gateState);
+  return !!String(pupilId || "").trim()
+    && key !== `${String(pupilId || "").trim()}::`
+    && !baselineProvisionAttemptKeys.has(key);
+}
+
+function markBaselineProvisionAttempted(pupilId = "", gateState = null) {
+  const key = buildBaselineProvisionAttemptKey(pupilId, gateState);
+  if (key) baselineProvisionAttemptKeys.add(key);
 }
 
 function hasVisibleBaselineProgress(assignment) {
@@ -2216,8 +2249,8 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
 
   const pupilId = String(session?.pupil_id || "").trim();
   const name = session?.first_name || session?.username || "Pupil";
-  const gateState = await readPupilBaselineGateState({ pupilId });
-  const waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
+  let gateState = await readPupilBaselineGateState({ pupilId });
+  let waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
   let assignments = null;
   const ensureAssignments = async () => {
     if (assignments) return assignments;
@@ -2240,10 +2273,6 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       bindAccessibilityControlEvents(containerEl);
       return;
     }
-  } else if (gateState?.status === "waiting" && waitingReason !== "no_active_form_membership" && waitingReason !== "runtime_inactive") {
-    // Phase 0 hardening removed anon access to raw class membership tables.
-    // The baseline gate RPC is now the runtime source of truth for baseline readiness.
-    resolvedGate = null;
   }
 
   if (resolvedGate?.assignment?.id) {
@@ -2268,16 +2297,60 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
 
   if (gateState?.status === "waiting") {
     if (waitingReason === "no_baseline_assignment") {
-      const loadedAssignments = await ensureAssignments().catch((error) => {
-        console.warn("load pupil assignments after missing baseline gate error:", error);
-        return [];
+      if (canTryBaselineProvisionForGate(pupilId, gateState)) {
+        markBaselineProvisionAttempted(pupilId, gateState);
+        containerEl.innerHTML = renderBaselineGateState(name, {
+          mode: "waiting",
+          waitingReason: "baseline_setup",
+          session,
+        });
+        bindAccessibilityControlEvents(containerEl);
+        const provisionResult = await ensureBaselineAssignmentsForGate({ gateState });
+        if (!provisionResult?.ok) {
+          console.warn("automatic baseline provisioning did not complete:", provisionResult?.error || provisionResult);
+        }
+        gateState = await readPupilBaselineGateState({ pupilId });
+        waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
+
+        if (gateState?.status === "ready") {
+          const loadedAssignments = await ensureAssignments().catch((error) => {
+            console.warn("load pupil assignments after baseline provision error:", error);
+            return [];
+          });
+          const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
+          const [practiceModel, progress] = await Promise.all([
+            loadPracticeModel(pupilId),
+            loadPupilProgress(pupilId),
+          ]);
+          renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+          return;
+        }
+
+        if ((gateState?.status === "resume" || gateState?.status === "start") && gateState?.assignment?.id) {
+          const assignmentList = [gateState.assignment];
+          if (autoOpenBaseline) {
+            await openSession(containerEl, session, gateState.assignment, assignmentList, []);
+            return;
+          }
+          containerEl.innerHTML = renderBaselineGateState(name, {
+            mode: gateState.status,
+            assignment: gateState.assignment,
+            session,
+          });
+          containerEl.querySelector('[data-action="open-gated-baseline"]')?.addEventListener("click", async () => {
+            await openSession(containerEl, session, gateState.assignment, assignmentList, []);
+          });
+          bindAccessibilityControlEvents(containerEl);
+          return;
+        }
+      }
+
+      containerEl.innerHTML = renderBaselineGateState(name, {
+        mode: "waiting",
+        waitingReason,
+        session,
       });
-      const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
-      const [practiceModel, progress] = await Promise.all([
-        loadPracticeModel(pupilId),
-        loadPupilProgress(pupilId),
-      ]);
-      renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+      bindAccessibilityControlEvents(containerEl);
       return;
     }
     containerEl.innerHTML = renderBaselineGateState(name, {
@@ -2289,13 +2362,21 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     return;
   }
 
+  if (gateState?.status !== "ready") {
+    containerEl.innerHTML = renderBaselineGateState(name, {
+      mode: "waiting",
+      waitingReason: waitingReason || "no_baseline_assignment",
+      session,
+    });
+    bindAccessibilityControlEvents(containerEl);
+    return;
+  }
+
   const loadedAssignments = await ensureAssignments().catch((error) => {
     console.warn("load pupil assignments error:", error);
     return [];
   });
-  const dashboardAssignments = gateState?.status === "ready"
-    ? loadedAssignments.filter((item) => !item?.isBaseline)
-    : loadedAssignments;
+  const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
 
   const [practiceModel, progress] = await Promise.all([
     loadPracticeModel(pupilId),

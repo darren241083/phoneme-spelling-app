@@ -2264,7 +2264,8 @@ function normalizeBaselineGateStatePayload(payload, {
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {
   const state = payload && typeof payload === "object" ? payload : {};
-  const normalizedStatus = String(state?.status || "waiting").trim().toLowerCase();
+  const rawStatus = String(state?.status || "waiting").trim().toLowerCase();
+  const normalizedStatus = rawStatus === "complete" || rawStatus === "completed" ? "ready" : rawStatus;
   const status = BASELINE_GATE_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : "waiting";
   const assignmentId = String(
     state?.assignment_id
@@ -2315,6 +2316,43 @@ function isMissingPupilBaselineGateReadFunctionError(error) {
   return code === "42883"
     || code === "PGRST202"
     || message.includes("read_pupil_baseline_gate_state");
+}
+
+function isMissingBaselineProvisionFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("ensure_form_class_baseline_assignments");
+}
+
+function normalizeBaselineProvisionResultPayload(payload, {
+  formClassIds = [],
+  standardKey = REQUIRED_BASELINE_STANDARD_KEY,
+  ok = true,
+  error = "",
+} = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const results = Array.isArray(source?.results) ? source.results : [];
+  const createdCount = Math.max(0, Number(source?.created_count ?? source?.createdCount ?? 0));
+  const normalizedStandardKey = String(
+    source?.standard_key
+    || source?.standardKey
+    || standardKey
+  ).trim().toLowerCase() || standardKey;
+  const normalizedStatus = String(source?.status || (ok ? "ok" : "error")).trim().toLowerCase() || (ok ? "ok" : "error");
+  return {
+    ok: ok && normalizedStatus !== "error",
+    status: normalizedStatus,
+    createdCount,
+    created_count: createdCount,
+    results,
+    standardKey: normalizedStandardKey,
+    standard_key: normalizedStandardKey,
+    formClassIds: normalizeIdList(formClassIds),
+    form_class_ids: normalizeIdList(formClassIds),
+    error: String(error || source?.error || "").trim(),
+  };
 }
 
 function isMissingPupilRuntimeAccessFunctionError(error) {
@@ -5005,18 +5043,19 @@ async function buildBaselineGateStateFromRuntimeAssignments({
       required_standard_key: safeRequiredKey,
       class_ids: classIds,
       form_class_ids: formClassIds,
-      assignment: null,
+      assignment: resumableAssignment,
     }, { requiredStandardKey: safeRequiredKey });
   }
 
+  const startAssignment = requiredBaselineAssignments[0] || null;
   return normalizeBaselineGateStatePayload({
     status: "start",
     waiting_reason: null,
-    assignment_id: requiredBaselineAssignments[0]?.id || "",
+    assignment_id: startAssignment?.id || "",
     required_standard_key: safeRequiredKey,
     class_ids: classIds,
     form_class_ids: formClassIds,
-    assignment: null,
+    assignment: startAssignment,
   }, { requiredStandardKey: safeRequiredKey });
 }
 
@@ -5116,8 +5155,85 @@ async function readPupilRuntimeAssignmentsPayload({ pupilId = "" } = {}) {
 }
 
 export async function readPupilBaselineGateState({ pupilId = "" } = {}) {
-  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId });
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizeBaselineGateStatePayload({
+      status: "waiting",
+      waiting_reason: "runtime_inactive",
+      required_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+      class_ids: [],
+      form_class_ids: [],
+      assignment: null,
+    });
+  }
+
+  const { data, error } = await supabase.rpc("read_pupil_baseline_gate_state", {
+    requested_pupil_id: safePupilId,
+    requested_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+  });
+
+  if (!error) {
+    return normalizeBaselineGateStatePayload(data);
+  }
+
+  if (!isMissingPupilBaselineGateReadFunctionError(error)) {
+    throw error;
+  }
+
+  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId: safePupilId });
   return buildBaselineGateStateFromRuntimeAssignments({ runtimePayload });
+}
+
+export async function ensureFormClassBaselineAssignments({
+  formClassIds = [],
+  standardKey = REQUIRED_BASELINE_STANDARD_KEY,
+} = {}) {
+  const safeFormClassIds = normalizeIdList(formClassIds);
+  const safeStandardKey = String(standardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase()
+    || REQUIRED_BASELINE_STANDARD_KEY;
+  if (!safeFormClassIds.length) {
+    return normalizeBaselineProvisionResultPayload(null, {
+      formClassIds: [],
+      standardKey: safeStandardKey,
+      ok: false,
+      error: "No eligible form groups were available for baseline provisioning.",
+    });
+  }
+
+  const { data, error } = await supabase.rpc("ensure_form_class_baseline_assignments", {
+    requested_class_ids: safeFormClassIds,
+    requested_standard_key: safeStandardKey,
+  });
+
+  if (error) {
+    return normalizeBaselineProvisionResultPayload(null, {
+      formClassIds: safeFormClassIds,
+      standardKey: safeStandardKey,
+      ok: false,
+      error: isMissingBaselineProvisionFunctionError(error)
+        ? "Automatic baseline provisioning is not available until the latest database migration is applied."
+        : (error.message || "Could not provision the standard baseline."),
+    });
+  }
+
+  return normalizeBaselineProvisionResultPayload(data, {
+    formClassIds: safeFormClassIds,
+    standardKey: safeStandardKey,
+    ok: true,
+  });
+}
+
+export async function ensureBaselineAssignmentsForGate({ gateState = null } = {}) {
+  const formClassIds = normalizeIdList(gateState?.formClassIds ?? gateState?.form_class_ids);
+  const standardKey = String(
+    gateState?.requiredStandardKey
+    || gateState?.required_standard_key
+    || REQUIRED_BASELINE_STANDARD_KEY
+  ).trim().toLowerCase() || REQUIRED_BASELINE_STANDARD_KEY;
+  return ensureFormClassBaselineAssignments({
+    formClassIds,
+    standardKey,
+  });
 }
 
 export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {

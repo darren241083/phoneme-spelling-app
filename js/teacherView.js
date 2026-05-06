@@ -53,7 +53,6 @@ import {
   writeExportWorkbook,
 } from "./analyticsExport.js?v=1.0";
 import {
-  buildBaselineAssignmentDefinition,
   buildPlacementSeedProfiles,
   buildStarterCatalogVirtualTests,
   isBaselineAssignmentWordRows,
@@ -65,6 +64,7 @@ import { buildResolvedWordMap } from "./phonicsResolution.js?v=1.0";
 import {
   cancelStaffPendingAccessApproval,
   consumeLatestStaffProfileSyncNotice,
+  ensureFormClassBaselineAssignments,
   ASSIGNMENT_AUTOMATION_KIND_PERSONALISED,
   ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE,
   ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
@@ -121,7 +121,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.47";
+} from "./db.js?v=1.48";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -916,8 +916,8 @@ function getDashboardTitle() {
 
 function getBaselineActionTooltipText() {
   return isCentralOwnerAppRole()
-    ? "Set the standard baseline test for this class. Future exceptional overrides will stay under central control."
-    : "Set the standard baseline test for this class before pupils move into the normal personalised flow.";
+    ? "Check or repair the standard baseline. Pupils start or continue baseline automatically when they log in."
+    : "Wordloom starts the standard baseline automatically for pupils. Personalised tests unlock after baseline is complete.";
 }
 
 function getGeneratePersonalisedActionTooltipText() {
@@ -10821,7 +10821,7 @@ async function onRootClick(event) {
 
   if (action === "toggle-create-baseline") {
     if (!(canManageOwnContent() && canAssignTests())) {
-      showNotice("Teacher or admin access is required to set a baseline test.", "error");
+      showNotice("Teacher or admin access is required to check baseline status.", "error");
       paint();
       return;
     }
@@ -12225,104 +12225,52 @@ async function createSpellingBeeCompetitionRelease({
 
 async function handleCreateBaselineAssignment(form) {
   if (!(canManageOwnContent() && canAssignTests())) {
-    showNotice("Teacher or admin access is required to set a baseline test.", "error");
+    showNotice("Teacher or admin access is required to check baseline status.", "error");
     paint();
     return;
   }
 
   const fd = new FormData(form);
   const classId = String(fd.get("class_id") || "").trim();
-  const deadlineRaw = String(fd.get("deadline") || "").trim();
   const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
 
   if (!classId || !selectedClass || !canEditClassRecord(selectedClass)) {
-    showNotice("Choose a class before setting the baseline test.", "error");
+    showNotice("Choose a form group before checking baseline status.", "error");
+    paint();
+    return;
+  }
+
+  if (normalizeClassType(selectedClass.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_FORM) {
+    showNotice("Choose a form group for standard baseline provisioning.", "error");
     paint();
     return;
   }
 
   const submitBtn = form.querySelector('button[type="submit"]');
-  setBusy(submitBtn, true, "Building...");
-
-  let createdTestId = "";
-  let createdAssignmentId = "";
+  setBusy(submitBtn, true, "Checking...");
 
   try {
-    const { data: membershipRows, error: membershipError } = await supabase
-      .from("pupil_classes")
-      .select("pupil_id")
-      .eq("class_id", classId)
-      .eq("active", true);
-    if (membershipError) throw membershipError;
-    if (!(membershipRows || []).some((row) => String(row?.pupil_id || "").trim())) {
-      throw new Error("This class does not have any active pupils yet.");
-    }
-
-    const definition = buildBaselineAssignmentDefinition({
-      className: selectedClass.name || "Class",
-      date: new Date(),
+    const provisionResult = await ensureFormClassBaselineAssignments({
+      formClassIds: [classId],
     });
-    if (!definition?.wordRows?.length) {
-      throw new Error("Could not build the baseline test.");
+    if (!provisionResult?.ok) {
+      throw new Error(provisionResult?.error || "Could not provision the standard baseline.");
     }
-
-    const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback("tests", {
-      teacher_id: state.user.id,
-      title: definition.title,
-      status: "published",
-      question_type: definition.questionType || "segmented_spelling",
-      analytics_target_words_enabled: false,
-      analytics_target_words_per_pupil: 0,
-    }, "id");
-    if (testError || !createdTest?.id) throw testError || new Error("Could not create the baseline test.");
-    createdTestId = String(createdTest.id);
-
-    const { error: wordError } = await supabase
-      .from("test_words")
-      .insert(
-        definition.wordRows.map((row) => ({
-          test_id: createdTestId,
-          ...row,
-        }))
-      );
-    if (wordError) throw wordError;
-
-    const { data: createdAssignment, error: assignmentError } = await insertSingleRowWithAnalyticsFallback(
-      "assignments_v2",
-      {
-        teacher_id: state.user.id,
-        test_id: createdTestId,
-        class_id: classId,
-        mode: "test",
-        max_attempts: null,
-        audio_enabled: true,
-        hints_enabled: false,
-        end_at: deadlineRaw ? new Date(deadlineRaw).toISOString() : null,
-        analytics_target_words_enabled: false,
-        analytics_target_words_per_pupil: 0,
-      },
-      "id",
-    );
-    if (assignmentError || !createdAssignment?.id) {
-      throw assignmentError || new Error("Could not create the class assignment.");
-    }
-    createdAssignmentId = String(createdAssignment.id);
 
     state.createBaselineOpen = false;
     await loadDashboardData();
     openDashboardSection("upcoming");
     state.activePanel = null;
-    showNotice("Baseline test assigned.", "success");
+    showNotice(
+      provisionResult.createdCount > 0
+        ? "Standard baseline provisioned. Pupils will start it automatically when they next log in."
+        : "Standard baseline is already ready. Pupils will start or continue it automatically when they log in.",
+      "success"
+    );
     paint();
   } catch (error) {
-    console.error("create baseline assignment error:", error);
-    if (createdAssignmentId || createdTestId) {
-      await cleanupAutoAssignedArtifacts({
-        assignmentId: createdAssignmentId,
-        testId: createdTestId,
-      });
-    }
-    showNotice(error?.message || "Could not assign the baseline test.", "error");
+    console.error("baseline status repair error:", error);
+    showNotice(error?.message || "Could not check baseline status.", "error");
     paint();
   } finally {
     setBusy(submitBtn, false);
@@ -15225,6 +15173,9 @@ function renderCreateBar() {
     statusLabel: getInterventionSelectedStatusLabel(interventionStatusFilter),
   });
   const ownedClasses = getOwnedClasses();
+  const ownedFormClasses = ownedClasses.filter((cls) =>
+    normalizeClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM
+  );
 
   return `
     <section class="td-action-bar">
@@ -15234,9 +15185,9 @@ function renderCreateBar() {
         ${showCreateTest ? `<button class="td-btn td-btn--primary" type="button" data-action="create-test">+ Create test</button>` : ""}
         ${showBaselineAction ? `
           <div class="td-action-button-shell">
-            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Set Baseline Test</button>
+            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Baseline status</button>
             ${renderInfoTip(getBaselineActionTooltipText(), {
-              label: "About Set Baseline Test",
+              label: "About Baseline status",
               className: "td-action-info-tip",
               triggerClassName: "td-action-info-tip-trigger",
               bubbleClassName: "td-action-info-tip-bubble",
@@ -15478,19 +15429,13 @@ function renderCreateBar() {
             name="class_id"
             required
           >
-            <option value="">Choose class...</option>
-            ${ownedClasses
+            <option value="">Choose form group...</option>
+            ${ownedFormClasses
               .map((cls) => `<option value="${escapeAttr(cls.id)}">${escapeHtml(cls.name || "Untitled class")}</option>`)
               .join("")}
           </select>
-          <input
-            class="td-input"
-            type="datetime-local"
-            name="deadline"
-            aria-label="Optional deadline"
-          />
-          <div class="td-action-inline-copy">Set the standard baseline test for this class. Each item keeps 1 scored attempt, with immediate post-scoring feedback if needed.</div>
-          <button class="td-btn td-btn--ghost" type="submit">Set Baseline Test</button>
+          <div class="td-action-inline-copy">Wordloom uses a standard baseline automatically. Pupils start or continue baseline when they log in, and personalised tests unlock after baseline is complete.</div>
+          <button class="td-btn td-btn--ghost" type="submit">Provision standard baseline</button>
         </form>
       </div>
 
