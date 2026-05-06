@@ -12003,7 +12003,7 @@ async function createGeneratedAssignmentForClass({
       teacher_id: state.user.id,
       title,
       status: "published",
-      question_type: "no_support_assessment",
+      question_type: "segmented_spelling",
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
     }, "id");

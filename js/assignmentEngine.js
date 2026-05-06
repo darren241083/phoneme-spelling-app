@@ -39,9 +39,22 @@ const SECTION_RATIOS = {
 
 const TARGET_REASON_BY_SUPPORT = {
   independent: "target_independent",
-  recognition: "target_confusion",
   focus: "target_confusion",
   supported: "target_supported",
+};
+
+const SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX = {
+  needs_support: 35,
+  core_developing: 55,
+  secure_expected: 65,
+  early_stretch: 80,
+};
+
+const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
+  needs_support: 2,
+  core_developing: 1,
+  secure_expected: 1,
+  early_stretch: 1,
 };
 
 function normalizeToken(value) {
@@ -1003,20 +1016,317 @@ function pickApprovedTargetCandidatesByGraphemeOrder({
   return selected;
 }
 
-function chooseRecognitionQuestionType(focusGrapheme) {
-  const focus = normalizeToken(focusGrapheme);
-  const phoneme = focus ? inferPhonemeFromGrapheme(focus, "all") : "";
-  const alternatives = phoneme
-    ? getPhonemeAlternativeOptions(focus, phoneme, ["core", "all"])
-    : [];
-  return alternatives.length ? "focus_sound" : "multiple_choice_grapheme_picker";
-}
-
-function resolveQuestionTypeForSupport(support, focusGrapheme) {
-  if (support === "recognition") return "multiple_choice_grapheme_picker";
-  if (support === "focus") return chooseRecognitionQuestionType(focusGrapheme);
+function resolveQuestionTypeForSupport(support) {
+  if (support === "focus") return "focus_sound";
   if (support === "supported") return "segmented_spelling";
   return "no_support_assessment";
+}
+
+function getProfileRows(profile, fallbackProfile, key) {
+  const rows = [];
+  if (Array.isArray(profile?.[key])) rows.push(...profile[key]);
+  if (Array.isArray(fallbackProfile?.[key])) rows.push(...fallbackProfile[key]);
+  return rows;
+}
+
+function findEvidenceRow(profile, fallbackProfile, key, targets) {
+  const cleanTargets = (Array.isArray(targets) ? targets : [])
+    .map((item) => normalizeToken(item))
+    .filter(Boolean);
+  if (!cleanTargets.length) return null;
+
+  const rows = getProfileRows(profile, fallbackProfile, key);
+  for (const target of cleanTargets) {
+    const row = rows.find((item) => normalizeToken(item?.target) === target);
+    if (row) return row;
+  }
+  return null;
+}
+
+function getConfusionEntry(profile, target) {
+  const focus = normalizeToken(target);
+  if (!focus) return null;
+  const source = profile?.confusionByTarget;
+  if (source && typeof source.get === "function") return source.get(focus) || null;
+  if (source && typeof source === "object") return source[focus] || null;
+  return null;
+}
+
+function findConfusionEvidence(profile, fallbackProfile, targets) {
+  const cleanTargets = (Array.isArray(targets) ? targets : [])
+    .map((item) => normalizeToken(item))
+    .filter(Boolean);
+  for (const target of cleanTargets) {
+    const entry = getConfusionEntry(profile, target) || getConfusionEntry(fallbackProfile, target);
+    if (entry && (Number(entry.attemptCount || 0) >= 2 || Number(entry.substitutionCount || 0) >= 2)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function getSpecEvidenceTargets(spec = {}, primaryTarget = "") {
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  const targets = [
+    spec.focusGrapheme || spec.engine_focus_grapheme || "",
+    ...(role === "target" ? [primaryTarget] : []),
+    ...(Array.isArray(spec.segments) ? spec.segments : []),
+  ];
+  return [...new Set(targets.map((item) => normalizeToken(item)).filter(Boolean))];
+}
+
+function isSecureEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  return !band || band === "secure";
+}
+
+function isDevelopingEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  return !band || band === "nearly_secure" || band === "developing";
+}
+
+function isRepeatedFailureEvidence(row) {
+  return !!row?.repeatedFailure || !!row?.repeated_failure;
+}
+
+function isStrongWeakEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  const total = Number(row.total || 0);
+  const accuracy = Number(row.accuracy);
+  const firstTrySuccessRate = Number(row.firstTrySuccessRate ?? row.first_try_success_rate);
+  const recentIncorrectCount = Number(row.recentIncorrectCount ?? row.recent_incorrect_count ?? 0);
+  const incorrect = Number(row.incorrect || 0);
+
+  if (isRepeatedFailureEvidence(row)) return true;
+  if (total < 3 && recentIncorrectCount < 2 && incorrect < 2) return false;
+  if (band === "insecure") return true;
+  if (Number.isFinite(accuracy) && accuracy <= 0.5) return true;
+  if (Number.isFinite(firstTrySuccessRate) && firstTrySuccessRate <= 0.25) return true;
+  return recentIncorrectCount >= 2 || incorrect >= 2;
+}
+
+function getSpecDifficultyScore(spec = {}) {
+  const score = Number(spec?.difficulty?.coreScore ?? spec?.difficulty?.score);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function isSimpleReviewItem(spec = {}, band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const score = getSpecDifficultyScore(spec);
+  const maxScore = SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX[band] ?? SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX.secure_expected;
+  return score > 0 && score <= maxScore;
+}
+
+function getSupportEvidenceForSpec(spec = {}, {
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+} = {}) {
+  const targets = getSpecEvidenceTargets(spec, primaryTarget);
+  const secureRow = findEvidenceRow(profile, fallbackProfile, "secureRows", targets);
+  const developingRow = findEvidenceRow(profile, fallbackProfile, "developingRows", targets);
+  const concernRow = findEvidenceRow(profile, fallbackProfile, "concernRows", targets);
+  const confusion = findConfusionEvidence(profile, fallbackProfile, targets);
+  const repeatedFailure = isRepeatedFailureEvidence(concernRow);
+  const strongWeak = isStrongWeakEvidence(concernRow);
+
+  return {
+    targets,
+    secureRow,
+    developingRow,
+    concernRow,
+    confusion,
+    secure: isSecureEvidence(secureRow),
+    developing: isDevelopingEvidence(developingRow),
+    concern: !!concernRow,
+    repeatedFailure,
+    strongWeak,
+    focusEvidence: !!confusion || repeatedFailure || strongWeak,
+  };
+}
+
+function getSupportLadderFocusLimit({
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  targetCount = 0,
+  engineOptions = null,
+} = {}) {
+  if (engineOptions?.allowConfusionSubstitution === false) return 0;
+  const baseLimit = SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND[band] ?? 1;
+  const extra = engineOptions?.supportPreset === "more_support_when_needed" ? 1 : 0;
+  return Math.max(0, Math.min(Number(targetCount || 0), baseLimit + extra));
+}
+
+function getTargetNonIndependentLimit({
+  targetCount = 0,
+  engineOptions = null,
+} = {}) {
+  const safeTargetCount = Math.max(0, Number(targetCount || 0));
+  if (!safeTargetCount) return 0;
+  if (
+    engineOptions?.allowConfusionSubstitution === false
+    && engineOptions?.allowSupportedSubstitution === false
+  ) {
+    return 0;
+  }
+
+  const baseLimit = safeTargetCount >= 4 ? 2 : 1;
+  const extraSlots = Math.max(0, Number(engineOptions?.extraTargetSupportSlots || 0));
+  const minimumIndependentTargetItems = Math.max(
+    0,
+    Math.min(
+      safeTargetCount,
+      Number(engineOptions?.minimumIndependentTargetItems || 0),
+    ),
+  );
+
+  return Math.max(
+    0,
+    Math.min(
+      safeTargetCount - minimumIndependentTargetItems,
+      baseLimit + extraSlots,
+    ),
+  );
+}
+
+function resolveSupportLadderDecision(spec = {}, {
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  canUseFocus = false,
+} = {}) {
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  const evidence = getSupportEvidenceForSpec(spec, {
+    profile,
+    fallbackProfile,
+    primaryTarget,
+  });
+
+  if (canUseFocus && role === "target" && evidence.focusEvidence) {
+    return {
+      support: "focus",
+      reason: evidence.confusion
+        ? "clear_confusion"
+        : evidence.repeatedFailure
+          ? "repeated_failure"
+          : "strong_weak_target",
+    };
+  }
+
+  if (band === "needs_support") {
+    if (role === "review" && evidence.secure && isSimpleReviewItem(spec, band)) {
+      return { support: "independent", reason: "secure_simple_review" };
+    }
+    return { support: "supported", reason: "needs_support_default_structure" };
+  }
+
+  if (band === "core_developing") {
+    if (role === "review" && evidence.secure) {
+      return { support: "independent", reason: "secure_review" };
+    }
+    return { support: "supported", reason: "core_default_structure" };
+  }
+
+  if (band === "early_stretch") {
+    if ((role === "target" || role === "stretch") && (evidence.concern || evidence.developing || evidence.strongWeak)) {
+      return { support: "supported", reason: "early_stretch_structure_needed" };
+    }
+    return { support: "independent", reason: "early_stretch_independent" };
+  }
+
+  if (role === "review" && evidence.secure) {
+    return { support: "independent", reason: "secure_review" };
+  }
+  if (role === "stretch" && !evidence.strongWeak && !evidence.repeatedFailure) {
+    return { support: "independent", reason: "stretch_probe" };
+  }
+  return { support: "supported", reason: "less_secure_or_new_target" };
+}
+
+function applySupportLadderDecision(spec = {}, decision = {}, band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const support = decision.support === "focus" || decision.support === "supported"
+    ? decision.support
+    : "independent";
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  return {
+    ...spec,
+    assignmentSupport: support,
+    questionType: resolveQuestionTypeForSupport(support),
+    targetReason: role === "target"
+      ? TARGET_REASON_BY_SUPPORT[support] || "target_independent"
+      : spec.targetReason,
+    supportLadderBand: band,
+    supportLadderReason: decision.reason || "",
+  };
+}
+
+function applySupportLadderToSpecs(specs = [], {
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  engineOptions = null,
+} = {}) {
+  const targetCount = (Array.isArray(specs) ? specs : [])
+    .filter((item) => normalizeToken(item?.assignmentRole || item?.assignment_role || "") === "target")
+    .length;
+  const focusLimit = getSupportLadderFocusLimit({
+    band,
+    targetCount,
+    engineOptions,
+  });
+  const targetNonIndependentLimit = getTargetNonIndependentLimit({
+    targetCount,
+    engineOptions,
+  });
+  let focusUsed = 0;
+  let targetNonIndependentUsed = 0;
+
+  return (Array.isArray(specs) ? specs : []).map((spec) => {
+    const role = normalizeToken(spec?.assignmentRole || spec?.assignment_role || "");
+    const isTarget = role === "target";
+    const hasTargetBudget = !isTarget || targetNonIndependentUsed < targetNonIndependentLimit;
+    const decision = resolveSupportLadderDecision(spec, {
+      band,
+      profile,
+      fallbackProfile,
+      primaryTarget,
+      canUseFocus: engineOptions?.allowConfusionSubstitution !== false
+        && focusUsed < focusLimit
+        && hasTargetBudget,
+    });
+
+    let gatedDecision = decision;
+    if (decision.support === "focus") {
+      const allowFocus = engineOptions?.allowConfusionSubstitution !== false
+        && focusUsed < focusLimit
+        && hasTargetBudget;
+      if (!allowFocus) {
+        gatedDecision = engineOptions?.allowSupportedSubstitution !== false && hasTargetBudget
+          ? { support: "supported", reason: `${decision.reason || "focus"}_downgraded_to_supported` }
+          : { support: "independent", reason: `${decision.reason || "focus"}_downgraded_to_independent` };
+      }
+    }
+    if (gatedDecision.support === "supported") {
+      const allowSupported = engineOptions?.allowSupportedSubstitution !== false
+        && hasTargetBudget;
+      if (!allowSupported) {
+        gatedDecision = {
+          support: "independent",
+          reason: `${gatedDecision.reason || "supported"}_downgraded_to_independent`,
+        };
+      }
+    }
+
+    const next = applySupportLadderDecision(spec, gatedDecision, band);
+    if (next.assignmentSupport === "focus") focusUsed += 1;
+    if (isTarget && next.assignmentSupport !== "independent") {
+      targetNonIndependentUsed += 1;
+    }
+    return next;
+  });
 }
 
 export function buildAssignmentEngineWordSignature(spec = {}) {
@@ -1035,11 +1345,13 @@ function buildWordSpec(candidate, {
   support = "independent",
   focusGrapheme = "",
   targetReason = "",
+  supportLadderBand = "",
+  supportLadderReason = "",
 }) {
   const focus = normalizeToken(focusGrapheme)
     || normalizeToken(chooseBestFocusGrapheme(candidate?.focusGraphemes || candidate?.segments || []))
     || normalizeToken(candidate?.focusGraphemes?.[0] || "");
-  const questionType = resolveQuestionTypeForSupport(support, focus);
+  const questionType = resolveQuestionTypeForSupport(support);
   return {
     word: candidate.word,
     sentence: candidate.sentence || null,
@@ -1048,6 +1360,8 @@ function buildWordSpec(candidate, {
     assignmentRole: role,
     assignmentSupport: support,
     focusGrapheme: focus,
+    supportLadderBand,
+    supportLadderReason,
     targetReason: targetReason || (role === "review"
       ? "review_retention"
       : role === "stretch"
@@ -1083,6 +1397,8 @@ export function buildAssignmentEngineWordPayload(spec = {}, position = 1) {
       question_type: spec.questionType || spec.question_type || "no_support_assessment",
       assignment_role: spec.assignmentRole || spec.assignment_role || "target",
       assignment_support: spec.assignmentSupport || spec.assignment_support || "independent",
+      support_ladder_band: spec.supportLadderBand || spec.support_ladder_band || "",
+      support_ladder_reason: spec.supportLadderReason || spec.support_ladder_reason || "",
       engine_focus_grapheme: focus || "",
       origin_test_word_id: spec.originTestWordId || spec.origin_test_word_id || null,
       origin_word_source: spec.originWordSource || spec.origin_word_source || "library",
@@ -1116,7 +1432,6 @@ function buildPupilPlan({
     };
   }
 
-  const baseNonIndependentLimit = composition.target >= 4 ? 2 : 1;
   const reservedPrimarySlots = Math.min(composition.target, Math.max(2, composition.target - 1));
   const targetChallengeLevel = resolveProfileChallengeLevel(profile || fallbackProfile);
   const primaryCoverage = selectApprovedTargetWords({
@@ -1220,10 +1535,6 @@ function buildPupilPlan({
     };
   }
 
-  const confusion = profile?.confusionByTarget?.get(primaryTarget) || fallbackProfile?.confusionByTarget?.get(primaryTarget) || null;
-  const repeatedFailure = !!(profile?.concernRows || []).find((item) => item.target === primaryTarget && item.repeatedFailure)
-    || !!(fallbackProfile?.concernRows || []).find((item) => item.target === primaryTarget && item.repeatedFailure);
-
   const targetSpecs = targetCandidates.map((candidate) => buildWordSpec(candidate, {
     role: "target",
     support: "independent",
@@ -1232,76 +1543,6 @@ function buildPupilPlan({
       : chooseBestFocusGrapheme(candidate.segments) || candidate.focusGraphemes?.[0] || primaryTarget,
     targetReason: "target_independent",
   }));
-
-  const minimumIndependentTargetItems = Math.max(
-    0,
-    Math.min(
-      targetSpecs.length,
-      Number(effectiveEngineOptions.minimumIndependentTargetItems || 0),
-    ),
-  );
-  let nonIndependentLimit = effectiveEngineOptions.allowConfusionSubstitution || effectiveEngineOptions.allowSupportedSubstitution
-    ? baseNonIndependentLimit + Math.max(0, Number(effectiveEngineOptions.extraTargetSupportSlots || 0))
-    : 0;
-  nonIndependentLimit = Math.max(
-    0,
-    Math.min(
-      targetSpecs.length - minimumIndependentTargetItems,
-      nonIndependentLimit,
-    ),
-  );
-  let nonIndependentUsed = 0;
-  if (
-    effectiveEngineOptions.allowConfusionSubstitution
-    && confusion
-    && Number(confusion.attemptCount || 0) >= 2
-    && targetSpecs.length
-    && nonIndependentUsed < nonIndependentLimit
-  ) {
-    const focusSupport = chooseRecognitionQuestionType(primaryTarget) === "focus_sound" ? "focus" : "recognition";
-    targetSpecs[0] = {
-      ...targetSpecs[0],
-      assignmentSupport: focusSupport,
-      questionType: resolveQuestionTypeForSupport(focusSupport, primaryTarget),
-      targetReason: "target_confusion",
-    };
-    nonIndependentUsed += 1;
-  }
-
-  if (
-    effectiveEngineOptions.allowSupportedSubstitution
-    && repeatedFailure
-    && targetSpecs.length > nonIndependentUsed
-    && nonIndependentUsed < nonIndependentLimit
-  ) {
-    const supportedIndex = targetSpecs.findIndex((item) => item.assignmentSupport === "independent");
-    if (supportedIndex >= 0) {
-      targetSpecs[supportedIndex] = {
-        ...targetSpecs[supportedIndex],
-        assignmentSupport: "supported",
-        questionType: "segmented_spelling",
-        targetReason: "target_supported",
-      };
-      nonIndependentUsed += 1;
-    }
-  }
-
-  if (
-    effectiveEngineOptions.supportPreset === "more_support_when_needed"
-    && (confusion || repeatedFailure)
-    && nonIndependentUsed < nonIndependentLimit
-  ) {
-    const supportedIndex = targetSpecs.findIndex((item) => item.assignmentSupport === "independent");
-    if (supportedIndex >= 0) {
-      targetSpecs[supportedIndex] = {
-        ...targetSpecs[supportedIndex],
-        assignmentSupport: "supported",
-        questionType: "segmented_spelling",
-        targetReason: "target_supported",
-      };
-      nonIndependentUsed += 1;
-    }
-  }
 
   const stretchCandidates = pickCandidatesByGraphemeOrder({
     count: composition.stretch,
@@ -1329,10 +1570,21 @@ function buildPupilPlan({
     targetReason: "stretch_probe",
   }));
 
+  const words = applySupportLadderToSpecs(
+    [...reviewCandidates, ...targetSpecs, ...stretchSpecs],
+    {
+      band: targetChallengeLevel,
+      profile,
+      fallbackProfile,
+      primaryTarget,
+      engineOptions: effectiveEngineOptions,
+    },
+  );
+
   return {
     pupilId,
     primaryTargetGrapheme: primaryTarget,
-    words: [...reviewCandidates, ...targetSpecs, ...stretchSpecs],
+    words,
     missingGraphemes: [],
   };
 }
