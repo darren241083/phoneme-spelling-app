@@ -1185,18 +1185,18 @@ export function mountGame({
 
   function readableQuestionType(item, type = currentModeKind) {
     const choice = getChoice(item);
-    const explicitType = normalizeStoredQuestionType(
-      choice?.question_type
-      ?? choice?.questionType
-      ?? choice?.mode
-      ?? "",
-      {
-        title: testMeta?.title,
-        mode: testMeta?.mode,
-      }
-    );
-    const explicitLabel = explicitType ? getQuestionHeaderLabel(explicitType) : "";
-    if (explicitLabel) return explicitLabel;
+    const explicitTypeValue = choice?.question_type ?? choice?.questionType ?? choice?.mode ?? "";
+    if (String(explicitTypeValue || "").trim()) {
+      const explicitType = normalizeStoredQuestionType(
+        explicitTypeValue,
+        {
+          title: testMeta?.title,
+          mode: testMeta?.mode,
+        }
+      );
+      const explicitLabel = explicitType ? getQuestionHeaderLabel(explicitType) : "";
+      if (explicitLabel) return explicitLabel;
+    }
 
     const modeLabel = getQuestionHeaderLabel(type);
     if (modeLabel) return modeLabel;
