@@ -1015,7 +1015,7 @@ function chooseRecognitionQuestionType(focusGrapheme) {
 function resolveQuestionTypeForSupport(support, focusGrapheme) {
   if (support === "recognition") return "multiple_choice_grapheme_picker";
   if (support === "focus") return chooseRecognitionQuestionType(focusGrapheme);
-  if (support === "supported") return "type_what_you_hear";
+  if (support === "supported") return "segmented_spelling";
   return "no_support_assessment";
 }
 
@@ -1279,7 +1279,7 @@ function buildPupilPlan({
       targetSpecs[supportedIndex] = {
         ...targetSpecs[supportedIndex],
         assignmentSupport: "supported",
-        questionType: "type_what_you_hear",
+        questionType: "segmented_spelling",
         targetReason: "target_supported",
       };
       nonIndependentUsed += 1;
@@ -1296,7 +1296,7 @@ function buildPupilPlan({
       targetSpecs[supportedIndex] = {
         ...targetSpecs[supportedIndex],
         assignmentSupport: "supported",
-        questionType: "type_what_you_hear",
+        questionType: "segmented_spelling",
         targetReason: "target_supported",
       };
       nonIndependentUsed += 1;

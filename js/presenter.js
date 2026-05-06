@@ -4,6 +4,8 @@ import { mountGame } from "./game.js?v=1.43";
 import {
   DEFAULT_QUESTION_TYPE,
   getQuestionTypeDisplayLabel,
+  getLaunchQuestionTypeOptions,
+  normalizeLaunchQuestionType,
   normalizeStoredQuestionType,
 } from "./questionTypes.js";
 import { inferPattern, parseWordList, splitWordToGraphemes } from "./wordParser.js?v=1.5";
@@ -19,15 +21,9 @@ import {
 const appEl = document.getElementById("app");
 const params = new URLSearchParams(window.location.search);
 const savedTestId = String(params.get("id") || "").trim();
-const requestedDemoType = normalizeStoredQuestionType(params.get("demo") || DEFAULT_QUESTION_TYPE, {});
+const requestedDemoType = normalizeLaunchQuestionType(params.get("demo") || DEFAULT_QUESTION_TYPE, {});
 
-const QUESTION_TYPE_OPTIONS = [
-  { value: "focus_sound", label: "Focus sound" },
-  { value: "spell_loom", label: "Spell Loom" },
-  { value: "type_what_you_hear", label: "Arrange what you hear" },
-  { value: "segmented_spelling", label: "Segmented spelling" },
-  { value: "no_support_assessment", label: "No support" },
-];
+const QUESTION_TYPE_OPTIONS = getLaunchQuestionTypeOptions();
 
 const SAMPLE_WORD_COUNT_DEFAULT = 10;
 const SAMPLE_WORD_COUNT_MAX = 10;
@@ -387,8 +383,7 @@ const SAMPLE_CONTEXT_STATUS = "teacher_edited";
 
 const STARTER_SETS = [
   { id: "ai_words", title: "ai sample test", questionType: "focus_sound", focus: "ai", words: SAMPLE_WORD_BANK.ai },
-  { id: "magic_e", title: "magic e sample test", questionType: "spell_loom", focus: "a-e", words: SAMPLE_WORD_BANK["a-e"] },
-  { id: "ee_words", title: "ee sample test", questionType: "type_what_you_hear", focus: "ee", words: SAMPLE_WORD_BANK.ee },
+  { id: "ee_segmented_words", title: "ee segmented spelling sample test", questionType: "segmented_spelling", focus: "ee", words: SAMPLE_WORD_BANK.ee },
   { id: "mixed_test", title: "mixed focus sample test", questionType: "no_support_assessment", focus: "", words: SAMPLE_WORD_BANK.mixed },
 ];
 
@@ -475,8 +470,6 @@ function buildGeneratedWordsText(focus, count, preferredWords = null) {
 function buildSampleTitle(questionType, focus) {
   const normalizedFocus = normalizeFocusValue(focus);
   if (normalizedFocus) return `${normalizedFocus} sample test`;
-  if (questionType === "spell_loom") return "Spell Loom sample test";
-  if (questionType === "type_what_you_hear") return "Arrange what you hear sample test";
   if (questionType === "segmented_spelling") return "Segmented spelling sample test";
   if (questionType === "no_support_assessment") return "Mixed focus sample test";
   return "Focus sound sample test";
@@ -485,7 +478,7 @@ function buildSampleTitle(questionType, focus) {
 function buildBuilderFromStarter(starter) {
   const wordCount = clampSampleWordCount(starter?.wordCount || SAMPLE_WORD_COUNT_DEFAULT);
   const focus = normalizeFocusValue(starter?.focus || "");
-  const questionType = normalizeStoredQuestionType(starter?.questionType || requestedDemoType || DEFAULT_QUESTION_TYPE, {});
+  const questionType = normalizeLaunchQuestionType(starter?.questionType || requestedDemoType || DEFAULT_QUESTION_TYPE, {});
   const generatedWordsText = buildGeneratedWordsText(focus, wordCount, starter?.words || null);
   const generatedTitle = String(starter?.title || "").trim() || buildSampleTitle(questionType, focus);
 
@@ -531,7 +524,7 @@ function readBuilderForm() {
   return {
     starterId: String(form.elements.namedItem("starter_id")?.value || "").trim(),
     title: String(form.elements.namedItem("title")?.value || "").trim(),
-    questionType: normalizeStoredQuestionType(form.elements.namedItem("question_type")?.value || DEFAULT_QUESTION_TYPE, {}),
+    questionType: normalizeLaunchQuestionType(form.elements.namedItem("question_type")?.value || DEFAULT_QUESTION_TYPE, {}),
     focus: normalizeFocusValue(form.elements.namedItem("focus")?.value || ""),
     wordCount: clampSampleWordCount(form.elements.namedItem("word_count")?.value || SAMPLE_WORD_COUNT_DEFAULT),
     wordsText: String(form.elements.namedItem("words_text")?.value || ""),
@@ -619,7 +612,7 @@ function escapeRegExpLiteral(value) {
 }
 
 function buildPublicSession(builder) {
-  const questionType = normalizeStoredQuestionType(builder.questionType || DEFAULT_QUESTION_TYPE, {});
+  const questionType = normalizeLaunchQuestionType(builder.questionType || DEFAULT_QUESTION_TYPE, {});
   const focus = normalizeFocusValue(builder.focus);
   const rawWords = parseWordList(builder.wordsText || "").slice(0, SAMPLE_WORD_COUNT_MAX);
 

@@ -4652,15 +4652,15 @@ function getAutomationSupportPresetShortDescription(value = "") {
     return "Uses independent typing wherever possible.";
   }
   if (normalized === "more_support_when_needed") {
-    return "Uses supported tile questions sooner when evidence is limited or weaker.";
+    return "Uses segmented spelling support sooner when evidence is limited or weaker.";
   }
-  return "Mixes independent typing with supported tile questions when useful.";
+  return "Mixes independent typing with segmented spelling support when useful.";
 }
 
 function getAutomationQuestionSupportLabel(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "independent_first") return "Mostly independent";
-  if (normalized === "more_support_when_needed") return "More supported practice";
+  if (normalized === "more_support_when_needed") return "More support";
   return "Balanced";
 }
 
@@ -6749,7 +6749,7 @@ function describeAssignmentTargetReason(target) {
     return normalizedFocus ? `Confusion check for ${normalizedFocus}` : "Confusion check";
   }
   if (target?.targetReason === "target_supported") {
-    return normalizedFocus ? `Supported practice for ${normalizedFocus}` : "Supported practice";
+    return normalizedFocus ? `Segmented support for ${normalizedFocus}` : "Segmented support";
   }
   if (target?.targetReason === "stretch_probe") {
     return normalizedFocus ? `Stretch check for ${normalizedFocus}` : "Stretch check";
@@ -6916,7 +6916,7 @@ function getGeneratedAssignmentRoleLabel(role) {
 function getAssignmentSupportLabel(support) {
   if (support === "focus") return "Focus";
   if (support === "recognition") return "Recognition";
-  if (support === "supported") return "Supported";
+  if (support === "supported") return "Segmented support";
   return "Independent";
 }
 
@@ -15743,7 +15743,7 @@ function renderCreateBar() {
                           <div class="td-automation-inline-label-row">
                             <strong>Question support</strong>
                           </div>
-                          <div class="td-action-inline-copy">Controls how often pupils get supported tile questions instead of independent typing.</div>
+                          <div class="td-action-inline-copy">Controls how often pupils get segmented spelling support instead of independent typing.</div>
                           <div class="td-automation-preset-guide">
                             ${automationPresetGuideHtml}
                           </div>

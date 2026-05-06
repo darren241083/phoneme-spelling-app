@@ -32,7 +32,7 @@ export const AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS = Object.freeze([
   {
     value: "balanced",
     label: "Balanced",
-    description: "Mix independent and supported items using the normal personalised balance.",
+    description: "Mix independent and structured spelling support using the normal personalised balance.",
   },
   {
     value: "independent_first",
@@ -292,7 +292,7 @@ export function getAutoAssignSupportPresetLabel(value) {
 export function getAutoAssignSupportPresetDescription(value) {
   const normalized = normalizeSupportPreset(value);
   return AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS.find((option) => option.value === normalized)?.description
-    || "Mix independent and supported items using the normal personalised balance.";
+    || "Mix independent and structured spelling support using the normal personalised balance.";
 }
 
 export function buildAutoAssignPolicySummary(rawPolicy = null, { useDefaultLabel = false } = {}) {

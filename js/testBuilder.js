@@ -33,6 +33,9 @@ import {
 } from "./phonicsResolution.js?v=1.0";
 import {
   DEFAULT_QUESTION_TYPE,
+  getLaunchQuestionTypeOptions,
+  getQuestionTypeDisplayLabel,
+  isLaunchVisibleQuestionType,
   isIndependentQuestionType,
   normalizeStoredQuestionType,
 } from "./questionTypes.js";
@@ -56,13 +59,7 @@ const ACCESSIBILITY_OPTIONS = [
   { value: "green", label: "Light green" },
   { value: "yellow", label: "Soft yellow" },
 ];
-const TEST_TYPE_OPTIONS = [
-  { value: "focus_sound", label: "Focus sound" },
-  { value: "spell_loom", label: "Spell Loom" },
-  { value: "type_what_you_hear", label: "Arrange what you hear" },
-  { value: "segmented_spelling", label: "Segmented spelling" },
-  { value: "no_support_assessment", label: "No support (assessment mode)" },
-];
+const TEST_TYPE_OPTIONS = getLaunchQuestionTypeOptions({ noSupportLabel: "No support (assessment mode)" });
 const SEGMENTED_VISUAL_AID_OPTIONS = [
   { value: "none", label: "Off" },
   { value: "phonics", label: "Phonics aids" },
@@ -2646,6 +2643,22 @@ function renderWordDifficultyCell(row, index){
   `;
 }
 
+function getTestTypeOptionsForRender(questionType){
+  const currentType = normalizeStoredQuestionType(questionType, {
+    title: state.test?.title || "",
+  });
+  if(isLaunchVisibleQuestionType(currentType)){
+    return TEST_TYPE_OPTIONS;
+  }
+  return [
+    {
+      value: currentType,
+      label: `${getQuestionTypeDisplayLabel(currentType, { noSupportLabel: "No support" })} (legacy)`,
+    },
+    ...TEST_TYPE_OPTIONS,
+  ];
+}
+
 function renderContextSupportCell(row, index){
   return `
     <div class="tb-context-cell">
@@ -2697,9 +2710,10 @@ function renderAssignments(){
   });
   const showLoomSettings = questionType === "spell_loom";
   const showSegmentedSettings = questionType === "segmented_spelling";
+  const testTypeOptions = getTestTypeOptionsForRender(questionType);
   const testTypeCard = `<div class="tb-assign-card">
       <div class="tb-test-settings-grid">
-        <label><span>Test type</span><select class="tb-input" data-field="test-question-type" ${state.isLocked ? "disabled" : ""}>${TEST_TYPE_OPTIONS.map(o => `<option value="${esc(o.value)}" ${String(questionType)===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>
+        <label><span>Test type</span><select class="tb-input" data-field="test-question-type" ${state.isLocked ? "disabled" : ""}>${testTypeOptions.map(o => `<option value="${esc(o.value)}" ${String(questionType)===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>
         ${showLoomSettings ? `<label><span>Decoy bands</span><select class="tb-input" data-field="test-loom-decoy-level" ${state.isLocked ? "disabled" : ""}>${LOOM_DECOY_LEVEL_OPTIONS.map(o => `<option value="${esc(o.value)}" ${normalizeLoomDecoyLevel(state.loomDecoyLevel)===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
         ${showSegmentedSettings ? `<label><span>Phonics aids</span><select class="tb-input" data-field="test-segmented-visual-aids" ${state.isLocked ? "disabled" : ""}>${SEGMENTED_VISUAL_AID_OPTIONS.map(o => `<option value="${esc(o.value)}" ${state.segmentedVisualAidsMode===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
       </div>

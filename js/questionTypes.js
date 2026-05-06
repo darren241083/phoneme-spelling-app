@@ -1,4 +1,13 @@
 export const DEFAULT_QUESTION_TYPE = "focus_sound";
+export const LAUNCH_QUESTION_TYPE_OPTIONS = Object.freeze([
+  { value: "focus_sound", label: "Focus sound" },
+  { value: "segmented_spelling", label: "Segmented spelling" },
+  { value: "no_support_assessment", label: "No support" },
+]);
+
+const LAUNCH_QUESTION_TYPE_VALUES = new Set(
+  LAUNCH_QUESTION_TYPE_OPTIONS.map((option) => option.value)
+);
 
 function normaliseValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -60,6 +69,24 @@ export function normalizeStoredQuestionType(questionType, context = {}) {
   }
 
   return DEFAULT_QUESTION_TYPE;
+}
+
+export function isLaunchVisibleQuestionType(questionType, context = {}) {
+  return LAUNCH_QUESTION_TYPE_VALUES.has(normalizeStoredQuestionType(questionType, context));
+}
+
+export function normalizeLaunchQuestionType(questionType, context = {}) {
+  const normalized = normalizeStoredQuestionType(questionType, context);
+  return LAUNCH_QUESTION_TYPE_VALUES.has(normalized) ? normalized : DEFAULT_QUESTION_TYPE;
+}
+
+export function getLaunchQuestionTypeOptions({
+  noSupportLabel = "No support",
+} = {}) {
+  return LAUNCH_QUESTION_TYPE_OPTIONS.map((option) => ({
+    ...option,
+    label: option.value === "no_support_assessment" ? noSupportLabel : option.label,
+  }));
 }
 
 export function isIndependentQuestionType(questionType, context = {}) {
