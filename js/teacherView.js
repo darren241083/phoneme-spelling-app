@@ -21872,7 +21872,7 @@ function renderPupilOnboardingResultCard() {
           ? `
             <div class="td-pupil-import-guidance">
               <strong>New pupil credentials</strong>
-              <span>Shown once. Save now.</span>
+              <span>PINs are shown once. Save these login details before closing this panel.</span>
             </div>
             <div class="td-pupil-import-credentials">
               ${createdCredentials.map((item) => `
@@ -21892,14 +21892,13 @@ function renderPupilOnboardingResultCard() {
           : ""
       }
       <div class="td-staff-access-import-actions">
-        <p class="td-staff-access-note td-staff-access-note--compact">This only hides the card. The PIN has already been reset.</p>
         <button
           class="td-btn td-btn--ghost"
           type="button"
           data-action="dismiss-pupil-import-result"
           ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
         >
-          Dismiss result
+          Hide
         </button>
       </div>
     </div>
