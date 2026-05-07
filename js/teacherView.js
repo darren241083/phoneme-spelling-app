@@ -136,6 +136,8 @@ import {
   getPupilImportRequiredColumns,
   parsePupilImportCsv,
 } from "./pupilCsvImport.js?v=1.4";
+import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
+import { buildAutomationRunFeedbackNotice } from "./automationRunFeedback.js?v=1.0";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -148,7 +150,6 @@ import {
   buildAutoAssignPolicySummary,
   buildDefaultPersonalisedAutomationPolicy,
   buildSpellingBeeLengthModeSummary,
-  doPersonalisedAutomationPolicyWindowsOverlap,
   derivePersonalisedAutomationDeadline,
   formatPersonalisedAutomationWeekdayList,
   getAutomationPolicyTypeLabel,
@@ -248,6 +249,7 @@ const BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS = 4;
 const ANALYTICS_ASSISTANT_THREAD_LIMIT = 10;
 const AUTOMATION_POLICY_DRAFT_STORAGE_PREFIX = "ps_personalised_automation_policy_draft_v2";
 const AUTOMATION_NEW_POLICY_KEY = "__new__";
+const AUTOMATION_VALIDATION_POLICY_OVERLAP = "policy_overlap";
 const ANALYTICS_ASSISTANT_INTRO =
   "Ask about intervention priorities, weak graphemes, class or year comparisons, or what an individual pupil may need next.";
 const GROUP_COMPARISON_MIN_COHORT_SIZE = 5;
@@ -4076,6 +4078,39 @@ function setAutomationPolicies(policies = []) {
   state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
 }
 
+async function refreshAutomationPolicies() {
+  if (!canManageAutomation()) {
+    setAutomationPolicies([]);
+    return [];
+  }
+  const policies = await listPersonalisedAutomationPolicies({ includeArchived: true });
+  setAutomationPolicies(policies);
+  return getAutomationPolicies();
+}
+
+async function refreshAutomationPoliciesForValidation(actionLabel = "continue") {
+  try {
+    await refreshAutomationPolicies();
+    return true;
+  } catch (error) {
+    console.error("refresh automation policies before validation error:", error);
+    showNotice(
+      `Could not refresh automation policies. Try again before you ${actionLabel} so Wordloom can check current policy overlaps.`,
+      "error"
+    );
+    paint();
+    return false;
+  }
+}
+
+async function refreshAutomationPoliciesAfterMutation(actionLabel = "update") {
+  try {
+    await refreshAutomationPolicies();
+  } catch (error) {
+    console.warn(`Could not refresh automation policies after ${actionLabel}:`, error);
+  }
+}
+
 function markCurrentAutomationPolicySaved(
   savedPolicy = null,
   {
@@ -4421,6 +4456,7 @@ function getAutomationRunPolicyValidation() {
     target_class_ids: getAutomationRunSelectedClassIds(),
   });
   const errors = [];
+  const notices = [];
   const selectedClassIds = getAutomationRunSelectedClassIds();
 
   if (!String(policy.name || "").trim()) {
@@ -4449,40 +4485,36 @@ function getAutomationRunPolicyValidation() {
     errors.push("This policy includes older non-form or incomplete targets. Choose year groups again before saving or running.");
   }
   if (!String(policy.archived_at || "").trim() && selectedClassIds.length) {
-    const overlappingPolicies = getAutomationPolicies()
-      .filter((item) => {
-        const itemId = String(item?.id || "").trim();
-        const policyId = String(policy?.id || "").trim();
-        return itemId
-          && itemId !== policyId
-          && doPersonalisedAutomationPolicyWindowsOverlap(policy, item);
-      })
-      .map((item) => ({
-        policy: item,
-        classIds: normalizeIdList(item?.target_class_ids || []),
-      }))
-      .filter((item) => item.classIds.some((classId) => selectedClassIds.includes(classId)));
+    const overlappingPolicies = getAutomationPolicyOverlapMatches({
+      policy,
+      policies: getAutomationPolicies(),
+      selectedClassIds,
+    });
     if (overlappingPolicies.length) {
       const classesById = new Map(getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item]));
       const overlapLabels = [...new Set(
         overlappingPolicies.flatMap((item) =>
-          item.classIds
-            .filter((classId) => selectedClassIds.includes(classId))
+          item.overlappingClassIds
             .map((classId) => String(classesById.get(classId)?.name || "Untitled group").trim() || "Untitled group")
         )
       )];
       const policyLabels = [...new Set(
         overlappingPolicies.map((item) => getAutomationPolicyDisplayName(item.policy))
       )];
-      errors.push(
-        `These form groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`
-      );
+      const message = `These form groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`;
+      errors.push(message);
+      notices.push({
+        code: AUTOMATION_VALIDATION_POLICY_OVERLAP,
+        title: "Policy overlap",
+        message,
+      });
     }
   }
 
   return {
     policy,
     errors,
+    notices,
   };
 }
 
@@ -12342,33 +12374,15 @@ async function handleAutoAssignPractice(form) {
 function summarizeSkipReasons(rows = []) {
   const counts = {};
   for (const row of rows || []) {
-    const key = String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase();
+    const baseKey = String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase();
+    const detailKey = String(row?.skip_reason_detail || row?.skipReasonDetail || "").trim().toLowerCase();
+    const key = baseKey === "baseline_incomplete" && detailKey === "no_baseline_assignment"
+      ? "no_baseline_assignment"
+      : baseKey;
     if (!key) continue;
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
-}
-
-function buildRunNowNotice({
-  classResults = [],
-  includedPupilCount = 0,
-  skippedPupilCount = 0,
-  errorCount = 0,
-} = {}) {
-  const generatedClassCount = (classResults || []).filter((item) => item?.status === "generated").length;
-  const parts = [
-    generatedClassCount === 0
-      ? "No new personalised tests were generated."
-      : (generatedClassCount === 1
-        ? "Generated 1 personalised test."
-        : `Generated ${generatedClassCount} personalised tests.`),
-    `Included ${Math.max(0, Number(includedPupilCount || 0))} pupil${Number(includedPupilCount || 0) === 1 ? "" : "s"}.`,
-    `Skipped ${Math.max(0, Number(skippedPupilCount || 0))} pupil${Number(skippedPupilCount || 0) === 1 ? "" : "s"}.`,
-  ];
-  if (errorCount > 0) {
-    parts.push(`${errorCount} class${errorCount === 1 ? "" : "es"} could not be processed.`);
-  }
-  return parts.join(" ");
 }
 
 async function handleSaveAutomationPolicy(form) {
@@ -12376,9 +12390,26 @@ async function handleSaveAutomationPolicy(form) {
 
   if (isSelectedAutomationPolicyBusy()) return;
 
-  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
-  const draftEntry = getCurrentAutomationDraftEntry();
+  let selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  let draftEntry = getCurrentAutomationDraftEntry();
   if (!draftEntry.dirty) return;
+  const selectedKeyBeforeRefresh = selectedKey;
+  if (!(await refreshAutomationPoliciesForValidation("save"))) return;
+  selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  draftEntry = getCurrentAutomationDraftEntry();
+  if (
+    selectedKeyBeforeRefresh !== AUTOMATION_NEW_POLICY_KEY
+    && selectedKeyBeforeRefresh !== selectedKey
+  ) {
+    showNotice("This automation policy is no longer available. Choose a saved policy before saving.", "error");
+    paint();
+    return;
+  }
+  if (!draftEntry.dirty) {
+    showNotice("Automation policy changes are already up to date.", "info");
+    paint();
+    return;
+  }
   const { policy, errors } = getAutomationRunPolicyValidation();
   if (errors.length) {
     showNotice(errors[0], "error");
@@ -12419,6 +12450,7 @@ async function handleSaveAutomationPolicy(form) {
       previousKey: selectedKey,
       previousEntry: draftEntry,
     });
+    await refreshAutomationPoliciesAfterMutation("save");
     showNotice(`Saved "${getAutomationPolicyDisplayName(savedPolicy)}".`, "success");
     shouldScrollToTop = true;
   } catch (error) {
@@ -12440,17 +12472,28 @@ async function handleRunNowPersonalisedGeneration() {
     return;
   }
 
-  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
-  const draftEntry = getCurrentAutomationDraftEntry();
-  const { policy, errors } = getAutomationRunPolicyValidation();
-  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
-  const requestedPolicyKey = resolveAutomationActionPolicyKey(policy, selectedKey);
   const currentAction = getAutomationActionState();
   if (isAutomationRunMode(currentAction.mode)) {
     showNotice("A personalised generation run is already in progress. Wait for it to finish before starting another run.", "info");
     paint();
     return;
   }
+  const selectedKeyBeforeRefresh = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  if (!(await refreshAutomationPoliciesForValidation("run this policy"))) return;
+
+  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  const draftEntry = getCurrentAutomationDraftEntry();
+  if (
+    selectedKeyBeforeRefresh !== AUTOMATION_NEW_POLICY_KEY
+    && selectedKeyBeforeRefresh !== selectedKey
+  ) {
+    showNotice("This automation policy is no longer available. Choose a saved policy before running.", "error");
+    paint();
+    return;
+  }
+  const { policy, errors } = getAutomationRunPolicyValidation();
+  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+  const requestedPolicyKey = resolveAutomationActionPolicyKey(policy, selectedKey);
   if (
     currentAction.policyKey
     && currentAction.policyKey === requestedPolicyKey
@@ -12531,6 +12574,7 @@ async function handleRunNowPersonalisedGeneration() {
         previousKey: selectedKey,
         previousEntry: draftEntry,
       });
+      await refreshAutomationPoliciesAfterMutation("save-and-run");
       effectivePolicy = normalizePersonalisedAutomationPolicy(savedFromRun);
       setAutomationActionState({
         policyKey: resolveAutomationActionPolicyKey(effectivePolicy, selectedKey),
@@ -12736,16 +12780,32 @@ async function handleRunNowPersonalisedGeneration() {
       for (const pupilId of classPupilIds) {
         const baselineGate = baselineGateByPupil.get(pupilId) || null;
         if (baselineGate?.status !== "ready") {
+          const baselineWaitingReason = String(
+            baselineGate?.waiting_reason || baselineGate?.waitingReason || ""
+          ).trim().toLowerCase();
           skippedRows.push({
             runId: runRecord.id,
             classId,
             pupilId,
             status: "skipped",
             skipReason: "baseline_incomplete",
+            skipReasonDetail: baselineWaitingReason === "no_baseline_assignment"
+              ? "no_baseline_assignment"
+              : "",
           });
           continue;
         }
-        if (pupilIdsIncludedThisRun.has(pupilId) || activeAutomationByPupil.has(pupilId)) {
+        if (pupilIdsIncludedThisRun.has(pupilId)) {
+          skippedRows.push({
+            runId: runRecord.id,
+            classId,
+            pupilId,
+            status: "skipped",
+            skipReason: "duplicate_pupil_in_run",
+          });
+          continue;
+        }
+        if (activeAutomationByPupil.has(pupilId)) {
           skippedRows.push({
             runId: runRecord.id,
             classId,
@@ -12875,15 +12935,14 @@ async function handleRunNowPersonalisedGeneration() {
     openDashboardSection("upcoming");
     state.createAutoAssignOpen = false;
     state.activePanel = null;
-    showNotice(
-      buildRunNowNotice({
-        classResults,
-        includedPupilCount,
-        skippedPupilCount,
-        errorCount,
-      }),
-      runStatus === "failed" ? "error" : (errorCount > 0 ? "info" : "success"),
-    );
+    const runNotice = buildAutomationRunFeedbackNotice({
+      classResults,
+      includedPupilCount,
+      skippedPupilCount,
+      errorCount,
+      runStatus,
+    });
+    showNotice(runNotice.message, runNotice.type);
     shouldScrollToRunResult = true;
     paint();
   } catch (error) {
@@ -13042,6 +13101,7 @@ async function handleSetAutomationPolicyArchived(policyId, archived) {
         targetFiltersTouched: currentEntry?.targetFiltersTouched === true,
       }, { basePolicy: savedPolicy });
     }
+    await refreshAutomationPoliciesAfterMutation(actionLabel);
     persistAutomationPolicyDraft();
     showNotice(
       archived
@@ -13088,6 +13148,7 @@ async function handleDeleteAutomationPolicy(policyId) {
         : "";
       state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
     }
+    await refreshAutomationPoliciesAfterMutation("delete");
     persistAutomationPolicyDraft();
     showNotice(`Deleted "${getAutomationPolicyDisplayName(deletedPolicy || sourcePolicy)}".`, "success");
     paint();
@@ -14870,6 +14931,16 @@ function renderCreateBar() {
   const automationDisplayValidationMessage = automationSaveValidationMessage === "Give this automation policy a name."
     ? "Add a policy name before saving or running this policy."
     : automationSaveValidationMessage;
+  const automationValidationNotice = (automationPolicyValidation.notices || [])
+    .find((item) => item?.code === AUTOMATION_VALIDATION_POLICY_OVERLAP) || null;
+  const automationReviewValidationCalloutHtml = automationValidationNotice
+    ? `
+      <div class="td-automation-validation-callout" role="alert">
+        <strong>${escapeHtml(automationValidationNotice.title || "Policy overlap")}</strong>
+        <p>${escapeHtml(automationValidationNotice.message || automationDisplayValidationMessage)}</p>
+      </div>
+    `
+    : "";
   const automationSaveDisabled = !automationDraftDirty
     || !!automationSaveValidationMessage
     || automationActionBusy
@@ -14890,7 +14961,9 @@ function renderCreateBar() {
     || (!automationDraftDirty ? "Make a valid change before saving." : "Ready to save.");
   const automationRunStatusMessage = automationRunReadyState.message
     || (automationRunReadyState.ready ? "Ready to run now." : "Complete the policy before running.");
-  const automationReviewGuidance = automationDisplayValidationMessage
+  const automationReviewGuidance = automationValidationNotice
+    ? "Resolve this policy overlap before saving or running."
+    : automationDisplayValidationMessage
     || (!automationRunReadyState.ready ? automationRunReadyState.message : "")
     || (automationDraftDirty ? "Review the policy, then save or run it now." : automationRunReadyState.message);
   const automationShowReviewStatusGrid = !automationDisplayValidationMessage;
@@ -15727,6 +15800,7 @@ function renderCreateBar() {
                               .join("")}
                           </div>
                           ${automationBottomSecondarySummary ? `<div>${escapeHtml(automationBottomSecondarySummary)}</div>` : ""}
+                          ${automationReviewValidationCalloutHtml}
                           <div class="td-automation-review-guidance">${escapeHtml(automationReviewGuidance)}</div>
                           ${automationShowReviewStatusGrid ? `
                             <div class="td-automation-review-status-grid">
@@ -26145,6 +26219,11 @@ function injectStyles() {
       border-color:#bbf7d0;
     }
 
+    .td-notice--warning{
+      background:#fffbeb;
+      border-color:#fde68a;
+    }
+
     .td-notice--error{
       background:#fef2f2;
       border-color:#fecaca;
@@ -26966,6 +27045,31 @@ function injectStyles() {
 
     .td-automation-review-guidance{
       color:#334155;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-validation-callout{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      margin-top:2px;
+      padding:12px 14px;
+      border:1px solid #fde68a;
+      border-radius:10px;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-automation-validation-callout strong{
+      color:#92400e;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-validation-callout p{
+      margin:0;
+      color:#78350f;
       font-size:0.9rem;
       line-height:1.45;
     }
