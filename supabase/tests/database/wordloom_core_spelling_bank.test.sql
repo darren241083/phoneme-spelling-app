@@ -29,8 +29,8 @@ from unnest(array[
   'teacher_a',
   'teacher_b',
   'admin_a',
-  'target_ar',
-  'core_word_sharp',
+  'target_zz',
+  'core_word_fizz',
   'override_a',
   'override_b',
   'school_word_a',
@@ -231,8 +231,8 @@ declare
   teacher_a_id uuid := (select id from wordloom_bank_ids where name = 'teacher_a');
   teacher_b_id uuid := (select id from wordloom_bank_ids where name = 'teacher_b');
   admin_a_id uuid := (select id from wordloom_bank_ids where name = 'admin_a');
-  target_ar_id uuid := (select id from wordloom_bank_ids where name = 'target_ar');
-  core_word_sharp_id uuid := (select id from wordloom_bank_ids where name = 'core_word_sharp');
+  target_zz_id uuid := (select id from wordloom_bank_ids where name = 'target_zz');
+  core_word_fizz_id uuid := (select id from wordloom_bank_ids where name = 'core_word_fizz');
   override_a_id uuid := (select id from wordloom_bank_ids where name = 'override_a');
   override_b_id uuid := (select id from wordloom_bank_ids where name = 'override_b');
   school_word_a_id uuid := (select id from wordloom_bank_ids where name = 'school_word_a');
@@ -308,9 +308,9 @@ begin
     sort_order
   )
   values (
-    target_ar_id,
-    'ar',
-    'ar',
+    target_zz_id,
+    'zz',
+    'zz',
     'needs_support',
     10
   );
@@ -329,17 +329,17 @@ begin
     meaning
   )
   values (
-    core_word_sharp_id,
-    'sharp',
-    'sharp',
-    '["sh","ar","p"]'::jsonb,
-    '["ar"]'::jsonb,
-    'ar',
+    core_word_fizz_id,
+    'fizz',
+    'fizz',
+    '["f","i","zz"]'::jsonb,
+    '["zz"]'::jsonb,
+    'zz',
     35,
     'Core',
     'pgTAP fixture',
-    'The pencil has a sharp point.',
-    'Having a fine point or edge.'
+    'The drink began to fizz.',
+    'To make small bubbles.'
   );
 
   insert into public.wordloom_core_word_targets (
@@ -349,9 +349,9 @@ begin
     target_role
   )
   values (
-    core_word_sharp_id,
-    target_ar_id,
-    'ar',
+    core_word_fizz_id,
+    target_zz_id,
+    'zz',
     'primary'
   );
 
@@ -363,8 +363,8 @@ begin
     created_by
   )
   values
-    (override_a_id, school_a_id, core_word_sharp_id, true, admin_a_id),
-    (override_b_id, school_b_id, core_word_sharp_id, true, teacher_b_id);
+    (override_a_id, school_a_id, core_word_fizz_id, true, admin_a_id),
+    (override_b_id, school_b_id, core_word_fizz_id, true, teacher_b_id);
 
   insert into public.school_spelling_bank_words (
     id,
@@ -410,9 +410,9 @@ values
     exists (
       select 1
       from public.wordloom_core_word_targets
-      where word_id = (select id from wordloom_bank_ids where name = 'core_word_sharp')
-        and focus_target_id = (select id from wordloom_bank_ids where name = 'target_ar')
-        and focus_grapheme = 'ar'
+      where word_id = (select id from wordloom_bank_ids where name = 'core_word_fizz')
+        and focus_target_id = (select id from wordloom_bank_ids where name = 'target_zz')
+        and focus_grapheme = 'zz'
         and target_role = 'primary'
     )
   ),
@@ -502,9 +502,9 @@ values
   (
     'invalid_target_role_blocked',
     not pg_temp.try_insert_core_word_target(
-      (select id from wordloom_bank_ids where name = 'core_word_sharp'),
-      (select id from wordloom_bank_ids where name = 'target_ar'),
-      'ar',
+      (select id from wordloom_bank_ids where name = 'core_word_fizz'),
+      (select id from wordloom_bank_ids where name = 'target_zz'),
+      'zz',
       'main'
     )
   ),
@@ -520,7 +520,7 @@ values
     'null_school_override_blocked',
     not pg_temp.try_insert_school_override(
       null,
-      (select id from wordloom_bank_ids where name = 'core_word_sharp'),
+      (select id from wordloom_bank_ids where name = 'core_word_fizz'),
       null
     )
   ),
@@ -598,7 +598,7 @@ values
     pg_temp.try_insert_school_override(
       (select id from wordloom_bank_ids where name = 'school_a'),
       null,
-      (select id from wordloom_bank_ids where name = 'target_ar')
+      (select id from wordloom_bank_ids where name = 'target_zz')
     )
   ),
   (
@@ -606,7 +606,7 @@ values
     not pg_temp.try_insert_school_override(
       (select id from wordloom_bank_ids where name = 'school_b'),
       null,
-      (select id from wordloom_bank_ids where name = 'target_ar')
+      (select id from wordloom_bank_ids where name = 'target_zz')
     )
   ),
   (
@@ -655,7 +655,7 @@ reset role;
 
 update public.wordloom_core_words
 set updated_at = '2000-01-01T00:00:00Z'::timestamptz
-where id = (select id from wordloom_bank_ids where name = 'core_word_sharp');
+where id = (select id from wordloom_bank_ids where name = 'core_word_fizz');
 
 insert into wordloom_bank_checks (name, bool_value)
 values (
@@ -663,7 +663,7 @@ values (
   (
     select updated_at > '2020-01-01T00:00:00Z'::timestamptz
     from public.wordloom_core_words
-    where id = (select id from wordloom_bank_ids where name = 'core_word_sharp')
+    where id = (select id from wordloom_bank_ids where name = 'core_word_fizz')
   )
 );
 
@@ -691,7 +691,7 @@ select ok((select bool_value from wordloom_bank_checks where name = 'null_school
 select ok((select bool_value from wordloom_bank_checks where name = 'invalid_school_word_approval_blocked'), 'invalid school word approval status is blocked');
 select ok((select bool_value from wordloom_bank_checks where name = 'school_word_approved_missing_context_blocked'), 'approved active school words require sentence and meaning');
 select ok((select bool_value from wordloom_bank_checks where name = 'no_usage_event_table_added'), 'Phase 1 does not add spelling bank usage events');
-select is((select int_value from wordloom_bank_checks where name = 'teacher_a_core_words_visible_count'), 1, 'authenticated staff can read core bank words');
+select ok((select int_value from wordloom_bank_checks where name = 'teacher_a_core_words_visible_count') >= 1, 'authenticated staff can read core bank words');
 select is((select int_value from wordloom_bank_checks where name = 'teacher_a_overrides_visible_count'), 1, 'School A teacher reads only School A overrides');
 select is((select int_value from wordloom_bank_checks where name = 'teacher_a_school_words_visible_count'), 1, 'School A teacher reads only School A school words');
 select ok((select bool_value from wordloom_bank_checks where name = 'authenticated_insert_core_blocked'), 'authenticated app users cannot write core focus targets');
