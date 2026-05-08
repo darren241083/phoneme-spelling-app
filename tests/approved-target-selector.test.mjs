@@ -4,6 +4,7 @@ import { loadBrowserModule } from "./load-browser-module.mjs";
 const {
   APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS,
   APPROVED_TARGET_SELECTOR_STATUS_READY,
+  buildAssignmentEngineWordPayload,
   buildGeneratedAssignmentPlan,
   selectApprovedTargetWords,
 } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
@@ -26,24 +27,48 @@ function wordRow({
   segments = ["ph"],
   source = "teacher",
   suitability,
+  suitabilityStatus,
+  approvalStatus,
+  active,
+  targetLinks,
   band,
   sentence = "",
+  meaning = "",
 } = {}) {
+  const choice = {
+    source,
+    focus_graphemes: focus,
+    selection_suitability: suitability,
+    difficulty: {
+      coreScore: score,
+      score,
+      band,
+    },
+  };
+  if (suitabilityStatus !== undefined) choice.suitability_status = suitabilityStatus;
+  if (approvalStatus !== undefined) choice.approval_status = approvalStatus;
+  if (active !== undefined) choice.is_active = active;
+  if (source === "wordloom_core") {
+    choice.origin_word_source = "wordloom_core";
+    choice.origin_bank_word_id = `core-${id}`;
+    choice.focus_target_links = targetLinks === undefined
+      ? focus.map((item) => ({ focus_grapheme: item, target_role: "primary" }))
+      : targetLinks;
+    choice.context_support = {
+      sentence,
+      meaning,
+      sentence_status: "approved",
+      meaning_status: "approved",
+      meaning_enabled: !!meaning,
+    };
+  }
+
   return {
     id,
     word,
     sentence,
     segments,
-    choice: {
-      source,
-      focus_graphemes: focus,
-      selection_suitability: suitability,
-      difficulty: {
-        coreScore: score,
-        score,
-        band,
-      },
-    },
+    choice,
   };
 }
 
@@ -152,7 +177,7 @@ test("missing suitability defaults to standard for teacher approved rows", () =>
   assertJsonEqual(words(result), ["phone"]);
 });
 
-test("non-teacher source is not selected even with matching grapheme and difficulty", () => {
+test("generated runtime source is not selected as an approved source candidate", () => {
   const result = selectApprovedTargetWords({
     focusGrapheme: "ph",
     challengeLevel: "needs_support",
@@ -164,6 +189,88 @@ test("non-teacher source is not selected even with matching grapheme and difficu
 
   assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS);
   assertJsonEqual(words(result), []);
+});
+
+test("wordloom core source is selected before legacy teacher rows", () => {
+  const result = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 1,
+    candidates: [
+      wordRow({ id: "teacher-1", word: "phase", score: 30, source: "teacher" }),
+      wordRow({
+        id: "core-1",
+        word: "phone",
+        score: 30,
+        source: "wordloom_core",
+        approvalStatus: "approved",
+        suitabilityStatus: "suitable",
+      }),
+    ],
+  });
+
+  assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_READY);
+  assertJsonEqual(words(result), ["phone"]);
+});
+
+test("legacy teacher rows fill only when core rows are insufficient", () => {
+  const result = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 2,
+    candidates: [
+      wordRow({
+        id: "core-1",
+        word: "phone",
+        score: 30,
+        source: "wordloom_core",
+        approvalStatus: "approved",
+        suitabilityStatus: "suitable",
+      }),
+      wordRow({ id: "teacher-1", word: "phase", score: 31, source: "teacher" }),
+    ],
+  });
+
+  assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_READY);
+  assertJsonEqual(words(result), ["phone", "phase"]);
+});
+
+test("wordloom core rows require active approved suitable status and target links", () => {
+  const result = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 1,
+    candidates: [
+      wordRow({ id: "pending", word: "phone", score: 30, source: "wordloom_core", approvalStatus: "pending", suitabilityStatus: "suitable" }),
+      wordRow({ id: "rejected", word: "photo", score: 30, source: "wordloom_core", approvalStatus: "rejected", suitabilityStatus: "suitable" }),
+      wordRow({ id: "retired", word: "phrase", score: 30, source: "wordloom_core", approvalStatus: "retired", suitabilityStatus: "suitable" }),
+      wordRow({ id: "inactive", word: "graph", score: 30, source: "wordloom_core", approvalStatus: "approved", suitabilityStatus: "suitable", active: false }),
+      wordRow({ id: "caution", word: "phantom", score: 30, source: "wordloom_core", approvalStatus: "approved", suitabilityStatus: "caution" }),
+      wordRow({ id: "exclude", word: "sphere", score: 30, source: "wordloom_core", approvalStatus: "approved", suitabilityStatus: "exclude" }),
+      wordRow({
+        id: "incidental",
+        word: "alpha",
+        score: 30,
+        source: "wordloom_core",
+        focus: ["a"],
+        segments: ["a", "l", "ph", "a"],
+        approvalStatus: "approved",
+        suitabilityStatus: "suitable",
+        targetLinks: [{ focus_grapheme: "a", target_role: "primary" }],
+      }),
+      wordRow({
+        id: "approved",
+        word: "phonics",
+        score: 30,
+        source: "wordloom_core",
+        approvalStatus: "approved",
+        suitabilityStatus: "suitable",
+      }),
+    ],
+  });
+
+  assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_READY);
+  assertJsonEqual(words(result), ["phonics"]);
 });
 
 test("ideal window is preferred before widened window and widening is reported", () => {
@@ -286,6 +393,59 @@ test("generated assignment target section uses approved selector and skips non-a
     .filter((item) => item.assignmentRole === "target")
     .map((item) => item.word);
   assertJsonEqual(targetWords, ["phone"]);
+});
+
+test("generated assignment can use wordloom core ar bank with no teacher test_words", () => {
+  const core = (data) => wordRow({
+    source: "wordloom_core",
+    approvalStatus: "approved",
+    suitabilityStatus: "suitable",
+    sentence: `${data.word} sentence.`,
+    meaning: `${data.word} meaning.`,
+    ...data,
+  });
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        core({ id: "ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        core({ id: "ai-2", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        core({ id: "ai-3", word: "paint", score: 26, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        core({ id: "ai-4", word: "snail", score: 27, focus: ["ai"], segments: ["s", "n", "ai", "l"] }),
+        core({ id: "ar-1", word: "farm", score: 34, focus: ["ar"], segments: ["f", "ar", "m"] }),
+        core({ id: "ar-2", word: "sharp", score: 38, focus: ["ar"], segments: ["sh", "ar", "p"] }),
+        core({ id: "ar-3", word: "start", score: 42, focus: ["ar"], segments: ["s", "t", "ar", "t"] }),
+        core({ id: "ar-4", word: "garden", score: 46, focus: ["ar"], segments: ["g", "ar", "d", "e", "n"] }),
+        core({ id: "or-1", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        core({ id: "or-2", word: "short", score: 60, focus: ["or"], segments: ["sh", "or", "t"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ar", total: 4, securityBand: "insecure" }],
+        secureRows: [{ target: "ai", total: 4, securityBand: "secure" }],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "core_developing" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const pupilWords = plan.pupilPlans[0]?.words || [];
+  assert.equal(pupilWords.length, 10);
+  assert.equal(pupilWords.every((item) => item.originWordSource === "wordloom_core"), true);
+  assert.equal(pupilWords.filter((item) => item.assignmentRole === "target" && item.focusGrapheme === "ar").length, 4);
+
+  const arWord = pupilWords.find((item) => item.assignmentRole === "target" && item.focusGrapheme === "ar");
+  const payload = buildAssignmentEngineWordPayload(arWord, 1);
+  assert.equal(payload.choice.source, "assignment_engine_pool");
+  assert.equal(payload.choice.origin_word_source, "wordloom_core");
+  assert.match(payload.choice.origin_bank_word_id, /^core-ar-/);
+  assert.equal(payload.choice.context_support.meaning_status, "approved");
+  assert.equal(payload.choice.context_support.meaning_enabled, true);
 });
 
 test("early_stretch baseline seed drives advanced approved target choice in first generated plan", () => {

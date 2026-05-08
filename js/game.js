@@ -1,5 +1,5 @@
 import { escapeHtml } from "./ui.js";
-import { pupilRecordAttempt } from "./db.js?v=1.18";
+import { pupilRecordAttempt } from "./db.js?v=1.49";
 import { createScrollMode } from "./modes_scroll.js";
 import {
   createSegmentedSpellingModel,

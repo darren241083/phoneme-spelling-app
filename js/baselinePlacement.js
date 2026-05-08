@@ -4,7 +4,7 @@ import {
   BASELINE_PRESET_BLUEPRINTS,
   BASELINE_STARTER_WORD_BANK,
 } from "./data/baselinePlacementCatalog.js";
-import { buildProfileFromAttempts } from "./assignmentEngine.js?v=1.5";
+import { buildProfileFromAttempts } from "./assignmentEngine.js?v=1.6";
 import { getQuestionEvidenceTier } from "./questionTypes.js?v=1.1";
 import { buildPersistedDifficultyPayload } from "./researchDifficulty.js?v=2.4";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";

@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { applyActiveSchoolFilter, readStaffAccessContext, resolveActiveSchoolDetails } from "./db.js?v=1.45";
+import { applyActiveSchoolFilter, readStaffAccessContext, resolveActiveSchoolDetails } from "./db.js?v=1.49";
 import { mountGame } from "./game.js?v=1.43";
 import {
   DEFAULT_QUESTION_TYPE,

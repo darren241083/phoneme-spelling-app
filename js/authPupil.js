@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient.js";
-import { normalizeSchoolSummary } from "./db.js?v=1.45";
+import { normalizeSchoolSummary } from "./db.js?v=1.49";
 
 const KEY = "ps_pupil_session_v2";
 

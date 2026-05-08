@@ -3,7 +3,7 @@ import {
   applyActiveSchoolFilter,
   readStaffAccessContext,
   withActiveSchoolId,
-} from "./db.js?v=1.45";
+} from "./db.js?v=1.49";
 
 function makeUsername(firstName, surname, misId) {
   const f = (firstName || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");

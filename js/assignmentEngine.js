@@ -22,7 +22,12 @@ export const APPROVED_TARGET_SELECTOR_STATUS_READY = "ready";
 export const APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS = "not_enough_approved_words";
 export const APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL = "secure_expected";
 
-const APPROVED_TARGET_SOURCE = "teacher";
+const APPROVED_TARGET_TEACHER_SOURCE = "teacher";
+const APPROVED_TARGET_WORDLOOM_CORE_SOURCE = "wordloom_core";
+const APPROVED_TARGET_SOURCE_PRIORITIES = {
+  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 0,
+  [APPROVED_TARGET_TEACHER_SOURCE]: 1,
+};
 const APPROVED_TARGET_WIDENING_DELTA = 10;
 const APPROVED_TARGET_CHALLENGE_WINDOWS = {
   needs_support: { min: 15, max: 45, center: 30, hardMax: 50 },
@@ -393,24 +398,75 @@ function resolveStoredFocusGrapheme(wordRow) {
   return normalizeToken(chooseBestFocusGrapheme(segments));
 }
 
+function getLibraryCandidateOriginSource(wordRow, choice) {
+  const source = normalizeMetadataKey(choice?.source || "");
+  if (source === APPROVED_TARGET_WORDLOOM_CORE_SOURCE) return APPROVED_TARGET_WORDLOOM_CORE_SOURCE;
+  return "library";
+}
+
+function getOriginBankWordId(wordRow, choice) {
+  return String(
+    choice?.origin_bank_word_id
+    || choice?.originBankWordId
+    || choice?.bank_word_id
+    || choice?.bankWordId
+    || wordRow?.origin_bank_word_id
+    || wordRow?.originBankWordId
+    || ""
+  ).trim() || null;
+}
+
+function getCandidateContextSupport(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const context = choice?.context_support || choice?.contextSupport || candidate?.contextSupport || candidate?.context_support || {};
+  return context && typeof context === "object" && !Array.isArray(context) ? context : {};
+}
+
+function getCandidateMeaning(candidate = {}) {
+  const context = getCandidateContextSupport(candidate);
+  return String(
+    candidate?.meaning
+    || candidate?.definition
+    || context?.meaning
+    || context?.definition
+    || ""
+  ).trim() || null;
+}
+
 function buildLibraryCandidate(wordRow) {
   const word = normalizeWord(wordRow?.word || "");
   if (!word) return null;
   const segments = normalizeSegments(word, wordRow?.segments);
   if (!segments.length) return null;
+  const rawChoice = wordRow?.choice && typeof wordRow.choice === "object" ? wordRow.choice : {};
+  const originWordSource = getLibraryCandidateOriginSource(wordRow, rawChoice);
+  const originBankWordId = originWordSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? (getOriginBankWordId(wordRow, rawChoice) || String(wordRow?.id || "").trim() || null)
+    : getOriginBankWordId(wordRow, rawChoice);
 
   return {
     word,
     sentence: String(wordRow?.sentence || "").trim() || null,
+    meaning: getCandidateMeaning({ ...wordRow, rawChoice }),
+    contextSupport: getCandidateContextSupport({ ...wordRow, rawChoice }),
     segments,
     focusGraphemes: normalizeFocusList([
-      ...(Array.isArray(wordRow?.choice?.focus_graphemes) ? wordRow.choice.focus_graphemes : []),
+      ...(Array.isArray(rawChoice?.focus_graphemes) ? rawChoice.focus_graphemes : []),
       resolveStoredFocusGrapheme(wordRow),
     ]),
-    originTestWordId: String(wordRow?.id || "") || null,
-    originWordSource: "library",
-    difficulty: getStoredDifficultyModelForWord(wordRow),
-    rawChoice: wordRow?.choice && typeof wordRow.choice === "object" ? wordRow.choice : {},
+    focusTargetLinks: getWordloomCoreTargetLinks({ rawChoice }),
+    originTestWordId: originWordSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+      ? null
+      : (String(wordRow?.id || "") || null),
+    originBankWordId,
+    originWordSource,
+    difficulty: getSelectorDifficulty({
+      word,
+      segments,
+      rawChoice,
+      difficulty: getStoredDifficultyModelForWord(wordRow),
+    }),
+    rawChoice,
   };
 }
 
@@ -439,20 +495,30 @@ function buildAttemptHistoryCandidate(attempt, resolvedWordMap = null) {
 
 function mergeCandidates(existing, candidate) {
   if (!existing) return candidate;
-  const existingIsLibrary = existing.originWordSource === "library";
-  const candidateIsLibrary = candidate.originWordSource === "library";
-  const preferred = existingIsLibrary || !candidateIsLibrary ? existing : candidate;
+  const existingPriority = getSelectorSourcePriority(getCandidateSelectionSource(existing));
+  const candidatePriority = getSelectorSourcePriority(getCandidateSelectionSource(candidate));
+  const preferred = candidatePriority < existingPriority ? candidate : existing;
   const secondary = preferred === existing ? candidate : existing;
 
   return {
     ...preferred,
     sentence: preferred.sentence || secondary.sentence || null,
+    meaning: preferred.meaning || secondary.meaning || null,
+    contextSupport: {
+      ...(secondary.contextSupport || {}),
+      ...(preferred.contextSupport || {}),
+    },
     segments: preferred.segments?.length ? preferred.segments : secondary.segments,
     focusGraphemes: normalizeFocusList([
       ...(preferred.focusGraphemes || []),
       ...(secondary.focusGraphemes || []),
     ]),
+    focusTargetLinks: [
+      ...(preferred.focusTargetLinks || []),
+      ...(secondary.focusTargetLinks || []),
+    ],
     originTestWordId: preferred.originTestWordId || secondary.originTestWordId || null,
+    originBankWordId: preferred.originBankWordId || secondary.originBankWordId || null,
     difficulty: preferred.difficulty || secondary.difficulty || null,
     rawChoice: {
       ...(secondary.rawChoice || {}),
@@ -616,6 +682,29 @@ function getCandidateChoice(candidate = {}) {
   return choice && typeof choice === "object" && !Array.isArray(choice) ? choice : {};
 }
 
+function getCandidateSelectionSource(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  return normalizeMetadataKey(
+    candidate?.selectionSource
+    || candidate?.selection_source
+    || choice?.selection_source
+    || choice?.source
+    || ""
+  );
+}
+
+function isApprovedTargetSelectionSource(source = "") {
+  return source === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    || source === APPROVED_TARGET_TEACHER_SOURCE;
+}
+
+function getSelectorSourcePriority(source = "") {
+  const cleanSource = normalizeMetadataKey(source);
+  return Object.prototype.hasOwnProperty.call(APPROVED_TARGET_SOURCE_PRIORITIES, cleanSource)
+    ? APPROVED_TARGET_SOURCE_PRIORITIES[cleanSource]
+    : 99;
+}
+
 function getCandidateDifficultyScore(candidate) {
   const score = Number(candidate?.difficulty?.coreScore ?? candidate?.difficulty?.score ?? 0);
   return Number.isFinite(score) ? score : 0;
@@ -645,14 +734,35 @@ function getSelectorDifficulty(candidate) {
 
 function getCandidateSuitability(candidate = {}) {
   const choice = getCandidateChoice(candidate);
+  const source = getCandidateSelectionSource(candidate);
+
+  const explicitActive = choice?.is_active ?? choice?.isActive ?? candidate?.is_active ?? candidate?.isActive;
+  if (explicitActive === false) return "exclude";
+
+  const approval = normalizeMetadataKey(
+    choice?.approval_status
+    || choice?.approvalStatus
+    || candidate?.approval_status
+    || candidate?.approvalStatus
+    || ""
+  );
+  if (approval && approval !== "approved") return "exclude";
+
   const value = normalizeMetadataKey(
     choice?.selection_suitability
     || choice?.selectionSuitability
+    || choice?.suitability_status
+    || choice?.suitabilityStatus
     || choice?.suitability
+    || candidate?.selection_suitability
+    || candidate?.selectionSuitability
+    || candidate?.suitability_status
+    || candidate?.suitabilityStatus
     || ""
   );
-  if (value === "exclude" || value === "caution" || value === "standard") return value;
-  return normalizeMetadataKey(choice?.source) === APPROVED_TARGET_SOURCE ? "standard" : "";
+  if (value === "exclude" || value === "caution") return value;
+  if (value === "standard" || value === "suitable") return "standard";
+  return source === APPROVED_TARGET_TEACHER_SOURCE ? "standard" : "";
 }
 
 function getSelectorDifficultyBandKey(difficulty = {}) {
@@ -698,7 +808,8 @@ function normalizeSelectorCandidate(candidate = {}, focusGrapheme = "") {
   const word = normalizeWord(candidate?.word || "");
   if (!word) return null;
   const choice = getCandidateChoice(candidate);
-  if (normalizeMetadataKey(choice?.source) !== APPROVED_TARGET_SOURCE) return null;
+  const selectionSource = getCandidateSelectionSource(candidate);
+  if (!isApprovedTargetSelectionSource(selectionSource)) return null;
 
   const segments = normalizeSegments(word, candidate?.segments);
   const focus = normalizeToken(focusGrapheme);
@@ -709,8 +820,15 @@ function normalizeSelectorCandidate(candidate = {}, focusGrapheme = "") {
     ...(Array.isArray(choice?.focus_graphemes) ? choice.focus_graphemes : []),
     choice?.engine_focus_grapheme || choice?.engineFocusGrapheme || "",
   ]);
-  const focusMatch = focusGraphemes.includes(focus);
-  const segmentMatch = segments.includes(focus);
+  const coreTargetLink = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? findWordloomCoreTargetLink(candidate, focus)
+    : null;
+  const focusMatch = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? !!coreTargetLink
+    : focusGraphemes.includes(focus);
+  const segmentMatch = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? false
+    : segments.includes(focus);
   if (!focusMatch && !segmentMatch) return null;
 
   const suitability = getCandidateSuitability(candidate);
@@ -731,10 +849,36 @@ function normalizeSelectorCandidate(candidate = {}, focusGrapheme = "") {
     segments,
     sentence: String(candidate?.sentence || "").trim(),
     coverage: focusMatch ? 2 : 1,
+    selectionSource,
+    sourcePriority: getSelectorSourcePriority(selectionSource),
     difficulty,
     bandKey: getSelectorDifficultyBandKey(difficulty),
     difficultyScore,
   };
+}
+
+function getWordloomCoreTargetLinks(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const links = candidate?.focusTargetLinks
+    || candidate?.focus_target_links
+    || candidate?.wordTargetLinks
+    || candidate?.word_target_links
+    || choice?.focus_target_links
+    || choice?.word_target_links
+    || [];
+  return (Array.isArray(links) ? links : [])
+    .map((item) => ({
+      focusGrapheme: normalizeToken(item?.focusGrapheme || item?.focus_grapheme || item?.target || ""),
+      targetRole: normalizeMetadataKey(item?.targetRole || item?.target_role || item?.role || ""),
+    }))
+    .filter((item) => item.focusGrapheme && (item.targetRole === "primary" || item.targetRole === "secondary"));
+}
+
+function findWordloomCoreTargetLink(candidate = {}, focus = "") {
+  const cleanFocus = normalizeToken(focus);
+  if (!cleanFocus) return null;
+  return getWordloomCoreTargetLinks(candidate)
+    .find((item) => item.focusGrapheme === cleanFocus) || null;
 }
 
 function buildSelectorWindow(window, { widened = false } = {}) {
@@ -771,6 +915,10 @@ function rankApprovedTargetCandidates(items, {
 } = {}) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
     if (b.coverage !== a.coverage) return b.coverage - a.coverage;
+
+    const sourcePriorityA = Number(a.sourcePriority ?? getSelectorSourcePriority(a.selectionSource));
+    const sourcePriorityB = Number(b.sourcePriority ?? getSelectorSourcePriority(b.selectionSource));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
 
     const distanceA = Math.abs(Number(a.difficultyScore || 0) - center);
     const distanceB = Math.abs(Number(b.difficultyScore || 0) - center);
@@ -1368,12 +1516,50 @@ function buildWordSpec(candidate, {
         ? "stretch_probe"
         : TARGET_REASON_BY_SUPPORT[support] || "target_independent"),
     originTestWordId: candidate.originTestWordId || null,
+    originBankWordId: candidate.originBankWordId || null,
     originWordSource: candidate.originWordSource || "library",
+    meaning: candidate.meaning || null,
+    contextSupport: candidate.contextSupport || null,
     difficulty: candidate.difficulty || buildPersistedDifficultyPayload({
       word: candidate.word,
       graphemes: candidate.segments,
     }),
   };
+}
+
+function normalizeContextSupportPayload(spec = {}, sentence = "") {
+  const source = spec?.contextSupport || spec?.context_support || {};
+  const context = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const cleanSentence = String(
+    context?.sentence
+    || context?.sentence_text
+    || context?.sentenceText
+    || sentence
+    || ""
+  ).trim();
+  const cleanMeaning = String(
+    spec?.meaning
+    || context?.meaning
+    || context?.definition
+    || context?.meaning_text
+    || context?.meaningText
+    || ""
+  ).trim();
+  const payload = {};
+
+  if (cleanSentence) {
+    payload.sentence = cleanSentence;
+    payload.sentence_status = String(context?.sentence_status || context?.sentenceStatus || "approved").trim() || "approved";
+    payload.sentence_required = context?.sentence_required === true || context?.sentenceRequired === true;
+  }
+  if (cleanMeaning) {
+    payload.meaning = cleanMeaning;
+    payload.meaning_status = String(context?.meaning_status || context?.meaningStatus || "approved").trim() || "approved";
+    payload.meaning_enabled = context?.meaning_enabled === false || context?.meaningEnabled === false ? false : true;
+    payload.meaning_enabled_by_default = context?.meaning_enabled_by_default === false || context?.meaningEnabledByDefault === false ? false : true;
+  }
+
+  return Object.keys(payload).length ? payload : null;
 }
 
 export function buildAssignmentEngineWordPayload(spec = {}, position = 1) {
@@ -1384,25 +1570,31 @@ export function buildAssignmentEngineWordPayload(spec = {}, position = 1) {
     word,
     graphemes: segments,
   });
+  const sentence = String(spec.sentence || "").trim() || null;
+  const contextSupport = normalizeContextSupportPayload(spec, sentence || "");
+  const originBankWordId = String(spec.originBankWordId || spec.origin_bank_word_id || "").trim();
+  const choice = {
+    focus_graphemes: focus ? [focus] : [],
+    difficulty,
+    source: ASSIGNMENT_ENGINE_WORD_SOURCE,
+    question_type: spec.questionType || spec.question_type || "no_support_assessment",
+    assignment_role: spec.assignmentRole || spec.assignment_role || "target",
+    assignment_support: spec.assignmentSupport || spec.assignment_support || "independent",
+    support_ladder_band: spec.supportLadderBand || spec.support_ladder_band || "",
+    support_ladder_reason: spec.supportLadderReason || spec.support_ladder_reason || "",
+    engine_focus_grapheme: focus || "",
+    origin_test_word_id: spec.originTestWordId || spec.origin_test_word_id || null,
+    origin_word_source: spec.originWordSource || spec.origin_word_source || "library",
+  };
+  if (originBankWordId) choice.origin_bank_word_id = originBankWordId;
+  if (contextSupport) choice.context_support = contextSupport;
 
   return {
     position,
     word,
-    sentence: String(spec.sentence || "").trim() || null,
+    sentence,
     segments,
-    choice: {
-      focus_graphemes: focus ? [focus] : [],
-      difficulty,
-      source: ASSIGNMENT_ENGINE_WORD_SOURCE,
-      question_type: spec.questionType || spec.question_type || "no_support_assessment",
-      assignment_role: spec.assignmentRole || spec.assignment_role || "target",
-      assignment_support: spec.assignmentSupport || spec.assignment_support || "independent",
-      support_ladder_band: spec.supportLadderBand || spec.support_ladder_band || "",
-      support_ladder_reason: spec.supportLadderReason || spec.support_ladder_reason || "",
-      engine_focus_grapheme: focus || "",
-      origin_test_word_id: spec.originTestWordId || spec.origin_test_word_id || null,
-      origin_word_source: spec.originWordSource || spec.origin_word_source || "library",
-    },
+    choice,
   };
 }
 

@@ -43,7 +43,7 @@ import {
   buildAssignmentEngineWordSignature,
   buildGeneratedAssignmentPlan,
   isFullyGeneratedAssignmentWordRows,
-} from "./assignmentEngine.js?v=1.5";
+} from "./assignmentEngine.js?v=1.6";
 import {
   buildExportFilename,
   buildScopedAnalyticsExportModel,
@@ -85,6 +85,7 @@ import {
   importStaffDirectoryCsv,
   getActiveSchoolIdFromAccessContext,
   isDeveloperSchoolSwitchEnabled,
+  listWordloomCoreSpellingBankWordRows,
   listTeacherPupilDirectoryForInterventionGroups,
   listActiveAdminUserIds,
   listActiveStaffRoleAssignments,
@@ -121,7 +122,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.48";
+} from "./db.js?v=1.49";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -11970,9 +11971,18 @@ async function buildPersonalisedPlanForClass({
   const nonBaselineAttempts = (attemptRows || []).filter(
     (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt)
   );
+  const wordloomCoreWordRows = await listWordloomCoreSpellingBankWordRows();
+  const wordloomCoreTests = wordloomCoreWordRows.length
+    ? [{
+      id: "wordloom-core-spelling-bank",
+      title: "Wordloom Core Spelling Bank",
+      test_words: wordloomCoreWordRows,
+    }]
+    : [];
+  const personalisedSourceTests = [...wordloomCoreTests, ...teacherTests];
   let plan = buildGeneratedAssignmentPlan({
     pupilIds: safePupilIds,
-    teacherTests,
+    teacherTests: personalisedSourceTests,
     attempts: nonBaselineAttempts,
     totalWords: effectivePolicy.assignment_length,
     currentProfiles,
@@ -11983,7 +11993,7 @@ async function buildPersonalisedPlanForClass({
   if (effectivePolicy.allow_starter_fallback && needsStarterCatalogFallback(plan, safePupilIds)) {
     plan = buildGeneratedAssignmentPlan({
       pupilIds: safePupilIds,
-      teacherTests: [...teacherTests, ...buildStarterCatalogVirtualTests()],
+      teacherTests: [...personalisedSourceTests, ...buildStarterCatalogVirtualTests()],
       attempts: nonBaselineAttempts,
       totalWords: effectivePolicy.assignment_length,
       currentProfiles,

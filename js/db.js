@@ -4,7 +4,7 @@ import { DEFAULT_QUESTION_TYPE, normalizeStoredQuestionType } from "./questionTy
 import {
   buildAssignmentEnginePupilReason,
   isFullyGeneratedAssignmentWordRows,
-} from "./assignmentEngine.js?v=1.5";
+} from "./assignmentEngine.js?v=1.6";
 import {
   buildBaselinePupilReason,
   isBaselineAssignmentWordRows,
@@ -63,6 +63,9 @@ const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
 const TEACHER_PUPIL_GROUP_VALUES_TABLE = "teacher_pupil_group_values";
 const WORD_CONTEXT_SUPPORT_TABLE = "word_context_support";
 const WORD_CONTEXT_SUPPORT_SELECT = "id, school_id, normalized_word, display_word, context_key, sentence, meaning, sentence_required, meaning_enabled_by_default, sentence_status, meaning_status, source, quality_flags, created_by, updated_by, created_at, updated_at";
+const WORDLOOM_CORE_WORD_TABLE = "wordloom_core_words";
+const WORDLOOM_CORE_WORD_TARGET_TABLE = "wordloom_core_word_targets";
+const WORDLOOM_CORE_FOCUS_TARGET_TABLE = "wordloom_core_focus_targets";
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
@@ -2091,6 +2094,259 @@ function normalizeLoadedWordRow(wordRow) {
 
 function normalizeLoadedWordRows(wordRows) {
   return (Array.isArray(wordRows) ? wordRows : []).map((row) => normalizeLoadedWordRow(row));
+}
+
+function normalizeWordloomCoreText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeWordloomCoreTextList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeWordloomCoreText(item)).filter(Boolean);
+  }
+
+  const clean = String(value || "").trim();
+  if (!clean) return [];
+
+  try {
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => normalizeWordloomCoreText(item)).filter(Boolean);
+    }
+  } catch {
+    // Fall through to the generic stored-segment parser below.
+  }
+
+  return normalizeLoadedSegments(clean)
+    .map((item) => normalizeWordloomCoreText(item))
+    .filter(Boolean);
+}
+
+function normalizeWordloomCoreDifficultyLabel(value = "") {
+  const label = String(value || "").trim();
+  const key = label.toLowerCase();
+  if (key.includes("stretch") || key.includes("challenge")) return { key: "challenge", label: label || "Stretch" };
+  if (key.includes("core")) return { key: "core", label: label || "Core" };
+  if (key.includes("easier") || key.includes("foundation")) return { key: "easier", label: label || "Easier" };
+  return { key: "", label };
+}
+
+function buildWordloomCoreDifficultyPayload(row = {}) {
+  const score = Number(row?.difficulty_score ?? row?.difficultyScore);
+  if (!Number.isFinite(score)) return null;
+  const band = normalizeWordloomCoreDifficultyLabel(row?.difficulty_label || row?.difficultyLabel);
+  const reason = String(row?.difficulty_reason || row?.difficultyReason || "").trim();
+  return {
+    version: "wordloom_core",
+    coreScore: Math.round(score),
+    adjustedScore: Math.round(score),
+    score: Math.round(score),
+    band: band.key || "core",
+    coreBand: band.key || "core",
+    label: band.label || "Core",
+    coreLabel: band.label || "Core",
+    reasons: reason ? [reason] : [],
+    modifierReasons: [],
+    flags: {},
+    features: {},
+    components: {},
+    modifiers: {},
+  };
+}
+
+function buildWordloomCoreContextSupport(row = {}) {
+  const sentence = String(row?.sentence || "").trim();
+  const meaning = String(row?.meaning || "").trim();
+  const context = {};
+
+  if (sentence) {
+    context.sentence = sentence;
+    context.sentence_status = "approved";
+    context.sentence_required = false;
+  }
+  if (meaning) {
+    context.meaning = meaning;
+    context.meaning_status = "approved";
+    context.meaning_enabled = true;
+    context.meaning_enabled_by_default = true;
+  }
+
+  return Object.keys(context).length ? context : null;
+}
+
+function normalizeWordloomCoreTargetRow(row = {}) {
+  const focusGrapheme = normalizeWordloomCoreText(row?.focus_grapheme || row?.focusGrapheme);
+  const targetRole = String(row?.target_role || row?.targetRole || "").trim().toLowerCase();
+  if (!focusGrapheme || !["primary", "secondary"].includes(targetRole)) return null;
+  return {
+    id: String(row?.id || "").trim(),
+    word_id: String(row?.word_id || row?.wordId || "").trim(),
+    focus_target_id: String(row?.focus_target_id || row?.focusTargetId || "").trim(),
+    focus_grapheme: focusGrapheme,
+    target_role: targetRole,
+    difficulty_modifier: Number.isFinite(Number(row?.difficulty_modifier ?? row?.difficultyModifier))
+      ? Number(row?.difficulty_modifier ?? row?.difficultyModifier)
+      : 0,
+    pattern_type: String(row?.pattern_type || row?.patternType || "").trim().toLowerCase(),
+  };
+}
+
+function chunkWordloomCoreIds(items = [], size = 100) {
+  const list = Array.isArray(items) ? items : [];
+  const chunks = [];
+  for (let index = 0; index < list.length; index += size) {
+    chunks.push(list.slice(index, index + size));
+  }
+  return chunks;
+}
+
+export function mapWordloomCoreBankRowsToWordRows({
+  wordRows = [],
+  wordTargetRows = [],
+  focusTargetRows = [],
+} = {}) {
+  const activeTargetIds = new Set(
+    (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+      .filter((row) => row?.is_active !== false && row?.isActive !== false)
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const targetRowsByWordId = new Map();
+
+  for (const row of Array.isArray(wordTargetRows) ? wordTargetRows : []) {
+    const target = normalizeWordloomCoreTargetRow(row);
+    if (!target?.word_id) continue;
+    if (!activeTargetIds.has(target.focus_target_id)) continue;
+    const next = targetRowsByWordId.get(target.word_id) || [];
+    next.push(target);
+    targetRowsByWordId.set(target.word_id, next);
+  }
+
+  return (Array.isArray(wordRows) ? wordRows : [])
+    .map((row) => {
+      const id = String(row?.id || "").trim();
+      if (!id) return null;
+      if (row?.is_active === false || row?.isActive === false) return null;
+      if (String(row?.approval_status || row?.approvalStatus || "").trim().toLowerCase() !== "approved") return null;
+      if (String(row?.suitability_status || row?.suitabilityStatus || "").trim().toLowerCase() !== "suitable") return null;
+
+      const targets = (targetRowsByWordId.get(id) || [])
+        .sort((a, b) => {
+          const roleDiff = (a.target_role === "primary" ? 0 : 1) - (b.target_role === "primary" ? 0 : 1);
+          if (roleDiff) return roleDiff;
+          return a.focus_grapheme.localeCompare(b.focus_grapheme);
+        });
+      const focusGraphemes = [...new Set(targets.map((target) => target.focus_grapheme).filter(Boolean))];
+      if (!focusGraphemes.length) return null;
+
+      const word = normalizeWordloomCoreText(row?.normalised_word || row?.normalisedWord || row?.word);
+      const segments = normalizeWordloomCoreTextList(row?.grapheme_segments ?? row?.graphemeSegments);
+      if (!word || !segments.length) return null;
+
+      const primaryFocus = normalizeWordloomCoreText(row?.primary_focus_grapheme || row?.primaryFocusGrapheme);
+      const contextSupport = buildWordloomCoreContextSupport(row);
+      const difficulty = buildWordloomCoreDifficultyPayload(row);
+      const sourceVersion = String(row?.source_version || row?.sourceVersion || "").trim();
+
+      return normalizeLoadedWordRow({
+        id,
+        word,
+        sentence: String(row?.sentence || "").trim() || null,
+        segments,
+        choice: {
+          source: "wordloom_core",
+          source_version: sourceVersion || null,
+          origin_word_source: "wordloom_core",
+          origin_bank_word_id: id,
+          focus_graphemes: focusGraphemes,
+          primary_focus_grapheme: focusGraphemes.includes(primaryFocus) ? primaryFocus : focusGraphemes[0],
+          focus_target_links: targets,
+          selection_suitability: "standard",
+          suitability_status: "suitable",
+          approval_status: "approved",
+          is_active: true,
+          difficulty,
+          difficulty_reason: String(row?.difficulty_reason || row?.difficultyReason || "").trim() || null,
+          context_support: contextSupport,
+        },
+      });
+    })
+    .filter(Boolean);
+}
+
+function isMissingWordloomCoreBankError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || message.includes(WORDLOOM_CORE_WORD_TABLE)
+    || message.includes(WORDLOOM_CORE_WORD_TARGET_TABLE)
+    || message.includes(WORDLOOM_CORE_FOCUS_TARGET_TABLE);
+}
+
+export async function listWordloomCoreSpellingBankWordRows({
+  limit = 600,
+} = {}) {
+  const safeLimit = Math.max(50, Math.min(1000, Math.round(Number(limit) || 600)));
+  const { data: wordRows, error: wordError } = await supabase
+    .from(WORDLOOM_CORE_WORD_TABLE)
+    .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
+    .eq("is_active", true)
+    .eq("approval_status", "approved")
+    .eq("suitability_status", "suitable")
+    .order("primary_focus_grapheme", { ascending: true })
+    .order("difficulty_score", { ascending: true })
+    .order("normalised_word", { ascending: true })
+    .limit(safeLimit);
+
+  if (wordError) {
+    if (isMissingWordloomCoreBankError(wordError)) return [];
+    throw wordError;
+  }
+
+  const safeWordRows = Array.isArray(wordRows) ? wordRows : [];
+  const wordIds = safeWordRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+  if (!wordIds.length) return [];
+
+  const wordTargetRows = [];
+  for (const chunk of chunkWordloomCoreIds(wordIds)) {
+    const { data, error: targetError } = await supabase
+      .from(WORDLOOM_CORE_WORD_TARGET_TABLE)
+      .select("id, word_id, focus_target_id, focus_grapheme, target_role, pattern_type, difficulty_modifier")
+      .in("word_id", chunk)
+      .in("target_role", ["primary", "secondary"]);
+
+    if (targetError) {
+      if (isMissingWordloomCoreBankError(targetError)) return [];
+      throw targetError;
+    }
+    wordTargetRows.push(...(Array.isArray(data) ? data : []));
+  }
+
+  const focusTargetIds = [...new Set(
+    wordTargetRows
+      .map((row) => String(row?.focus_target_id || "").trim())
+      .filter(Boolean)
+  )];
+  if (!focusTargetIds.length) return [];
+
+  const { data: focusTargetRows, error: focusError } = await supabase
+    .from(WORDLOOM_CORE_FOCUS_TARGET_TABLE)
+    .select("id, focus_grapheme, is_active")
+    .in("id", focusTargetIds)
+    .eq("is_active", true);
+
+  if (focusError) {
+    if (isMissingWordloomCoreBankError(focusError)) return [];
+    throw focusError;
+  }
+
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows: safeWordRows,
+    wordTargetRows: wordTargetRows || [],
+    focusTargetRows: focusTargetRows || [],
+  });
 }
 
 function normalizeBeeEndedReason(value) {

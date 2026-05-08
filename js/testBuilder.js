@@ -12,7 +12,7 @@ import {
   storeActiveSchoolId,
   upsertWordContextSupport,
   withActiveSchoolId,
-} from "./db.js?v=1.48";
+} from "./db.js?v=1.49";
 import {
   buildTestWordContextSnapshot,
   validateMeaningSupportText,
