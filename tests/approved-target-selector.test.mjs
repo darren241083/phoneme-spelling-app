@@ -395,6 +395,78 @@ test("generated assignment target section uses approved selector and skips non-a
   assertJsonEqual(targetWords, ["phone"]);
 });
 
+test("generated assignment uses partial primary target coverage and fills safely with warnings", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-ai-2", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-ai-3", word: "paint", score: 26, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "review-ee-1", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-ee-2", word: "green", score: 25, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "review-ee-3", word: "sleep", score: 26, focus: ["ee"], segments: ["s", "l", "ee", "p"] }),
+        wordRow({ id: "stretch-or-1", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        wordRow({ id: "stretch-or-2", word: "short", score: 60, focus: ["or"], segments: ["sh", "or", "t"] }),
+        wordRow({ id: "target-ph-1", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        wordRow({ id: "target-sh-1", word: "shell", score: 31, focus: ["sh"], segments: ["sh", "e", "ll"] }),
+        wordRow({ id: "generated-ph", word: "phase", score: 30, focus: ["ph"], segments: ["ph", "a", "s", "e"], source: "assignment_engine_pool" }),
+        wordRow({ id: "pending-ph", word: "photo", score: 31, focus: ["ph"], segments: ["ph", "o", "t", "o"], approvalStatus: "pending" }),
+        wordRow({ id: "blocked-ph", word: "graph", score: 32, focus: ["ph"], segments: ["g", "r", "a", "ph"], suitability: "blocked" }),
+        wordRow({ id: "unsuitable-ph", word: "phantom", score: 33, focus: ["ph"], segments: ["ph", "a", "n", "t", "o", "m"], suitabilityStatus: "unsuitable" }),
+        wordRow({ id: "inactive-ph", word: "sphere", score: 34, focus: ["ph"], segments: ["s", "ph", "ere"], active: false }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [
+          { target: "ph", total: 4, securityBand: "insecure" },
+          { target: "sh", total: 3, securityBand: "insecure" },
+        ],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assert.equal(plan.coverageWarnings.length, 1);
+  assertJsonEqual(plan.coverageWarnings[0], {
+    type: "target_coverage_low",
+    pupilId: "pupil-1",
+    focusGrapheme: "ph",
+    requestedTargetCount: 4,
+    selectedTargetCount: 1,
+    fallbackCount: 3,
+    message: "Only 1 of 4 requested target slots could use approved ph words; 3 slots will use safe fallback, review, or consolidation words.",
+  });
+
+  const pupilPlan = plan.pupilPlans[0];
+  const pupilWords = pupilPlan?.words || [];
+  assert.equal(pupilPlan.coverageWarnings.length, 1);
+  assert.equal(pupilWords.length, 10);
+  assert.equal(new Set(pupilWords.map((item) => item.word)).size, pupilWords.length);
+
+  const selectedWords = pupilWords.map((item) => item.word);
+  assert.equal(selectedWords.includes("phone"), true);
+  assert.equal(selectedWords.includes("shell"), true);
+  for (const blocked of ["phase", "photo", "graph", "phantom", "sphere"]) {
+    assert.equal(selectedWords.includes(blocked), false, `${blocked} should not be selected`);
+  }
+
+  const targetWords = pupilWords
+    .filter((item) => item.assignmentRole === "target")
+    .map((item) => item.word);
+  assertJsonEqual(targetWords, ["phone", "shell"]);
+});
+
 test("generated assignment can use wordloom core ar bank with no teacher test_words", () => {
   const core = (data) => wordRow({
     source: "wordloom_core",
@@ -510,7 +582,7 @@ test("early_stretch baseline seed drives advanced approved target choice in firs
   assertJsonEqual(targetWords, ["chiefly"]);
 });
 
-test("generated assignment does not fall back when approved target bank is insufficient", () => {
+test("generated assignment fails only when safe non-duplicate fallback words are insufficient", () => {
   const plan = buildGeneratedAssignmentPlan({
     pupilIds: ["pupil-1"],
     teacherTests: [{
@@ -533,7 +605,7 @@ test("generated assignment does not fall back when approved target bank is insuf
   });
 
   assert.equal(plan.pupilPlans.length, 0);
-  assert.equal(plan.error, "Not enough saved words are available for ph.");
+  assert.equal(plan.error, "Not enough safe candidate words are available to build the assignment.");
 });
 
 let failureCount = 0;

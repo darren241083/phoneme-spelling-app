@@ -73,6 +73,35 @@ function buildCoreBankRowsForProvisioning() {
   });
 }
 
+function buildLowCoverageCoreBankRowsForProvisioning() {
+  const wordRows = [
+    coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 46 }),
+    coreBankWord({ id: "core-boat", word: "boat", segments: ["b", "oa", "t"], focus: "oa", score: 28 }),
+    coreBankWord({ id: "core-seed", word: "seed", segments: ["s", "ee", "d"], focus: "ee", score: 28 }),
+    coreBankWord({ id: "core-train", word: "train", segments: ["t", "r", "ai", "n"], focus: "ai", score: 30 }),
+    coreBankWord({ id: "core-light", word: "light", segments: ["l", "igh", "t"], focus: "igh", score: 32 }),
+    coreBankWord({ id: "core-farm", word: "farm", segments: ["f", "ar", "m"], focus: "ar", score: 34 }),
+    coreBankWord({ id: "core-start", word: "start", segments: ["s", "t", "ar", "t"], focus: "ar", score: 36 }),
+    coreBankWord({ id: "core-storm", word: "storm", segments: ["s", "t", "or", "m"], focus: "or", score: 38 }),
+    coreBankWord({ id: "core-short", word: "short", segments: ["sh", "or", "t"], focus: "or", score: 40 }),
+    coreBankWord({ id: "core-green", word: "green", segments: ["g", "r", "ee", "n"], focus: "ee", score: 30 }),
+    coreBankWord({ id: "core-paint", word: "paint", segments: ["p", "ai", "n", "t"], focus: "ai", score: 32 }),
+  ];
+  const focusTargetRows = [...new Set(wordRows.map((row) => row.primary_focus_grapheme))]
+    .map((focus) => ({ id: `target-${focus}`, focus_grapheme: focus, is_active: true }));
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows: wordRows.map((row) => ({
+      id: `link-${row.id}`,
+      word_id: row.id,
+      focus_target_id: `target-${row.primary_focus_grapheme}`,
+      focus_grapheme: row.primary_focus_grapheme,
+      target_role: "primary",
+    })),
+    focusTargetRows,
+  });
+}
+
 function buildBaselineRows() {
   return buildBaselineAssignmentDefinition({})
     .wordRows
@@ -251,6 +280,33 @@ const provisionedFromAttemptDerivedStatus = buildProvisioningPlan({
 });
 assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans.length, 1);
 assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans[0].primaryTargetGrapheme, "tion");
+
+const provisionedWithLowCoverageFallback = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: [baselineStatusWithResultJson],
+  wordloomCoreWordRows: buildLowCoverageCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 10,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+assert.equal(provisionedWithLowCoverageFallback.plan.pupilPlans.length, 1);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings.length, 1);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].focusGrapheme, "tion");
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].requestedTargetCount, 4);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].selectedTargetCount, 1);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].fallbackCount, 3);
+const lowCoverageWords = provisionedWithLowCoverageFallback.plan.pupilPlans[0].words;
+assert.equal(lowCoverageWords.length, 10);
+assert.equal(new Set(lowCoverageWords.map((word) => word.word)).size, 10);
+assert.equal(
+  lowCoverageWords.filter((word) => word.assignmentRole === "target" && word.focusGrapheme === "tion").length,
+  1,
+);
 
 assert.throws(
   () => buildProvisioningPlan({

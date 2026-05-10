@@ -383,7 +383,7 @@ export function buildAutoAssignmentComposition(totalWords = ASSIGNMENT_ENGINE_DE
 }
 
 export function isAssignmentEngineWordRow(wordRow) {
-  return normalizeToken(wordRow?.choice?.source) === ASSIGNMENT_ENGINE_WORD_SOURCE;
+  return normalizeMetadataKey(wordRow?.choice?.source) === ASSIGNMENT_ENGINE_WORD_SOURCE;
 }
 
 export function isFullyGeneratedAssignmentWordRows(wordRows) {
@@ -760,9 +760,44 @@ function getCandidateSuitability(candidate = {}) {
     || candidate?.suitabilityStatus
     || ""
   );
-  if (value === "exclude" || value === "caution") return value;
+  if (value === "exclude" || value === "caution" || value === "blocked" || value === "unsuitable") return value;
   if (value === "standard" || value === "suitable") return "standard";
   return source === APPROVED_TARGET_TEACHER_SOURCE ? "standard" : "";
+}
+
+function isGeneratedAssignmentCandidateUsable(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const source = getCandidateSelectionSource(candidate);
+  if (source === ASSIGNMENT_ENGINE_WORD_SOURCE) return false;
+
+  const explicitActive = choice?.is_active ?? choice?.isActive ?? candidate?.is_active ?? candidate?.isActive;
+  if (explicitActive === false) return false;
+
+  const approval = normalizeMetadataKey(
+    choice?.approval_status
+    || choice?.approvalStatus
+    || candidate?.approval_status
+    || candidate?.approvalStatus
+    || ""
+  );
+  if (approval && approval !== "approved") return false;
+
+  const suitability = normalizeMetadataKey(
+    choice?.selection_suitability
+    || choice?.selectionSuitability
+    || choice?.suitability_status
+    || choice?.suitabilityStatus
+    || choice?.suitability
+    || candidate?.selection_suitability
+    || candidate?.selectionSuitability
+    || candidate?.suitability_status
+    || candidate?.suitabilityStatus
+    || ""
+  );
+  return suitability !== "exclude"
+    && suitability !== "caution"
+    && suitability !== "blocked"
+    && suitability !== "unsuitable";
 }
 
 function getSelectorDifficultyBandKey(difficulty = {}) {
@@ -1598,6 +1633,29 @@ export function buildAssignmentEngineWordPayload(spec = {}, position = 1) {
   };
 }
 
+function buildTargetCoverageWarning({
+  pupilId = "",
+  focusGrapheme = "",
+  requestedTargetCount = 0,
+  selectedTargetCount = 0,
+} = {}) {
+  const requested = Math.max(0, Number(requestedTargetCount || 0));
+  const selected = Math.max(0, Number(selectedTargetCount || 0));
+  const fallbackCount = Math.max(0, requested - selected);
+  const focus = normalizeToken(focusGrapheme);
+  return {
+    type: "target_coverage_low",
+    pupilId: String(pupilId || ""),
+    focusGrapheme: focus,
+    requestedTargetCount: requested,
+    selectedTargetCount: selected,
+    fallbackCount,
+    message: fallbackCount
+      ? `Only ${selected} of ${requested} requested target slots could use approved ${focus} words; ${fallbackCount} slot${fallbackCount === 1 ? "" : "s"} will use safe fallback, review, or consolidation words.`
+      : "",
+  };
+}
+
 function buildPupilPlan({
   pupilId,
   profile,
@@ -1607,11 +1665,13 @@ function buildPupilPlan({
   engineOptions,
 }) {
   const candidates = Array.isArray(pool?.candidates) ? pool.candidates : [];
+  const usableCandidates = candidates.filter(isGeneratedAssignmentCandidateUsable);
   const usageByWord = pool?.usageByWord instanceof Map ? pool.usageByWord : new Map();
   const usedWords = new Set();
   const effectiveEngineOptions = engineOptions && typeof engineOptions === "object"
     ? engineOptions
     : buildAutoAssignEngineOptions();
+  const coverageWarnings = [];
 
   const primaryTargetRow = getPrimaryTarget(profile, fallbackProfile);
   const primaryTarget = normalizeToken(primaryTargetRow?.target);
@@ -1626,23 +1686,6 @@ function buildPupilPlan({
 
   const reservedPrimarySlots = Math.min(composition.target, Math.max(2, composition.target - 1));
   const targetChallengeLevel = resolveProfileChallengeLevel(profile || fallbackProfile);
-  const primaryCoverage = selectApprovedTargetWords({
-    focusGrapheme: primaryTarget,
-    candidates,
-    challengeLevel: targetChallengeLevel,
-    count: reservedPrimarySlots,
-    usageByWord,
-    usedWords: new Set(),
-  });
-
-  if (primaryCoverage.status !== APPROVED_TARGET_SELECTOR_STATUS_READY) {
-    return {
-      pupilId,
-      missingGraphemes: [primaryTarget],
-      words: [],
-      error: `Not enough approved words are available for ${primaryTarget}.`,
-    };
-  }
 
   const reviewTargets = getUniqueTargetList(
     (profile?.secureRows?.length ? profile.secureRows : fallbackProfile?.secureRows) || [],
@@ -1667,7 +1710,7 @@ function buildPupilPlan({
     count: composition.review,
     graphemeOrder: reviewTargets,
     role: "review",
-    candidates,
+    candidates: usableCandidates,
     usageByWord,
     usedWords,
     fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
@@ -1678,35 +1721,14 @@ function buildPupilPlan({
     targetReason: "review_retention",
   }));
 
-  if (reviewCandidates.length < composition.review) {
-    return {
-      pupilId,
-      missingGraphemes: [],
-      words: [],
-      error: "Not enough candidate words are available to build the review section.",
-    };
-  }
-
-  const primaryTargetSelection = selectApprovedTargetWords({
-    focusGrapheme: primaryTarget,
+  const primaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
+    count: reservedPrimarySlots,
+    graphemeOrder: [primaryTarget],
     candidates,
     challengeLevel: targetChallengeLevel,
-    count: reservedPrimarySlots,
     usageByWord,
     usedWords,
   });
-  if (primaryTargetSelection.status !== APPROVED_TARGET_SELECTOR_STATUS_READY) {
-    return {
-      pupilId,
-      missingGraphemes: [primaryTarget],
-      words: [],
-      error: `Not enough approved words are available for ${primaryTarget}.`,
-    };
-  }
-  const primaryTargetCandidates = primaryTargetSelection.words;
-  for (const candidate of primaryTargetCandidates) {
-    usedWords.add(normalizeWord(candidate?.word || ""));
-  }
 
   const remainingTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
     count: Math.max(0, composition.target - primaryTargetCandidates.length),
@@ -1718,13 +1740,16 @@ function buildPupilPlan({
   });
 
   const targetCandidates = [...primaryTargetCandidates, ...remainingTargetCandidates].slice(0, composition.target);
-  if (targetCandidates.length < composition.target) {
-    return {
+  const primaryTargetSelectionCount = targetCandidates
+    .filter((candidate) => getCandidateCoverage(candidate, primaryTarget) > 0)
+    .length;
+  if (primaryTargetSelectionCount < composition.target) {
+    coverageWarnings.push(buildTargetCoverageWarning({
       pupilId,
-      missingGraphemes: [],
-      words: [],
-      error: "Not enough approved words are available to build the target section.",
-    };
+      focusGrapheme: primaryTarget,
+      requestedTargetCount: composition.target,
+      selectedTargetCount: primaryTargetSelectionCount,
+    }));
   }
 
   const targetSpecs = targetCandidates.map((candidate) => buildWordSpec(candidate, {
@@ -1740,20 +1765,11 @@ function buildPupilPlan({
     count: composition.stretch,
     graphemeOrder: stretchTargets,
     role: "stretch",
-    candidates,
+    candidates: usableCandidates,
     usageByWord,
     usedWords,
     fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
   });
-
-  if (stretchCandidates.length < composition.stretch) {
-    return {
-      pupilId,
-      missingGraphemes: [],
-      words: [],
-      error: "Not enough candidate words are available to build the stretch section.",
-    };
-  }
 
   const stretchSpecs = stretchCandidates.map((candidate) => buildWordSpec(candidate, {
     role: "stretch",
@@ -1762,8 +1778,44 @@ function buildPupilPlan({
     targetReason: "stretch_probe",
   }));
 
+  const specs = [...reviewCandidates, ...targetSpecs, ...stretchSpecs];
+  const fallbackTargets = getUniqueTargetList(
+    [
+      ...((profile?.secureRows?.length ? profile.secureRows : fallbackProfile?.secureRows) || []),
+      ...(profile?.developingRows || []),
+      ...((fallbackProfile?.developingRows || []).filter((item) => !profile?.developingRows?.some((own) => own.target === item.target))),
+      ...(profile?.concernRows || []),
+      ...((fallbackProfile?.concernRows || []).filter((item) => !profile?.concernRows?.some((own) => own.target === item.target))),
+    ],
+    [primaryTarget]
+  );
+  const fallbackCandidates = pickCandidatesByGraphemeOrder({
+    count: Math.max(0, composition.totalWords - specs.length),
+    graphemeOrder: fallbackTargets,
+    role: "review",
+    candidates: usableCandidates.filter((candidate) => getCandidateCoverage(candidate, primaryTarget) === 0),
+    usageByWord,
+    usedWords,
+  }).map((candidate) => buildWordSpec(candidate, {
+    role: "review",
+    support: "independent",
+    focusGrapheme: chooseBestFocusGrapheme(candidate.segments) || candidate.focusGraphemes?.[0] || "",
+    targetReason: "review_retention",
+  }));
+  specs.push(...fallbackCandidates);
+
+  if (specs.length < composition.totalWords) {
+    return {
+      pupilId,
+      missingGraphemes: [],
+      words: [],
+      coverageWarnings,
+      error: "Not enough safe candidate words are available to build the assignment.",
+    };
+  }
+
   const words = applySupportLadderToSpecs(
-    [...reviewCandidates, ...targetSpecs, ...stretchSpecs],
+    specs.slice(0, composition.totalWords),
     {
       band: targetChallengeLevel,
       profile,
@@ -1778,6 +1830,7 @@ function buildPupilPlan({
     primaryTargetGrapheme: primaryTarget,
     words,
     missingGraphemes: [],
+    coverageWarnings,
   };
 }
 
@@ -1871,6 +1924,7 @@ export function buildGeneratedAssignmentPlan({
   const pupilPlans = [];
   const missingGraphemes = new Set();
   const errors = [];
+  const coverageWarnings = [];
 
   for (const pupilId of pupils) {
     const providedProfile = currentProfiles && typeof currentProfiles === "object"
@@ -1890,6 +1944,9 @@ export function buildGeneratedAssignmentPlan({
     });
 
     if (plan?.error) errors.push(plan.error);
+    for (const warning of plan?.coverageWarnings || []) {
+      coverageWarnings.push(warning);
+    }
     for (const missing of plan?.missingGraphemes || []) {
       missingGraphemes.add(missing);
     }
@@ -1898,6 +1955,7 @@ export function buildGeneratedAssignmentPlan({
         pupilId,
         primaryTargetGrapheme: plan.primaryTargetGrapheme || "",
         words: plan.words.slice(0, composition.totalWords),
+        coverageWarnings: Array.isArray(plan.coverageWarnings) ? plan.coverageWarnings : [],
       });
     }
   }
@@ -1919,6 +1977,7 @@ export function buildGeneratedAssignmentPlan({
     clearFocusGrapheme: resolveAssignmentEngineFocus(allTargetWords),
     pupilPlans,
     missingGraphemes: [...missingGraphemes],
+    coverageWarnings,
     error: missingGraphemes.size
       ? `Not enough saved words are available for ${[...missingGraphemes].join(", ")}.`
       : (errors[0] || ""),
