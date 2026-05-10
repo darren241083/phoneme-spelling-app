@@ -4,9 +4,16 @@ import {
   buildAutoAssignedPoolEntries,
   buildAutoAssignedPoolIdMap,
   buildAutoAssignedTargetRows,
+  buildBaselineAssignmentMetaMap,
+  buildBaselineEvidenceAttemptRows,
+  buildPlacementCurrentProfiles,
+  buildProvisioningPlan,
   buildPublicProvisioningResponse,
   mapWordloomCoreBankRowsToWordRows,
 } from "../supabase/functions/provision-personalised-assignment/provisioningCore.mjs";
+import {
+  buildBaselineAssignmentDefinition,
+} from "../supabase/functions/provision-personalised-assignment/pure/baselinePlacement.js";
 
 const response = buildPublicProvisioningResponse({
   status: "provisioned",
@@ -19,6 +26,160 @@ assert.equal(response.status, "provisioned");
 assert.equal(response.assignmentId, "11111111-1111-4111-8111-111111111111");
 assert.deepEqual(buildPublicProvisioningResponse({ status: "not_ready" }), { status: "not_ready" });
 assert.deepEqual(buildPublicProvisioningResponse({ status: "unexpected" }), { status: "generation_failed" });
+
+function coreBankWord({ id, word, segments, focus, score = 42 }) {
+  return {
+    id,
+    word,
+    normalised_word: word,
+    grapheme_segments: segments,
+    primary_focus_grapheme: focus,
+    difficulty_score: score,
+    difficulty_label: "Core",
+    difficulty_reason: `${focus} smoke-test word.`,
+    sentence: `Spell ${word}.`,
+    meaning: `${word} meaning.`,
+    suitability_status: "suitable",
+    approval_status: "approved",
+    source_version: "test",
+    is_active: true,
+  };
+}
+
+function buildCoreBankRowsForProvisioning() {
+  const wordRows = [
+    coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 44 }),
+    coreBankWord({ id: "core-motion", word: "motion", segments: ["m", "o", "tion"], focus: "tion", score: 46 }),
+    coreBankWord({ id: "core-station", word: "station", segments: ["s", "t", "a", "tion"], focus: "tion", score: 48 }),
+    coreBankWord({ id: "core-fiction", word: "fiction", segments: ["f", "i", "c", "tion"], focus: "tion", score: 50 }),
+    coreBankWord({ id: "core-boat", word: "boat", segments: ["b", "oa", "t"], focus: "oa", score: 28 }),
+    coreBankWord({ id: "core-seed", word: "seed", segments: ["s", "ee", "d"], focus: "ee", score: 28 }),
+    coreBankWord({ id: "core-train", word: "train", segments: ["t", "r", "ai", "n"], focus: "ai", score: 30 }),
+    coreBankWord({ id: "core-light", word: "light", segments: ["l", "igh", "t"], focus: "igh", score: 32 }),
+  ];
+  const focusTargetRows = [...new Set(wordRows.map((row) => row.primary_focus_grapheme))]
+    .map((focus) => ({ id: `target-${focus}`, focus_grapheme: focus, is_active: true }));
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows: wordRows.map((row) => ({
+      id: `link-${row.id}`,
+      word_id: row.id,
+      focus_target_id: `target-${row.primary_focus_grapheme}`,
+      focus_grapheme: row.primary_focus_grapheme,
+      target_role: "primary",
+    })),
+    focusTargetRows,
+  });
+}
+
+function buildBaselineRows() {
+  return buildBaselineAssignmentDefinition({})
+    .wordRows
+    .map((row, index) => ({
+      ...row,
+      id: `baseline-word-${index + 1}`,
+    }));
+}
+
+function buildBaselineResultRows(rows) {
+  return rows.map((row) => {
+    const focus = row?.choice?.focus_graphemes?.[0] || "";
+    const correct = focus !== "tion";
+    return {
+      baseTestWordId: row.id,
+      word: row.word,
+      correctSpelling: row.word,
+      typed: correct ? row.word : "miss",
+      correct,
+      attemptsUsed: 1,
+      questionType: row?.choice?.question_type || "segmented_spelling",
+      focusGrapheme: focus,
+      targetGraphemes: row.segments,
+    };
+  });
+}
+
+const baselineRows = buildBaselineRows();
+const baselineAssignment = {
+  id: "baseline-assignment",
+  test: {
+    test_words: baselineRows,
+  },
+};
+const baselineStatusWithResultJson = {
+  pupil_id: "pupil-one",
+  assignment_id: "baseline-assignment",
+  status: "completed",
+  completed_at: "2026-05-10T12:00:00.000Z",
+  result_json: buildBaselineResultRows(baselineRows),
+};
+const baselineMetaById = buildBaselineAssignmentMetaMap([baselineAssignment]);
+
+assert.equal(baselineMetaById.get("baseline-assignment").wordRows.length, baselineRows.length);
+
+const baselineEvidenceRows = buildBaselineEvidenceAttemptRows({
+  attempts: [],
+  baselineStatusRows: [baselineStatusWithResultJson],
+  baselineAssignmentMetaById: baselineMetaById,
+});
+assert.equal(baselineEvidenceRows.length, baselineRows.length);
+assert.equal(baselineEvidenceRows.filter((row) => row.focus_grapheme === "tion" && row.correct === false).length, 4);
+
+const realAttempt = {
+  pupil_id: "pupil-one",
+  assignment_id: "baseline-assignment",
+  test_word_id: "baseline-word-10",
+  word_text: "question",
+  correct: true,
+  mode: "segmented_spelling",
+  attempt_source: "baseline",
+  attempt_number: 1,
+  focus_grapheme: "tion",
+  target_graphemes: ["qu", "e", "s", "tion"],
+  typed: "question",
+  created_at: "2026-05-10T11:59:00.000Z",
+};
+const questionResultRow = baselineStatusWithResultJson.result_json.find((row) => row.word === "question");
+const dedupedBaselineEvidenceRows = buildBaselineEvidenceAttemptRows({
+  attempts: [realAttempt],
+  baselineStatusRows: [{
+    ...baselineStatusWithResultJson,
+    result_json: [questionResultRow],
+  }],
+  baselineAssignmentMetaById: baselineMetaById,
+});
+assert.equal(dedupedBaselineEvidenceRows.length, 1);
+assert.equal(dedupedBaselineEvidenceRows[0].correct, true);
+
+const placementProfilesFromResultJson = buildPlacementCurrentProfiles({
+  pupilIds: ["pupil-one"],
+  attempts: [],
+  baselineStatusRows: [baselineStatusWithResultJson],
+  baselineAssignmentMetaById: baselineMetaById,
+});
+assert.equal(placementProfilesFromResultJson["pupil-one"].concernRows[0].target, "tion");
+
+const provisionedFromStatusOnly = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: [baselineStatusWithResultJson],
+  wordloomCoreWordRows: buildCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+assert.equal(provisionedFromStatusOnly.plan.pupilPlans.length, 1);
+assert.equal(provisionedFromStatusOnly.plan.pupilPlans[0].primaryTargetGrapheme, "tion");
+assert.equal(
+  provisionedFromStatusOnly.plan.pupilPlans[0].words.some((word) =>
+    word.assignmentRole === "target" && word.focusGrapheme === "tion"
+  ),
+  true,
+);
 
 const mappedCoreRows = mapWordloomCoreBankRowsToWordRows({
   wordRows: [

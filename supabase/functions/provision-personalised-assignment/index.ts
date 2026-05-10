@@ -404,7 +404,7 @@ async function readCompletedBaselineStatusRows(
 
   const { data, error } = await serviceClient
     .from("assignment_pupil_statuses")
-    .select("assignment_id, pupil_id, status, completed_at")
+    .select("assignment_id, pupil_id, status, completed_at, result_json")
     .in("assignment_id", safeAssignmentIds)
     .eq("pupil_id", pupilId)
     .eq("school_id", schoolId);

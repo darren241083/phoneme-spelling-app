@@ -163,10 +163,12 @@ export function buildBaselineAssignmentMetaMap(assignments) {
       .filter((assignment) => assignment?.id)
       .map((assignment) => {
         const test = toSingleRow(assignment?.test) || toSingleRow(assignment?.tests) || null;
+        const wordRows = normalizeLoadedWordRows(test?.test_words || []);
         return [
           normalizeId(assignment.id),
           {
-            preset: resolveBaselinePresetFromWordRows(test?.test_words || []),
+            preset: resolveBaselinePresetFromWordRows(wordRows),
+            wordRows,
           },
         ];
       })
@@ -189,6 +191,182 @@ export function getIndependentAttemptRows(attempts) {
     .filter((attempt) => getQuestionEvidenceTier(attempt?.mode) === "independent");
 }
 
+function normalizeEvidenceWord(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[^a-z]+|[^a-z]+$/g, "")
+    .replace(/[^a-z'-]/g, "");
+}
+
+function normalizeEvidenceBoolean(value) {
+  if (typeof value === "boolean") return value;
+  const clean = String(value ?? "").trim().toLowerCase();
+  return clean === "true" || clean === "1" || clean === "yes";
+}
+
+function getBaselineAssignmentMeta(assignmentMetaById, assignmentId = "") {
+  const safeAssignmentId = normalizeId(assignmentId);
+  if (!safeAssignmentId) return null;
+  if (assignmentMetaById instanceof Map) return assignmentMetaById.get(safeAssignmentId) || null;
+  return assignmentMetaById?.[safeAssignmentId] || null;
+}
+
+function buildBaselineWordLookup(wordRows = []) {
+  const byId = new Map();
+  const byWord = new Map();
+
+  for (const row of Array.isArray(wordRows) ? wordRows : []) {
+    const id = normalizeId(row?.id);
+    if (id) byId.set(id, row);
+    const word = normalizeEvidenceWord(row?.word);
+    if (word && !byWord.has(word)) byWord.set(word, row);
+  }
+
+  return { byId, byWord };
+}
+
+function getResultRowTestWordId(resultRow = {}) {
+  return normalizeId(
+    resultRow?.baseTestWordId
+    || resultRow?.base_test_word_id
+    || resultRow?.testWordId
+    || resultRow?.test_word_id
+    || resultRow?.wordId
+    || resultRow?.word_id
+  );
+}
+
+function getResultRowWord(resultRow = {}) {
+  return normalizeEvidenceWord(
+    resultRow?.correctSpelling
+    || resultRow?.correct_spelling
+    || resultRow?.word
+    || resultRow?.word_text
+  );
+}
+
+function resolveBaselineWordRowForResult(resultRow = {}, lookup = {}) {
+  const testWordId = getResultRowTestWordId(resultRow);
+  if (testWordId && lookup.byId?.has(testWordId)) return lookup.byId.get(testWordId);
+  const word = getResultRowWord(resultRow);
+  return word ? lookup.byWord?.get(word) || null : null;
+}
+
+function getBaselineWordChoice(wordRow = {}) {
+  return normalizeLoadedChoice(wordRow?.choice);
+}
+
+function getBaselineWordFocus(wordRow = {}) {
+  const choice = getBaselineWordChoice(wordRow);
+  const focusChoices = Array.isArray(choice?.focus_graphemes)
+    ? choice.focus_graphemes.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+  return focusChoices[0] || "";
+}
+
+function buildBaselineEvidenceAttemptKey(attempt = {}) {
+  const pupilId = normalizeId(attempt?.pupil_id || attempt?.pupilId);
+  const assignmentId = normalizeId(attempt?.assignment_id || attempt?.assignmentId);
+  if (!pupilId || !assignmentId) return "";
+  const testWordId = normalizeId(attempt?.test_word_id || attempt?.testWordId);
+  if (testWordId) return `${pupilId}::${assignmentId}::word:${testWordId}`;
+  const word = normalizeEvidenceWord(attempt?.word_text || attempt?.word);
+  return word ? `${pupilId}::${assignmentId}::text:${word}` : "";
+}
+
+function buildBaselineResultEvidenceAttempts({ baselineStatusRows = [], baselineAssignmentMetaById = new Map() } = {}) {
+  const evidenceRows = [];
+
+  for (const status of Array.isArray(baselineStatusRows) ? baselineStatusRows : []) {
+    if (!isCompletedAssignmentStatusRow(status)) continue;
+    const pupilId = normalizeId(status?.pupil_id || status?.pupilId);
+    const assignmentId = normalizeId(status?.assignment_id || status?.assignmentId);
+    if (!pupilId || !assignmentId) continue;
+
+    const assignmentMeta = getBaselineAssignmentMeta(baselineAssignmentMetaById, assignmentId);
+    const wordRows = Array.isArray(assignmentMeta?.wordRows) ? assignmentMeta.wordRows : [];
+    if (!wordRows.length) continue;
+
+    const resultRows = Array.isArray(status?.result_json)
+      ? status.result_json
+      : (Array.isArray(status?.resultJson) ? status.resultJson : []);
+    if (!resultRows.length) continue;
+
+    const lookup = buildBaselineWordLookup(wordRows);
+    const completedMs = new Date(status?.completed_at || status?.completedAt || 0).getTime();
+    const baseMs = Number.isFinite(completedMs) ? completedMs : 0;
+
+    for (const [index, resultRow] of resultRows.entries()) {
+      if (!resultRow || resultRow.completed === false) continue;
+      const wordRow = resolveBaselineWordRowForResult(resultRow, lookup);
+      if (!wordRow) continue;
+
+      const choice = getBaselineWordChoice(wordRow);
+      const word = getResultRowWord(resultRow) || normalizeEvidenceWord(wordRow?.word);
+      const testWordId = getResultRowTestWordId(resultRow) || normalizeId(wordRow?.id);
+      if (!word || !testWordId) continue;
+
+      const targetGraphemes = normalizeLoadedSegments(
+        resultRow?.targetGraphemes
+        || resultRow?.target_graphemes
+        || wordRow?.segments
+      );
+      const focusGrapheme = String(
+        resultRow?.focusGrapheme
+        || resultRow?.focus_grapheme
+        || getBaselineWordFocus(wordRow)
+      ).trim().toLowerCase();
+
+      evidenceRows.push({
+        pupil_id: pupilId,
+        assignment_id: assignmentId,
+        test_word_id: testWordId,
+        assignment_target_id: null,
+        mode: String(resultRow?.questionType || resultRow?.question_type || choice?.question_type || "").trim(),
+        attempt_source: "baseline",
+        correct: normalizeEvidenceBoolean(resultRow?.correct),
+        attempt_number: Math.max(1, Number(resultRow?.attemptsUsed || resultRow?.attempts_used || resultRow?.attempt_number || 1)),
+        created_at: new Date(baseMs + index * 1000).toISOString(),
+        focus_grapheme: focusGrapheme || null,
+        pattern_type: String(resultRow?.patternType || resultRow?.pattern_type || choice?.pattern_type || "").trim().toLowerCase() || null,
+        word_text: word,
+        typed: String(resultRow?.typed ?? (normalizeEvidenceBoolean(resultRow?.correct) ? word : "")).trim(),
+        target_graphemes: targetGraphemes,
+      });
+    }
+  }
+
+  return evidenceRows;
+}
+
+export function buildBaselineEvidenceAttemptRows({
+  attempts = [],
+  baselineStatusRows = [],
+  baselineAssignmentMetaById = new Map(),
+} = {}) {
+  const mergedRows = [];
+  const seenKeys = new Set();
+
+  for (const attempt of Array.isArray(attempts) ? attempts : []) {
+    mergedRows.push(attempt);
+    const key = buildBaselineEvidenceAttemptKey(attempt);
+    if (key) seenKeys.add(key);
+  }
+
+  for (const evidenceRow of buildBaselineResultEvidenceAttempts({
+    baselineStatusRows,
+    baselineAssignmentMetaById,
+  })) {
+    const key = buildBaselineEvidenceAttemptKey(evidenceRow);
+    if (key && seenKeys.has(key)) continue;
+    mergedRows.push(evidenceRow);
+    if (key) seenKeys.add(key);
+  }
+
+  return mergedRows;
+}
+
 export function buildPlacementCurrentProfiles({
   pupilIds = [],
   attempts = [],
@@ -196,8 +374,13 @@ export function buildPlacementCurrentProfiles({
   baselineAssignmentMetaById = new Map(),
   resolvedWordMap = null,
 } = {}) {
-  const placementSeedProfiles = buildPlacementSeedProfiles({
+  const evidenceAttempts = buildBaselineEvidenceAttemptRows({
     attempts,
+    baselineStatusRows,
+    baselineAssignmentMetaById,
+  });
+  const placementSeedProfiles = buildPlacementSeedProfiles({
+    attempts: evidenceAttempts,
     completedStatuses: baselineStatusRows,
     assignmentMetaById: baselineAssignmentMetaById,
     resolvedWordMap,
