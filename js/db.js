@@ -5046,8 +5046,9 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
       const classId = String(row?.class_id || row?.classId || "").trim();
       const pupilId = String(row?.pupil_id || row?.pupilId || "").trim();
       if (!runId || !classId || !pupilId) return null;
-      const status = String(row?.status || "").trim().toLowerCase() === "included" ? "included" : "skipped";
-      const skipReason = status === "skipped"
+      const rawStatus = String(row?.status || "").trim().toLowerCase();
+      const status = rawStatus === "included" || rawStatus === "waiting" ? rawStatus : "skipped";
+      const skipReason = status !== "included"
         ? String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase() || null
         : null;
       return {

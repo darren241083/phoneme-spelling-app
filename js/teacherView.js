@@ -12764,6 +12764,7 @@ async function handleRunNowPersonalisedGeneration() {
     const classResults = [];
     let includedPupilCount = 0;
     let skippedPupilCount = 0;
+    let waitingPupilCount = 0;
     let errorCount = 0;
     const pupilIdsIncludedThisRun = new Set();
 
@@ -12772,6 +12773,7 @@ async function handleRunNowPersonalisedGeneration() {
       const className = String(selectedClass?.name || "Class").trim() || "Class";
       const classPupilIds = pupilIdsByClassId.get(classId) || [];
       const skippedRows = [];
+      const waitingRows = [];
 
       if (!classPupilIds.length) {
         classResults.push({
@@ -12779,7 +12781,9 @@ async function handleRunNowPersonalisedGeneration() {
           className,
           status: "no_active_pupils",
           includedCount: 0,
+          waitingCount: 0,
           skippedCount: 0,
+          waitingReasons: {},
           skipReasons: {},
           assignmentId: "",
         });
@@ -12793,15 +12797,14 @@ async function handleRunNowPersonalisedGeneration() {
           const baselineWaitingReason = String(
             baselineGate?.waiting_reason || baselineGate?.waitingReason || ""
           ).trim().toLowerCase();
-          skippedRows.push({
+          waitingRows.push({
             runId: runRecord.id,
             classId,
             pupilId,
-            status: "skipped",
-            skipReason: "baseline_incomplete",
-            skipReasonDetail: baselineWaitingReason === "no_baseline_assignment"
+            status: "waiting",
+            skipReason: baselineWaitingReason === "no_baseline_assignment"
               ? "no_baseline_assignment"
-              : "",
+              : "baseline_incomplete",
           });
           continue;
         }
@@ -12829,17 +12832,20 @@ async function handleRunNowPersonalisedGeneration() {
       }
 
       skippedPupilCount += skippedRows.length;
+      waitingPupilCount += waitingRows.length;
 
       if (!includedPupilIds.length) {
-        if (skippedRows.length) {
-          await upsertPersonalisedGenerationRunPupilRows(skippedRows);
+        if (waitingRows.length || skippedRows.length) {
+          await upsertPersonalisedGenerationRunPupilRows([...waitingRows, ...skippedRows]);
         }
         classResults.push({
           classId,
           className,
-          status: "skipped",
+          status: waitingRows.length && !skippedRows.length ? "waiting" : "skipped",
           includedCount: 0,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
           assignmentId: "",
         });
@@ -12875,7 +12881,7 @@ async function handleRunNowPersonalisedGeneration() {
           status: "included",
           skipReason: null,
         }));
-        await upsertPersonalisedGenerationRunPupilRows([...includedRows, ...skippedRows]);
+        await upsertPersonalisedGenerationRunPupilRows([...includedRows, ...waitingRows, ...skippedRows]);
 
         for (const pupilId of includedPupilIds) {
           pupilIdsIncludedThisRun.add(pupilId);
@@ -12893,7 +12899,9 @@ async function handleRunNowPersonalisedGeneration() {
           status: "generated",
           assignmentId: created.assignmentId,
           includedCount: includedRows.length,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
         });
       } catch (classError) {
@@ -12908,8 +12916,8 @@ async function handleRunNowPersonalisedGeneration() {
           });
         }
         errorCount += 1;
-        if (skippedRows.length) {
-          await upsertPersonalisedGenerationRunPupilRows(skippedRows);
+        if (waitingRows.length || skippedRows.length) {
+          await upsertPersonalisedGenerationRunPupilRows([...waitingRows, ...skippedRows]);
         }
         classResults.push({
           classId,
@@ -12917,7 +12925,9 @@ async function handleRunNowPersonalisedGeneration() {
           status: "error",
           assignmentId: "",
           includedCount: 0,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
           error: classError?.message || "Could not generate a personalised test for this class.",
         });
@@ -12934,6 +12944,7 @@ async function handleRunNowPersonalisedGeneration() {
       summary: {
         classes: classResults,
         errorCount,
+        waitingPupilCount,
         automationPolicyId: effectivePolicy.id || null,
         policySnapshot: effectivePolicy,
         derivedDeadlineAt: deadlineIso,
@@ -12949,6 +12960,7 @@ async function handleRunNowPersonalisedGeneration() {
       classResults,
       includedPupilCount,
       skippedPupilCount,
+      waitingPupilCount,
       errorCount,
       runStatus,
     });

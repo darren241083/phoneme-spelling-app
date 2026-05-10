@@ -23,17 +23,25 @@ function addCount(counts, key, value = 1) {
   counts[safeKey] = toCount(counts[safeKey]) + toCount(value || 1);
 }
 
-export function summarizeAutomationRunSkipReasons(classResults = []) {
+function summarizeReasonCounts(classResults = [], reasonKey = "skipReasons") {
   const counts = {};
   for (const result of Array.isArray(classResults) ? classResults : []) {
-    const skipReasons = result?.skipReasons && typeof result.skipReasons === "object"
-      ? result.skipReasons
+    const reasons = result?.[reasonKey] && typeof result[reasonKey] === "object"
+      ? result[reasonKey]
       : {};
-    for (const [key, value] of Object.entries(skipReasons)) {
+    for (const [key, value] of Object.entries(reasons)) {
       addCount(counts, key, value);
     }
   }
   return counts;
+}
+
+export function summarizeAutomationRunSkipReasons(classResults = []) {
+  return summarizeReasonCounts(classResults, "skipReasons");
+}
+
+export function summarizeAutomationRunWaitingReasons(classResults = []) {
+  return summarizeReasonCounts(classResults, "waitingReasons");
 }
 
 function getSkipCount(skipReasonCounts, key) {
@@ -53,61 +61,85 @@ function buildGeneratedClassCopy(generatedClassCount, includedPupilCount) {
   return "No personalised tests generated.";
 }
 
-function buildBaselineSkipSentence(count, { noAssignment = false } = {}) {
+function buildBaselineWaitingSentence(count, { noAssignment = false } = {}) {
   const pupilText = formatCountLabel(count, "pupil");
   if (noAssignment) {
-    return `${pupilText} ${formatPupilVerb(count)} skipped because they do not have a baseline assignment yet. Baseline tests are created automatically when pupils log in, or use Baseline status to provision them now.`;
+    return `${pupilText} ${formatPupilVerb(count)} waiting for baseline. Baseline tests are created automatically when pupils log in, or use Baseline status to provision them now.`;
   }
-  return `${pupilText} ${formatPupilVerb(count)} skipped because they have not completed baseline yet. Pupils need to complete baseline before personalised tests can be generated. Baseline tests are created automatically when pupils log in, or use Baseline status to provision them now.`;
+  return `${pupilText} ${formatPupilVerb(count)} waiting for baseline. They need to complete baseline before personalised tests can be generated.`;
+}
+
+function buildWaitingReasonSentences(waitingReasonCounts = {}) {
+  const sentences = [];
+  const noAssignmentCount = getSkipCount(waitingReasonCounts, NO_BASELINE_ASSIGNMENT_REASON);
+  const baselineIncompleteCount = getSkipCount(waitingReasonCounts, BASELINE_INCOMPLETE_REASON);
+  const baselineTotal = noAssignmentCount + baselineIncompleteCount;
+
+  if (baselineTotal > 0) {
+    sentences.push(buildBaselineWaitingSentence(baselineTotal, {
+      noAssignment: noAssignmentCount > 0 && baselineIncompleteCount === 0,
+    }));
+  }
+
+  return sentences;
 }
 
 function buildSkipReasonSentences(skipReasonCounts = {}) {
   const sentences = [];
-  const noAssignmentCount = getSkipCount(skipReasonCounts, NO_BASELINE_ASSIGNMENT_REASON);
-  const baselineIncompleteCount = getSkipCount(skipReasonCounts, BASELINE_INCOMPLETE_REASON);
-  const baselineTotal = noAssignmentCount + baselineIncompleteCount;
+  const activeAssignmentCount = getSkipCount(skipReasonCounts, ACTIVE_AUTOMATED_ASSIGNMENT_REASON);
+  const duplicateCount = getSkipCount(skipReasonCounts, DUPLICATE_PUPIL_IN_RUN_REASON);
 
-  if (baselineTotal > 0) {
-    sentences.push(buildBaselineSkipSentence(baselineTotal, {
-      noAssignment: noAssignmentCount > 0 && baselineIncompleteCount === 0,
-    }));
+  if (activeAssignmentCount > 0) {
+    sentences.push(`${formatCountLabel(activeAssignmentCount, "pupil")} already ${activeAssignmentCount === 1 ? "has" : "have"} an active personalised assignment.`);
   }
-  if (getSkipCount(skipReasonCounts, ACTIVE_AUTOMATED_ASSIGNMENT_REASON) > 0) {
-    sentences.push("Some pupils already have an active personalised assignment.");
-  }
-  if (getSkipCount(skipReasonCounts, DUPLICATE_PUPIL_IN_RUN_REASON) > 0) {
-    sentences.push("Some pupils were skipped because they appeared through more than one selected group.");
+  if (duplicateCount > 0) {
+    sentences.push(`${formatCountLabel(duplicateCount, "pupil")} ${formatPupilVerb(duplicateCount)} skipped because they appeared through more than one selected group.`);
   }
 
   return sentences;
+}
+
+function sumClassCount(classResults = [], key = "") {
+  return (Array.isArray(classResults) ? classResults : [])
+    .reduce((sum, item) => sum + toCount(item?.[key]), 0);
 }
 
 export function buildAutomationRunFeedbackNotice({
   classResults = [],
   includedPupilCount = 0,
   skippedPupilCount = 0,
+  waitingPupilCount = null,
   errorCount = 0,
   runStatus = "completed",
 } = {}) {
   const includedCount = toCount(includedPupilCount);
   const skippedCount = toCount(skippedPupilCount);
+  const waitingCount = waitingPupilCount == null
+    ? sumClassCount(classResults, "waitingCount")
+    : toCount(waitingPupilCount);
   const failedClassCount = toCount(errorCount);
   const generatedClassCount = (Array.isArray(classResults) ? classResults : [])
     .filter((item) => item?.status === "generated")
     .length;
   const skipReasonCounts = summarizeAutomationRunSkipReasons(classResults);
   const skipReasonSentences = buildSkipReasonSentences(skipReasonCounts);
+  const waitingReasonCounts = summarizeAutomationRunWaitingReasons(classResults);
+  const waitingReasonSentences = buildWaitingReasonSentences(waitingReasonCounts);
   const failed = String(runStatus || "").trim().toLowerCase() === "failed";
   const type = failed
     ? "error"
-    : (skippedCount > 0 || failedClassCount > 0 || includedCount === 0 ? "warning" : "success");
+    : (waitingCount > 0 || skippedCount > 0 || failedClassCount > 0 || includedCount === 0 ? "warning" : "success");
 
-  if (includedCount === 0 && skippedCount > 0 && !failedClassCount) {
+  if (includedCount === 0 && (waitingCount > 0 || skippedCount > 0) && !failedClassCount) {
     const parts = [
       "No personalised tests generated.",
+      ...waitingReasonSentences,
       ...skipReasonSentences,
     ];
-    if (!skipReasonSentences.length) {
+    if (waitingCount > 0 && !waitingReasonSentences.length) {
+      parts.push(`${formatCountLabel(waitingCount, "pupil")} ${formatPupilVerb(waitingCount)} waiting for baseline.`);
+    }
+    if (skippedCount > 0 && !skipReasonSentences.length) {
       parts.push(`${formatCountLabel(skippedCount, "pupil")} ${formatPupilVerb(skippedCount)} skipped.`);
     }
     return {
@@ -123,6 +155,12 @@ export function buildAutomationRunFeedbackNotice({
   if (includedCount > 0) {
     parts.push(`Included ${formatCountLabel(includedCount, "pupil")}.`);
   }
+  if (waitingCount > 0) {
+    parts.push(...waitingReasonSentences);
+    if (!waitingReasonSentences.length) {
+      parts.push(`${formatCountLabel(waitingCount, "pupil")} ${formatPupilVerb(waitingCount)} waiting for baseline.`);
+    }
+  }
   if (skippedCount > 0) {
     parts.push(`Skipped ${formatCountLabel(skippedCount, "pupil")}.`);
     parts.push(...skipReasonSentences);
@@ -130,7 +168,7 @@ export function buildAutomationRunFeedbackNotice({
   if (failedClassCount > 0) {
     parts.push(`${failedClassCount} class${failedClassCount === 1 ? "" : "es"} could not be processed.`);
   }
-  if (includedCount === 0 && skippedCount === 0 && generatedClassCount === 0 && failedClassCount === 0) {
+  if (includedCount === 0 && waitingCount === 0 && skippedCount === 0 && generatedClassCount === 0 && failedClassCount === 0) {
     parts.push("No active pupils were available in the selected groups.");
   }
 
