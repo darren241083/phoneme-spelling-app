@@ -374,6 +374,9 @@ verify_jwt = false
 [functions.group-comparison]
 verify_jwt = false
 
+[functions.provision-personalised-assignment]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
