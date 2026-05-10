@@ -36,6 +36,7 @@ const PERSONALISED_GENERATION_RUN_PUPIL_TABLE = "personalised_generation_run_pup
 const PERSONALISED_AUTOMATION_POLICY_TABLE = "personalised_automation_policies";
 const PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE = "personalised_automation_policy_targets";
 const PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE = "personalised_automation_policy_events";
+const PERSONALISED_PROVISIONING_FUNCTION = "provision-personalised-assignment";
 const SPELLING_BEE_RESULT_TABLE = "spelling_bee_results";
 const STAFF_PROFILES_TABLE = "staff_profiles";
 const STAFF_IMPORT_BATCH_TABLE = "staff_import_batches";
@@ -93,6 +94,22 @@ const INTERVENTION_POSITIVE_EAL_VALUES = new Set(["1", "true", "yes", "y", "eal"
 const INTERVENTION_IGNORED_GENDER_VALUES = new Set(["", "unknown", "not_known", "not known", "prefer_not_to_say", "prefer not to say"]);
 const WORD_CONTEXT_SUPPORT_STATUSES = new Set(["ai_generated", "auto_approved", "teacher_entered", "teacher_edited", "hidden", "needs_review"]);
 const WORD_CONTEXT_SUPPORT_SOURCES = new Set(["teacher", "ai", "system", "import"]);
+const PERSONALISED_PROVISIONING_STATUS_VALUES = new Set([
+  "invalid_pupil",
+  "not_ready",
+  "nothing_waiting",
+  "already_active",
+  "already_provisioning",
+  "provisioned",
+  "generation_failed",
+]);
+const PERSONALISED_PROVISIONING_SAFE_STATUSES = new Set([
+  "provisioned",
+  "nothing_waiting",
+  "not_ready",
+  "already_active",
+  "already_provisioning",
+]);
 
 let latestStaffProfileSyncNotice = null;
 
@@ -5496,6 +5513,88 @@ export async function ensureBaselineAssignmentsForGate({ gateState = null } = {}
 export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {
   const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId });
   return runtimePayload.assignments;
+}
+
+function parseSupabaseFunctionPayload(payload) {
+  if (typeof payload !== "string") return payload;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return { status: payload };
+  }
+}
+
+async function extractSupabaseFunctionErrorMessage(error) {
+  if (!error) return "";
+  if (error.context && typeof error.context.text === "function") {
+    const rawText = await error.context.text().catch(() => "");
+    if (rawText) {
+      try {
+        const payload = JSON.parse(rawText);
+        const direct = [
+          payload?.error,
+          payload?.message,
+          payload?.msg,
+          payload?.error_description,
+          payload?.details,
+        ].find((value) => typeof value === "string" && value.trim());
+        if (direct) return direct.trim();
+      } catch {
+        return rawText;
+      }
+    }
+  }
+  return String(error?.message || error || "").trim();
+}
+
+function normalizePersonalisedProvisioningResult(payload, fallback = {}) {
+  const data = parseSupabaseFunctionPayload(payload);
+  const row = data && typeof data === "object" ? data : {};
+  const rawStatus = String(row?.status || fallback.status || "generation_failed").trim().toLowerCase()
+    || "generation_failed";
+  const status = PERSONALISED_PROVISIONING_STATUS_VALUES.has(rawStatus) ? rawStatus : "generation_failed";
+  const assignmentId = status === "provisioned"
+    ? String(row?.assignmentId || row?.assignment_id || fallback.assignmentId || "").trim()
+    : "";
+  const ok = PERSONALISED_PROVISIONING_SAFE_STATUSES.has(status);
+  const error = ok ? "" : String(fallback.error || `Personalised provisioning returned ${status}.`).trim();
+  return {
+    ok,
+    status,
+    provisioned: status === "provisioned",
+    assignmentId,
+    error,
+  };
+}
+
+export async function provisionWaitingPersonalisedAssignmentAfterBaseline({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizePersonalisedProvisioningResult(null, {
+      status: "invalid_pupil",
+      error: "Missing pupil id.",
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke(PERSONALISED_PROVISIONING_FUNCTION, {
+      body: { pupilId: safePupilId },
+    });
+
+    if (error) {
+      return normalizePersonalisedProvisioningResult(null, {
+        status: "generation_failed",
+        error: await extractSupabaseFunctionErrorMessage(error) || "Personalised provisioning request failed.",
+      });
+    }
+
+    return normalizePersonalisedProvisioningResult(data);
+  } catch (error) {
+    return normalizePersonalisedProvisioningResult(null, {
+      status: "generation_failed",
+      error: String(error?.message || error || "Personalised provisioning request failed.").trim(),
+    });
+  }
 }
 
 /* ---------------------------

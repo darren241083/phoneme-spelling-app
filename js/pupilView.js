@@ -4,6 +4,7 @@ import {
   markAssignmentComplete,
   markAssignmentSessionOpened,
   normalizeSchoolSummary,
+  provisionWaitingPersonalisedAssignmentAfterBaseline,
   readPupilBaselineGateState,
   readPupilRuntimeAssignments,
   readAssignmentAttemptRows,
@@ -15,7 +16,7 @@ import {
   saveAssignmentProgress,
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
-} from "./db.js?v=1.49";
+} from "./db.js?v=1.50";
 import { mountGame } from "./game.js?v=1.43";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
@@ -56,6 +57,7 @@ const pupilDashboardState = {
 let pupilHeroStageOutsideClickHandler = null;
 let pupilHeroStageEscapeHandler = null;
 const baselineProvisionAttemptKeys = new Set();
+const personalisedProvisionAttemptKeys = new Set();
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -958,6 +960,47 @@ function canTryBaselineProvisionForGate(pupilId = "", gateState = null) {
 function markBaselineProvisionAttempted(pupilId = "", gateState = null) {
   const key = buildBaselineProvisionAttemptKey(pupilId, gateState);
   if (key) baselineProvisionAttemptKeys.add(key);
+}
+
+function buildPersonalisedProvisionAttemptKey(pupilId = "", gateState = null) {
+  const classIds = Array.isArray(gateState?.classIds)
+    ? gateState.classIds
+    : (Array.isArray(gateState?.class_ids) ? gateState.class_ids : []);
+  const normalizedClassIds = [...new Set(
+    classIds
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort();
+  const completedAssignmentId = String(gateState?.completedAssignmentId || gateState?.completed_assignment_id || "").trim();
+  const assignmentId = String(gateState?.assignmentId || gateState?.assignment_id || gateState?.assignment?.id || "").trim();
+  const standardKey = String(gateState?.requiredStandardKey || gateState?.required_standard_key || "").trim().toLowerCase();
+  return [
+    String(pupilId || "").trim(),
+    String(gateState?.status || "").trim().toLowerCase(),
+    completedAssignmentId || assignmentId || standardKey || "ready",
+    normalizedClassIds.join(","),
+  ].join("::");
+}
+
+function canTryPersonalisedProvisionForReadyGate(pupilId = "", gateState = null) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId || String(gateState?.status || "").trim().toLowerCase() !== "ready") return false;
+  return !personalisedProvisionAttemptKeys.has(buildPersonalisedProvisionAttemptKey(safePupilId, gateState));
+}
+
+function markPersonalisedProvisionAttempted(pupilId = "", gateState = null) {
+  const key = buildPersonalisedProvisionAttemptKey(pupilId, gateState);
+  if (key) personalisedProvisionAttemptKeys.add(key);
+}
+
+async function maybeProvisionPersonalisedAfterReadyBaseline({ pupilId = "", gateState = null } = {}) {
+  if (!canTryPersonalisedProvisionForReadyGate(pupilId, gateState)) return null;
+  markPersonalisedProvisionAttempted(pupilId, gateState);
+  const result = await provisionWaitingPersonalisedAssignmentAfterBaseline({ pupilId });
+  if (result && !result.ok) {
+    console.warn("post-baseline personalised provisioning did not complete:", result.error || result);
+  }
+  return result;
 }
 
 function hasVisibleBaselineProgress(assignment) {
@@ -2257,6 +2300,24 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     assignments = await loadAssignments(pupilId);
     return assignments;
   };
+  const renderReadyDashboard = async ({
+    readyGateState = gateState,
+    assignmentLoadWarning = "load pupil assignments error:",
+  } = {}) => {
+    await maybeProvisionPersonalisedAfterReadyBaseline({ pupilId, gateState: readyGateState }).catch((error) => {
+      console.warn("post-baseline personalised provisioning error:", error);
+    });
+    const loadedAssignments = await ensureAssignments().catch((error) => {
+      console.warn(assignmentLoadWarning, error);
+      return [];
+    });
+    const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
+    const [practiceModel, progress] = await Promise.all([
+      loadPracticeModel(pupilId),
+      loadPupilProgress(pupilId),
+    ]);
+    renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+  };
 
   let resolvedGate = null;
   if (gateState?.status === "resume" || gateState?.status === "start") {
@@ -2313,16 +2374,10 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
         waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
 
         if (gateState?.status === "ready") {
-          const loadedAssignments = await ensureAssignments().catch((error) => {
-            console.warn("load pupil assignments after baseline provision error:", error);
-            return [];
+          await renderReadyDashboard({
+            readyGateState: gateState,
+            assignmentLoadWarning: "load pupil assignments after baseline provision error:",
           });
-          const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
-          const [practiceModel, progress] = await Promise.all([
-            loadPracticeModel(pupilId),
-            loadPupilProgress(pupilId),
-          ]);
-          renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
           return;
         }
 
@@ -2372,17 +2427,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     return;
   }
 
-  const loadedAssignments = await ensureAssignments().catch((error) => {
-    console.warn("load pupil assignments error:", error);
-    return [];
-  });
-  const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
-
-  const [practiceModel, progress] = await Promise.all([
-    loadPracticeModel(pupilId),
-    loadPupilProgress(pupilId),
-  ]);
-  renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+  await renderReadyDashboard({ readyGateState: gateState });
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
