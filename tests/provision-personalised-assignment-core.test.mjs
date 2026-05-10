@@ -4,6 +4,7 @@ import {
   buildAutoAssignedPoolEntries,
   buildAutoAssignedPoolIdMap,
   buildAutoAssignedTargetRows,
+  buildAttemptDerivedBaselineStatusRows,
   buildBaselineAssignmentMetaMap,
   buildBaselineEvidenceAttemptRows,
   buildPlacementCurrentProfiles,
@@ -99,6 +100,30 @@ function buildBaselineResultRows(rows) {
   });
 }
 
+function buildBaselineAttemptRows(rows, {
+  pupilId = "pupil-one",
+  assignmentId = "baseline-assignment",
+  completedAt = "2026-05-10T12:00:00.000Z",
+} = {}) {
+  const baseMs = new Date(completedAt).getTime();
+  return buildBaselineResultRows(rows).map((row, index) => ({
+    pupil_id: pupilId,
+    assignment_id: assignmentId,
+    test_word_id: row.baseTestWordId,
+    assignment_target_id: null,
+    mode: row.questionType,
+    attempt_source: "baseline",
+    correct: row.correct,
+    attempt_number: row.attemptsUsed,
+    created_at: new Date(baseMs + index * 1000).toISOString(),
+    focus_grapheme: row.focusGrapheme,
+    pattern_type: null,
+    word_text: row.word,
+    typed: row.typed,
+    target_graphemes: row.targetGraphemes,
+  }));
+}
+
 const baselineRows = buildBaselineRows();
 const baselineAssignment = {
   id: "baseline-assignment",
@@ -159,6 +184,36 @@ const placementProfilesFromResultJson = buildPlacementCurrentProfiles({
 });
 assert.equal(placementProfilesFromResultJson["pupil-one"].concernRows[0].target, "tion");
 
+const baselineAttemptRows = buildBaselineAttemptRows(baselineRows);
+const attemptDerivedBaselineStatusRows = buildAttemptDerivedBaselineStatusRows({
+  pupilId: "pupil-one",
+  completedAssignmentId: "baseline-assignment",
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: [],
+  attemptRows: baselineAttemptRows,
+});
+assert.equal(attemptDerivedBaselineStatusRows.length, 1);
+assert.equal(attemptDerivedBaselineStatusRows[0].assignment_id, "baseline-assignment");
+assert.equal(attemptDerivedBaselineStatusRows[0].pupil_id, "pupil-one");
+assert.equal(
+  buildAttemptDerivedBaselineStatusRows({
+    pupilId: "pupil-one",
+    completedAssignmentId: "baseline-assignment",
+    baselineAssignments: [baselineAssignment],
+    baselineStatusRows: [baselineStatusWithResultJson],
+    attemptRows: baselineAttemptRows,
+  }).length,
+  0,
+);
+
+const placementProfilesFromAttemptDerivedStatus = buildPlacementCurrentProfiles({
+  pupilIds: ["pupil-one"],
+  attempts: baselineAttemptRows,
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  baselineAssignmentMetaById: baselineMetaById,
+});
+assert.equal(placementProfilesFromAttemptDerivedStatus["pupil-one"].concernRows[0].target, "tion");
+
 const provisionedFromStatusOnly = buildProvisioningPlan({
   pupilId: "pupil-one",
   teacherTests: [],
@@ -179,6 +234,39 @@ assert.equal(
     word.assignmentRole === "target" && word.focusGrapheme === "tion"
   ),
   true,
+);
+
+const provisionedFromAttemptDerivedStatus = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: baselineAttemptRows,
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans.length, 1);
+assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans[0].primaryTargetGrapheme, "tion");
+
+assert.throws(
+  () => buildProvisioningPlan({
+    pupilId: "pupil-one",
+    teacherTests: [],
+    attemptRows: [],
+    baselineAssignments: [baselineAssignment],
+    baselineStatusRows: [],
+    wordloomCoreWordRows: buildCoreBankRowsForProvisioning(),
+    policy: {
+      assignment_length: 4,
+      support_preset: "balanced",
+      allow_starter_fallback: false,
+    },
+  }),
+  /No grapheme focus could be identified from current evidence/,
 );
 
 const mappedCoreRows = mapWordloomCoreBankRowsToWordRows({

@@ -407,6 +407,54 @@ export function buildPlacementCurrentProfiles({
   return currentProfiles;
 }
 
+export function buildAttemptDerivedBaselineStatusRows({
+  pupilId = "",
+  completedAssignmentId = "",
+  baselineAssignments = [],
+  baselineStatusRows = [],
+  attemptRows = [],
+} = {}) {
+  const safePupilId = normalizeId(pupilId);
+  const safeAssignmentId = normalizeId(completedAssignmentId);
+  if (!safePupilId || !safeAssignmentId) return [];
+
+  const baselineAssignmentIds = new Set(
+    filterBaselineAssignments(baselineAssignments)
+      .map((assignment) => normalizeId(assignment?.id))
+      .filter(Boolean)
+  );
+  if (!baselineAssignmentIds.has(safeAssignmentId)) return [];
+
+  const hasCompletedStatus = (Array.isArray(baselineStatusRows) ? baselineStatusRows : [])
+    .some((row) =>
+      normalizeId(row?.assignment_id || row?.assignmentId) === safeAssignmentId
+      && normalizeId(row?.pupil_id || row?.pupilId) === safePupilId
+      && isCompletedAssignmentStatusRow(row)
+    );
+  if (hasCompletedStatus) return [];
+
+  const relevantAttempts = (Array.isArray(attemptRows) ? attemptRows : [])
+    .filter((attempt) =>
+      normalizeId(attempt?.assignment_id || attempt?.assignmentId) === safeAssignmentId
+      && normalizeId(attempt?.pupil_id || attempt?.pupilId) === safePupilId
+      && !isPracticeAttemptRow(attempt)
+    );
+  if (!relevantAttempts.length) return [];
+
+  const latestAttemptMs = relevantAttempts.reduce((latest, attempt) => {
+    const ms = new Date(attempt?.created_at || attempt?.createdAt || 0).getTime();
+    return Number.isFinite(ms) ? Math.max(latest, ms) : latest;
+  }, 0);
+
+  return [{
+    assignment_id: safeAssignmentId,
+    pupil_id: safePupilId,
+    status: "completed",
+    completed_at: latestAttemptMs ? new Date(latestAttemptMs).toISOString() : new Date().toISOString(),
+    result_json: [],
+  }];
+}
+
 export function needsStarterCatalogFallback(plan, pupilIds) {
   return !!plan?.error
     || !plan?.pupilPlans?.length

@@ -6,6 +6,7 @@ import {
   WORDLOOM_CORE_WORD_TABLE,
   WORDLOOM_CORE_WORD_TARGET_TABLE,
   buildAssignmentTitle,
+  buildAttemptDerivedBaselineStatusRows,
   buildAutoAssignedPoolEntries,
   buildAutoAssignedPoolIdMap,
   buildAutoAssignedTargetRows,
@@ -262,13 +263,44 @@ async function readClaimContext(
   };
 }
 
-async function readBaselineGateStatus(serviceClient: ServiceClient, pupilId: string) {
+async function readBaselineGateState(serviceClient: ServiceClient, pupilId: string) {
   const { data, error } = await serviceClient.rpc("read_pupil_baseline_gate_state", {
     requested_pupil_id: pupilId,
     requested_standard_key: BASELINE_STANDARD_KEY,
   });
   if (error) throw error;
-  return String((data as Record<string, unknown> | null)?.status || "").trim().toLowerCase();
+  return data && typeof data === "object" ? data as Record<string, unknown> : {};
+}
+
+function getBaselineGateStatus(gateState: Record<string, unknown> | null) {
+  return String(gateState?.status || "").trim().toLowerCase();
+}
+
+function getCompletedBaselineAssignmentId(gateState: Record<string, unknown> | null) {
+  return normalizeId(gateState?.completed_assignment_id || gateState?.completedAssignmentId);
+}
+
+function mergeBaselineAssignments(...assignmentGroups: Record<string, unknown>[][]) {
+  const mergedById = new Map<string, Record<string, unknown>>();
+  for (const assignments of assignmentGroups) {
+    for (const assignment of Array.isArray(assignments) ? assignments : []) {
+      const id = normalizeId(assignment?.id);
+      if (!id || mergedById.has(id)) continue;
+      mergedById.set(id, assignment);
+    }
+  }
+  return Array.from(mergedById.values());
+}
+
+function buildNonPracticeAttemptFilter(schoolId = "") {
+  const safeSchoolId = normalizeId(schoolId);
+  if (!safeSchoolId) return "attempt_source.is.null,attempt_source.neq.practice";
+  return [
+    `and(school_id.eq.${safeSchoolId},attempt_source.is.null)`,
+    `and(school_id.eq.${safeSchoolId},attempt_source.neq.practice)`,
+    "and(school_id.is.null,attempt_source.is.null)",
+    "and(school_id.is.null,attempt_source.neq.practice)",
+  ].join(",");
 }
 
 async function hasActivePersonalisedAssignment(
@@ -338,14 +370,14 @@ async function readAttemptsForPupil(
   serviceClient: ServiceClient,
   { pupilId, schoolId }: { pupilId: string; schoolId: string },
 ) {
-  const { data, error } = await serviceClient
+  let query = serviceClient
     .from("attempts")
     .select("pupil_id, assignment_id, test_word_id, assignment_target_id, mode, attempt_source, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
     .eq("pupil_id", pupilId)
-    .eq("school_id", schoolId)
-    .or("attempt_source.is.null,attempt_source.neq.practice")
+    .or(buildNonPracticeAttemptFilter(schoolId));
+  const { data, error } = await query
     .order("created_at", { ascending: false })
-    .limit(800);
+    .limit(1000);
   if (error) throw error;
   return data || [];
 }
@@ -372,16 +404,45 @@ async function readBaselineAssignmentsForClass(
   serviceClient: ServiceClient,
   { classId, schoolId }: { classId: string; schoolId: string },
 ) {
-  const { data, error } = await serviceClient
+  let query = serviceClient
     .from("assignments_v2")
     .select("id, class_id, test_id, created_at, school_id, tests(id, title, test_words(id, position, word, sentence, segments, choice))")
-    .eq("class_id", classId)
-    .eq("school_id", schoolId)
+    .eq("class_id", classId);
+  const safeSchoolId = normalizeId(schoolId);
+  if (safeSchoolId) {
+    query = query.or(`school_id.eq.${safeSchoolId},school_id.is.null`);
+  }
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw error;
 
-  return (data || []).map((assignment: Record<string, unknown>) => {
+  return normalizeJoinedBaselineAssignments(data || []);
+}
+
+async function readBaselineAssignmentsById(
+  serviceClient: ServiceClient,
+  { assignmentIds, schoolId }: { assignmentIds: string[]; schoolId: string },
+) {
+  const safeAssignmentIds = normalizeIdList(assignmentIds);
+  if (!safeAssignmentIds.length) return [];
+
+  let query = serviceClient
+    .from("assignments_v2")
+    .select("id, class_id, test_id, created_at, school_id, tests(id, title, test_words(id, position, word, sentence, segments, choice))")
+    .in("id", safeAssignmentIds);
+  const safeSchoolId = normalizeId(schoolId);
+  if (safeSchoolId) {
+    query = query.or(`school_id.eq.${safeSchoolId},school_id.is.null`);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
+  if (error) throw error;
+
+  return normalizeJoinedBaselineAssignments(data || []);
+}
+
+function normalizeJoinedBaselineAssignments(assignments: Record<string, unknown>[]) {
+  return (assignments || []).map((assignment: Record<string, unknown>) => {
     const joinedTest = Array.isArray(assignment.tests) ? assignment.tests[0] : assignment.tests;
     return {
       ...assignment,
@@ -402,12 +463,16 @@ async function readCompletedBaselineStatusRows(
   const safeAssignmentIds = normalizeIdList(assignmentIds);
   if (!safeAssignmentIds.length || !pupilId) return [];
 
-  const { data, error } = await serviceClient
+  let query = serviceClient
     .from("assignment_pupil_statuses")
     .select("assignment_id, pupil_id, status, completed_at, result_json")
     .in("assignment_id", safeAssignmentIds)
-    .eq("pupil_id", pupilId)
-    .eq("school_id", schoolId);
+    .eq("pupil_id", pupilId);
+  const safeSchoolId = normalizeId(schoolId);
+  if (safeSchoolId) {
+    query = query.or(`school_id.eq.${safeSchoolId},school_id.is.null`);
+  }
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingTableError(error, "assignment_pupil_statuses")) return [];
@@ -716,11 +781,13 @@ Deno.serve(async (req) => {
     teacherId = context.teacherId;
     schoolId = context.schoolId;
 
-    const baselineStatus = await readBaselineGateStatus(serviceClient, context.pupilId);
+    const baselineGateState = await readBaselineGateState(serviceClient, context.pupilId);
+    const baselineStatus = getBaselineGateStatus(baselineGateState);
     if (baselineStatus !== "ready") {
       await releaseClaim(serviceClient, runPupilId);
       return publicStatus("not_ready");
     }
+    const completedBaselineAssignmentId = getCompletedBaselineAssignmentId(baselineGateState);
 
     if (await hasActivePersonalisedAssignment(serviceClient, {
       pupilId: context.pupilId,
@@ -733,7 +800,8 @@ Deno.serve(async (req) => {
     const [
       attemptRows,
       teacherTests,
-      baselineAssignments,
+      completedBaselineAssignments,
+      classBaselineAssignments,
       wordloomCoreWordRows,
     ] = await Promise.all([
       readAttemptsForPupil(serviceClient, {
@@ -744,17 +812,49 @@ Deno.serve(async (req) => {
         teacherId: context.teacherId,
         schoolId: context.schoolId,
       }),
+      readBaselineAssignmentsById(serviceClient, {
+        assignmentIds: [completedBaselineAssignmentId],
+        schoolId: context.schoolId,
+      }),
       readBaselineAssignmentsForClass(serviceClient, {
         classId: context.classId,
         schoolId: context.schoolId,
       }),
       readWordloomCoreSpellingBankWordRows(serviceClient),
     ]);
+    const baselineAssignments = mergeBaselineAssignments(completedBaselineAssignments, classBaselineAssignments);
 
     const baselineStatusRows = await readCompletedBaselineStatusRows(serviceClient, {
       assignmentIds: baselineAssignments.map((assignment: Record<string, unknown>) => normalizeId(assignment.id)),
       pupilId: context.pupilId,
       schoolId: context.schoolId,
+    });
+    const attemptDerivedBaselineStatusRows = buildAttemptDerivedBaselineStatusRows({
+      pupilId: context.pupilId,
+      completedAssignmentId: completedBaselineAssignmentId,
+      baselineAssignments,
+      baselineStatusRows,
+      attemptRows,
+    });
+    const effectiveBaselineStatusRows = [
+      ...baselineStatusRows,
+      ...attemptDerivedBaselineStatusRows,
+    ];
+    const baselineAssignmentIds = new Set(
+      baselineAssignments
+        .map((assignment: Record<string, unknown>) => normalizeId(assignment.id))
+        .filter(Boolean)
+    );
+    const baselineAttemptCount = attemptRows
+      .filter((attempt: Record<string, unknown>) => baselineAssignmentIds.has(normalizeId(attempt.assignment_id)))
+      .length;
+    console.log("Personalised provisioning evidence counts:", {
+      baselineAssignmentCount: baselineAssignments.length,
+      completedBaselineStatusCount: baselineStatusRows.length,
+      syntheticBaselineStatusCount: attemptDerivedBaselineStatusRows.length,
+      baselineAttemptCount,
+      teacherTestCount: Array.isArray(teacherTests) ? teacherTests.length : 0,
+      wordloomCoreWordCount: Array.isArray(wordloomCoreWordRows) ? wordloomCoreWordRows.length : 0,
     });
 
     const { plan } = buildProvisioningPlan({
@@ -762,7 +862,7 @@ Deno.serve(async (req) => {
       teacherTests,
       attemptRows,
       baselineAssignments,
-      baselineStatusRows,
+      baselineStatusRows: effectiveBaselineStatusRows,
       wordloomCoreWordRows,
       policy: buildProvisioningPolicy(context.runRow),
       resolvedWordMap: null,
