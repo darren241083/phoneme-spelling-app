@@ -73,6 +73,30 @@ function buildCoreBankRowsForProvisioning() {
   });
 }
 
+function buildUsageAwareCoreBankRowsForProvisioning() {
+  const wordRows = [
+    coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 44 }),
+    coreBankWord({ id: "core-motion", word: "motion", segments: ["m", "o", "tion"], focus: "tion", score: 44 }),
+    coreBankWord({ id: "core-boat", word: "boat", segments: ["b", "oa", "t"], focus: "oa", score: 28 }),
+    coreBankWord({ id: "core-seed", word: "seed", segments: ["s", "ee", "d"], focus: "ee", score: 28 }),
+    coreBankWord({ id: "core-train", word: "train", segments: ["t", "r", "ai", "n"], focus: "ai", score: 30 }),
+    coreBankWord({ id: "core-light", word: "light", segments: ["l", "igh", "t"], focus: "igh", score: 32 }),
+  ];
+  const focusTargetRows = [...new Set(wordRows.map((row) => row.primary_focus_grapheme))]
+    .map((focus) => ({ id: `target-${focus}`, focus_grapheme: focus, is_active: true }));
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows: wordRows.map((row) => ({
+      id: `link-${row.id}`,
+      word_id: row.id,
+      focus_target_id: `target-${row.primary_focus_grapheme}`,
+      focus_grapheme: row.primary_focus_grapheme,
+      target_role: "primary",
+    })),
+    focusTargetRows,
+  });
+}
+
 function buildLowCoverageCoreBankRowsForProvisioning() {
   const wordRows = [
     coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 46 }),
@@ -280,6 +304,40 @@ const provisionedFromAttemptDerivedStatus = buildProvisioningPlan({
 });
 assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans.length, 1);
 assert.equal(provisionedFromAttemptDerivedStatus.plan.pupilPlans[0].primaryTargetGrapheme, "tion");
+
+const provisionedWithUsageAwareSelection = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [
+    ...baselineAttemptRows,
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "live-assignment",
+      test_word_id: "live-action",
+      word_text: "action",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "auto_assigned",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["a", "c", "tion"],
+      typed: "action",
+    },
+  ],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+const usageAwareTargetWords = provisionedWithUsageAwareSelection.plan.pupilPlans[0].words
+  .filter((word) => word.assignmentRole === "target")
+  .map((word) => word.word);
+assert.deepEqual(usageAwareTargetWords, ["motion"]);
 
 const provisionedWithLowCoverageFallback = buildProvisioningPlan({
   pupilId: "pupil-one",

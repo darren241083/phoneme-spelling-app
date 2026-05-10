@@ -105,6 +105,61 @@ function makeBaselineAttempts(rows, correctWords = new Set()) {
   }));
 }
 
+function usageAttempt({
+  pupilId = "pupil-1",
+  word,
+  correct = true,
+  attemptNumber = 1,
+  focus = "ph",
+  segments = null,
+  createdAt = "2026-05-01T10:00:00.000Z",
+} = {}) {
+  return {
+    pupil_id: pupilId,
+    assignment_id: `${pupilId}-assignment`,
+    test_word_id: `${pupilId}-${word}`,
+    word_text: word,
+    correct,
+    attempt_number: attemptNumber,
+    mode: "no_support_assessment",
+    focus_grapheme: focus,
+    target_graphemes: Array.isArray(segments) ? segments : [focus],
+    attempt_source: "auto_assigned",
+    created_at: createdAt,
+  };
+}
+
+function usageAwareProfile() {
+  return {
+    concernRows: [{ target: "ph", total: 3, securityBand: "insecure" }],
+    secureRows: [{ target: "ai", total: 4, securityBand: "secure" }],
+    developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+    confusionByTarget: new Map(),
+    placementMeta: { targetChallengeLevel: "needs_support" },
+  };
+}
+
+function usageAwareTeacherTests({ includePhase = true } = {}) {
+  return [{
+    test_words: [
+      wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+      wordRow({ id: "review-train", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+      wordRow({ id: "stretch-storm", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+      wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ...(includePhase
+        ? [wordRow({ id: "target-phase", word: "phase", score: 30, focus: ["ph"], segments: ["ph", "a", "s", "e"] })]
+        : []),
+    ],
+  }];
+}
+
+function targetWordsFor(plan, pupilId = "pupil-1") {
+  const pupilPlan = (plan.pupilPlans || []).find((item) => item.pupilId === pupilId);
+  return (pupilPlan?.words || [])
+    .filter((item) => item.assignmentRole === "target")
+    .map((item) => item.word);
+}
+
 test("same grapheme selects different difficulty-fit words for support, secure, and stretch", () => {
   const candidates = [
     wordRow({ id: "1", word: "photo", score: 32, sentence: "Take a photo." }),
@@ -196,6 +251,10 @@ test("wordloom core source is selected before legacy teacher rows", () => {
     focusGrapheme: "ph",
     challengeLevel: "needs_support",
     count: 1,
+    usageByWord: new Map([
+      ["phase", { count: 2, incorrectCount: 2, lastSeenAt: 1000, reviewDue: true }],
+      ["phone", { count: 1, incorrectCount: 0, lastSeenAt: 2000, recentlySeen: true, recentlySecure: true }],
+    ]),
     candidates: [
       wordRow({ id: "teacher-1", word: "phase", score: 30, source: "teacher" }),
       wordRow({
@@ -361,6 +420,110 @@ test("ordering is stable by normalised word then id when ranking factors tie", (
 
   assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_READY);
   assertJsonEqual(words(result), ["phase", "phone"]);
+});
+
+test("generated assignment avoids recently secure approved words when equivalent alternatives exist", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      usageAttempt({
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phase"]);
+});
+
+test("generated assignment prefers previously incorrect words within the same source and window", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      usageAttempt({
+        word: "phone",
+        correct: false,
+        attemptNumber: 2,
+        segments: ["ph", "o", "n", "e"],
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("recently secure words are reduced in priority but remain eligible as fallback", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests({ includePhase: false }),
+    attempts: [
+      usageAttempt({
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("multi-pupil generated assignment uses pupil-specific word usage history", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1", "pupil-2"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      usageAttempt({
+        pupilId: "pupil-1",
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+        createdAt: "2026-05-01T10:00:00.000Z",
+      }),
+      usageAttempt({
+        pupilId: "pupil-2",
+        word: "phase",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "a", "s", "e"],
+        createdAt: "2026-05-01T10:01:00.000Z",
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+      "pupil-2": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan, "pupil-1"), ["phase"]);
+  assertJsonEqual(targetWordsFor(plan, "pupil-2"), ["phone"]);
+  for (const pupilPlan of plan.pupilPlans) {
+    const selectedWords = pupilPlan.words.map((item) => item.word);
+    assert.equal(new Set(selectedWords).size, selectedWords.length);
+  }
 });
 
 test("generated assignment target section uses approved selector and skips non-approved same-grapheme words", () => {

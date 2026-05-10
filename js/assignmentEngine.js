@@ -61,6 +61,8 @@ const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
   secure_expected: 1,
   early_stretch: 1,
 };
+const USAGE_RECENT_UNIQUE_WORD_LIMIT = 4;
+const USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 function normalizeToken(value) {
   return String(value || "")
@@ -350,23 +352,89 @@ function buildConfusionByExpected(attempts, resolvedWordMap = null) {
   return bestByExpected;
 }
 
+function getAttemptWordText(attempt) {
+  return normalizeWord(attempt?.word_text || attempt?.word || "");
+}
+
+function getAttemptCorrectValue(attempt) {
+  const value = attempt?.correct ?? attempt?.is_correct;
+  if (typeof value === "boolean") return value;
+  const clean = String(value ?? "").trim().toLowerCase();
+  if (clean === "true" || clean === "1" || clean === "yes") return true;
+  return false;
+}
+
+function getAttemptNumberValue(attempt) {
+  const value = Number(attempt?.attempt_number ?? attempt?.attempt_no ?? 1);
+  return Number.isFinite(value) ? Math.max(1, value) : 1;
+}
+
+function getAttemptSeenAt(attempt) {
+  const seenAt = new Date(attempt?.created_at || 0).getTime();
+  return Number.isFinite(seenAt) ? seenAt : 0;
+}
+
+function buildDefaultUsageMeta(word = "") {
+  return {
+    word,
+    count: 0,
+    correctCount: 0,
+    incorrectCount: 0,
+    lastSeenAt: 0,
+    lastCorrectAt: 0,
+    lastIncorrectAt: 0,
+    latestCorrect: null,
+    latestAttemptNumber: 0,
+    recentlySeen: false,
+    recentlySecure: false,
+    reviewDue: false,
+  };
+}
+
 function buildWordUsageStats(attempts) {
   const usage = new Map();
+  const events = [];
 
   for (const attempt of attempts || []) {
-    const word = normalizeWord(attempt?.word_text || "");
+    const word = getAttemptWordText(attempt);
     if (!word) continue;
-    const current = usage.get(word) || {
-      word,
-      count: 0,
-      incorrectCount: 0,
-      lastSeenAt: 0,
-    };
+    const current = usage.get(word) || buildDefaultUsageMeta(word);
+    const correct = getAttemptCorrectValue(attempt);
+    const attemptNumber = getAttemptNumberValue(attempt);
+    const seenAt = getAttemptSeenAt(attempt);
+
     current.count += 1;
-    if (!attempt?.correct) current.incorrectCount += 1;
-    const seenAt = new Date(attempt?.created_at || 0).getTime();
-    if (Number.isFinite(seenAt)) current.lastSeenAt = Math.max(current.lastSeenAt, seenAt);
+    if (correct) {
+      current.correctCount += 1;
+      current.lastCorrectAt = Math.max(current.lastCorrectAt, seenAt);
+    } else {
+      current.incorrectCount += 1;
+      current.lastIncorrectAt = Math.max(current.lastIncorrectAt, seenAt);
+    }
+    if (seenAt >= current.lastSeenAt) {
+      current.lastSeenAt = seenAt;
+      current.latestCorrect = correct;
+      current.latestAttemptNumber = attemptNumber;
+    }
     usage.set(word, current);
+    events.push({ word, seenAt });
+  }
+
+  const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
+  const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - USAGE_RECENT_WINDOW_MS : 0;
+  const recentWords = new Set();
+  for (const event of [...events].sort((a, b) => b.seenAt - a.seenAt)) {
+    if (recentWords.size >= USAGE_RECENT_UNIQUE_WORD_LIMIT) break;
+    if (event.seenAt > 0 && event.seenAt >= recentCutoff) recentWords.add(event.word);
+  }
+
+  for (const current of usage.values()) {
+    current.recentlySeen = current.lastSeenAt > 0 && recentWords.has(current.word);
+    current.recentlySecure = current.recentlySeen
+      && current.latestCorrect === true
+      && current.latestAttemptNumber <= 1
+      && current.incorrectCount === 0;
+    current.reviewDue = current.count > 0 && current.lastSeenAt > 0 && !current.recentlySeen;
   }
 
   return usage;
@@ -965,8 +1033,8 @@ function rankApprovedTargetCandidates(items, {
 
     const usageA = getUsageMeta(a, usageByWord);
     const usageB = getUsageMeta(b, usageByWord);
-    if (usageA.count !== usageB.count) return usageA.count - usageB.count;
-    if (usageA.lastSeenAt !== usageB.lastSeenAt) return usageA.lastSeenAt - usageB.lastSeenAt;
+    const usageDiff = compareUsageForTarget(usageA, usageB);
+    if (usageDiff) return usageDiff;
 
     const sentenceDiff = Number(!!b.sentence) - Number(!!a.sentence);
     if (sentenceDiff) return sentenceDiff;
@@ -1064,11 +1132,44 @@ export function selectApprovedTargetWords({
 }
 
 function getUsageMeta(candidate, usageByWord) {
-  return usageByWord.get(normalizeWord(candidate?.word || "")) || {
-    count: 0,
-    incorrectCount: 0,
-    lastSeenAt: 0,
-  };
+  return usageByWord.get(normalizeWord(candidate?.word || "")) || buildDefaultUsageMeta(normalizeWord(candidate?.word || ""));
+}
+
+function compareBooleanDesc(a, b) {
+  return Number(!!b) - Number(!!a);
+}
+
+function compareBooleanAsc(a, b) {
+  return Number(!!a) - Number(!!b);
+}
+
+function compareUsageAgeAndCount(usageA, usageB) {
+  if (usageA.count !== usageB.count) return usageA.count - usageB.count;
+  if (usageA.lastSeenAt !== usageB.lastSeenAt) return usageA.lastSeenAt - usageB.lastSeenAt;
+  return 0;
+}
+
+function compareUsageForTarget(usageA, usageB) {
+  if (usageA.incorrectCount !== usageB.incorrectCount) return usageB.incorrectCount - usageA.incorrectCount;
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  return compareUsageAgeAndCount(usageA, usageB);
+}
+
+function compareUsageForReview(usageA, usageB) {
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  if (usageA.incorrectCount !== usageB.incorrectCount) return usageB.incorrectCount - usageA.incorrectCount;
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  return compareUsageAgeAndCount(usageA, usageB);
+}
+
+function compareUsageForStretch(usageA, usageB) {
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  return compareUsageAgeAndCount(usageA, usageB);
 }
 
 function sortCandidatesForRole(candidates, {
@@ -1081,15 +1182,16 @@ function sortCandidatesForRole(candidates, {
     const coverageDiff = getCandidateCoverage(b, cleanGrapheme) - getCandidateCoverage(a, cleanGrapheme);
     if (coverageDiff) return coverageDiff;
 
-    const sentenceDiff = Number(!!b?.sentence) - Number(!!a?.sentence);
-    if (sentenceDiff) return sentenceDiff;
+    const sourcePriorityA = getSelectorSourcePriority(getCandidateSelectionSource(a));
+    const sourcePriorityB = getSelectorSourcePriority(getCandidateSelectionSource(b));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
 
     const usageA = getUsageMeta(a, usageByWord);
     const usageB = getUsageMeta(b, usageByWord);
 
     if (role === "review") {
-      if (usageA.count !== usageB.count) return usageA.count - usageB.count;
-      if (usageA.lastSeenAt !== usageB.lastSeenAt) return usageA.lastSeenAt - usageB.lastSeenAt;
+      const usageDiff = compareUsageForReview(usageA, usageB);
+      if (usageDiff) return usageDiff;
       if (getCandidateDifficultyScore(a) !== getCandidateDifficultyScore(b)) {
         return getCandidateDifficultyScore(a) - getCandidateDifficultyScore(b);
       }
@@ -1097,14 +1199,18 @@ function sortCandidatesForRole(candidates, {
       if (getCandidateDifficultyScore(b) !== getCandidateDifficultyScore(a)) {
         return getCandidateDifficultyScore(b) - getCandidateDifficultyScore(a);
       }
-      if (usageA.count !== usageB.count) return usageA.count - usageB.count;
+      const usageDiff = compareUsageForStretch(usageA, usageB);
+      if (usageDiff) return usageDiff;
     } else {
-      if (usageB.incorrectCount !== usageA.incorrectCount) return usageB.incorrectCount - usageA.incorrectCount;
+      const usageDiff = compareUsageForTarget(usageA, usageB);
+      if (usageDiff) return usageDiff;
       const distanceA = Math.abs(getCandidateDifficultyScore(a) - 50);
       const distanceB = Math.abs(getCandidateDifficultyScore(b) - 50);
       if (distanceA !== distanceB) return distanceA - distanceB;
-      if (usageA.count !== usageB.count) return usageA.count - usageB.count;
     }
+
+    const sentenceDiff = Number(!!b?.sentence) - Number(!!a?.sentence);
+    if (sentenceDiff) return sentenceDiff;
 
     return String(a?.word || "").localeCompare(String(b?.word || ""));
   });
@@ -1663,10 +1769,13 @@ function buildPupilPlan({
   composition,
   pool,
   engineOptions,
+  usageByWord,
 }) {
   const candidates = Array.isArray(pool?.candidates) ? pool.candidates : [];
   const usableCandidates = candidates.filter(isGeneratedAssignmentCandidateUsable);
-  const usageByWord = pool?.usageByWord instanceof Map ? pool.usageByWord : new Map();
+  const effectiveUsageByWord = usageByWord instanceof Map
+    ? usageByWord
+    : (pool?.usageByWord instanceof Map ? pool.usageByWord : new Map());
   const usedWords = new Set();
   const effectiveEngineOptions = engineOptions && typeof engineOptions === "object"
     ? engineOptions
@@ -1711,7 +1820,7 @@ function buildPupilPlan({
     graphemeOrder: reviewTargets,
     role: "review",
     candidates: usableCandidates,
-    usageByWord,
+    usageByWord: effectiveUsageByWord,
     usedWords,
     fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
   }).map((candidate) => buildWordSpec(candidate, {
@@ -1726,7 +1835,7 @@ function buildPupilPlan({
     graphemeOrder: [primaryTarget],
     candidates,
     challengeLevel: targetChallengeLevel,
-    usageByWord,
+    usageByWord: effectiveUsageByWord,
     usedWords,
   });
 
@@ -1735,7 +1844,7 @@ function buildPupilPlan({
     graphemeOrder: [primaryTarget, ...secondaryTargetList],
     candidates,
     challengeLevel: targetChallengeLevel,
-    usageByWord,
+    usageByWord: effectiveUsageByWord,
     usedWords,
   });
 
@@ -1766,7 +1875,7 @@ function buildPupilPlan({
     graphemeOrder: stretchTargets,
     role: "stretch",
     candidates: usableCandidates,
-    usageByWord,
+    usageByWord: effectiveUsageByWord,
     usedWords,
     fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
   });
@@ -1794,7 +1903,7 @@ function buildPupilPlan({
     graphemeOrder: fallbackTargets,
     role: "review",
     candidates: usableCandidates.filter((candidate) => getCandidateCoverage(candidate, primaryTarget) === 0),
-    usageByWord,
+    usageByWord: effectiveUsageByWord,
     usedWords,
   }).map((candidate) => buildWordSpec(candidate, {
     role: "review",
@@ -1927,11 +2036,12 @@ export function buildGeneratedAssignmentPlan({
   const coverageWarnings = [];
 
   for (const pupilId of pupils) {
+    const pupilAttempts = extractAttemptsForPupil(sortedAttempts, pupilId);
     const providedProfile = currentProfiles && typeof currentProfiles === "object"
       ? currentProfiles[pupilId] || currentProfiles[String(pupilId)] || null
       : null;
     const profile = providedProfile || buildProfileFromAttempts(
-      extractAttemptsForPupil(sortedAttempts, pupilId),
+      pupilAttempts,
       resolvedWordMap,
     );
     const plan = buildPupilPlan({
@@ -1941,6 +2051,7 @@ export function buildGeneratedAssignmentPlan({
       composition,
       pool,
       engineOptions,
+      usageByWord: buildWordUsageStats(pupilAttempts),
     });
 
     if (plan?.error) errors.push(plan.error);
