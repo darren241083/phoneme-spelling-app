@@ -106,6 +106,7 @@ import {
   readStaffPendingAccessDetail,
   readStaffPendingAccessDuplicatePreflight,
   readTeacherAppRole,
+  readWordloomCoreBankMonitor,
   resetPupilLoginPin,
   resolveActiveSchoolDetails,
   revokeAllStaffLiveAccess,
@@ -122,7 +123,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.49";
+} from "./db.js?v=1.50";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -174,7 +175,7 @@ import {
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
-const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "analytics", "upcoming", "classes", "tests"];
+const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
 const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
 const ALL_CLASSES_EXPORT_SCOPE_VALUE = "__all_classes__";
@@ -528,6 +529,14 @@ function createDefaultPupilOnboardingState() {
   };
 }
 
+function createDefaultBankMonitorState() {
+  return {
+    status: "idle",
+    message: "",
+    data: null,
+  };
+}
+
 function createDefaultAutomationTargetFilters() {
   return {
     yearGroup: "",
@@ -634,6 +643,7 @@ const state = {
   sections: {
     staffAccess: false,
     pupilOnboarding: false,
+    bankMonitor: false,
     upcoming: false,
     classes: false,
     tests: false,
@@ -720,6 +730,7 @@ const state = {
   interventionGroup: createDefaultInterventionGroupState(),
   staffAccess: createDefaultStaffAccessState(),
   pupilOnboarding: createDefaultPupilOnboardingState(),
+  bankMonitor: createDefaultBankMonitorState(),
   demoData: {
     loading: false,
     action: "",
@@ -732,6 +743,7 @@ let visualCompareSeed = 0;
 let groupComparisonRequestId = 0;
 let staffAccessDirectoryRequestId = 0;
 let staffAccessDetailsRequestId = 0;
+let bankMonitorRequestId = 0;
 let visualAnalyticsDerivedCache = {
   sourceData: null,
   grapheme: "",
@@ -777,6 +789,14 @@ function hasTeacherAuthoringAccess() {
 
 function canManageAutomation() {
   return !!getAccessCapabilities()?.can_manage_automation;
+}
+
+function canViewWordloomCoreBankMonitor() {
+  const accessContext = getAccessContext();
+  const roles = accessContext?.roles || {};
+  return !!roles.admin
+    || !!roles.literacy_lead
+    || !!accessContext?.capabilities?.can_manage_automation;
 }
 
 function canManageSpellingBeePolicies() {
@@ -5173,6 +5193,37 @@ async function loadDashboardData() {
   } else {
     state.pupilOnboarding = createDefaultPupilOnboardingState();
     state.sections.pupilOnboarding = false;
+  }
+  if (!canViewWordloomCoreBankMonitor()) {
+    state.bankMonitor = createDefaultBankMonitorState();
+    state.sections.bankMonitor = false;
+  }
+}
+
+async function ensureWordloomCoreBankMonitorLoaded({ force = false } = {}) {
+  if (!canViewWordloomCoreBankMonitor()) return;
+  const currentStatus = String(state.bankMonitor?.status || "idle");
+  if (!force && (currentStatus === "ready" || currentStatus === "unavailable" || currentStatus === "loading")) return;
+
+  const requestId = ++bankMonitorRequestId;
+  state.bankMonitor.status = "loading";
+  state.bankMonitor.message = "";
+  if (rootEl?.isConnected) paint();
+
+  try {
+    const data = await readWordloomCoreBankMonitor();
+    if (requestId !== bankMonitorRequestId) return;
+    state.bankMonitor.data = data;
+    state.bankMonitor.status = data?.available === false ? "unavailable" : "ready";
+    state.bankMonitor.message = data?.message || "";
+  } catch (error) {
+    if (requestId !== bankMonitorRequestId) return;
+    console.error("load Wordloom core bank monitor error:", error);
+    state.bankMonitor.data = null;
+    state.bankMonitor.status = "error";
+    state.bankMonitor.message = error?.message || "Could not load the core bank monitor.";
+  } finally {
+    if (requestId === bankMonitorRequestId && rootEl?.isConnected) paint();
   }
 }
 
@@ -10396,6 +10447,9 @@ async function onRootClick(event) {
     if (key === "pupilOnboarding" && state.sections.pupilOnboarding) {
       void loadPupilPlacementRows({ force: true });
     }
+    if (key === "bankMonitor" && state.sections.bankMonitor) {
+      void ensureWordloomCoreBankMonitorLoaded();
+    }
     return;
   }
 
@@ -14738,6 +14792,7 @@ function paint() {
       ${renderCreateBar()}
       ${renderSectionStaffAccess()}
       ${renderSectionPupilOnboarding()}
+      ${renderSectionWordloomCoreBankMonitor()}
       ${renderAnalyticsBar()}
       ${renderSectionUpcomingAssignments()}
       ${renderSectionClasses()}
@@ -22583,6 +22638,204 @@ function renderSectionPupilOnboarding() {
               ${renderPupilPlacementPanel()}
               ${renderPupilOnboardingPreflightCard()}
               ${renderPupilOnboardingPreviewCard()}
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
+function getBankMonitorState() {
+  return state.bankMonitor && typeof state.bankMonitor === "object"
+    ? state.bankMonitor
+    : createDefaultBankMonitorState();
+}
+
+function formatBankMonitorStatusLabel(value = "") {
+  const clean = String(value || "").trim().toLowerCase();
+  if (!clean) return "Unknown";
+  return clean
+    .split("_")
+    .map((part) => part ? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}` : "")
+    .filter(Boolean)
+    .join(" ");
+}
+
+function renderBankMonitorMetric(label = "", value = "", helper = "") {
+  return `
+    <div class="td-bank-monitor-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value))}</strong>
+      ${helper ? `<small>${escapeHtml(helper)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderBankMonitorBreakdown(title = "", rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return `
+    <section class="td-bank-monitor-block">
+      <div class="td-bank-monitor-block-head">
+        <h4>${escapeHtml(title)}</h4>
+      </div>
+      <div class="td-bank-monitor-breakdown">
+        ${
+          safeRows.length
+            ? safeRows.map((row) => `
+              <div class="td-bank-monitor-breakdown-row">
+                <span>${escapeHtml(formatBankMonitorStatusLabel(row?.status))}</span>
+                <strong>${escapeHtml(String(Math.max(0, Number(row?.count || 0))))}</strong>
+              </div>
+            `).join("")
+            : `<div class="td-empty td-empty--compact"><strong>No status rows.</strong></div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderBankMonitorWarnings(warnings = []) {
+  const safeWarnings = Array.isArray(warnings) ? warnings : [];
+  return `
+    <section class="td-bank-monitor-block">
+      <div class="td-bank-monitor-block-head">
+        <h4>Selector smoke warnings</h4>
+        <span class="td-pill ${safeWarnings.length ? "" : "td-pill--muted"}">${escapeHtml(String(safeWarnings.length))}</span>
+      </div>
+      ${
+        safeWarnings.length
+          ? `
+            <div class="td-bank-monitor-warning-row">
+              ${safeWarnings.map((warning) => `
+                <span class="td-bank-monitor-warning-chip">
+                  <strong>${escapeHtml(warning.focusGrapheme || "")}</strong>
+                  ${escapeHtml(`${Math.max(0, Number(warning.selectedTargetCount || 0))}/${Math.max(0, Number(warning.requestedTargetCount || 0))}`)}
+                </span>
+              `).join("")}
+            </div>
+          `
+          : `<div class="td-empty td-empty--compact"><strong>No selector smoke warnings.</strong></div>`
+      }
+    </section>
+  `;
+}
+
+function renderBankMonitorGraphemes(model = {}) {
+  const graphemes = Array.isArray(model?.graphemes) ? model.graphemes : [];
+  return `
+    <section class="td-bank-monitor-block td-bank-monitor-block--wide">
+      <div class="td-bank-monitor-block-head">
+        <h4>Usable primary words per grapheme</h4>
+        <span class="td-pill">${escapeHtml(`Threshold ${model?.threshold || 6}`)}</span>
+      </div>
+      ${
+        graphemes.length
+          ? `
+            <div class="td-bank-monitor-grapheme-grid">
+              ${graphemes.map((row) => `
+                <div class="td-bank-monitor-grapheme ${row?.belowThreshold ? "is-low" : ""}">
+                  <span>${escapeHtml(row?.displayLabel || row?.focusGrapheme || "")}</span>
+                  <strong>${escapeHtml(String(Math.max(0, Number(row?.usablePrimaryWordCount || 0))))}</strong>
+                </div>
+              `).join("")}
+            </div>
+          `
+          : `<div class="td-empty td-empty--compact"><strong>No active focus graphemes.</strong></div>`
+      }
+    </section>
+  `;
+}
+
+function renderBankMonitorContent() {
+  const monitor = getBankMonitorState();
+  const status = String(monitor.status || "idle");
+  if (status === "idle") {
+    return `<div class="td-empty td-empty--compact"><strong>Open the monitor to load core bank coverage.</strong></div>`;
+  }
+  if (status === "loading") {
+    return `<div class="td-empty td-empty--compact"><strong>Loading core bank monitor...</strong></div>`;
+  }
+  if (status === "error") {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>Could not load the core bank monitor.</strong>
+        <p>${escapeHtml(monitor.message || "Please try again later.")}</p>
+      </div>
+    `;
+  }
+
+  const model = monitor.data || null;
+  if (!model || model.available === false || status === "unavailable") {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>Core bank monitor unavailable.</strong>
+        <p>${escapeHtml(model?.message || monitor.message || "The core bank tables could not be read in this environment.")}</p>
+      </div>
+    `;
+  }
+
+  const confidence = model.coverageConfidence || {};
+  const missingContextCount = Math.max(0, Number(model.missingSentenceCount || 0) + Number(model.missingMeaningCount || 0));
+  return `
+    <div class="td-bank-monitor-panel">
+      <div class="td-bank-monitor-top">
+        <div>
+          <h3>Wordloom core bank</h3>
+          <p>${escapeHtml(confidence.summary || "Core bank coverage summary.")}</p>
+        </div>
+        <div class="td-bank-monitor-status">
+          <span class="td-bank-monitor-confidence td-bank-monitor-confidence--${escapeAttr(confidence.tone || "muted")}">
+            ${escapeHtml(confidence.label || "Status")}
+          </span>
+          <span class="td-pill td-pill--muted">Read-only</span>
+        </div>
+      </div>
+
+      <div class="td-bank-monitor-metrics">
+        ${renderBankMonitorMetric("Usable active words", model.usableActiveWordCount || 0, `${model.totalCoreWordCount || 0} total core words`)}
+        ${renderBankMonitorMetric("Active focus graphemes", model.activeFocusGraphemeCount || 0)}
+        ${renderBankMonitorMetric("Below threshold", Array.isArray(model.belowThresholdGraphemes) ? model.belowThresholdGraphemes.length : 0, `Threshold ${model.threshold || 6}`)}
+        ${renderBankMonitorMetric("Missing context", missingContextCount, `${model.missingSentenceCount || 0} sentence | ${model.missingMeaningCount || 0} meaning`)}
+      </div>
+
+      <div class="td-bank-monitor-grid">
+        ${renderBankMonitorGraphemes(model)}
+        ${renderBankMonitorWarnings(model.selectorSmokeWarnings || [])}
+        ${renderBankMonitorBreakdown("Approval status", model.approvalStatusBreakdown || [])}
+        ${renderBankMonitorBreakdown("Suitability status", model.suitabilityStatusBreakdown || [])}
+        <section class="td-bank-monitor-block">
+          <div class="td-bank-monitor-block-head">
+            <h4>Inactive words</h4>
+          </div>
+          <div class="td-bank-monitor-breakdown">
+            <div class="td-bank-monitor-breakdown-row">
+              <span>Inactive</span>
+              <strong>${escapeHtml(String(Math.max(0, Number(model.inactiveWordCount || 0))))}</strong>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function renderSectionWordloomCoreBankMonitor() {
+  if (!canViewWordloomCoreBankMonitor()) return "";
+  const isOpen = !!state.sections.bankMonitor;
+
+  return `
+    <section class="td-section td-section--bank-monitor">
+      ${renderCollapsibleSectionHeader({
+        title: "Core bank monitor",
+        section: "bankMonitor",
+        isOpen,
+      })}
+      ${
+        isOpen
+          ? `
+            <div class="td-section-body">
+              ${renderBankMonitorContent()}
             </div>
           `
           : ""
@@ -31074,6 +31327,232 @@ function injectStyles() {
       font-size:1.15rem;
     }
 
+    .td-bank-monitor-panel{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .td-bank-monitor-top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      padding:16px;
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,0.03);
+    }
+
+    .td-bank-monitor-top h3{
+      margin:0 0 4px;
+      color:#0f172a;
+      font-size:1.05rem;
+      line-height:1.25;
+      font-weight:800;
+    }
+
+    .td-bank-monitor-top p{
+      margin:0;
+      color:#64748b;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-bank-monitor-status{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+      flex:0 0 auto;
+    }
+
+    .td-bank-monitor-confidence{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:5px 9px;
+      border-radius:999px;
+      border:1px solid #cbd5e1;
+      background:#f8fafc;
+      color:#334155;
+      font-size:0.78rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    .td-bank-monitor-confidence--success{
+      border-color:#86efac;
+      background:#f0fdf4;
+      color:#166534;
+    }
+
+    .td-bank-monitor-confidence--warning{
+      border-color:#fcd34d;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-bank-monitor-confidence--muted{
+      border-color:#cbd5e1;
+      background:#f1f5f9;
+      color:#64748b;
+    }
+
+    .td-bank-monitor-metrics{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px;
+    }
+
+    .td-bank-monitor-metric{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+      padding:12px 14px;
+      border:1px solid #dbe3ee;
+      border-radius:16px;
+      background:#f8fafc;
+      color:#475569;
+    }
+
+    .td-bank-monitor-metric span,
+    .td-bank-monitor-metric small{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.3;
+    }
+
+    .td-bank-monitor-metric strong{
+      color:#0f172a;
+      font-size:1.18rem;
+      line-height:1.15;
+    }
+
+    .td-bank-monitor-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:12px;
+    }
+
+    .td-bank-monitor-block{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-width:0;
+      padding:14px;
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,0.03);
+    }
+
+    .td-bank-monitor-block--wide{
+      grid-column:1 / -1;
+    }
+
+    .td-bank-monitor-block-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .td-bank-monitor-block-head h4{
+      margin:0;
+      color:#0f172a;
+      font-size:0.92rem;
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-bank-monitor-grapheme-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(74px,1fr));
+      gap:8px;
+    }
+
+    .td-bank-monitor-grapheme{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
+      padding:8px 10px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#334155;
+    }
+
+    .td-bank-monitor-grapheme.is-low{
+      border-color:#fcd34d;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-bank-monitor-grapheme span{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      color:inherit;
+      font-size:0.86rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    .td-bank-monitor-grapheme strong{
+      color:inherit;
+      font-size:0.9rem;
+      font-weight:900;
+    }
+
+    .td-bank-monitor-warning-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .td-bank-monitor-warning-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      padding:7px 10px;
+      border:1px solid #fcd34d;
+      border-radius:999px;
+      background:#fffbeb;
+      color:#92400e;
+      font-size:0.82rem;
+      font-weight:800;
+    }
+
+    .td-bank-monitor-breakdown{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-bank-monitor-breakdown-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:8px 10px;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#475569;
+      font-size:0.86rem;
+      font-weight:700;
+    }
+
+    .td-bank-monitor-breakdown-row strong{
+      color:#0f172a;
+      font-size:0.92rem;
+      font-weight:900;
+    }
+
     .td-test-groups{
       display:flex;
       flex-direction:column;
@@ -34356,6 +34835,10 @@ function injectStyles() {
         grid-template-columns:1fr;
       }
 
+      .td-bank-monitor-grid{
+        grid-template-columns:1fr;
+      }
+
       .td-staff-access-import-actions{
         justify-content:flex-start;
       }
@@ -34557,6 +35040,14 @@ function injectStyles() {
 
       .td-action-button-shell .td-btn{
         flex:1 1 auto;
+      }
+
+      .td-bank-monitor-top{
+        flex-direction:column;
+      }
+
+      .td-bank-monitor-status{
+        justify-content:flex-start;
       }
 
       .td-btn--ghost{

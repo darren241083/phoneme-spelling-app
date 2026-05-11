@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient.js";
 import { DEFAULT_QUESTION_TYPE, normalizeStoredQuestionType } from "./questionTypes.js?v=1.1";
 import {
   buildAssignmentEnginePupilReason,
+  buildGeneratedAssignmentPlan,
   isFullyGeneratedAssignmentWordRows,
 } from "./assignmentEngine.js?v=1.6";
 import {
@@ -67,6 +68,10 @@ const WORD_CONTEXT_SUPPORT_SELECT = "id, school_id, normalized_word, display_wor
 const WORDLOOM_CORE_WORD_TABLE = "wordloom_core_words";
 const WORDLOOM_CORE_WORD_TARGET_TABLE = "wordloom_core_word_targets";
 const WORDLOOM_CORE_FOCUS_TARGET_TABLE = "wordloom_core_focus_targets";
+const WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD = 6;
+const WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT = 10;
+const WORDLOOM_CORE_APPROVAL_STATUS_ORDER = ["approved", "pending", "rejected", "retired", "unknown"];
+const WORDLOOM_CORE_SUITABILITY_STATUS_ORDER = ["suitable", "caution", "exclude", "unknown"];
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
@@ -2291,6 +2296,329 @@ export function mapWordloomCoreBankRowsToWordRows({
     .filter(Boolean);
 }
 
+function normalizeWordloomCoreBankMonitorThreshold(value) {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.min(50, parsed))
+    : WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD;
+}
+
+function normalizeWordloomCoreMonitorStatus(value = "") {
+  return String(value || "").trim().toLowerCase() || "unknown";
+}
+
+function normalizeWordloomCoreMonitorFocusTarget(row = {}) {
+  const id = String(row?.id || "").trim();
+  const focusGrapheme = normalizeWordloomCoreText(row?.focus_grapheme || row?.focusGrapheme);
+  if (!id || !focusGrapheme) return null;
+  const sortOrder = Number(row?.sort_order ?? row?.sortOrder);
+  return {
+    id,
+    focus_grapheme: focusGrapheme,
+    display_label: String(row?.display_label || row?.displayLabel || focusGrapheme).trim() || focusGrapheme,
+    stage_band: String(row?.stage_band || row?.stageBand || "").trim(),
+    challenge_band: String(row?.challenge_band || row?.challengeBand || "").trim(),
+    sort_order: Number.isFinite(sortOrder) ? sortOrder : 9999,
+    is_active: row?.is_active === false || row?.isActive === false ? false : true,
+  };
+}
+
+function isWordloomCoreMonitorWordActive(row = {}) {
+  return row?.is_active === false || row?.isActive === false ? false : true;
+}
+
+function addWordloomCoreBreakdownCount(counts, value = "") {
+  const key = normalizeWordloomCoreMonitorStatus(value);
+  counts.set(key, (counts.get(key) || 0) + 1);
+}
+
+function buildWordloomCoreBreakdownRows(counts, order = []) {
+  const rows = [];
+  const seen = new Set();
+  for (const key of order) {
+    if (!counts.has(key)) continue;
+    seen.add(key);
+    rows.push({ status: key, count: counts.get(key) || 0 });
+  }
+  for (const key of [...counts.keys()].sort((a, b) => a.localeCompare(b))) {
+    if (seen.has(key)) continue;
+    rows.push({ status: key, count: counts.get(key) || 0 });
+  }
+  return rows;
+}
+
+function normalizeWordloomCoreSelectorSmokeWarning(value = {}) {
+  const focusGrapheme = normalizeWordloomCoreText(value?.focusGrapheme || value?.focus_grapheme);
+  const requestedTargetCount = Math.max(0, Math.round(Number(value?.requestedTargetCount ?? value?.requested_target_count ?? 0)));
+  const selectedTargetCount = Math.max(0, Math.round(Number(value?.selectedTargetCount ?? value?.selected_target_count ?? 0)));
+  if (!focusGrapheme || requestedTargetCount <= 0 || selectedTargetCount >= requestedTargetCount) return null;
+  return {
+    type: "target_coverage_low",
+    focusGrapheme,
+    selectedTargetCount,
+    requestedTargetCount,
+    fallbackCount: Math.max(0, requestedTargetCount - selectedTargetCount),
+  };
+}
+
+function normalizeWordloomCoreSelectorSmokeWarnings(values = []) {
+  const rows = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const row = normalizeWordloomCoreSelectorSmokeWarning(value);
+    if (!row) continue;
+    if (seen.has(row.focusGrapheme)) continue;
+    seen.add(row.focusGrapheme);
+    rows.push(row);
+  }
+  return rows.sort((a, b) => a.focusGrapheme.localeCompare(b.focusGrapheme));
+}
+
+function buildWordloomCoreCoverageConfidence({
+  available = true,
+  totalCoreWordCount = 0,
+  activeFocusGraphemeCount = 0,
+  usableActiveWordCount = 0,
+  belowThresholdCount = 0,
+  selectorWarningCount = 0,
+  missingContextCount = 0,
+} = {}) {
+  if (!available) {
+    return {
+      key: "unavailable",
+      label: "Monitor unavailable",
+      tone: "muted",
+      summary: "Core bank tables could not be read in this environment.",
+    };
+  }
+  if (!totalCoreWordCount || !activeFocusGraphemeCount) {
+    return {
+      key: "empty",
+      label: "No core bank data",
+      tone: "warning",
+      summary: "No active core bank targets or words are available to monitor yet.",
+    };
+  }
+  if (!usableActiveWordCount) {
+    return {
+      key: "no_usable_words",
+      label: "No usable words",
+      tone: "warning",
+      summary: "Core words exist, but none currently pass the selector-ready checks.",
+    };
+  }
+  if (belowThresholdCount || selectorWarningCount || missingContextCount) {
+    return {
+      key: "needs_expansion",
+      label: "Needs expansion",
+      tone: "warning",
+      summary: "The proof bank is usable, with a few focus targets or context fields to strengthen.",
+    };
+  }
+  return {
+    key: "healthy",
+    label: "Healthy",
+    tone: "success",
+    summary: "The active core bank is covering the monitored launch targets.",
+  };
+}
+
+export function buildWordloomCoreBankMonitorModel({
+  focusTargetRows = [],
+  wordRows = [],
+  wordTargetRows = [],
+  selectorSmokeWarnings = [],
+  threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD,
+  available = true,
+  message = "",
+} = {}) {
+  const safeThreshold = normalizeWordloomCoreBankMonitorThreshold(threshold);
+  const safeMessage = String(message || "").trim();
+  if (!available) {
+    return {
+      available: false,
+      message: safeMessage || "Core bank monitor data is unavailable.",
+      threshold: safeThreshold,
+      totalCoreWordCount: 0,
+      usableActiveWordCount: 0,
+      activeFocusGraphemeCount: 0,
+      inactiveWordCount: 0,
+      missingSentenceCount: 0,
+      missingMeaningCount: 0,
+      approvalStatusBreakdown: [],
+      suitabilityStatusBreakdown: [],
+      graphemes: [],
+      belowThresholdGraphemes: [],
+      selectorSmokeWarnings: [],
+      coverageConfidence: buildWordloomCoreCoverageConfidence({ available: false }),
+    };
+  }
+
+  const normalizedFocusTargets = (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+    .map((row) => normalizeWordloomCoreMonitorFocusTarget(row))
+    .filter(Boolean)
+    .sort((a, b) => a.sort_order - b.sort_order || a.focus_grapheme.localeCompare(b.focus_grapheme));
+  const activeFocusTargets = normalizedFocusTargets.filter((row) => row.is_active);
+  const activeTargetIds = new Set(activeFocusTargets.map((row) => row.id));
+  const activeTargetsById = new Map(activeFocusTargets.map((row) => [row.id, row]));
+  const wordList = Array.isArray(wordRows) ? wordRows : [];
+  const activeWordRows = wordList.filter((row) => isWordloomCoreMonitorWordActive(row));
+  const approvalCounts = new Map();
+  const suitabilityCounts = new Map();
+
+  for (const row of wordList) {
+    addWordloomCoreBreakdownCount(approvalCounts, row?.approval_status || row?.approvalStatus);
+    addWordloomCoreBreakdownCount(suitabilityCounts, row?.suitability_status || row?.suitabilityStatus);
+  }
+
+  const usableWordRows = mapWordloomCoreBankRowsToWordRows({
+    wordRows: wordList,
+    wordTargetRows,
+    focusTargetRows: normalizedFocusTargets,
+  });
+  const usableWordIds = new Set(
+    usableWordRows
+      .map((row) => String(row?.choice?.origin_bank_word_id || row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const primaryWordIdsByFocus = new Map(activeFocusTargets.map((row) => [row.focus_grapheme, new Set()]));
+
+  for (const rawTargetRow of Array.isArray(wordTargetRows) ? wordTargetRows : []) {
+    const target = normalizeWordloomCoreTargetRow(rawTargetRow);
+    if (!target || target.target_role !== "primary") continue;
+    if (!activeTargetIds.has(target.focus_target_id)) continue;
+    if (!usableWordIds.has(target.word_id)) continue;
+    const focusTarget = activeTargetsById.get(target.focus_target_id);
+    const focusGrapheme = focusTarget?.focus_grapheme || target.focus_grapheme;
+    if (!focusGrapheme) continue;
+    const set = primaryWordIdsByFocus.get(focusGrapheme) || new Set();
+    set.add(target.word_id);
+    primaryWordIdsByFocus.set(focusGrapheme, set);
+  }
+
+  const graphemes = activeFocusTargets.map((target) => {
+    const usablePrimaryWordCount = primaryWordIdsByFocus.get(target.focus_grapheme)?.size || 0;
+    return {
+      focusGrapheme: target.focus_grapheme,
+      displayLabel: target.display_label,
+      stageBand: target.stage_band,
+      challengeBand: target.challenge_band,
+      sortOrder: target.sort_order,
+      usablePrimaryWordCount,
+      belowThreshold: usablePrimaryWordCount < safeThreshold,
+    };
+  });
+  const belowThresholdGraphemes = graphemes.filter((row) => row.belowThreshold);
+  const normalizedSelectorWarnings = normalizeWordloomCoreSelectorSmokeWarnings(selectorSmokeWarnings);
+  const missingSentenceCount = activeWordRows.filter((row) => !String(row?.sentence || "").trim()).length;
+  const missingMeaningCount = activeWordRows.filter((row) => !String(row?.meaning || "").trim()).length;
+
+  return {
+    available: true,
+    message: safeMessage,
+    threshold: safeThreshold,
+    totalCoreWordCount: wordList.length,
+    usableActiveWordCount: usableWordRows.length,
+    activeFocusGraphemeCount: activeFocusTargets.length,
+    inactiveWordCount: wordList.filter((row) => !isWordloomCoreMonitorWordActive(row)).length,
+    missingSentenceCount,
+    missingMeaningCount,
+    approvalStatusBreakdown: buildWordloomCoreBreakdownRows(approvalCounts, WORDLOOM_CORE_APPROVAL_STATUS_ORDER),
+    suitabilityStatusBreakdown: buildWordloomCoreBreakdownRows(suitabilityCounts, WORDLOOM_CORE_SUITABILITY_STATUS_ORDER),
+    graphemes,
+    belowThresholdGraphemes,
+    selectorSmokeWarnings: normalizedSelectorWarnings,
+    coverageConfidence: buildWordloomCoreCoverageConfidence({
+      available: true,
+      totalCoreWordCount: wordList.length,
+      activeFocusGraphemeCount: activeFocusTargets.length,
+      usableActiveWordCount: usableWordRows.length,
+      belowThresholdCount: belowThresholdGraphemes.length,
+      selectorWarningCount: normalizedSelectorWarnings.length,
+      missingContextCount: missingSentenceCount + missingMeaningCount,
+    }),
+  };
+}
+
+function buildWordloomCoreMonitorSampleProfile(target, allTargets) {
+  const fallbackTargets = allTargets
+    .filter((item) => item.focusGrapheme !== target.focusGrapheme)
+    .map((item) => item.focusGrapheme);
+
+  return {
+    concernRows: [{
+      target: target.focusGrapheme,
+      total: 4,
+      securityBand: "insecure",
+    }],
+    secureRows: fallbackTargets.map((focusGrapheme) => ({
+      target: focusGrapheme,
+      total: 4,
+      securityBand: "secure",
+    })),
+    developingRows: fallbackTargets.map((focusGrapheme) => ({
+      target: focusGrapheme,
+      total: 3,
+      securityBand: "nearly_secure",
+    })),
+    confusionByTarget: new Map(),
+    placementMeta: {
+      targetChallengeLevel: target.challengeBand || "secure_expected",
+    },
+  };
+}
+
+function buildWordloomCoreBankMonitorSelectorSmokeWarnings({
+  focusTargetRows = [],
+  wordRows = [],
+  wordTargetRows = [],
+  assignmentWordCount = WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT,
+} = {}) {
+  if (typeof buildGeneratedAssignmentPlan !== "function") return [];
+  const activeTargets = (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+    .map((row) => normalizeWordloomCoreMonitorFocusTarget(row))
+    .filter((row) => row?.is_active);
+  if (!activeTargets.length) return [];
+
+  const assignmentRows = mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows,
+    focusTargetRows,
+  });
+  if (!assignmentRows.length) return [];
+
+  const targets = activeTargets.map((target) => ({
+    focusGrapheme: target.focus_grapheme,
+    challengeBand: target.challenge_band || "secure_expected",
+  }));
+  const teacherTests = [{
+    id: "wordloom-core-bank-monitor",
+    title: "Wordloom Core Bank Monitor",
+    test_words: assignmentRows,
+  }];
+  const warnings = [];
+
+  for (const target of targets) {
+    const pupilId = `bank-monitor-${target.focusGrapheme}`;
+    const plan = buildGeneratedAssignmentPlan({
+      pupilIds: [pupilId],
+      teacherTests,
+      attempts: [],
+      totalWords: assignmentWordCount,
+      currentProfiles: {
+        [pupilId]: buildWordloomCoreMonitorSampleProfile(target, targets),
+      },
+    });
+    for (const warning of plan?.coverageWarnings || []) {
+      if (warning?.type !== "target_coverage_low") continue;
+      if (normalizeWordloomCoreText(warning?.focusGrapheme) !== target.focusGrapheme) continue;
+      warnings.push(warning);
+    }
+  }
+
+  return normalizeWordloomCoreSelectorSmokeWarnings(warnings);
+}
+
 function isMissingWordloomCoreBankError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -2300,6 +2628,71 @@ function isMissingWordloomCoreBankError(error) {
     || message.includes(WORDLOOM_CORE_WORD_TABLE)
     || message.includes(WORDLOOM_CORE_WORD_TARGET_TABLE)
     || message.includes(WORDLOOM_CORE_FOCUS_TARGET_TABLE);
+}
+
+function buildUnavailableWordloomCoreBankMonitorModel(error = null, threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD) {
+  const message = String(error?.message || "").trim();
+  return buildWordloomCoreBankMonitorModel({
+    available: false,
+    threshold,
+    message: message || "Core bank monitor data is unavailable.",
+  });
+}
+
+export async function readWordloomCoreBankMonitor({
+  threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD,
+  assignmentWordCount = WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT,
+} = {}) {
+  const safeThreshold = normalizeWordloomCoreBankMonitorThreshold(threshold);
+  try {
+    const { data: focusTargetRows, error: focusError } = await supabase
+      .from(WORDLOOM_CORE_FOCUS_TARGET_TABLE)
+      .select("id, focus_grapheme, display_label, stage_band, challenge_band, sort_order, is_active")
+      .order("sort_order", { ascending: true })
+      .order("focus_grapheme", { ascending: true });
+
+    if (focusError) return buildUnavailableWordloomCoreBankMonitorModel(focusError, safeThreshold);
+
+    const { data: wordRows, error: wordError } = await supabase
+      .from(WORDLOOM_CORE_WORD_TABLE)
+      .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
+      .order("primary_focus_grapheme", { ascending: true })
+      .order("normalised_word", { ascending: true })
+      .limit(2000);
+
+    if (wordError) return buildUnavailableWordloomCoreBankMonitorModel(wordError, safeThreshold);
+
+    const safeWordRows = Array.isArray(wordRows) ? wordRows : [];
+    const wordIds = safeWordRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+    const wordTargetRows = [];
+
+    for (const chunk of chunkWordloomCoreIds(wordIds, 200)) {
+      const { data, error: targetError } = await supabase
+        .from(WORDLOOM_CORE_WORD_TARGET_TABLE)
+        .select("id, word_id, focus_target_id, focus_grapheme, target_role, pattern_type, difficulty_modifier")
+        .in("word_id", chunk);
+
+      if (targetError) return buildUnavailableWordloomCoreBankMonitorModel(targetError, safeThreshold);
+      wordTargetRows.push(...(Array.isArray(data) ? data : []));
+    }
+
+    const selectorSmokeWarnings = buildWordloomCoreBankMonitorSelectorSmokeWarnings({
+      focusTargetRows: focusTargetRows || [],
+      wordRows: safeWordRows,
+      wordTargetRows,
+      assignmentWordCount,
+    });
+
+    return buildWordloomCoreBankMonitorModel({
+      focusTargetRows: focusTargetRows || [],
+      wordRows: safeWordRows,
+      wordTargetRows,
+      selectorSmokeWarnings,
+      threshold: safeThreshold,
+    });
+  } catch (error) {
+    return buildUnavailableWordloomCoreBankMonitorModel(error, safeThreshold);
+  }
 }
 
 export async function listWordloomCoreSpellingBankWordRows({
