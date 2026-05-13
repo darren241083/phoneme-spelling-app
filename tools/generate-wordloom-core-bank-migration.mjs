@@ -215,6 +215,29 @@ const PHASE_CONFIGS = new Map([
     includeExplicitHintSqlCheck: true,
     includeSchoolScopeSqlCheck: true,
   }],
+  ["8b", {
+    key: "8b",
+    sourceVersion: "wordloom_core_v1_phase_8b_2026_05_13",
+    migrationFilename: "20260513153000_wordloom_core_spelling_bank_phase_8b_structured_expansion_batch_1.sql",
+    tempTablePrefix: "phase_8b",
+    expectedCountColumn: "expected_phase_8b_word_count",
+    title: "Phase 8B",
+    noteText: "Wordloom core v1 Phase 8B structured expansion batch 1 target",
+    linkNoteText: "Wordloom core v1 Phase 8B structured expansion batch 1 target link",
+    expectedCounts: new Map([
+      ["ear", 22],
+      ["oy", 28],
+      ["oi", 30],
+      ["dge", 30],
+      ["ie", 28],
+      ["ci", 32],
+      ["au", 24],
+      ["ure", 30],
+      ["tch", 26],
+    ]),
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -470,7 +493,7 @@ function parsePhaseArg(argv = []) {
   const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
   const config = PHASE_CONFIGS.get(phase);
   if (!config) {
-    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, or --phase=7h.`);
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, --phase=7h, or --phase=8b.`);
   }
   return config;
 }
