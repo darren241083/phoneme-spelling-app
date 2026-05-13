@@ -7,11 +7,22 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "..");
 const sourcePath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
 const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
+const PHASE_7C_SOURCE_VERSION = "wordloom_core_v1_phase_7c_2026_05_13";
 const EXPECTED_PHASE_7B_COUNTS = new Map([
   ["ay", 8],
   ["ea", 8],
   ["ew", 8],
   ["tch", 8],
+  ["air", 4],
+  ["au", 4],
+]);
+const EXPECTED_PHASE_7C_COUNTS = new Map([
+  ["aw", 8],
+  ["ure", 8],
+  ["ay", 4],
+  ["ea", 4],
+  ["ew", 4],
+  ["tch", 4],
   ["air", 4],
   ["au", 4],
 ]);
@@ -146,7 +157,11 @@ function buildValidationReport(source) {
   const phase7BPrimaryCounts = Object.fromEntries(
     [...EXPECTED_PHASE_7B_COUNTS.keys()].map((focus) => [focus, 0]),
   );
+  const phase7CPrimaryCounts = Object.fromEntries(
+    [...EXPECTED_PHASE_7C_COUNTS.keys()].map((focus) => [focus, 0]),
+  );
   const phase7BWords = [];
+  const phase7CWords = [];
 
   if (!metadata) errors.push("metadata_missing");
   if (!isNonEmptyText(metadata?.schema_version)) errors.push("metadata_schema_version_missing");
@@ -192,6 +207,7 @@ function buildValidationReport(source) {
       && normalizeText(word.approval_status) === "approved"
       && normalizeText(word.suitability_status) === "suitable";
     const isPhase7BWord = String(word.source_version || "") === PHASE_7B_SOURCE_VERSION;
+    const isPhase7CWord = String(word.source_version || "") === PHASE_7C_SOURCE_VERSION;
 
     if (!cleanWord) errors.push(`${label}_word_missing`);
     if (!normalisedWord) errors.push(`${label}_normalised_word_missing`);
@@ -235,6 +251,23 @@ function buildValidationReport(source) {
       }
     }
 
+    if (isPhase7CWord) {
+      phase7CWords.push(word);
+      if (word.is_active !== true) errors.push(`${label}_phase7c_not_active`);
+      if (normalizeText(word.approval_status) !== "approved") errors.push(`${label}_phase7c_not_approved`);
+      if (normalizeText(word.suitability_status) !== "suitable") errors.push(`${label}_phase7c_not_suitable`);
+      if (normalizeText(word.source) !== "wordloom_core") errors.push(`${label}_phase7c_wrong_source`);
+      if (!EXPECTED_PHASE_7C_COUNTS.has(primaryFocus)) errors.push(`${label}_phase7c_unexpected_target_${primaryFocus || "missing"}`);
+      if (isWeakContext(word.sentence)) errors.push(`${label}_phase7c_sentence_weak`);
+      if (isWeakContext(word.meaning)) errors.push(`${label}_phase7c_meaning_weak`);
+      if (isCircularMeaning(normalisedWord, word.meaning)) errors.push(`${label}_phase7c_meaning_circular`);
+      if (hasExplicitHintText(word.sentence)) errors.push(`${label}_phase7c_sentence_spelling_hint`);
+      if (hasExplicitHintText(word.meaning)) errors.push(`${label}_phase7c_meaning_spelling_hint`);
+      if (phase7CPrimaryCounts[primaryFocus] !== undefined) {
+        phase7CPrimaryCounts[primaryFocus] += 1;
+      }
+    }
+
     const primaryTargetLinks = [];
     for (const [linkIndex, link] of targetLinks.entries()) {
       const linkLabel = `${label}_target_link[${linkIndex}]`;
@@ -269,6 +302,13 @@ function buildValidationReport(source) {
   for (const [focus, expected] of EXPECTED_PHASE_7B_COUNTS) {
     const actual = Number(phase7BPrimaryCounts[focus] || 0);
     if (actual !== expected) errors.push(`phase7b_target_${focus}_count_${actual}_expected_${expected}`);
+  }
+  if (phase7CWords.length !== 40) {
+    errors.push(`phase7c_word_count_${phase7CWords.length}_expected_40`);
+  }
+  for (const [focus, expected] of EXPECTED_PHASE_7C_COUNTS) {
+    const actual = Number(phase7CPrimaryCounts[focus] || 0);
+    if (actual !== expected) errors.push(`phase7c_target_${focus}_count_${actual}_expected_${expected}`);
   }
 
   const primaryCountsByTarget = {};
@@ -321,6 +361,11 @@ function buildValidationReport(source) {
       wordCount: phase7BWords.length,
       primaryCountsByTarget: phase7BPrimaryCounts,
     },
+    phase7C: {
+      sourceVersion: PHASE_7C_SOURCE_VERSION,
+      wordCount: phase7CWords.length,
+      primaryCountsByTarget: phase7CPrimaryCounts,
+    },
     difficultyBands: Object.fromEntries(
       ["easier", "core", "stretch"].map((band) => [
         band,
@@ -336,7 +381,7 @@ const report = buildValidationReport(source);
 assert.deepEqual(report.errors, [], `Wordloom source data errors: ${report.errors.join(", ")}`);
 assert.equal(report.sourceVersion, "wordloom_core_v1_foundation_2026_05_13");
 assert.equal(report.sourceTargetCount, 30);
-assert.equal(report.sourceWordCount, 42);
+assert.equal(report.sourceWordCount, 82);
 assert.equal(report.context.missingSentenceCount, 0);
 assert.equal(report.context.missingMeaningCount, 0);
 assert.equal(report.context.weakSentenceCount, 0);
@@ -351,6 +396,17 @@ assert.deepEqual(report.phase7B.primaryCountsByTarget, {
   air: 4,
   au: 4,
 });
+assert.equal(report.phase7C.wordCount, 40);
+assert.deepEqual(report.phase7C.primaryCountsByTarget, {
+  aw: 8,
+  ure: 8,
+  ay: 4,
+  ea: 4,
+  ew: 4,
+  tch: 4,
+  air: 4,
+  au: 4,
+});
 
 console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   sourceVersion: report.sourceVersion,
@@ -359,6 +415,7 @@ console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   sourceValidationWarningCount: report.warnings.length,
   context: report.context,
   phase7B: report.phase7B,
+  phase7C: report.phase7C,
   primaryCountsByTarget: report.primaryCountsByTarget,
   difficultyWindowCountsByTarget: report.difficultyWindowCountsByTarget,
 })}`);

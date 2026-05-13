@@ -2,16 +2,50 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
-const MIGRATION_FILENAME = "20260513120000_wordloom_core_spelling_bank_phase_7b_launch_batch.sql";
 const PROOF_SOURCE_VERSION = "wordloom_core_proof_v1";
-const EXPECTED_COUNTS = new Map([
-  ["ay", 8],
-  ["ea", 8],
-  ["ew", 8],
-  ["tch", 8],
-  ["air", 4],
-  ["au", 4],
+const PHASE_CONFIGS = new Map([
+  ["7b", {
+    key: "7b",
+    sourceVersion: "wordloom_core_v1_phase_7b_2026_05_13",
+    migrationFilename: "20260513120000_wordloom_core_spelling_bank_phase_7b_launch_batch.sql",
+    tempTablePrefix: "phase_7b",
+    expectedCountColumn: "expected_phase_7b_word_count",
+    title: "Phase 7B",
+    noteText: "Wordloom core v1 Phase 7B launch batch target",
+    linkNoteText: "Wordloom core v1 Phase 7B launch batch target link",
+    expectedCounts: new Map([
+      ["ay", 8],
+      ["ea", 8],
+      ["ew", 8],
+      ["tch", 8],
+      ["air", 4],
+      ["au", 4],
+    ]),
+    includeExplicitHintSqlCheck: false,
+    includeSchoolScopeSqlCheck: false,
+  }],
+  ["7c", {
+    key: "7c",
+    sourceVersion: "wordloom_core_v1_phase_7c_2026_05_13",
+    migrationFilename: "20260513123000_wordloom_core_spelling_bank_phase_7c_aw_ure_topups.sql",
+    tempTablePrefix: "phase_7c",
+    expectedCountColumn: "expected_phase_7c_word_count",
+    title: "Phase 7C",
+    noteText: "Wordloom core v1 Phase 7C aw, ure, and active target top-up batch target",
+    linkNoteText: "Wordloom core v1 Phase 7C aw, ure, and active target top-up batch target link",
+    expectedCounts: new Map([
+      ["aw", 8],
+      ["ure", 8],
+      ["ay", 4],
+      ["ea", 4],
+      ["ew", 4],
+      ["tch", 4],
+      ["air", 4],
+      ["au", 4],
+    ]),
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -61,11 +95,11 @@ const proofMigrationPath = path.join(
   "migrations",
   "20260508150000_wordloom_core_spelling_bank_proof_set.sql",
 );
-const migrationPath = path.join(repoRoot, "supabase", "migrations", MIGRATION_FILENAME);
 
-function fail(errors) {
+function fail(errors, config = null) {
   const list = Array.isArray(errors) ? errors : [errors];
-  throw new Error(`Cannot generate Phase 7B migration:\n${list.map((item) => `- ${item}`).join("\n")}`);
+  const phaseTitle = config?.title || "requested phase";
+  throw new Error(`Cannot generate ${phaseTitle} migration:\n${list.map((item) => `- ${item}`).join("\n")}`);
 }
 
 function normalizeText(value = "") {
@@ -109,9 +143,9 @@ function sqlTextArray(values) {
   return `array[${values.map((value) => sqlString(value)).join(",")}]::text[]`;
 }
 
-function sqlInt(value) {
+function sqlInt(value, config = null) {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed)) fail(`Expected integer value, got ${value}.`);
+  if (!Number.isInteger(parsed)) fail(`Expected integer value, got ${value}.`, config);
   return String(parsed);
 }
 
@@ -262,35 +296,50 @@ function countByPrimaryFocus(words) {
   return counts;
 }
 
-function validateSource(source) {
+function parsePhaseArg(argv = []) {
+  const phaseArg = argv.find((arg) => String(arg || "").startsWith("--phase="));
+  const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
+  const config = PHASE_CONFIGS.get(phase);
+  if (!config) {
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b or --phase=7c.`);
+  }
+  return config;
+}
+
+function validateSource(source, config) {
   const errors = [];
   const targets = Array.isArray(source?.targets) ? source.targets : [];
   const words = Array.isArray(source?.words) ? source.words : [];
   const targetByFocus = new Map();
-  const phaseWords = words.filter((word) => word?.source_version === PHASE_7B_SOURCE_VERSION);
+  const phaseWords = words.filter((word) => word?.source_version === config.sourceVersion);
   const phaseNormalised = new Set();
   const duplicateNormalised = new Set();
+  const expectedTotal = [...config.expectedCounts.values()].reduce((total, count) => total + count, 0);
 
   for (const target of targets) {
     const focus = normalizeText(target?.focus_grapheme);
     if (focus) targetByFocus.set(focus, target);
   }
 
-  if (phaseWords.length !== 40) {
-    errors.push(`expected_40_phase_7b_words_found_${phaseWords.length}`);
+  for (const focus of config.expectedCounts.keys()) {
+    if (!targetByFocus.has(focus)) errors.push(`target_${focus}_missing_from_source_targets`);
+  }
+
+  if (phaseWords.length !== expectedTotal) {
+    errors.push(`expected_${expectedTotal}_${config.key}_words_found_${phaseWords.length}`);
   }
 
   const counts = countByPrimaryFocus(phaseWords);
-  for (const [focus, expected] of EXPECTED_COUNTS) {
+  for (const [focus, expected] of config.expectedCounts) {
     const actual = counts.get(focus) || 0;
     if (actual !== expected) errors.push(`target_${focus}_count_${actual}_expected_${expected}`);
   }
   for (const focus of counts.keys()) {
-    if (!EXPECTED_COUNTS.has(focus)) errors.push(`unexpected_phase_7b_target_${focus}`);
+    if (!config.expectedCounts.has(focus)) errors.push(`unexpected_${config.key}_target_${focus}`);
   }
 
   for (const [index, word] of phaseWords.entries()) {
-    const label = `phase7b_word[${index}]_${word?.normalised_word || word?.word || "unknown"}`;
+    const label = `${config.key}_word[${index}]_${word?.normalised_word || word?.word || "unknown"}`;
     for (const field of REQUIRED_WORD_FIELDS) {
       if (!Object.prototype.hasOwnProperty.call(word, field)) errors.push(`${label}_missing_${field}`);
     }
@@ -327,6 +376,7 @@ function validateSource(source) {
     if (isWeakContext(word?.meaning)) errors.push(`${label}_meaning_weak`);
     if (isCircularMeaning(normalisedWord, word?.meaning)) errors.push(`${label}_meaning_circular`);
     if (hasExplicitHintText(word?.sentence)) errors.push(`${label}_sentence_spelling_hint`);
+    if (hasExplicitHintText(word?.meaning)) errors.push(`${label}_meaning_spelling_hint`);
     if (primaryLinks.length !== 1) errors.push(`${label}_primary_link_count_${primaryLinks.length}`);
 
     for (const [linkIndex, link] of targetLinks.entries()) {
@@ -342,11 +392,11 @@ function validateSource(source) {
   }
 
   for (const duplicate of duplicateNormalised) {
-    errors.push(`duplicate_phase_7b_word_${duplicate}`);
+    errors.push(`duplicate_${config.key}_word_${duplicate}`);
   }
 
   const activeOtherSourceWords = words
-    .filter((word) => word?.is_active === true && word?.source_version !== PHASE_7B_SOURCE_VERSION)
+    .filter((word) => word?.is_active === true && word?.source_version !== config.sourceVersion)
     .map((word) => ({
       normalised_word: normalizeText(word?.normalised_word || word?.word),
       source_version: String(word?.source_version || ""),
@@ -355,17 +405,17 @@ function validateSource(source) {
   const existingWords = [...activeOtherSourceWords, ...parseProofWords()];
   for (const existing of existingWords) {
     if (phaseNormalised.has(existing.normalised_word)) {
-      errors.push(`phase_7b_word_${existing.normalised_word}_collides_with_${existing.source_version || "unknown_source"}`);
+      errors.push(`${config.key}_word_${existing.normalised_word}_collides_with_${existing.source_version || "unknown_source"}`);
     }
   }
 
-  if (errors.length) fail(errors);
+  if (errors.length) fail(errors, config);
 
-  const targetRows = [...EXPECTED_COUNTS.keys()]
+  const targetRows = [...config.expectedCounts.keys()]
     .map((focus) => ({
       ...targetByFocus.get(focus),
       focus_grapheme: focus,
-      expected_phase_7b_word_count: EXPECTED_COUNTS.get(focus),
+      [config.expectedCountColumn]: config.expectedCounts.get(focus),
     }))
     .sort((a, b) => Number(a.sort_order) - Number(b.sort_order) || a.focus_grapheme.localeCompare(b.focus_grapheme));
   const wordRows = phaseWords
@@ -389,7 +439,7 @@ function validateSource(source) {
       || a.normalised_word.localeCompare(b.normalised_word)
     );
 
-  return { targetRows, wordRows };
+  return { targetRows, wordRows, expectedTotal };
 }
 
 function valuesBlock(rows, rowToFields) {
@@ -398,7 +448,51 @@ function valuesBlock(rows, rowToFields) {
     .join(",\n");
 }
 
-function buildMigrationSql({ targetRows, wordRows }) {
+function buildOptionalExplicitHintCheck(config, wordsTable) {
+  if (!config.includeExplicitHintSqlCheck) return "";
+  return `
+  if exists (
+    select 1
+    from ${wordsTable}
+    where sentence ~* '\\m(grapheme|focus sound|target sound|spelling pattern)\\M'
+      or meaning ~* '\\m(grapheme|focus sound|target sound|spelling pattern)\\M'
+  ) then
+    raise exception 'Wordloom core ${config.title} words contain explicit spelling-hint context.';
+  end if;
+`;
+}
+
+function buildOptionalSchoolScopeCheck(config, wordsTable) {
+  if (!config.includeSchoolScopeSqlCheck) return "";
+  return `
+  if exists (
+    select 1
+    from public.school_spelling_bank_overrides as overrides
+    inner join ${wordsTable} as phase_words
+      on phase_words.normalised_word in (
+        select normalised_word
+        from public.wordloom_core_words
+        where id = overrides.core_word_id
+      )
+  ) then
+    raise exception 'Wordloom core ${config.title} must not create school override rows for new core words.';
+  end if;
+
+  if exists (
+    select 1
+    from public.school_spelling_bank_words as school_words
+    inner join ${wordsTable} as phase_words
+      on phase_words.normalised_word = school_words.normalised_word
+  ) then
+    raise exception 'Wordloom core ${config.title} must not add rows to school spelling bank additions.';
+  end if;
+`;
+}
+
+function buildMigrationSql({ config, targetRows, wordRows, expectedTotal }) {
+  const targetsTable = `wordloom_core_${config.tempTablePrefix}_targets`;
+  const wordsTable = `wordloom_core_${config.tempTablePrefix}_words`;
+  const wordTargetsTable = `wordloom_core_${config.tempTablePrefix}_word_targets`;
   const wordTargetRows = wordRows.flatMap((word) =>
     word.target_links.map((link) => ({
       normalised_word: word.normalised_word,
@@ -415,8 +509,8 @@ function buildMigrationSql({ targetRows, wordRows }) {
     sqlString(target.display_label),
     sqlString(target.stage_band),
     sqlString(target.challenge_band),
-    sqlInt(target.sort_order),
-    sqlInt(target.expected_phase_7b_word_count),
+    sqlInt(target.sort_order, config),
+    sqlInt(target[config.expectedCountColumn], config),
   ]);
   const wordValues = valuesBlock(wordRows, (word) => [
     sqlString(word.word),
@@ -425,7 +519,7 @@ function buildMigrationSql({ targetRows, wordRows }) {
     sqlTextArray(word.grapheme_segments),
     sqlTextArray(word.focus_graphemes),
     sqlString(word.stage_band),
-    sqlInt(word.difficulty_score),
+    sqlInt(word.difficulty_score, config),
     sqlString(word.difficulty_label),
     sqlString(word.difficulty_reason),
     sqlString(word.sentence),
@@ -441,32 +535,32 @@ function buildMigrationSql({ targetRows, wordRows }) {
     sqlString(link.focus_grapheme),
     sqlString(link.target_role),
     sqlString(link.pattern_type),
-    sqlInt(link.difficulty_modifier),
+    sqlInt(link.difficulty_modifier, config),
   ]);
 
   return `begin;
 
-create temporary table wordloom_core_phase_7b_targets (
+create temporary table ${targetsTable} (
   focus_grapheme text primary key,
   display_label text not null,
   stage_band text not null,
   challenge_band text not null,
   sort_order integer not null,
-  expected_phase_7b_word_count integer not null
+  ${config.expectedCountColumn} integer not null
 ) on commit drop;
 
-insert into wordloom_core_phase_7b_targets (
+insert into ${targetsTable} (
   focus_grapheme,
   display_label,
   stage_band,
   challenge_band,
   sort_order,
-  expected_phase_7b_word_count
+  ${config.expectedCountColumn}
 )
 values
 ${targetValues};
 
-create temporary table wordloom_core_phase_7b_words (
+create temporary table ${wordsTable} (
   word text primary key,
   normalised_word text not null,
   primary_focus_grapheme text not null,
@@ -485,7 +579,7 @@ create temporary table wordloom_core_phase_7b_words (
   is_active boolean not null
 ) on commit drop;
 
-insert into wordloom_core_phase_7b_words (
+insert into ${wordsTable} (
   word,
   normalised_word,
   primary_focus_grapheme,
@@ -506,7 +600,7 @@ insert into wordloom_core_phase_7b_words (
 values
 ${wordValues};
 
-create temporary table wordloom_core_phase_7b_word_targets (
+create temporary table ${wordTargetsTable} (
   normalised_word text not null,
   focus_grapheme text not null,
   target_role text not null,
@@ -514,7 +608,7 @@ create temporary table wordloom_core_phase_7b_word_targets (
   difficulty_modifier integer not null default 0
 ) on commit drop;
 
-insert into wordloom_core_phase_7b_word_targets (
+insert into ${wordTargetsTable} (
   normalised_word,
   focus_grapheme,
   target_role,
@@ -526,112 +620,112 @@ ${linkValues};
 
 do $$
 begin
-  if (select count(*) from wordloom_core_phase_7b_words) <> 40 then
-    raise exception 'Wordloom core Phase 7B batch must contain exactly 40 words.';
+  if (select count(*) from ${wordsTable}) <> ${expectedTotal} then
+    raise exception 'Wordloom core ${config.title} batch must contain exactly ${expectedTotal} words.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_targets as target
+    from ${targetsTable} as target
     left join (
       select primary_focus_grapheme, count(*)::integer as word_count
-      from wordloom_core_phase_7b_words
+      from ${wordsTable}
       group by primary_focus_grapheme
     ) as actual
       on actual.primary_focus_grapheme = target.focus_grapheme
-    where coalesce(actual.word_count, 0) <> target.expected_phase_7b_word_count
+    where coalesce(actual.word_count, 0) <> target.${config.expectedCountColumn}
   ) then
-    raise exception 'Wordloom core Phase 7B target counts do not match expected coverage.';
+    raise exception 'Wordloom core ${config.title} target counts do not match expected coverage.';
   end if;
 
   if exists (
     select normalised_word
-    from wordloom_core_phase_7b_words
+    from ${wordsTable}
     group by normalised_word
     having count(*) > 1
   ) then
-    raise exception 'Wordloom core Phase 7B batch contains duplicate normalised words.';
+    raise exception 'Wordloom core ${config.title} batch contains duplicate normalised words.';
   end if;
 
   if exists (
     select 1
     from public.wordloom_core_words as existing
-    inner join wordloom_core_phase_7b_words as phase_words
+    inner join ${wordsTable} as phase_words
       on phase_words.normalised_word = existing.normalised_word
     where existing.is_active is true
-      and coalesce(existing.source_version, '') <> '${PHASE_7B_SOURCE_VERSION}'
+      and coalesce(existing.source_version, '') <> '${config.sourceVersion}'
   ) then
-    raise exception 'Wordloom core Phase 7B batch collides with existing active core words.';
+    raise exception 'Wordloom core ${config.title} batch collides with existing active core words.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_words
+    from ${wordsTable}
     where is_active is not true
       or approval_status <> 'approved'
       or suitability_status <> 'suitable'
       or source <> 'wordloom_core'
-      or source_version <> '${PHASE_7B_SOURCE_VERSION}'
+      or source_version <> '${config.sourceVersion}'
       or btrim(sentence) = ''
       or btrim(meaning) = ''
   ) then
-    raise exception 'Wordloom core Phase 7B words must be active approved suitable Wordloom rows with sentence and meaning.';
+    raise exception 'Wordloom core ${config.title} words must be active approved suitable Wordloom rows with sentence and meaning.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_words
+    from ${wordsTable}
     where sentence ~* '\\m(placeholder|tbd|todo|lorem|sample sentence|example sentence|needs review)\\M'
       or meaning ~* '\\m(placeholder|tbd|todo|lorem|meaning goes here|definition goes here|needs review)\\M'
   ) then
-    raise exception 'Wordloom core Phase 7B words contain placeholder context.';
+    raise exception 'Wordloom core ${config.title} words contain placeholder context.';
   end if;
-
+${buildOptionalExplicitHintCheck(config, wordsTable)}
   if exists (
     select 1
-    from wordloom_core_phase_7b_words
+    from ${wordsTable}
     where array_to_string(grapheme_segments, '') <> normalised_word
   ) then
-    raise exception 'Wordloom core Phase 7B words contain grapheme segments that do not reconstruct the word.';
+    raise exception 'Wordloom core ${config.title} words contain grapheme segments that do not reconstruct the word.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_words
+    from ${wordsTable}
     where not (primary_focus_grapheme = any(grapheme_segments))
       or not (primary_focus_grapheme = any(focus_graphemes))
   ) then
-    raise exception 'Wordloom core Phase 7B primary focus values must appear in segments and focus_graphemes.';
+    raise exception 'Wordloom core ${config.title} primary focus values must appear in segments and focus_graphemes.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_word_targets
+    from ${wordTargetsTable}
     where target_role not in ('primary', 'secondary', 'incidental')
   ) then
-    raise exception 'Wordloom core Phase 7B word target links contain an invalid target_role.';
+    raise exception 'Wordloom core ${config.title} word target links contain an invalid target_role.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_word_targets as word_targets
-    left join wordloom_core_phase_7b_targets as targets
+    from ${wordTargetsTable} as word_targets
+    left join ${targetsTable} as targets
       on targets.focus_grapheme = word_targets.focus_grapheme
     where targets.focus_grapheme is null
   ) then
-    raise exception 'Wordloom core Phase 7B word target links point to unknown targets.';
+    raise exception 'Wordloom core ${config.title} word target links point to unknown targets.';
   end if;
 
   if exists (
     select words.normalised_word
-    from wordloom_core_phase_7b_words as words
-    left join wordloom_core_phase_7b_word_targets as word_targets
+    from ${wordsTable} as words
+    left join ${wordTargetsTable} as word_targets
       on word_targets.normalised_word = words.normalised_word
      and word_targets.target_role = 'primary'
     group by words.normalised_word
     having count(word_targets.normalised_word) <> 1
   ) then
-    raise exception 'Every Wordloom core Phase 7B word must have exactly one primary target link.';
+    raise exception 'Every Wordloom core ${config.title} word must have exactly one primary target link.';
   end if;
 end $$;
 
@@ -651,8 +745,8 @@ select
   challenge_band,
   sort_order,
   true,
-  'Wordloom core v1 Phase 7B launch batch target'
-from wordloom_core_phase_7b_targets
+  '${config.noteText}'
+from ${targetsTable}
 on conflict (focus_grapheme) do update
 set
   display_label = excluded.display_label,
@@ -666,13 +760,13 @@ do $$
 begin
   if exists (
     select 1
-    from wordloom_core_phase_7b_targets as phase_targets
+    from ${targetsTable} as phase_targets
     left join public.wordloom_core_focus_targets as targets
       on targets.focus_grapheme = phase_targets.focus_grapheme
      and targets.is_active is true
     where targets.id is null
   ) then
-    raise exception 'Wordloom core Phase 7B linked targets must exist and be active.';
+    raise exception 'Wordloom core ${config.title} linked targets must exist and be active.';
   end if;
 end $$;
 
@@ -711,7 +805,7 @@ select
   source,
   source_version,
   is_active
-from wordloom_core_phase_7b_words
+from ${wordsTable}
 on conflict (normalised_word) where is_active is true do update
 set
   word = excluded.word,
@@ -746,11 +840,11 @@ select
   word_targets.target_role,
   word_targets.pattern_type,
   word_targets.difficulty_modifier,
-  'Wordloom core v1 Phase 7B launch batch target link'
-from wordloom_core_phase_7b_word_targets as word_targets
+  '${config.linkNoteText}'
+from ${wordTargetsTable} as word_targets
 inner join public.wordloom_core_words as words
   on words.normalised_word = word_targets.normalised_word
- and words.source_version = '${PHASE_7B_SOURCE_VERSION}'
+ and words.source_version = '${config.sourceVersion}'
  and words.is_active is true
 inner join public.wordloom_core_focus_targets as targets
   on targets.focus_grapheme = word_targets.focus_grapheme
@@ -768,17 +862,17 @@ begin
     select count(*)::integer
     from public.wordloom_core_words
     where source = 'wordloom_core'
-      and source_version = '${PHASE_7B_SOURCE_VERSION}'
+      and source_version = '${config.sourceVersion}'
       and is_active is true
       and approval_status = 'approved'
       and suitability_status = 'suitable'
-  ) <> 40 then
-    raise exception 'Wordloom core Phase 7B persisted word count must be exactly 40.';
+  ) <> ${expectedTotal} then
+    raise exception 'Wordloom core ${config.title} persisted word count must be exactly ${expectedTotal}.';
   end if;
 
   if exists (
     select 1
-    from wordloom_core_phase_7b_targets as expected
+    from ${targetsTable} as expected
     left join (
       select
         word_targets.focus_grapheme,
@@ -788,16 +882,16 @@ begin
         on word_targets.word_id = words.id
        and word_targets.target_role = 'primary'
       where words.source = 'wordloom_core'
-        and words.source_version = '${PHASE_7B_SOURCE_VERSION}'
+        and words.source_version = '${config.sourceVersion}'
         and words.is_active is true
         and words.approval_status = 'approved'
         and words.suitability_status = 'suitable'
       group by word_targets.focus_grapheme
     ) as actual
       on actual.focus_grapheme = expected.focus_grapheme
-    where coalesce(actual.word_count, 0) <> expected.expected_phase_7b_word_count
+    where coalesce(actual.word_count, 0) <> expected.${config.expectedCountColumn}
   ) then
-    raise exception 'Wordloom core Phase 7B persisted target counts do not match expected coverage.';
+    raise exception 'Wordloom core ${config.title} persisted target counts do not match expected coverage.';
   end if;
 
   if exists (
@@ -807,19 +901,19 @@ begin
     group by normalised_word
     having count(*) > 1
   ) then
-    raise exception 'Wordloom core active words contain duplicate normalised words after Phase 7B.';
+    raise exception 'Wordloom core active words contain duplicate normalised words after ${config.title}.';
   end if;
 
   if exists (
     select 1
     from public.wordloom_core_words as words
-    where words.source_version = '${PHASE_7B_SOURCE_VERSION}'
+    where words.source_version = '${config.sourceVersion}'
       and (
         btrim(coalesce(words.sentence, '')) = ''
         or btrim(coalesce(words.meaning, '')) = ''
       )
   ) then
-    raise exception 'Wordloom core Phase 7B persisted words must retain sentence and meaning.';
+    raise exception 'Wordloom core ${config.title} persisted words must retain sentence and meaning.';
   end if;
 
   if exists (
@@ -830,13 +924,13 @@ begin
      and word_targets.target_role = 'primary'
     inner join public.wordloom_core_focus_targets as targets
       on targets.id = word_targets.focus_target_id
-    where words.source_version = '${PHASE_7B_SOURCE_VERSION}'
+    where words.source_version = '${config.sourceVersion}'
       and (
         targets.is_active is not true
         or word_targets.focus_grapheme <> targets.focus_grapheme
       )
   ) then
-    raise exception 'Wordloom core Phase 7B persisted links must point to active matching targets.';
+    raise exception 'Wordloom core ${config.title} persisted links must point to active matching targets.';
   end if;
 
   if exists (
@@ -845,22 +939,24 @@ begin
     left join public.wordloom_core_word_targets as word_targets
       on word_targets.word_id = words.id
      and word_targets.target_role = 'primary'
-    where words.source_version = '${PHASE_7B_SOURCE_VERSION}'
+    where words.source_version = '${config.sourceVersion}'
       and words.is_active is true
     group by words.id
     having count(word_targets.id) <> 1
   ) then
-    raise exception 'Every persisted Wordloom core Phase 7B word must have exactly one primary target link.';
-  end if;
+    raise exception 'Every persisted Wordloom core ${config.title} word must have exactly one primary target link.';
+  end if;${buildOptionalSchoolScopeCheck(config, wordsTable)}
 end $$;
 
 commit;
 `;
 }
 
+const config = parsePhaseArg(process.argv.slice(2));
 const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-const { targetRows, wordRows } = validateSource(source);
+const { targetRows, wordRows, expectedTotal } = validateSource(source, config);
+const migrationPath = path.join(repoRoot, "supabase", "migrations", config.migrationFilename);
 mkdirSync(path.dirname(migrationPath), { recursive: true });
-writeFileSync(migrationPath, buildMigrationSql({ targetRows, wordRows }), "utf8");
+writeFileSync(migrationPath, buildMigrationSql({ config, targetRows, wordRows, expectedTotal }), "utf8");
 
-console.log(`Generated ${path.relative(repoRoot, migrationPath)} with ${wordRows.length} Phase 7B words.`);
+console.log(`Generated ${path.relative(repoRoot, migrationPath)} with ${wordRows.length} ${config.title} words.`);
