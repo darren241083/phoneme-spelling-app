@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "..");
 const sourcePath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
+const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
+const EXPECTED_PHASE_7B_COUNTS = new Map([
+  ["ay", 8],
+  ["ea", 8],
+  ["ew", 8],
+  ["tch", 8],
+  ["air", 4],
+  ["au", 4],
+]);
 
 const TARGET_REQUIRED_FIELDS = [
   "focus_grapheme",
@@ -47,6 +56,12 @@ const PLACEHOLDER_PATTERNS = [
   /\bdefinition goes here\b/i,
   /\bneeds review\b/i,
 ];
+const EXPLICIT_HINT_PATTERNS = [
+  /\bgrapheme\b/i,
+  /\bfocus sound\b/i,
+  /\btarget sound\b/i,
+  /\bspelling pattern\b/i,
+];
 
 function normalizeText(value = "") {
   return String(value || "").trim().toLowerCase();
@@ -73,6 +88,22 @@ function hasPlaceholderText(value = "") {
 function isWeakContext(value = "") {
   const clean = String(value || "").trim();
   return clean.length > 0 && clean.length < 12;
+}
+
+function hasExplicitHintText(value = "") {
+  return EXPLICIT_HINT_PATTERNS.some((pattern) => pattern.test(String(value || "")));
+}
+
+function isCircularMeaning(word, meaning) {
+  const cleanWord = normalizeText(word);
+  const cleanMeaning = normalizeText(meaning)
+    .replace(/[.?!]+$/g, "")
+    .replace(/\s+/g, " ");
+  return cleanMeaning === cleanWord
+    || cleanMeaning === `to ${cleanWord}`
+    || cleanMeaning === `a ${cleanWord}`
+    || cleanMeaning === `an ${cleanWord}`
+    || cleanMeaning === `the ${cleanWord}`;
 }
 
 function difficultyBandForScore(score) {
@@ -112,6 +143,10 @@ function buildValidationReport(source) {
   const difficultyWindows = metadata?.difficulty_windows && typeof metadata.difficulty_windows === "object"
     ? metadata.difficulty_windows
     : {};
+  const phase7BPrimaryCounts = Object.fromEntries(
+    [...EXPECTED_PHASE_7B_COUNTS.keys()].map((focus) => [focus, 0]),
+  );
+  const phase7BWords = [];
 
   if (!metadata) errors.push("metadata_missing");
   if (!isNonEmptyText(metadata?.schema_version)) errors.push("metadata_schema_version_missing");
@@ -156,6 +191,7 @@ function buildValidationReport(source) {
     const activeApprovedSuitable = word.is_active === true
       && normalizeText(word.approval_status) === "approved"
       && normalizeText(word.suitability_status) === "suitable";
+    const isPhase7BWord = String(word.source_version || "") === PHASE_7B_SOURCE_VERSION;
 
     if (!cleanWord) errors.push(`${label}_word_missing`);
     if (!normalisedWord) errors.push(`${label}_normalised_word_missing`);
@@ -181,6 +217,22 @@ function buildValidationReport(source) {
       if (!isNonEmptyText(word.meaning)) errors.push(`${label}_meaning_missing`);
       if (hasPlaceholderText(word.sentence)) errors.push(`${label}_sentence_placeholder`);
       if (hasPlaceholderText(word.meaning)) errors.push(`${label}_meaning_placeholder`);
+    }
+
+    if (isPhase7BWord) {
+      phase7BWords.push(word);
+      if (word.is_active !== true) errors.push(`${label}_phase7b_not_active`);
+      if (normalizeText(word.approval_status) !== "approved") errors.push(`${label}_phase7b_not_approved`);
+      if (normalizeText(word.suitability_status) !== "suitable") errors.push(`${label}_phase7b_not_suitable`);
+      if (normalizeText(word.source) !== "wordloom_core") errors.push(`${label}_phase7b_wrong_source`);
+      if (!EXPECTED_PHASE_7B_COUNTS.has(primaryFocus)) errors.push(`${label}_phase7b_unexpected_target_${primaryFocus || "missing"}`);
+      if (isWeakContext(word.sentence)) errors.push(`${label}_phase7b_sentence_weak`);
+      if (isWeakContext(word.meaning)) errors.push(`${label}_phase7b_meaning_weak`);
+      if (isCircularMeaning(normalisedWord, word.meaning)) errors.push(`${label}_phase7b_meaning_circular`);
+      if (hasExplicitHintText(word.sentence)) errors.push(`${label}_phase7b_sentence_spelling_hint`);
+      if (phase7BPrimaryCounts[primaryFocus] !== undefined) {
+        phase7BPrimaryCounts[primaryFocus] += 1;
+      }
     }
 
     const primaryTargetLinks = [];
@@ -209,6 +261,14 @@ function buildValidationReport(source) {
 
   for (const duplicate of duplicateNormalisedWords) {
     errors.push(`duplicate_normalised_word_${duplicate}`);
+  }
+
+  if (phase7BWords.length !== 40) {
+    errors.push(`phase7b_word_count_${phase7BWords.length}_expected_40`);
+  }
+  for (const [focus, expected] of EXPECTED_PHASE_7B_COUNTS) {
+    const actual = Number(phase7BPrimaryCounts[focus] || 0);
+    if (actual !== expected) errors.push(`phase7b_target_${focus}_count_${actual}_expected_${expected}`);
   }
 
   const primaryCountsByTarget = {};
@@ -256,6 +316,11 @@ function buildValidationReport(source) {
       weakMeaningCount,
       placeholderContextCount,
     },
+    phase7B: {
+      sourceVersion: PHASE_7B_SOURCE_VERSION,
+      wordCount: phase7BWords.length,
+      primaryCountsByTarget: phase7BPrimaryCounts,
+    },
     difficultyBands: Object.fromEntries(
       ["easier", "core", "stretch"].map((band) => [
         band,
@@ -271,10 +336,21 @@ const report = buildValidationReport(source);
 assert.deepEqual(report.errors, [], `Wordloom source data errors: ${report.errors.join(", ")}`);
 assert.equal(report.sourceVersion, "wordloom_core_v1_foundation_2026_05_13");
 assert.equal(report.sourceTargetCount, 30);
-assert.equal(report.sourceWordCount, 10);
+assert.equal(report.sourceWordCount, 42);
 assert.equal(report.context.missingSentenceCount, 0);
 assert.equal(report.context.missingMeaningCount, 0);
+assert.equal(report.context.weakSentenceCount, 0);
+assert.equal(report.context.weakMeaningCount, 0);
 assert.equal(report.context.placeholderContextCount, 0);
+assert.equal(report.phase7B.wordCount, 40);
+assert.deepEqual(report.phase7B.primaryCountsByTarget, {
+  ay: 8,
+  ea: 8,
+  ew: 8,
+  tch: 8,
+  air: 4,
+  au: 4,
+});
 
 console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   sourceVersion: report.sourceVersion,
@@ -282,6 +358,7 @@ console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   sourceWordCount: report.sourceWordCount,
   sourceValidationWarningCount: report.warnings.length,
   context: report.context,
+  phase7B: report.phase7B,
   primaryCountsByTarget: report.primaryCountsByTarget,
   difficultyWindowCountsByTarget: report.difficultyWindowCountsByTarget,
 })}`);

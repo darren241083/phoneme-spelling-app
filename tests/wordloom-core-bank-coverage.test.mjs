@@ -7,10 +7,19 @@ import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const EXPECTED_PROOF_TARGET_COUNT = 24;
 const EXPECTED_PROOF_WORD_COUNT = 150;
+const EXPECTED_PHASE_7B_TARGET_COUNT = 6;
+const EXPECTED_PHASE_7B_WORD_COUNT = 40;
 const EXPECTED_ASSIGNMENT_WORD_COUNT = 10;
-const EXPECTED_LOW_COVERAGE_WARNINGS = new Map([
-  ["air", { selectedTargetCount: 2, requestedTargetCount: 4 }],
-  ["au", { selectedTargetCount: 3, requestedTargetCount: 4 }],
+const PROOF_SOURCE_VERSION = "wordloom_core_proof_v1";
+const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
+const EXPECTED_LOW_COVERAGE_WARNINGS = new Map();
+const EXPECTED_PHASE_7B_COUNTS = new Map([
+  ["ay", 8],
+  ["ea", 8],
+  ["ew", 8],
+  ["tch", 8],
+  ["air", 4],
+  ["au", 4],
 ]);
 
 const { buildGeneratedAssignmentPlan } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
@@ -22,6 +31,12 @@ const proofSetMigrationPath = path.join(
   "supabase",
   "migrations",
   "20260508150000_wordloom_core_spelling_bank_proof_set.sql",
+);
+const phase7BMigrationPath = path.join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260513120000_wordloom_core_spelling_bank_phase_7b_launch_batch.sql",
 );
 const sourceDataPath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
 const SOURCE_PLACEHOLDER_PATTERNS = [
@@ -210,6 +225,64 @@ function parseProofWords(source) {
     });
 }
 
+function parsePhase7BTargets(source) {
+  return parseSqlTuples(extractInsertValues(source, "wordloom_core_phase_7b_targets"))
+    .map((tupleText) => {
+      const fields = splitSqlFields(tupleText);
+      assert.equal(fields.length, 6, `Expected 6 Phase 7B target fields, got ${fields.length}.`);
+      return {
+        focusGrapheme: unquoteSqlString(fields[0]),
+        displayLabel: unquoteSqlString(fields[1]),
+        stageBand: unquoteSqlString(fields[2]),
+        challengeBand: unquoteSqlString(fields[3]),
+        sortOrder: parseSqlInteger(fields[4]),
+        expectedPrimaryWordCount: parseSqlInteger(fields[5]),
+      };
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function parsePhase7BWords(source) {
+  return parseSqlTuples(extractInsertValues(source, "wordloom_core_phase_7b_words"))
+    .map((tupleText) => {
+      const fields = splitSqlFields(tupleText);
+      assert.equal(fields.length, 16, `Expected 16 Phase 7B word fields, got ${fields.length}.`);
+      return {
+        word: unquoteSqlString(fields[0]),
+        normalisedWord: unquoteSqlString(fields[1]),
+        primaryFocusGrapheme: unquoteSqlString(fields[2]),
+        graphemeSegments: parseSqlTextArray(fields[3]),
+        focusGraphemes: parseSqlTextArray(fields[4]),
+        stageBand: unquoteSqlString(fields[5]),
+        difficultyScore: parseSqlInteger(fields[6]),
+        difficultyLabel: unquoteSqlString(fields[7]),
+        difficultyReason: unquoteSqlString(fields[8]),
+        sentence: unquoteSqlString(fields[9]),
+        meaning: unquoteSqlString(fields[10]),
+        approvalStatus: unquoteSqlString(fields[11]),
+        suitabilityStatus: unquoteSqlString(fields[12]),
+        source: unquoteSqlString(fields[13]),
+        sourceVersion: unquoteSqlString(fields[14]),
+        active: String(fields[15]).trim().toLowerCase() === "true",
+      };
+    });
+}
+
+function parsePhase7BWordTargets(source) {
+  return parseSqlTuples(extractInsertValues(source, "wordloom_core_phase_7b_word_targets"))
+    .map((tupleText) => {
+      const fields = splitSqlFields(tupleText);
+      assert.equal(fields.length, 5, `Expected 5 Phase 7B word-target fields, got ${fields.length}.`);
+      return {
+        normalisedWord: unquoteSqlString(fields[0]),
+        focusGrapheme: unquoteSqlString(fields[1]),
+        targetRole: unquoteSqlString(fields[2]),
+        patternType: unquoteSqlString(fields[3]),
+        difficultyModifier: parseSqlInteger(fields[4]),
+      };
+    });
+}
+
 function difficultyBandForLabel(label = "") {
   const clean = String(label || "").trim().toLowerCase();
   if (clean.includes("stretch") || clean.includes("challenge")) return "challenge";
@@ -315,22 +388,24 @@ function buildSourceDataCoverageReport(source = {}) {
   };
 }
 
-function toAssignmentWordRow(proofWord) {
-  const band = difficultyBandForLabel(proofWord.difficultyLabel);
+function toAssignmentWordRow(bankWord, sourceVersion = PROOF_SOURCE_VERSION) {
+  const band = difficultyBandForLabel(bankWord.difficultyLabel);
   return {
-    id: `core-${proofWord.normalisedWord}`,
-    word: proofWord.normalisedWord,
-    sentence: proofWord.sentence,
-    segments: proofWord.graphemeSegments,
+    id: `core-${sourceVersion}-${bankWord.normalisedWord}`,
+    word: bankWord.normalisedWord,
+    sentence: bankWord.sentence,
+    segments: bankWord.graphemeSegments,
     choice: {
       source: "wordloom_core",
-      source_version: "wordloom_core_proof_v1",
+      source_version: sourceVersion,
       origin_word_source: "wordloom_core",
-      origin_bank_word_id: `core-${proofWord.normalisedWord}`,
-      focus_graphemes: [proofWord.primaryFocusGrapheme],
-      primary_focus_grapheme: proofWord.primaryFocusGrapheme,
+      origin_bank_word_id: `core-${sourceVersion}-${bankWord.normalisedWord}`,
+      focus_graphemes: Array.isArray(bankWord.focusGraphemes) && bankWord.focusGraphemes.length
+        ? bankWord.focusGraphemes
+        : [bankWord.primaryFocusGrapheme],
+      primary_focus_grapheme: bankWord.primaryFocusGrapheme,
       focus_target_links: [{
-        focus_grapheme: proofWord.primaryFocusGrapheme,
+        focus_grapheme: bankWord.primaryFocusGrapheme,
         target_role: "primary",
       }],
       selection_suitability: "standard",
@@ -338,24 +413,24 @@ function toAssignmentWordRow(proofWord) {
       approval_status: "approved",
       is_active: true,
       context_support: {
-        sentence: proofWord.sentence,
+        sentence: bankWord.sentence,
         sentence_status: "approved",
         sentence_required: false,
-        meaning: proofWord.meaning,
+        meaning: bankWord.meaning,
         meaning_status: "approved",
         meaning_enabled: true,
         meaning_enabled_by_default: true,
       },
       difficulty: {
         version: "wordloom_core",
-        coreScore: proofWord.difficultyScore,
-        adjustedScore: proofWord.difficultyScore,
-        score: proofWord.difficultyScore,
+        coreScore: bankWord.difficultyScore,
+        adjustedScore: bankWord.difficultyScore,
+        score: bankWord.difficultyScore,
         band,
         coreBand: band,
-        label: proofWord.difficultyLabel,
-        coreLabel: proofWord.difficultyLabel,
-        reasons: proofWord.difficultyReason ? [proofWord.difficultyReason] : [],
+        label: bankWord.difficultyLabel,
+        coreLabel: bankWord.difficultyLabel,
+        reasons: bankWord.difficultyReason ? [bankWord.difficultyReason] : [],
         modifierReasons: [],
         flags: {},
         features: {},
@@ -484,18 +559,39 @@ function buildPlanForTarget({ target, targets, assignmentRows, pupilId }) {
   });
 }
 
-const migrationSql = readFileSync(proofSetMigrationPath, "utf8");
+const proofMigrationSql = readFileSync(proofSetMigrationPath, "utf8");
+const phase7BMigrationSql = readFileSync(phase7BMigrationPath, "utf8");
 const sourceData = JSON.parse(readFileSync(sourceDataPath, "utf8"));
 const sourceCoverageReport = buildSourceDataCoverageReport(sourceData);
-const proofTargets = parseProofTargets(migrationSql);
-const proofWords = parseProofWords(migrationSql);
-const assignmentRows = proofWords.map((proofWord) => toAssignmentWordRow(proofWord));
+const proofTargets = parseProofTargets(proofMigrationSql);
+const proofWords = parseProofWords(proofMigrationSql);
+const phase7BTargets = parsePhase7BTargets(phase7BMigrationSql);
+const phase7BWords = parsePhase7BWords(phase7BMigrationSql);
+const phase7BWordTargets = parsePhase7BWordTargets(phase7BMigrationSql);
 const proofWordCountByGrapheme = new Map();
+const phase7BWordCountByGrapheme = new Map();
+const combinedWordCountByGrapheme = new Map();
+const proofWordsByNormalised = new Set(proofWords.map((word) => word.normalisedWord));
 
 for (const proofWord of proofWords) {
   proofWordCountByGrapheme.set(
     proofWord.primaryFocusGrapheme,
     (proofWordCountByGrapheme.get(proofWord.primaryFocusGrapheme) || 0) + 1,
+  );
+  combinedWordCountByGrapheme.set(
+    proofWord.primaryFocusGrapheme,
+    (combinedWordCountByGrapheme.get(proofWord.primaryFocusGrapheme) || 0) + 1,
+  );
+}
+
+for (const phaseWord of phase7BWords) {
+  phase7BWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (phase7BWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
+  );
+  combinedWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (combinedWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
   );
 }
 
@@ -509,14 +605,95 @@ assert.equal(
   EXPECTED_PROOF_WORD_COUNT,
   `Expected ${EXPECTED_PROOF_WORD_COUNT} proof words in ${proofSetMigrationPath}.`,
 );
+assert.equal(
+  phase7BTargets.length,
+  EXPECTED_PHASE_7B_TARGET_COUNT,
+  `Expected ${EXPECTED_PHASE_7B_TARGET_COUNT} Phase 7B targets in ${phase7BMigrationPath}.`,
+);
+assert.equal(
+  phase7BWords.length,
+  EXPECTED_PHASE_7B_WORD_COUNT,
+  `Expected ${EXPECTED_PHASE_7B_WORD_COUNT} Phase 7B words in ${phase7BMigrationPath}.`,
+);
+assert.equal(
+  phase7BWordTargets.length,
+  EXPECTED_PHASE_7B_WORD_COUNT,
+  "Phase 7B migration should define one word-target link per word.",
+);
+
+for (const [focus, expectedCount] of EXPECTED_PHASE_7B_COUNTS) {
+  assert.equal(
+    phase7BWordCountByGrapheme.get(focus) || 0,
+    expectedCount,
+    `${focus} should have ${expectedCount} Phase 7B words.`,
+  );
+  const sourceTarget = sourceCoverageReport.sourceTargets.find((target) => target.grapheme === focus);
+  assert.equal(sourceTarget?.sourcePrimaryWordCount, expectedCount, `${focus} source coverage should match Phase 7B count.`);
+}
+
+for (const launchTarget of ["ay", "ea", "ew", "tch"]) {
+  assert.equal(
+    phase7BTargets.some((target) => target.focusGrapheme === launchTarget),
+    true,
+    `${launchTarget} should be included as a Phase 7B launch target.`,
+  );
+}
+
+const phase7BLinksByWord = new Map();
+for (const link of phase7BWordTargets) {
+  const next = phase7BLinksByWord.get(link.normalisedWord) || [];
+  next.push(link);
+  phase7BLinksByWord.set(link.normalisedWord, next);
+}
+
+for (const phaseWord of phase7BWords) {
+  assert.equal(phaseWord.source, "wordloom_core", `${phaseWord.normalisedWord} should be Wordloom core source.`);
+  assert.equal(phaseWord.sourceVersion, PHASE_7B_SOURCE_VERSION, `${phaseWord.normalisedWord} should carry Phase 7B source_version.`);
+  assert.equal(phaseWord.approvalStatus, "approved", `${phaseWord.normalisedWord} should be approved.`);
+  assert.equal(phaseWord.suitabilityStatus, "suitable", `${phaseWord.normalisedWord} should be suitable.`);
+  assert.equal(phaseWord.active, true, `${phaseWord.normalisedWord} should be active.`);
+  assert.equal(String(phaseWord.sentence || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful sentence.`);
+  assert.equal(String(phaseWord.meaning || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful meaning.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be placeholder text.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be placeholder text.`);
+  assert.equal(isWeakSourceContext(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be weak context.`);
+  assert.equal(isWeakSourceContext(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be weak context.`);
+  assert.equal(phaseWord.graphemeSegments.join(""), phaseWord.normalisedWord, `${phaseWord.normalisedWord} segments should reconstruct the word.`);
+  assert.equal(phaseWord.graphemeSegments.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in segments.`);
+  assert.equal(phaseWord.focusGraphemes.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in focus_graphemes.`);
+  assert.equal(proofWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a proof word.`);
+
+  const primaryLinks = (phase7BLinksByWord.get(phaseWord.normalisedWord) || [])
+    .filter((link) => link.targetRole === "primary");
+  assert.equal(primaryLinks.length, 1, `${phaseWord.normalisedWord} should have exactly one primary Phase 7B target link.`);
+  assert.equal(primaryLinks[0]?.focusGrapheme, phaseWord.primaryFocusGrapheme, `${phaseWord.normalisedWord} primary link should match primary focus.`);
+}
+
+const combinedTargetByFocus = new Map();
+for (const target of proofTargets) combinedTargetByFocus.set(target.focusGrapheme, target);
+for (const target of phase7BTargets) {
+  const existing = combinedTargetByFocus.get(target.focusGrapheme);
+  if (existing) {
+    assert.equal(target.challengeBand, existing.challengeBand, `${target.focusGrapheme} Phase 7B target should preserve challenge band.`);
+    assert.equal(target.stageBand, existing.stageBand, `${target.focusGrapheme} Phase 7B target should preserve stage band.`);
+  } else {
+    combinedTargetByFocus.set(target.focusGrapheme, target);
+  }
+}
+const combinedTargets = [...combinedTargetByFocus.values()]
+  .sort((a, b) => a.sortOrder - b.sortOrder || a.focusGrapheme.localeCompare(b.focusGrapheme));
+const assignmentRows = [
+  ...proofWords.map((proofWord) => toAssignmentWordRow(proofWord, PROOF_SOURCE_VERSION)),
+  ...phase7BWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7B_SOURCE_VERSION)),
+];
 
 const coverageReportRows = [];
 
-for (const target of proofTargets) {
+for (const target of combinedTargets) {
   const pupilId = `coverage-${target.focusGrapheme}`;
   const plan = buildPlanForTarget({
     target,
-    targets: proofTargets,
+    targets: combinedTargets,
     assignmentRows,
     pupilId,
   });
@@ -562,6 +739,8 @@ for (const target of proofTargets) {
   coverageReportRows.push({
     grapheme: target.focusGrapheme,
     proofWordCount: proofWordCountByGrapheme.get(target.focusGrapheme) || 0,
+    phase7BWordCount: phase7BWordCountByGrapheme.get(target.focusGrapheme) || 0,
+    combinedWordCount: combinedWordCountByGrapheme.get(target.focusGrapheme) || 0,
     selectedWordCount: selectedWords.length,
     selectedPrimaryTargetCount,
     warningType: warning?.type || null,
@@ -571,13 +750,13 @@ for (const target of proofTargets) {
   });
 }
 
-const aiTarget = proofTargets.find((target) => target.focusGrapheme === "ai");
+const aiTarget = combinedTargets.find((target) => target.focusGrapheme === "ai");
 assert.ok(aiTarget, "Expected ai proof target for exclusion guard.");
 
 const invalidRows = invalidWordRowsForExclusionGuard();
 const exclusionPlan = buildPlanForTarget({
   target: aiTarget,
-  targets: proofTargets,
+  targets: combinedTargets,
   assignmentRows: [...assignmentRows, ...invalidRows],
   pupilId: "coverage-exclusion-ai",
 });
@@ -591,8 +770,12 @@ for (const invalidRow of invalidRows) {
 }
 
 const report = {
-  targetCount: proofTargets.length,
+  proofTargetCount: proofTargets.length,
+  phase7BTargetCount: phase7BTargets.length,
+  targetCount: combinedTargets.length,
   proofWordCount: proofWords.length,
+  phase7BWordCount: phase7BWords.length,
+  combinedWordCount: assignmentRows.length,
   assignmentWordCount: EXPECTED_ASSIGNMENT_WORD_COUNT,
   sourceVersion: sourceCoverageReport.sourceVersion,
   sourceTargetCount: sourceCoverageReport.sourceTargetCount,
