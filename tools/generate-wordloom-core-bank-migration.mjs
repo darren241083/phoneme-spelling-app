@@ -46,6 +46,28 @@ const PHASE_CONFIGS = new Map([
     includeExplicitHintSqlCheck: true,
     includeSchoolScopeSqlCheck: true,
   }],
+  ["7d", {
+    key: "7d",
+    sourceVersion: "wordloom_core_v1_phase_7d_2026_05_13",
+    migrationFilename: "20260513130000_wordloom_core_spelling_bank_phase_7d_proof_topups.sql",
+    tempTablePrefix: "phase_7d",
+    expectedCountColumn: "expected_phase_7d_word_count",
+    title: "Phase 7D",
+    noteText: "Wordloom core v1 Phase 7D proof-target top-up batch target",
+    linkNoteText: "Wordloom core v1 Phase 7D proof-target top-up batch target link",
+    expectedCounts: new Map([
+      ["ai", 6],
+      ["ee", 6],
+      ["oa", 6],
+      ["igh", 6],
+      ["or", 6],
+      ["sh", 6],
+      ["ch", 6],
+      ["ck", 6],
+    ]),
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -301,7 +323,7 @@ function parsePhaseArg(argv = []) {
   const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
   const config = PHASE_CONFIGS.get(phase);
   if (!config) {
-    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b or --phase=7c.`);
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, or --phase=7d.`);
   }
   return config;
 }
