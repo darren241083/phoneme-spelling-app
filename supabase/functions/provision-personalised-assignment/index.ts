@@ -29,6 +29,7 @@ const corsHeaders = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CLAIMED_STATUS = "claimed";
 const BASELINE_STANDARD_KEY = "core_v2";
+const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
 
 type ServiceClient = ReturnType<typeof createClient>;
 
@@ -482,18 +483,48 @@ async function readCompletedBaselineStatusRows(
   return (data || []).filter((row: Record<string, unknown>) => isCompletedAssignmentStatusRow(row));
 }
 
-async function readWordloomCoreSpellingBankWordRows(serviceClient: ServiceClient, limit = 600) {
-  const safeLimit = Math.max(50, Math.min(1000, Math.round(Number(limit) || 600)));
-  const { data: wordRows, error: wordError } = await serviceClient
-    .from(WORDLOOM_CORE_WORD_TABLE)
-    .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
-    .eq("is_active", true)
-    .eq("approval_status", "approved")
-    .eq("suitability_status", "suitable")
-    .order("primary_focus_grapheme", { ascending: true })
-    .order("difficulty_score", { ascending: true })
-    .order("normalised_word", { ascending: true })
-    .limit(safeLimit);
+function normalizeWordloomCoreReadLimit(value: unknown = null) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function readPagedWordloomCoreWordRows(serviceClient: ServiceClient, limit: unknown = null) {
+  const rows: Record<string, unknown>[] = [];
+  const safeLimit = normalizeWordloomCoreReadLimit(limit);
+  let from = 0;
+
+  while (safeLimit === null || rows.length < safeLimit) {
+    const remaining = safeLimit === null
+      ? WORDLOOM_CORE_BANK_PAGE_SIZE
+      : Math.min(WORDLOOM_CORE_BANK_PAGE_SIZE, safeLimit - rows.length);
+    if (remaining <= 0) break;
+
+    const to = from + remaining - 1;
+    const { data, error } = await serviceClient
+      .from(WORDLOOM_CORE_WORD_TABLE)
+      .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
+      .eq("is_active", true)
+      .eq("approval_status", "approved")
+      .eq("suitability_status", "suitable")
+      .order("primary_focus_grapheme", { ascending: true })
+      .order("difficulty_score", { ascending: true })
+      .order("normalised_word", { ascending: true })
+      .range(from, to);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = Array.isArray(data) ? data : [];
+    rows.push(...pageRows);
+    if (pageRows.length < remaining) break;
+    from += remaining;
+  }
+
+  return { data: rows, error: null };
+}
+
+async function readWordloomCoreSpellingBankWordRows(serviceClient: ServiceClient, limit: unknown = null) {
+  const { data: wordRows, error: wordError } = await readPagedWordloomCoreWordRows(serviceClient, limit);
 
   if (wordError) {
     if (isMissingTableError(wordError, WORDLOOM_CORE_WORD_TABLE)) return [];

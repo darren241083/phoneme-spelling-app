@@ -70,6 +70,7 @@ const WORDLOOM_CORE_WORD_TARGET_TABLE = "wordloom_core_word_targets";
 const WORDLOOM_CORE_FOCUS_TARGET_TABLE = "wordloom_core_focus_targets";
 const WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD = 6;
 const WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT = 10;
+const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
 const WORDLOOM_CORE_APPROVAL_STATUS_ORDER = ["approved", "pending", "rejected", "retired", "unknown"];
 const WORDLOOM_CORE_SUITABILITY_STATUS_ORDER = ["suitable", "caution", "exclude", "unknown"];
 
@@ -2222,6 +2223,49 @@ function chunkWordloomCoreIds(items = [], size = 100) {
   return chunks;
 }
 
+function normalizeWordloomCoreReadLimit(value = null) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function readPagedWordloomCoreWordRows({
+  selectColumns,
+  applyFilters = (query) => query,
+  applyOrdering = (query) => query,
+  limit = null,
+  pageSize = WORDLOOM_CORE_BANK_PAGE_SIZE,
+} = {}) {
+  const rows = [];
+  const safeLimit = normalizeWordloomCoreReadLimit(limit);
+  const safePageSize = Math.max(1, Math.min(WORDLOOM_CORE_BANK_PAGE_SIZE, Math.round(Number(pageSize) || WORDLOOM_CORE_BANK_PAGE_SIZE)));
+  let from = 0;
+
+  while (safeLimit === null || rows.length < safeLimit) {
+    const remaining = safeLimit === null
+      ? safePageSize
+      : Math.min(safePageSize, safeLimit - rows.length);
+    if (remaining <= 0) break;
+
+    const to = from + remaining - 1;
+    const query = applyOrdering(applyFilters(
+      supabase
+        .from(WORDLOOM_CORE_WORD_TABLE)
+        .select(selectColumns)
+    ));
+    const { data, error } = await query.range(from, to);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = Array.isArray(data) ? data : [];
+    rows.push(...pageRows);
+    if (pageRows.length < remaining) break;
+    from += remaining;
+  }
+
+  return { data: rows, error: null };
+}
+
 export function mapWordloomCoreBankRowsToWordRows({
   wordRows = [],
   wordTargetRows = [],
@@ -2653,12 +2697,12 @@ export async function readWordloomCoreBankMonitor({
 
     if (focusError) return buildUnavailableWordloomCoreBankMonitorModel(focusError, safeThreshold);
 
-    const { data: wordRows, error: wordError } = await supabase
-      .from(WORDLOOM_CORE_WORD_TABLE)
-      .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
-      .order("primary_focus_grapheme", { ascending: true })
-      .order("normalised_word", { ascending: true })
-      .limit(2000);
+    const { data: wordRows, error: wordError } = await readPagedWordloomCoreWordRows({
+      selectColumns: "id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active",
+      applyOrdering: (query) => query
+        .order("primary_focus_grapheme", { ascending: true })
+        .order("normalised_word", { ascending: true }),
+    });
 
     if (wordError) return buildUnavailableWordloomCoreBankMonitorModel(wordError, safeThreshold);
 
@@ -2696,19 +2740,20 @@ export async function readWordloomCoreBankMonitor({
 }
 
 export async function listWordloomCoreSpellingBankWordRows({
-  limit = 600,
+  limit = null,
 } = {}) {
-  const safeLimit = Math.max(50, Math.min(1000, Math.round(Number(limit) || 600)));
-  const { data: wordRows, error: wordError } = await supabase
-    .from(WORDLOOM_CORE_WORD_TABLE)
-    .select("id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active")
-    .eq("is_active", true)
-    .eq("approval_status", "approved")
-    .eq("suitability_status", "suitable")
-    .order("primary_focus_grapheme", { ascending: true })
-    .order("difficulty_score", { ascending: true })
-    .order("normalised_word", { ascending: true })
-    .limit(safeLimit);
+  const { data: wordRows, error: wordError } = await readPagedWordloomCoreWordRows({
+    selectColumns: "id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active",
+    limit,
+    applyFilters: (query) => query
+      .eq("is_active", true)
+      .eq("approval_status", "approved")
+      .eq("suitability_status", "suitable"),
+    applyOrdering: (query) => query
+      .order("primary_focus_grapheme", { ascending: true })
+      .order("difficulty_score", { ascending: true })
+      .order("normalised_word", { ascending: true }),
+  });
 
   if (wordError) {
     if (isMissingWordloomCoreBankError(wordError)) return [];

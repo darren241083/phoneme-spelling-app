@@ -640,6 +640,15 @@ function countSourceDifficultyWindows(words, windows) {
   );
 }
 
+function countRowsByKey(rows, keyFn) {
+  const counts = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = String(keyFn(row) || "unknown");
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
 function buildSourceDataCoverageReport(source = {}) {
   const metadata = source?.metadata && typeof source.metadata === "object" ? source.metadata : {};
   const targets = Array.isArray(source?.targets) ? source.targets : [];
@@ -1610,6 +1619,16 @@ const combinedTargets = [...combinedTargetByFocus.values()]
 assert.equal(combinedTargets.length, 30, "Proof plus Phase 7B through Phase 7H should cover 30 production targets.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "aw"), true, "Combined production coverage should include aw.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "ure"), true, "Combined production coverage should include ure.");
+const productionWords = [
+  ...proofWords,
+  ...phase7BWords,
+  ...phase7CWords,
+  ...phase7DWords,
+  ...phase7EWords,
+  ...phase7FWords,
+  ...phase7GWords,
+  ...phase7HWords,
+];
 const assignmentRows = [
   ...proofWords.map((proofWord) => toAssignmentWordRow(proofWord, PROOF_SOURCE_VERSION)),
   ...phase7BWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7B_SOURCE_VERSION)),
@@ -1621,6 +1640,60 @@ const assignmentRows = [
   ...phase7HWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7H_SOURCE_VERSION)),
 ];
 assert.equal(assignmentRows.length, 1000, "Proof plus Phase 7B through Phase 7H should provide 1,000 production words.");
+
+const targetByFocus = new Map(combinedTargets.map((target) => [target.focusGrapheme, target]));
+const normalisedWordCounts = countRowsByKey(productionWords, (word) => word.normalisedWord);
+const productionBankAudit = {
+  activeApprovedSuitableWordloomCoreCount: productionWords.length,
+  duplicateNormalisedWords: Object.entries(normalisedWordCounts)
+    .filter(([, count]) => count > 1)
+    .map(([word]) => word)
+    .sort(),
+  missingSentenceCount: productionWords.filter((word) => !String(word.sentence || "").trim()).length,
+  missingMeaningCount: productionWords.filter((word) => !String(word.meaning || "").trim()).length,
+  primaryCoverage: Object.fromEntries(
+    [...EXPECTED_PHASE_7H_PRODUCTION_TOTALS.keys()].map((focus) => [
+      focus,
+      combinedWordCountByGrapheme.get(focus) || 0,
+    ]),
+  ),
+  stageCoverage: countRowsByKey(productionWords, (word) => word.stageBand),
+  challengeCoverage: countRowsByKey(
+    productionWords,
+    (word) => targetByFocus.get(word.primaryFocusGrapheme)?.challengeBand,
+  ),
+  difficultyLabelCoverage: countRowsByKey(productionWords, (word) => difficultyBandForLabel(word.difficultyLabel)),
+  difficultyWindowCoverage: {
+    needs_support: productionWords.filter((word) => word.difficultyScore >= 15 && word.difficultyScore <= 50).length,
+    core_developing: productionWords.filter((word) => word.difficultyScore >= 25 && word.difficultyScore <= 60).length,
+    secure_expected: productionWords.filter((word) => word.difficultyScore >= 35 && word.difficultyScore <= 65).length,
+    early_stretch: productionWords.filter((word) => word.difficultyScore >= 55 && word.difficultyScore <= 80).length,
+  },
+};
+
+assert.equal(productionBankAudit.activeApprovedSuitableWordloomCoreCount, 1000, "Current production bank audit should cover exactly 1,000 active approved suitable Wordloom core words.");
+assert.deepEqual(productionBankAudit.duplicateNormalisedWords, [], "Current production bank audit should not find duplicate active normalised words.");
+assert.equal(productionBankAudit.missingSentenceCount, 0, "Current production bank audit should not find missing sentence support.");
+assert.equal(productionBankAudit.missingMeaningCount, 0, "Current production bank audit should not find missing meaning support.");
+assert.deepEqual(productionBankAudit.primaryCoverage, Object.fromEntries(EXPECTED_PHASE_7H_PRODUCTION_TOTALS), "Current production bank audit should match expected per-focus primary coverage.");
+assert.deepEqual(productionBankAudit.stageCoverage, {
+  floor_core: 517,
+  diagnostic: 311,
+  ceiling_challenge: 172,
+});
+assert.deepEqual(productionBankAudit.challengeCoverage, {
+  needs_support: 254,
+  core_developing: 352,
+  secure_expected: 286,
+  early_stretch: 108,
+});
+assert.equal(productionBankAudit.difficultyLabelCoverage.easier > 0, true, "Current production bank audit should include easier words.");
+assert.equal(productionBankAudit.difficultyLabelCoverage.core > 0, true, "Current production bank audit should include core words.");
+assert.equal(productionBankAudit.difficultyLabelCoverage.challenge > 0, true, "Current production bank audit should include stretch/challenge words.");
+assert.equal(productionBankAudit.difficultyWindowCoverage.needs_support > 0, true, "Current production bank audit should include needs-support score coverage.");
+assert.equal(productionBankAudit.difficultyWindowCoverage.core_developing > 0, true, "Current production bank audit should include core-developing score coverage.");
+assert.equal(productionBankAudit.difficultyWindowCoverage.secure_expected > 0, true, "Current production bank audit should include secure-expected score coverage.");
+assert.equal(productionBankAudit.difficultyWindowCoverage.early_stretch > 0, true, "Current production bank audit should include early-stretch score coverage.");
 
 for (const [focus, expectedCount] of EXPECTED_PHASE_7H_PRODUCTION_TOTALS) {
   assert.equal(
