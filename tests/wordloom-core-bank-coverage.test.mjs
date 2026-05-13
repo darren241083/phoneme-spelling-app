@@ -13,11 +13,14 @@ const EXPECTED_PHASE_7C_TARGET_COUNT = 8;
 const EXPECTED_PHASE_7C_WORD_COUNT = 40;
 const EXPECTED_PHASE_7D_TARGET_COUNT = 8;
 const EXPECTED_PHASE_7D_WORD_COUNT = 48;
+const EXPECTED_PHASE_7E_TARGET_COUNT = 16;
+const EXPECTED_PHASE_7E_WORD_COUNT = 180;
 const EXPECTED_ASSIGNMENT_WORD_COUNT = 10;
 const PROOF_SOURCE_VERSION = "wordloom_core_proof_v1";
 const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
 const PHASE_7C_SOURCE_VERSION = "wordloom_core_v1_phase_7c_2026_05_13";
 const PHASE_7D_SOURCE_VERSION = "wordloom_core_v1_phase_7d_2026_05_13";
+const PHASE_7E_SOURCE_VERSION = "wordloom_core_v1_phase_7e_2026_05_13";
 const EXPECTED_LOW_COVERAGE_WARNINGS = new Map();
 const EXPECTED_PHASE_7B_COUNTS = new Map([
   ["ay", 8],
@@ -47,6 +50,42 @@ const EXPECTED_PHASE_7D_COUNTS = new Map([
   ["ch", 6],
   ["ck", 6],
 ]);
+const EXPECTED_PHASE_7E_COUNTS = new Map([
+  ["ear", 10],
+  ["er", 16],
+  ["oy", 10],
+  ["oi", 10],
+  ["ou", 14],
+  ["ow", 14],
+  ["th", 16],
+  ["ng", 14],
+  ["dge", 10],
+  ["tion", 14],
+  ["ur", 14],
+  ["ie", 10],
+  ["ci", 10],
+  ["aw", 8],
+  ["ure", 8],
+  ["ea", 2],
+]);
+const EXPECTED_PHASE_7E_PRODUCTION_TOTALS = new Map([
+  ["ear", 16],
+  ["er", 22],
+  ["oy", 16],
+  ["oi", 16],
+  ["ou", 20],
+  ["ow", 20],
+  ["th", 22],
+  ["ng", 20],
+  ["dge", 16],
+  ["tion", 20],
+  ["ur", 20],
+  ["ie", 16],
+  ["ci", 16],
+  ["aw", 16],
+  ["ure", 16],
+  ["ea", 14],
+]);
 
 const { buildGeneratedAssignmentPlan } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
 
@@ -75,6 +114,12 @@ const phase7DMigrationPath = path.join(
   "supabase",
   "migrations",
   "20260513130000_wordloom_core_spelling_bank_phase_7d_proof_topups.sql",
+);
+const phase7EMigrationPath = path.join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260513133000_wordloom_core_spelling_bank_phase_7e_bulk_topup.sql",
 );
 const sourceDataPath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
 const SOURCE_PLACEHOLDER_PATTERNS = [
@@ -361,6 +406,18 @@ function parsePhase7DWords(source) {
 
 function parsePhase7DWordTargets(source) {
   return parsePhaseWordTargets(source, "wordloom_core_phase_7d_word_targets", "Phase 7D");
+}
+
+function parsePhase7ETargets(source) {
+  return parsePhaseTargets(source, "wordloom_core_phase_7e_targets", "Phase 7E");
+}
+
+function parsePhase7EWords(source) {
+  return parsePhaseWords(source, "wordloom_core_phase_7e_words", "Phase 7E");
+}
+
+function parsePhase7EWordTargets(source) {
+  return parsePhaseWordTargets(source, "wordloom_core_phase_7e_word_targets", "Phase 7E");
 }
 
 function difficultyBandForLabel(label = "") {
@@ -670,11 +727,13 @@ const proofMigrationSql = readFileSync(proofSetMigrationPath, "utf8");
 const phase7BMigrationSql = readFileSync(phase7BMigrationPath, "utf8");
 const phase7CMigrationSql = readFileSync(phase7CMigrationPath, "utf8");
 const phase7DMigrationSql = readFileSync(phase7DMigrationPath, "utf8");
+const phase7EMigrationSql = readFileSync(phase7EMigrationPath, "utf8");
 const sourceData = JSON.parse(readFileSync(sourceDataPath, "utf8"));
 const sourceCoverageReport = buildSourceDataCoverageReport(sourceData);
 const phase7BSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_7B_SOURCE_VERSION);
 const phase7CSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_7C_SOURCE_VERSION);
 const phase7DSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_7D_SOURCE_VERSION);
+const phase7ESourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_7E_SOURCE_VERSION);
 const proofTargets = parseProofTargets(proofMigrationSql);
 const proofWords = parseProofWords(proofMigrationSql);
 const phase7BTargets = parsePhase7BTargets(phase7BMigrationSql);
@@ -686,14 +745,19 @@ const phase7CWordTargets = parsePhase7CWordTargets(phase7CMigrationSql);
 const phase7DTargets = parsePhase7DTargets(phase7DMigrationSql);
 const phase7DWords = parsePhase7DWords(phase7DMigrationSql);
 const phase7DWordTargets = parsePhase7DWordTargets(phase7DMigrationSql);
+const phase7ETargets = parsePhase7ETargets(phase7EMigrationSql);
+const phase7EWords = parsePhase7EWords(phase7EMigrationSql);
+const phase7EWordTargets = parsePhase7EWordTargets(phase7EMigrationSql);
 const proofWordCountByGrapheme = new Map();
 const phase7BWordCountByGrapheme = new Map();
 const phase7CWordCountByGrapheme = new Map();
 const phase7DWordCountByGrapheme = new Map();
+const phase7EWordCountByGrapheme = new Map();
 const combinedWordCountByGrapheme = new Map();
 const proofWordsByNormalised = new Set(proofWords.map((word) => word.normalisedWord));
 const phase7BWordsByNormalised = new Set(phase7BWords.map((word) => word.normalisedWord));
 const phase7CWordsByNormalised = new Set(phase7CWords.map((word) => word.normalisedWord));
+const phase7DWordsByNormalised = new Set(phase7DWords.map((word) => word.normalisedWord));
 
 for (const proofWord of proofWords) {
   proofWordCountByGrapheme.set(
@@ -732,6 +796,17 @@ for (const phaseWord of phase7DWords) {
   phase7DWordCountByGrapheme.set(
     phaseWord.primaryFocusGrapheme,
     (phase7DWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
+  );
+  combinedWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (combinedWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
+  );
+}
+
+for (const phaseWord of phase7EWords) {
+  phase7EWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (phase7EWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
   );
   combinedWordCountByGrapheme.set(
     phaseWord.primaryFocusGrapheme,
@@ -794,6 +869,26 @@ assert.equal(
   EXPECTED_PHASE_7D_WORD_COUNT,
   "Phase 7D migration should define one word-target link per word.",
 );
+assert.equal(
+  phase7ETargets.length,
+  EXPECTED_PHASE_7E_TARGET_COUNT,
+  `Expected ${EXPECTED_PHASE_7E_TARGET_COUNT} Phase 7E targets in ${phase7EMigrationPath}.`,
+);
+assert.equal(
+  phase7EWords.length,
+  EXPECTED_PHASE_7E_WORD_COUNT,
+  `Expected ${EXPECTED_PHASE_7E_WORD_COUNT} Phase 7E words in ${phase7EMigrationPath}.`,
+);
+assert.equal(
+  phase7EWordTargets.length,
+  EXPECTED_PHASE_7E_WORD_COUNT,
+  "Phase 7E migration should define one word-target link per word.",
+);
+assert.equal(
+  sourceCoverageReport.sourceWordCount,
+  310,
+  "Phase 7E source data should contain 310 rows after the bulk top-up.",
+);
 
 for (const [focus, expectedCount] of EXPECTED_PHASE_7B_COUNTS) {
   assert.equal(
@@ -834,6 +929,19 @@ for (const [focus, expectedCount] of EXPECTED_PHASE_7D_COUNTS) {
   );
 }
 
+for (const [focus, expectedCount] of EXPECTED_PHASE_7E_COUNTS) {
+  assert.equal(
+    phase7EWordCountByGrapheme.get(focus) || 0,
+    expectedCount,
+    `${focus} should have ${expectedCount} Phase 7E words.`,
+  );
+  assert.equal(
+    phase7ESourceWordCountByGrapheme.get(focus) || 0,
+    expectedCount,
+    `${focus} source coverage should include ${expectedCount} Phase 7E words.`,
+  );
+}
+
 for (const launchTarget of ["ay", "ea", "ew", "tch"]) {
   assert.equal(
     phase7BTargets.some((target) => target.focusGrapheme === launchTarget),
@@ -858,6 +966,14 @@ for (const launchTarget of ["ai", "ee", "oa", "igh", "or", "sh", "ch", "ck"]) {
   );
 }
 
+for (const [launchTarget] of EXPECTED_PHASE_7E_COUNTS) {
+  assert.equal(
+    phase7ETargets.some((target) => target.focusGrapheme === launchTarget),
+    true,
+    `${launchTarget} should be included as a Phase 7E bulk top-up target.`,
+  );
+}
+
 const phase7BLinksByWord = new Map();
 for (const link of phase7BWordTargets) {
   const next = phase7BLinksByWord.get(link.normalisedWord) || [];
@@ -875,6 +991,12 @@ for (const link of phase7DWordTargets) {
   const next = phase7DLinksByWord.get(link.normalisedWord) || [];
   next.push(link);
   phase7DLinksByWord.set(link.normalisedWord, next);
+}
+const phase7ELinksByWord = new Map();
+for (const link of phase7EWordTargets) {
+  const next = phase7ELinksByWord.get(link.normalisedWord) || [];
+  next.push(link);
+  phase7ELinksByWord.set(link.normalisedWord, next);
 }
 
 for (const phaseWord of phase7BWords) {
@@ -958,6 +1080,35 @@ for (const phaseWord of phase7DWords) {
   assert.equal(primaryLinks[0]?.focusGrapheme, phaseWord.primaryFocusGrapheme, `${phaseWord.normalisedWord} primary link should match primary focus.`);
 }
 
+for (const phaseWord of phase7EWords) {
+  assert.equal(phaseWord.source, "wordloom_core", `${phaseWord.normalisedWord} should be Wordloom core source.`);
+  assert.equal(phaseWord.sourceVersion, PHASE_7E_SOURCE_VERSION, `${phaseWord.normalisedWord} should carry Phase 7E source_version.`);
+  assert.equal(phaseWord.approvalStatus, "approved", `${phaseWord.normalisedWord} should be approved.`);
+  assert.equal(phaseWord.suitabilityStatus, "suitable", `${phaseWord.normalisedWord} should be suitable.`);
+  assert.equal(phaseWord.active, true, `${phaseWord.normalisedWord} should be active.`);
+  assert.equal(String(phaseWord.sentence || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful sentence.`);
+  assert.equal(String(phaseWord.meaning || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful meaning.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be placeholder text.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be placeholder text.`);
+  assert.equal(isWeakSourceContext(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be weak context.`);
+  assert.equal(isWeakSourceContext(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be weak context.`);
+  assert.equal(isCircularMeaning(phaseWord.normalisedWord, phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be circular.`);
+  assert.equal(hasExplicitHintText(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be spelling-hint text.`);
+  assert.equal(hasExplicitHintText(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be spelling-hint text.`);
+  assert.equal(phaseWord.graphemeSegments.join(""), phaseWord.normalisedWord, `${phaseWord.normalisedWord} segments should reconstruct the word.`);
+  assert.equal(phaseWord.graphemeSegments.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in segments.`);
+  assert.equal(phaseWord.focusGraphemes.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in focus_graphemes.`);
+  assert.equal(proofWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a proof word.`);
+  assert.equal(phase7BWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7B word.`);
+  assert.equal(phase7CWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7C word.`);
+  assert.equal(phase7DWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7D word.`);
+
+  const primaryLinks = (phase7ELinksByWord.get(phaseWord.normalisedWord) || [])
+    .filter((link) => link.targetRole === "primary");
+  assert.equal(primaryLinks.length, 1, `${phaseWord.normalisedWord} should have exactly one primary Phase 7E target link.`);
+  assert.equal(primaryLinks[0]?.focusGrapheme, phaseWord.primaryFocusGrapheme, `${phaseWord.normalisedWord} primary link should match primary focus.`);
+}
+
 const combinedTargetByFocus = new Map();
 for (const target of proofTargets) combinedTargetByFocus.set(target.focusGrapheme, target);
 for (const target of phase7BTargets) {
@@ -987,9 +1138,18 @@ for (const target of phase7DTargets) {
     combinedTargetByFocus.set(target.focusGrapheme, target);
   }
 }
+for (const target of phase7ETargets) {
+  const existing = combinedTargetByFocus.get(target.focusGrapheme);
+  if (existing) {
+    assert.equal(target.challengeBand, existing.challengeBand, `${target.focusGrapheme} Phase 7E target should preserve challenge band.`);
+    assert.equal(target.stageBand, existing.stageBand, `${target.focusGrapheme} Phase 7E target should preserve stage band.`);
+  } else {
+    combinedTargetByFocus.set(target.focusGrapheme, target);
+  }
+}
 const combinedTargets = [...combinedTargetByFocus.values()]
   .sort((a, b) => a.sortOrder - b.sortOrder || a.focusGrapheme.localeCompare(b.focusGrapheme));
-assert.equal(combinedTargets.length, 30, "Proof plus Phase 7B plus Phase 7C plus Phase 7D should cover 30 production targets.");
+assert.equal(combinedTargets.length, 30, "Proof plus Phase 7B plus Phase 7C plus Phase 7D plus Phase 7E should cover 30 production targets.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "aw"), true, "Combined production coverage should include aw.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "ure"), true, "Combined production coverage should include ure.");
 const assignmentRows = [
@@ -997,14 +1157,23 @@ const assignmentRows = [
   ...phase7BWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7B_SOURCE_VERSION)),
   ...phase7CWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7C_SOURCE_VERSION)),
   ...phase7DWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7D_SOURCE_VERSION)),
+  ...phase7EWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_7E_SOURCE_VERSION)),
 ];
-assert.equal(assignmentRows.length, 278, "Proof plus Phase 7B plus Phase 7C plus Phase 7D should provide 278 production words.");
+assert.equal(assignmentRows.length, 458, "Proof plus Phase 7B plus Phase 7C plus Phase 7D plus Phase 7E should provide 458 production words.");
 
 for (const focus of EXPECTED_PHASE_7D_COUNTS.keys()) {
   assert.equal(
     combinedWordCountByGrapheme.get(focus) || 0,
     12,
     `${focus} should have 12 production words after Phase 7D.`,
+  );
+}
+
+for (const [focus, expectedCount] of EXPECTED_PHASE_7E_PRODUCTION_TOTALS) {
+  assert.equal(
+    combinedWordCountByGrapheme.get(focus) || 0,
+    expectedCount,
+    `${focus} should have ${expectedCount} production words after Phase 7E.`,
   );
 }
 
@@ -1063,6 +1232,7 @@ for (const target of combinedTargets) {
     phase7BWordCount: phase7BWordCountByGrapheme.get(target.focusGrapheme) || 0,
     phase7CWordCount: phase7CWordCountByGrapheme.get(target.focusGrapheme) || 0,
     phase7DWordCount: phase7DWordCountByGrapheme.get(target.focusGrapheme) || 0,
+    phase7EWordCount: phase7EWordCountByGrapheme.get(target.focusGrapheme) || 0,
     combinedWordCount: combinedWordCountByGrapheme.get(target.focusGrapheme) || 0,
     selectedWordCount: selectedWords.length,
     selectedPrimaryTargetCount,
@@ -1097,11 +1267,13 @@ const report = {
   phase7BTargetCount: phase7BTargets.length,
   phase7CTargetCount: phase7CTargets.length,
   phase7DTargetCount: phase7DTargets.length,
+  phase7ETargetCount: phase7ETargets.length,
   targetCount: combinedTargets.length,
   proofWordCount: proofWords.length,
   phase7BWordCount: phase7BWords.length,
   phase7CWordCount: phase7CWords.length,
   phase7DWordCount: phase7DWords.length,
+  phase7EWordCount: phase7EWords.length,
   combinedWordCount: assignmentRows.length,
   assignmentWordCount: EXPECTED_ASSIGNMENT_WORD_COUNT,
   sourceVersion: sourceCoverageReport.sourceVersion,

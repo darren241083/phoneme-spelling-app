@@ -3,11 +3,11 @@
   "metadata": {
     "schema_version": "wordloom_core_bank_source_v1",
     "source_version": "wordloom_core_v1_foundation_2026_05_13",
-    "status": "phase_7d_proof_target_topups",
-    "purpose": "Reviewable source-data foundation for the Wordloom-owned v1 core spelling bank, including reviewed Phase 7B, Phase 7C, and Phase 7D production batches.",
+    "status": "phase_7e_bulk_topups",
+    "purpose": "Reviewable source data for the Wordloom-owned v1 core spelling bank, moving toward approximately 1,000 production words and including reviewed Phase 7B, Phase 7C, Phase 7D, and Phase 7E production batches.",
     "word_count_target_range": {
-      "min": 480,
-      "max": 720
+      "min": 900,
+      "max": 1050
     },
     "minimum_primary_words_per_active_target": 16,
     "difficulty_score_range": {
@@ -33,11 +33,12 @@
       }
     },
     "notes": [
-      "This file is intentionally a small staged source, not the full v1 bank.",
+      "This file is a staged source moving toward the full approximate 1,000-word v1 production bank.",
       "Phase 7A rows remain a review-only foundation sample unless explicitly selected by a later source_version.",
       "Rows with source_version wordloom_core_v1_phase_7b_2026_05_13 are reviewed Wordloom-owned Phase 7B production batch content.",
       "Rows with source_version wordloom_core_v1_phase_7c_2026_05_13 are reviewed Wordloom-owned Phase 7C production batch content for aw, ure, and active target top-ups.",
       "Rows with source_version wordloom_core_v1_phase_7d_2026_05_13 are reviewed Wordloom-owned Phase 7D production proof-target top-up batch content.",
+      "Rows with source_version wordloom_core_v1_phase_7e_2026_05_13 are reviewed Wordloom-owned Phase 7E production bulk top-up batch content.",
       "Production SQL is generated from this format after source review."
     ]
   },
@@ -48,7 +49,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 10,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 38,
       "is_active": true
     },
     {
@@ -57,7 +58,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 20,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 38,
       "is_active": true
     },
     {
@@ -66,7 +67,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 30,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 34,
       "is_active": true
     },
     {
@@ -75,7 +76,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 40,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 32,
       "is_active": true
     },
     {
@@ -84,7 +85,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 50,
-      "expected_primary_word_count_v1": 24,
+      "expected_primary_word_count_v1": 40,
       "is_active": true
     },
     {
@@ -93,7 +94,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 60,
-      "expected_primary_word_count_v1": 24,
+      "expected_primary_word_count_v1": 38,
       "is_active": true
     },
     {
@@ -102,7 +103,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 70,
-      "expected_primary_word_count_v1": 24,
+      "expected_primary_word_count_v1": 32,
       "is_active": true
     },
     {
@@ -111,7 +112,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 80,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 30,
       "is_active": true
     },
     {
@@ -120,7 +121,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 90,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 40,
       "is_active": true
     },
     {
@@ -129,7 +130,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 100,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 28,
       "is_active": true
     },
     {
@@ -138,7 +139,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 110,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 28,
       "is_active": true
     },
     {
@@ -147,7 +148,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 120,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 36,
       "is_active": true
     },
     {
@@ -156,7 +157,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 130,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 36,
       "is_active": true
     },
     {
@@ -165,7 +166,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 140,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 36,
       "is_active": true
     },
     {
@@ -174,7 +175,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 150,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 36,
       "is_active": true
     },
     {
@@ -183,7 +184,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 160,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 38,
       "is_active": true
     },
     {
@@ -192,7 +193,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 170,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 36,
       "is_active": true
     },
     {
@@ -201,7 +202,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 180,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 34,
       "is_active": true
     },
     {
@@ -210,7 +211,7 @@
       "stage_band": "ceiling_challenge",
       "challenge_band": "secure_expected",
       "sort_order": 190,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 28,
       "is_active": true
     },
     {
@@ -219,7 +220,7 @@
       "stage_band": "ceiling_challenge",
       "challenge_band": "early_stretch",
       "sort_order": 200,
-      "expected_primary_word_count_v1": 28,
+      "expected_primary_word_count_v1": 32,
       "is_active": true
     },
     {
@@ -228,7 +229,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 210,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 34,
       "is_active": true
     },
     {
@@ -237,7 +238,7 @@
       "stage_band": "ceiling_challenge",
       "challenge_band": "early_stretch",
       "sort_order": 220,
-      "expected_primary_word_count_v1": 24,
+      "expected_primary_word_count_v1": 28,
       "is_active": true
     },
     {
@@ -255,7 +256,7 @@
       "stage_band": "ceiling_challenge",
       "challenge_band": "secure_expected",
       "sort_order": 240,
-      "expected_primary_word_count_v1": 24,
+      "expected_primary_word_count_v1": 30,
       "is_active": true
     },
     {
@@ -264,7 +265,7 @@
       "stage_band": "floor_core",
       "challenge_band": "needs_support",
       "sort_order": 250,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 38,
       "is_active": true
     },
     {
@@ -273,7 +274,7 @@
       "stage_band": "floor_core",
       "challenge_band": "core_developing",
       "sort_order": 260,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 40,
       "is_active": true
     },
     {
@@ -282,7 +283,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 270,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 32,
       "is_active": true
     },
     {
@@ -291,7 +292,7 @@
       "stage_band": "ceiling_challenge",
       "challenge_band": "early_stretch",
       "sort_order": 280,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 24,
       "is_active": true
     },
     {
@@ -300,7 +301,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 290,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 32,
       "is_active": true
     },
     {
@@ -309,7 +310,7 @@
       "stage_band": "diagnostic",
       "challenge_band": "secure_expected",
       "sort_order": 300,
-      "expected_primary_word_count_v1": 20,
+      "expected_primary_word_count_v1": 28,
       "is_active": true
     }
   ],
@@ -3690,6 +3691,4686 @@
           "focus_grapheme": "ck",
           "target_role": "primary",
           "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dear",
+      "normalised_word": "dear",
+      "grapheme_segments": ["d", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ear word with a single initial consonant.",
+      "sentence": "The dear note made Mum smile.",
+      "meaning": "Loved, valued, or special to someone.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "gear",
+      "normalised_word": "gear",
+      "grapheme_segments": ["g", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ear word with a single initial consonant.",
+      "sentence": "Put your sports gear by the door.",
+      "meaning": "Equipment or clothes used for an activity.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "rear",
+      "normalised_word": "rear",
+      "grapheme_segments": ["r", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short ear word with a less common everyday meaning.",
+      "sentence": "The rear door opened onto the garden.",
+      "meaning": "The back part of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "tear",
+      "normalised_word": "tear",
+      "grapheme_segments": ["t", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short ear word with a common alternative meaning.",
+      "sentence": "A tear rolled down his cheek after he yawned.",
+      "meaning": "A drop of water that comes from the eye.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "wear",
+      "normalised_word": "wear",
+      "grapheme_segments": ["w", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ear spelling with a different pronunciation.",
+      "sentence": "Wear your coat on the cold walk.",
+      "meaning": "To have clothes or shoes on your body.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "appear",
+      "normalised_word": "appear",
+      "grapheme_segments": ["a", "pp", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ear word with the target at the end.",
+      "sentence": "Stars appear when the sky grows dark.",
+      "meaning": "To become able to be seen.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "disappear",
+      "normalised_word": "disappear",
+      "grapheme_segments": ["d", "i", "s", "a", "pp", "ear"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 64,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ear word with a prefix and target at the end.",
+      "sentence": "The puddle will disappear in the sun.",
+      "meaning": "To stop being seen or found.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "earring",
+      "normalised_word": "earring",
+      "grapheme_segments": ["ear", "r", "i", "ng"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable ear word with a final ng segment.",
+      "sentence": "One silver earring was in the small box.",
+      "meaning": "A piece of jewellery worn on the ear.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "hearing",
+      "normalised_word": "hearing",
+      "grapheme_segments": ["h", "ear", "i", "ng"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable ear word with an ing ending.",
+      "sentence": "Good hearing helps us listen in class.",
+      "meaning": "The ability to hear sounds.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "clearing",
+      "normalised_word": "clearing",
+      "grapheme_segments": ["c", "l", "ear", "i", "ng"],
+      "focus_graphemes": ["ear"],
+      "primary_focus_grapheme": "ear",
+      "stage_band": "diagnostic",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ear word with an initial blend and final ng segment.",
+      "sentence": "Sunlight filled the clearing in the wood.",
+      "meaning": "An open space in a group of trees.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ear",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "after",
+      "normalised_word": "after",
+      "grapheme_segments": ["a", "f", "t", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable er word.",
+      "sentence": "We read quietly after lunch.",
+      "meaning": "Later than something else.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "better",
+      "normalised_word": "better",
+      "grapheme_segments": ["b", "e", "tt", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common er word with a doubled consonant.",
+      "sentence": "The second try was better.",
+      "meaning": "Of a higher quality or more useful.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "butter",
+      "normalised_word": "butter",
+      "grapheme_segments": ["b", "u", "tt", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common er word with a doubled consonant.",
+      "sentence": "Spread butter on the warm toast.",
+      "meaning": "A soft yellow food made from cream.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dinner",
+      "normalised_word": "dinner",
+      "grapheme_segments": ["d", "i", "nn", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common er word with a doubled consonant.",
+      "sentence": "Dinner was ready at six.",
+      "meaning": "A main meal eaten during the day or evening.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "helper",
+      "normalised_word": "helper",
+      "grapheme_segments": ["h", "e", "l", "p", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable er word with a final suffix.",
+      "sentence": "The helper carried books to the shelf.",
+      "meaning": "A person who helps with a task.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "ladder",
+      "normalised_word": "ladder",
+      "grapheme_segments": ["l", "a", "dd", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable er word with a doubled consonant.",
+      "sentence": "The ladder reached the low branch.",
+      "meaning": "A tool with steps used for climbing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mother",
+      "normalised_word": "mother",
+      "grapheme_segments": ["m", "o", "th", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common family word with th before er.",
+      "sentence": "Her mother packed a snack.",
+      "meaning": "A female parent.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "father",
+      "normalised_word": "father",
+      "grapheme_segments": ["f", "a", "th", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common family word with th before er.",
+      "sentence": "His father fixed the bike bell.",
+      "meaning": "A male parent.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "brother",
+      "normalised_word": "brother",
+      "grapheme_segments": ["b", "r", "o", "th", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common er word with an initial consonant blend.",
+      "sentence": "My brother found the missing sock.",
+      "meaning": "A boy or man with the same parent as another child.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sister",
+      "normalised_word": "sister",
+      "grapheme_segments": ["s", "i", "s", "t", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable er word.",
+      "sentence": "Her sister chose the blue cup.",
+      "meaning": "A girl or woman with the same parent as another child.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "summer",
+      "normalised_word": "summer",
+      "grapheme_segments": ["s", "u", "mm", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common seasonal er word with a doubled consonant.",
+      "sentence": "Summer days can feel bright and warm.",
+      "meaning": "The season after spring and before autumn.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "under",
+      "normalised_word": "under",
+      "grapheme_segments": ["u", "n", "d", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common positional er word.",
+      "sentence": "The pencil rolled under the desk.",
+      "meaning": "In or to a lower place than something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "over",
+      "normalised_word": "over",
+      "grapheme_segments": ["o", "v", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common positional er word.",
+      "sentence": "The kite flew over the field.",
+      "meaning": "Above or across something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "never",
+      "normalised_word": "never",
+      "grapheme_segments": ["n", "e", "v", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable er word.",
+      "sentence": "Never leave the gate open.",
+      "meaning": "Not at any time.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "water",
+      "normalised_word": "water",
+      "grapheme_segments": ["w", "a", "t", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common er word with a different vowel sound.",
+      "sentence": "Water filled the clear jug.",
+      "meaning": "The clear liquid that people, plants, and animals need.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "flower",
+      "normalised_word": "flower",
+      "grapheme_segments": ["f", "l", "ow", "er"],
+      "focus_graphemes": ["er"],
+      "primary_focus_grapheme": "er",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable er word with another vowel digraph.",
+      "sentence": "A yellow flower grew by the path.",
+      "meaning": "The coloured part of a plant that can make seeds.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "er",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cowboy",
+      "normalised_word": "cowboy",
+      "grapheme_segments": ["c", "ow", "b", "oy"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable oy word with another vowel digraph.",
+      "sentence": "The cowboy hat hung on a peg.",
+      "meaning": "A person who works with cattle on a ranch.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "decoy",
+      "normalised_word": "decoy",
+      "grapheme_segments": ["d", "e", "c", "oy"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable oy word with the target at the end.",
+      "sentence": "The wooden decoy floated on the pond.",
+      "meaning": "Something used to attract attention away from the real thing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "destroy",
+      "normalised_word": "destroy",
+      "grapheme_segments": ["d", "e", "s", "t", "r", "oy"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable oy word with an initial consonant cluster before the target.",
+      "sentence": "Do not destroy the model after the show.",
+      "meaning": "To damage something so it cannot be used.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "employ",
+      "normalised_word": "employ",
+      "grapheme_segments": ["e", "m", "p", "l", "oy"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable oy word with the target at the end.",
+      "sentence": "The shop will employ a new helper.",
+      "meaning": "To give someone paid work.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "enjoyable",
+      "normalised_word": "enjoyable",
+      "grapheme_segments": ["e", "n", "j", "oy", "a", "b", "l", "e"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer oy word with a suffix.",
+      "sentence": "The music lesson was enjoyable.",
+      "meaning": "Pleasant and fun.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "joyful",
+      "normalised_word": "joyful",
+      "grapheme_segments": ["j", "oy", "f", "u", "l"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable oy word with a suffix.",
+      "sentence": "The class gave a joyful cheer.",
+      "meaning": "Full of happiness.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "loyal",
+      "normalised_word": "loyal",
+      "grapheme_segments": ["l", "oy", "a", "l"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable oy word.",
+      "sentence": "A loyal friend keeps a promise.",
+      "meaning": "Faithful and ready to support someone.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "oyster",
+      "normalised_word": "oyster",
+      "grapheme_segments": ["oy", "s", "t", "er"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable oy word with an er ending.",
+      "sentence": "The oyster shell was smooth.",
+      "meaning": "A shellfish that lives in the sea.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "toys",
+      "normalised_word": "toys",
+      "grapheme_segments": ["t", "oy", "s"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common oy word with a final consonant.",
+      "sentence": "The toys went back in the box.",
+      "meaning": "Objects that children play with.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "voyage",
+      "normalised_word": "voyage",
+      "grapheme_segments": ["v", "oy", "a", "g", "e"],
+      "focus_graphemes": ["oy"],
+      "primary_focus_grapheme": "oy",
+      "stage_band": "floor_core",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable oy word with final silent e.",
+      "sentence": "The ship began its long voyage.",
+      "meaning": "A long journey, often by sea or through space.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oy",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "oil",
+      "normalised_word": "oil",
+      "grapheme_segments": ["oi", "l"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common oi word.",
+      "sentence": "A little oil made the wheel turn smoothly.",
+      "meaning": "A thick liquid used for cooking or machines.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "foil",
+      "normalised_word": "foil",
+      "grapheme_segments": ["f", "oi", "l"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short oi word with a final consonant.",
+      "sentence": "Wrap the sandwich in foil.",
+      "meaning": "Thin shiny metal used for covering food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "voice",
+      "normalised_word": "voice",
+      "grapheme_segments": ["v", "oi", "c", "e"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oi word with final silent e.",
+      "sentence": "Use a calm voice in the library.",
+      "meaning": "The sound made when someone speaks or sings.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "choice",
+      "normalised_word": "choice",
+      "grapheme_segments": ["ch", "oi", "c", "e"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oi word with another multiletter grapheme.",
+      "sentence": "You have a choice of two books.",
+      "meaning": "The act of choosing between things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "noise",
+      "normalised_word": "noise",
+      "grapheme_segments": ["n", "oi", "s", "e"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oi word with final silent e.",
+      "sentence": "A loud noise came from the hall.",
+      "meaning": "A sound, especially one that is loud or unwanted.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "noisy",
+      "normalised_word": "noisy",
+      "grapheme_segments": ["n", "oi", "s", "y"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable oi word with a suffix.",
+      "sentence": "The playground was noisy at break.",
+      "meaning": "Full of loud sound.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "avoid",
+      "normalised_word": "avoid",
+      "grapheme_segments": ["a", "v", "oi", "d"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable oi word with the target in the middle.",
+      "sentence": "Walk around the puddle to avoid wet shoes.",
+      "meaning": "To keep away from something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "joint",
+      "normalised_word": "joint",
+      "grapheme_segments": ["j", "oi", "n", "t"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Oi word with a final consonant cluster.",
+      "sentence": "The robot arm bent at one joint.",
+      "meaning": "A place where two parts are joined.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "coil",
+      "normalised_word": "coil",
+      "grapheme_segments": ["c", "oi", "l"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short oi word with a final consonant.",
+      "sentence": "The rope lay in a neat coil.",
+      "meaning": "A round loop or curl of something long.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "hoist",
+      "normalised_word": "hoist",
+      "grapheme_segments": ["h", "oi", "s", "t"],
+      "focus_graphemes": ["oi"],
+      "primary_focus_grapheme": "oi",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Oi word with a final consonant cluster.",
+      "sentence": "We helped hoist the flag.",
+      "meaning": "To lift something up.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oi",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "about",
+      "normalised_word": "about",
+      "grapheme_segments": ["a", "b", "ou", "t"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common two-syllable ou word.",
+      "sentence": "Tell me about your picture.",
+      "meaning": "Connected with or on the subject of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "around",
+      "normalised_word": "around",
+      "grapheme_segments": ["a", "r", "ou", "n", "d"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable ou word with a final consonant cluster.",
+      "sentence": "We walked around the pond.",
+      "meaning": "On all sides of something or in a circle.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "bounce",
+      "normalised_word": "bounce",
+      "grapheme_segments": ["b", "ou", "n", "c", "e"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with final silent e.",
+      "sentence": "The ball can bounce on the hard floor.",
+      "meaning": "To spring back after hitting a surface.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "couch",
+      "normalised_word": "couch",
+      "grapheme_segments": ["c", "ou", "ch"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with a final ch segment.",
+      "sentence": "The cushion fell from the couch.",
+      "meaning": "A long soft seat for sitting on.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "ground",
+      "normalised_word": "ground",
+      "grapheme_segments": ["g", "r", "ou", "n", "d"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with consonant clusters.",
+      "sentence": "Leaves covered the ground.",
+      "meaning": "The surface of the earth under your feet.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "house",
+      "normalised_word": "house",
+      "grapheme_segments": ["h", "ou", "s", "e"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ou word with final silent e.",
+      "sentence": "The house had a red front door.",
+      "meaning": "A building where people live.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mouse",
+      "normalised_word": "mouse",
+      "grapheme_segments": ["m", "ou", "s", "e"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with final silent e.",
+      "sentence": "The toy mouse was grey.",
+      "meaning": "A small animal with a long tail.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mountain",
+      "normalised_word": "mountain",
+      "grapheme_segments": ["m", "ou", "n", "t", "ai", "n"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ou word with another vowel digraph.",
+      "sentence": "Snow lay on the mountain top.",
+      "meaning": "A very high natural area of land.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mouth",
+      "normalised_word": "mouth",
+      "grapheme_segments": ["m", "ou", "th"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with a final th segment.",
+      "sentence": "Smile with your mouth closed for the photo.",
+      "meaning": "The part of the face used for eating and speaking.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "proud",
+      "normalised_word": "proud",
+      "grapheme_segments": ["p", "r", "ou", "d"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with an initial consonant blend.",
+      "sentence": "Mia felt proud of her neat work.",
+      "meaning": "Pleased because of something done well.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shout",
+      "normalised_word": "shout",
+      "grapheme_segments": ["sh", "ou", "t"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with an initial sh segment.",
+      "sentence": "Please do not shout across the room.",
+      "meaning": "To speak very loudly.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sound",
+      "normalised_word": "sound",
+      "grapheme_segments": ["s", "ou", "n", "d"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with a final consonant cluster.",
+      "sentence": "The bell made a clear sound.",
+      "meaning": "Something that can be heard.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "south",
+      "normalised_word": "south",
+      "grapheme_segments": ["s", "ou", "th"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ou word with a final th segment.",
+      "sentence": "The map showed south at the bottom.",
+      "meaning": "The direction opposite north.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thousand",
+      "normalised_word": "thousand",
+      "grapheme_segments": ["th", "ou", "s", "a", "n", "d"],
+      "focus_graphemes": ["ou"],
+      "primary_focus_grapheme": "ou",
+      "stage_band": "floor_core",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ou word with another multiletter grapheme.",
+      "sentence": "A thousand grains of sand filled the jar.",
+      "meaning": "The number 1000.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ou",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "how",
+      "normalised_word": "how",
+      "grapheme_segments": ["h", "ow"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ow word.",
+      "sentence": "How did you solve the puzzle?",
+      "meaning": "In what way.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "owl",
+      "normalised_word": "owl",
+      "grapheme_segments": ["ow", "l"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short ow word with a final consonant.",
+      "sentence": "The owl picture was on the card.",
+      "meaning": "A bird with large eyes that often hunts at night.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "clown",
+      "normalised_word": "clown",
+      "grapheme_segments": ["c", "l", "ow", "n"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ow word with an initial consonant blend.",
+      "sentence": "The clown wore a bright hat.",
+      "meaning": "A performer who tries to make people laugh.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "crowd",
+      "normalised_word": "crowd",
+      "grapheme_segments": ["c", "r", "ow", "d"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ow word with an initial consonant blend.",
+      "sentence": "A small crowd waited by the stage.",
+      "meaning": "A large group of people together.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "frown",
+      "normalised_word": "frown",
+      "grapheme_segments": ["f", "r", "ow", "n"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ow word with an initial consonant blend.",
+      "sentence": "A frown crossed his face for a moment.",
+      "meaning": "A look that shows worry or displeasure.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "growl",
+      "normalised_word": "growl",
+      "grapheme_segments": ["g", "r", "ow", "l"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ow word with an initial consonant blend and final consonant.",
+      "sentence": "The engine made a low growl.",
+      "meaning": "A deep rough sound.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shower",
+      "normalised_word": "shower",
+      "grapheme_segments": ["sh", "ow", "er"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word with other multiletter segments.",
+      "sentence": "A quick shower of rain passed over.",
+      "meaning": "A short fall of rain or a spray of water.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "tower",
+      "normalised_word": "tower",
+      "grapheme_segments": ["t", "ow", "er"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word with an er ending.",
+      "sentence": "The tall tower had a clock.",
+      "meaning": "A high narrow building or structure.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "power",
+      "normalised_word": "power",
+      "grapheme_segments": ["p", "ow", "er"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word with an er ending.",
+      "sentence": "The lamp needed power to shine.",
+      "meaning": "Energy that makes something work.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "powder",
+      "normalised_word": "powder",
+      "grapheme_segments": ["p", "ow", "d", "er"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word with an er ending.",
+      "sentence": "Fine powder covered the tray.",
+      "meaning": "Dry material made of tiny loose grains.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "towel",
+      "normalised_word": "towel",
+      "grapheme_segments": ["t", "ow", "e", "l"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word.",
+      "sentence": "Hang the towel on the rail.",
+      "meaning": "A piece of cloth used for drying things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "allow",
+      "normalised_word": "allow",
+      "grapheme_segments": ["a", "ll", "ow"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ow word with a doubled consonant.",
+      "sentence": "The rules allow one extra turn.",
+      "meaning": "To let something happen.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "window",
+      "normalised_word": "window",
+      "grapheme_segments": ["w", "i", "n", "d", "ow"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable ow word with a different pronunciation.",
+      "sentence": "Open the window a little.",
+      "meaning": "An opening with glass that lets in light.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "yellow",
+      "normalised_word": "yellow",
+      "grapheme_segments": ["y", "e", "ll", "ow"],
+      "focus_graphemes": ["ow"],
+      "primary_focus_grapheme": "ow",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable ow word with a different pronunciation.",
+      "sentence": "The yellow cup was on the shelf.",
+      "meaning": "The colour of lemons and sunshine.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ow",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "that",
+      "normalised_word": "that",
+      "grapheme_segments": ["th", "a", "t"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short high-frequency th word.",
+      "sentence": "That bag belongs on the hook.",
+      "meaning": "A word used to point to a thing or idea.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "this",
+      "normalised_word": "this",
+      "grapheme_segments": ["th", "i", "s"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short high-frequency th word.",
+      "sentence": "This page has a map.",
+      "meaning": "A word used for something close by.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "then",
+      "normalised_word": "then",
+      "grapheme_segments": ["th", "e", "n"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common th word.",
+      "sentence": "Finish the line, then check it.",
+      "meaning": "After that time or next.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "them",
+      "normalised_word": "them",
+      "grapheme_segments": ["th", "e", "m"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common th word.",
+      "sentence": "Give them a turn with the game.",
+      "meaning": "A word used for other people or things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "they",
+      "normalised_word": "they",
+      "grapheme_segments": ["th", "e", "y"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common th word.",
+      "sentence": "They waited quietly by the door.",
+      "meaning": "A word used for two or more people or things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "there",
+      "normalised_word": "there",
+      "grapheme_segments": ["th", "er", "e"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with an er segment.",
+      "sentence": "Put the tray over there.",
+      "meaning": "In or at that place.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "these",
+      "normalised_word": "these",
+      "grapheme_segments": ["th", "e", "s", "e"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common th word with final silent e.",
+      "sentence": "These pencils are sharp.",
+      "meaning": "A word used for more than one thing close by.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "those",
+      "normalised_word": "those",
+      "grapheme_segments": ["th", "o", "s", "e"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common th word with final silent e.",
+      "sentence": "Those shoes are by the mat.",
+      "meaning": "A word used for more than one thing farther away.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "than",
+      "normalised_word": "than",
+      "grapheme_segments": ["th", "a", "n"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common th word.",
+      "sentence": "Sam is taller than Ben.",
+      "meaning": "A word used when comparing things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "think",
+      "normalised_word": "think",
+      "grapheme_segments": ["th", "i", "n", "k"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with a final consonant cluster.",
+      "sentence": "Think before you answer.",
+      "meaning": "To use your mind to consider something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thing",
+      "normalised_word": "thing",
+      "grapheme_segments": ["th", "i", "ng"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with a final ng segment.",
+      "sentence": "One thing was missing from the box.",
+      "meaning": "An object, idea, or item.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thumb",
+      "normalised_word": "thumb",
+      "grapheme_segments": ["th", "u", "m", "b"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with a final silent consonant.",
+      "sentence": "Press the button with your thumb.",
+      "meaning": "The short thick finger on the side of your hand.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thick",
+      "normalised_word": "thick",
+      "grapheme_segments": ["th", "i", "ck"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with a final ck segment.",
+      "sentence": "The thick book stood on the shelf.",
+      "meaning": "Wide from one side to the other.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thread",
+      "normalised_word": "thread",
+      "grapheme_segments": ["th", "r", "ea", "d"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Th word with an initial consonant cluster and ea segment.",
+      "sentence": "A red thread lay on the table.",
+      "meaning": "A thin strand used for sewing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "month",
+      "normalised_word": "month",
+      "grapheme_segments": ["m", "o", "n", "th"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common th word with the target at the end.",
+      "sentence": "Next month we visit the museum.",
+      "meaning": "One of the twelve parts of a year.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cloth",
+      "normalised_word": "cloth",
+      "grapheme_segments": ["c", "l", "o", "th"],
+      "focus_graphemes": ["th"],
+      "primary_focus_grapheme": "th",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Th word with an initial consonant blend and target at the end.",
+      "sentence": "Use a cloth to wipe the table.",
+      "meaning": "Material made from woven threads.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "th",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sing",
+      "normalised_word": "sing",
+      "grapheme_segments": ["s", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ng word.",
+      "sentence": "We sing the song together.",
+      "meaning": "To make music with your voice.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "wing",
+      "normalised_word": "wing",
+      "grapheme_segments": ["w", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ng word.",
+      "sentence": "The paper plane had one bent wing.",
+      "meaning": "A part used for flying.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "bring",
+      "normalised_word": "bring",
+      "grapheme_segments": ["b", "r", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ng word with an initial consonant blend.",
+      "sentence": "Bring your book to the carpet.",
+      "meaning": "To carry something to a place.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "spring",
+      "normalised_word": "spring",
+      "grapheme_segments": ["s", "p", "r", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ng word with a longer initial consonant cluster.",
+      "sentence": "Spring flowers grew near the fence.",
+      "meaning": "The season after winter and before summer.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "string",
+      "normalised_word": "string",
+      "grapheme_segments": ["s", "t", "r", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ng word with a longer initial consonant cluster.",
+      "sentence": "Tie the card with string.",
+      "meaning": "Thin cord made from twisted threads.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "wrong",
+      "normalised_word": "wrong",
+      "grapheme_segments": ["w", "r", "o", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ng word with a silent initial consonant.",
+      "sentence": "The answer was wrong, so we tried again.",
+      "meaning": "Not correct.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "young",
+      "normalised_word": "young",
+      "grapheme_segments": ["y", "ou", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ng word with an ou segment.",
+      "sentence": "The young plant needed water.",
+      "meaning": "Not old or fully grown.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "along",
+      "normalised_word": "along",
+      "grapheme_segments": ["a", "l", "o", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with target at the end.",
+      "sentence": "Walk along the path to the gate.",
+      "meaning": "Moving beside or following the length of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "belong",
+      "normalised_word": "belong",
+      "grapheme_segments": ["b", "e", "l", "o", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with target at the end.",
+      "sentence": "The blue coat may belong to Omar.",
+      "meaning": "To be owned by someone or fit in a place.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "evening",
+      "normalised_word": "evening",
+      "grapheme_segments": ["e", "v", "e", "n", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Longer ng word with an ing ending.",
+      "sentence": "The evening sky turned pink.",
+      "meaning": "The later part of the day before night.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "walking",
+      "normalised_word": "walking",
+      "grapheme_segments": ["w", "a", "l", "k", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with an ing ending.",
+      "sentence": "Walking to school keeps us active.",
+      "meaning": "Moving on foot at a steady pace.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "helping",
+      "normalised_word": "helping",
+      "grapheme_segments": ["h", "e", "l", "p", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with an ing ending.",
+      "sentence": "Helping a friend is kind.",
+      "meaning": "Giving support or making a task easier.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "playing",
+      "normalised_word": "playing",
+      "grapheme_segments": ["p", "l", "ay", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with another vowel digraph.",
+      "sentence": "Playing outside made everyone smile.",
+      "meaning": "Taking part in a game or fun activity.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "looking",
+      "normalised_word": "looking",
+      "grapheme_segments": ["l", "oo", "k", "i", "ng"],
+      "focus_graphemes": ["ng"],
+      "primary_focus_grapheme": "ng",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ng word with an ing ending.",
+      "sentence": "Looking carefully helped us find the clue.",
+      "meaning": "Using your eyes to search or notice.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ng",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "judge",
+      "normalised_word": "judge",
+      "grapheme_segments": ["j", "u", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common dge word with a single initial consonant.",
+      "sentence": "The judge chose the neatest poster.",
+      "meaning": "A person who decides a result or choice.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "ledge",
+      "normalised_word": "ledge",
+      "grapheme_segments": ["l", "e", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "The plant sat on the window ledge.",
+      "meaning": "A narrow shelf-like edge.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "wedge",
+      "normalised_word": "wedge",
+      "grapheme_segments": ["w", "e", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "A wooden wedge held the door open.",
+      "meaning": "A piece with one thick end and one thin end.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "ridge",
+      "normalised_word": "ridge",
+      "grapheme_segments": ["r", "i", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "The path followed the ridge of the hill.",
+      "meaning": "A long raised line or high narrow area.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "smudge",
+      "normalised_word": "smudge",
+      "grapheme_segments": ["s", "m", "u", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Dge word with an initial consonant blend.",
+      "sentence": "A smudge of paint marked the page.",
+      "meaning": "A blurred or messy mark.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "lodge",
+      "normalised_word": "lodge",
+      "grapheme_segments": ["l", "o", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "The small lodge stood by the lake.",
+      "meaning": "A small house or building used for stays.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "fridge",
+      "normalised_word": "fridge",
+      "grapheme_segments": ["f", "r", "i", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Common dge word with an initial consonant blend.",
+      "sentence": "Put the milk back in the fridge.",
+      "meaning": "A cold cupboard used to keep food fresh.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "nudge",
+      "normalised_word": "nudge",
+      "grapheme_segments": ["n", "u", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "A gentle nudge moved the box along.",
+      "meaning": "A small push.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "budge",
+      "normalised_word": "budge",
+      "grapheme_segments": ["b", "u", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short dge word with a single initial consonant.",
+      "sentence": "The heavy drawer would not budge.",
+      "meaning": "To move a little.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sledge",
+      "normalised_word": "sledge",
+      "grapheme_segments": ["s", "l", "e", "dge"],
+      "focus_graphemes": ["dge"],
+      "primary_focus_grapheme": "dge",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Dge word with an initial consonant blend.",
+      "sentence": "The sledge slid over the snow.",
+      "meaning": "A low frame used for sliding over snow.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "dge",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "addition",
+      "normalised_word": "addition",
+      "grapheme_segments": ["a", "dd", "i", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Common tion word used in school maths.",
+      "sentence": "Addition helps us find the total.",
+      "meaning": "The act of adding numbers or things together.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "subtraction",
+      "normalised_word": "subtraction",
+      "grapheme_segments": ["s", "u", "b", "t", "r", "a", "c", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 70,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word used in school maths.",
+      "sentence": "Subtraction tells us how many are left.",
+      "meaning": "The act of taking one number or amount from another.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "option",
+      "normalised_word": "option",
+      "grapheme_segments": ["o", "p", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Shorter tion word with the target at the end.",
+      "sentence": "You can choose one option from the list.",
+      "meaning": "A choice that is available.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "motion",
+      "normalised_word": "motion",
+      "grapheme_segments": ["m", "o", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Shorter tion word with the target at the end.",
+      "sentence": "The swing moved in a smooth motion.",
+      "meaning": "Movement from one place or position to another.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "lotion",
+      "normalised_word": "lotion",
+      "grapheme_segments": ["l", "o", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Shorter tion word with the target at the end.",
+      "sentence": "The lotion made her hands soft.",
+      "meaning": "A liquid or cream put on skin.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "portion",
+      "normalised_word": "portion",
+      "grapheme_segments": ["p", "or", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Tion word with an r-controlled segment.",
+      "sentence": "Each pupil had a small portion of fruit.",
+      "meaning": "A part or share of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "caution",
+      "normalised_word": "caution",
+      "grapheme_segments": ["c", "au", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Tion word with another vowel digraph.",
+      "sentence": "Use caution near the wet floor.",
+      "meaning": "Care taken to avoid a problem.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "direction",
+      "normalised_word": "direction",
+      "grapheme_segments": ["d", "i", "r", "e", "c", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 66,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with several consonants before the target.",
+      "sentence": "The arrow showed the right direction.",
+      "meaning": "The way something points or moves.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "collection",
+      "normalised_word": "collection",
+      "grapheme_segments": ["c", "o", "ll", "e", "c", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 68,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with a doubled consonant.",
+      "sentence": "Her shell collection filled a small tray.",
+      "meaning": "A group of things gathered together.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "celebration",
+      "normalised_word": "celebration",
+      "grapheme_segments": ["c", "e", "l", "e", "b", "r", "a", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 72,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with four syllable parts.",
+      "sentence": "The celebration began with music.",
+      "meaning": "A happy event for a special reason.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "invitation",
+      "normalised_word": "invitation",
+      "grapheme_segments": ["i", "n", "v", "i", "t", "a", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 70,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with several syllable parts.",
+      "sentence": "An invitation arrived in a blue envelope.",
+      "meaning": "A request asking someone to come to an event.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "description",
+      "normalised_word": "description",
+      "grapheme_segments": ["d", "e", "s", "c", "r", "i", "p", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 74,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with a consonant cluster before the target.",
+      "sentence": "Write a description of the garden.",
+      "meaning": "Words that tell what someone or something is like.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "information",
+      "normalised_word": "information",
+      "grapheme_segments": ["i", "n", "f", "or", "m", "a", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 72,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer tion word with an r-controlled segment.",
+      "sentence": "The poster gave useful information.",
+      "meaning": "Facts or details about something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "invention",
+      "normalised_word": "invention",
+      "grapheme_segments": ["i", "n", "v", "e", "n", "tion"],
+      "focus_graphemes": ["tion"],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 66,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Tion word with the target after a consonant.",
+      "sentence": "Her invention held pencils upright.",
+      "meaning": "A new thing that someone has made or designed.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "fur",
+      "normalised_word": "fur",
+      "grapheme_segments": ["f", "ur"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ur word.",
+      "sentence": "The toy rabbit had soft fur.",
+      "meaning": "The thick hair that covers some animals.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "curl",
+      "normalised_word": "curl",
+      "grapheme_segments": ["c", "ur", "l"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short ur word with a final consonant.",
+      "sentence": "One curl fell across her forehead.",
+      "meaning": "A piece of hair or material in a curved shape.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "purse",
+      "normalised_word": "purse",
+      "grapheme_segments": ["p", "ur", "s", "e"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ur word with final silent e.",
+      "sentence": "The coin was in a small purse.",
+      "meaning": "A small bag for money or personal things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "surf",
+      "normalised_word": "surf",
+      "grapheme_segments": ["s", "ur", "f"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short ur word with a final consonant.",
+      "sentence": "The surf rolled onto the beach.",
+      "meaning": "Waves breaking near the shore.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "purple",
+      "normalised_word": "purple",
+      "grapheme_segments": ["p", "ur", "p", "l", "e"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable ur word.",
+      "sentence": "The purple folder was on the desk.",
+      "meaning": "A colour made from red and blue.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "turtle",
+      "normalised_word": "turtle",
+      "grapheme_segments": ["t", "ur", "t", "l", "e"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable ur word.",
+      "sentence": "The turtle moved slowly across the sand.",
+      "meaning": "An animal with a hard shell.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "burger",
+      "normalised_word": "burger",
+      "grapheme_segments": ["b", "ur", "g", "er"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word with an er ending.",
+      "sentence": "The bean burger was warm.",
+      "meaning": "A round cooked food served in a bun.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "curtain",
+      "normalised_word": "curtain",
+      "grapheme_segments": ["c", "ur", "t", "ai", "n"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word with another vowel digraph.",
+      "sentence": "Close the curtain before the film.",
+      "meaning": "Cloth that hangs by a window or stage.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "return",
+      "normalised_word": "return",
+      "grapheme_segments": ["r", "e", "t", "ur", "n"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word with the target in the middle.",
+      "sentence": "Return the book to the library.",
+      "meaning": "To go or bring something back.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "during",
+      "normalised_word": "during",
+      "grapheme_segments": ["d", "ur", "i", "ng"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word with a final ng segment.",
+      "sentence": "We listened during the story.",
+      "meaning": "At some time while something is happening.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "hurry",
+      "normalised_word": "hurry",
+      "grapheme_segments": ["h", "ur", "r", "y"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word.",
+      "sentence": "Hurry gently so you do not trip.",
+      "meaning": "To move or act quickly.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "curly",
+      "normalised_word": "curly",
+      "grapheme_segments": ["c", "ur", "l", "y"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable ur word with a suffix.",
+      "sentence": "Curly ribbon decorated the card.",
+      "meaning": "Having curls or curved shapes.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "surprise",
+      "normalised_word": "surprise",
+      "grapheme_segments": ["s", "ur", "p", "r", "i", "s", "e"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ur word with consonant clusters.",
+      "sentence": "The surprise note was inside the box.",
+      "meaning": "Something unexpected.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thursday",
+      "normalised_word": "thursday",
+      "grapheme_segments": ["th", "ur", "s", "d", "ay"],
+      "focus_graphemes": ["ur"],
+      "primary_focus_grapheme": "ur",
+      "stage_band": "diagnostic",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ur word with other multiletter graphemes.",
+      "sentence": "Thursday is our library day.",
+      "meaning": "The day of the week after Wednesday.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ur",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "pie",
+      "normalised_word": "pie",
+      "grapheme_segments": ["p", "ie"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short common ie word.",
+      "sentence": "A small pie cooled on the tray.",
+      "meaning": "A baked dish with pastry and filling.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "tie",
+      "normalised_word": "tie",
+      "grapheme_segments": ["t", "ie"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short common ie word.",
+      "sentence": "Tie the ribbon in a bow.",
+      "meaning": "To fasten something with a knot.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cried",
+      "normalised_word": "cried",
+      "grapheme_segments": ["c", "r", "ie", "d"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ie word with an initial consonant blend.",
+      "sentence": "The baby cried until Dad sang softly.",
+      "meaning": "Made tears or a loud upset sound.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "tried",
+      "normalised_word": "tried",
+      "grapheme_segments": ["t", "r", "ie", "d"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ie word with an initial consonant blend.",
+      "sentence": "She tried the puzzle again.",
+      "meaning": "Made an effort to do something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dried",
+      "normalised_word": "dried",
+      "grapheme_segments": ["d", "r", "ie", "d"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Ie word with an initial consonant blend.",
+      "sentence": "The wet socks dried by the heater.",
+      "meaning": "Became free from water.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "belief",
+      "normalised_word": "belief",
+      "grapheme_segments": ["b", "e", "l", "ie", "f"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ie word with the target in the middle.",
+      "sentence": "His belief in teamwork helped the group.",
+      "meaning": "An idea that someone thinks is true.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "relief",
+      "normalised_word": "relief",
+      "grapheme_segments": ["r", "e", "l", "ie", "f"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ie word with the target in the middle.",
+      "sentence": "Relief came when the lost key was found.",
+      "meaning": "A good feeling after worry or difficulty ends.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "niece",
+      "normalised_word": "niece",
+      "grapheme_segments": ["n", "ie", "c", "e"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Ie word with final silent e.",
+      "sentence": "My niece sent a drawing.",
+      "meaning": "The daughter of your brother or sister.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "friend",
+      "normalised_word": "friend",
+      "grapheme_segments": ["f", "r", "ie", "n", "d"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Common ie word with a different pronunciation.",
+      "sentence": "A friend saved me a seat.",
+      "meaning": "Someone you like and know well.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "quiet",
+      "normalised_word": "quiet",
+      "grapheme_segments": ["q", "u", "ie", "t"],
+      "focus_graphemes": ["ie"],
+      "primary_focus_grapheme": "ie",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable ie word with the target in the middle.",
+      "sentence": "The room was quiet during reading.",
+      "meaning": "Making little or no noise.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ie",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "city",
+      "normalised_word": "city",
+      "grapheme_segments": ["ci", "t", "y"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common soft ci word at the start.",
+      "sentence": "The city had a busy train station.",
+      "meaning": "A large town where many people live and work.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "circle",
+      "normalised_word": "circle",
+      "grapheme_segments": ["ci", "r", "c", "l", "e"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common soft ci word at the start.",
+      "sentence": "Draw a circle around the answer.",
+      "meaning": "A round flat shape.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "pencil",
+      "normalised_word": "pencil",
+      "grapheme_segments": ["p", "e", "n", "ci", "l"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common soft ci word in the middle.",
+      "sentence": "Sharpen the pencil before writing.",
+      "meaning": "A tool used for writing or drawing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cinema",
+      "normalised_word": "cinema",
+      "grapheme_segments": ["ci", "n", "e", "m", "a"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable soft ci word at the start.",
+      "sentence": "The cinema showed a short film.",
+      "meaning": "A place where people watch films.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "citrus",
+      "normalised_word": "citrus",
+      "grapheme_segments": ["ci", "t", "r", "u", "s"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Soft ci word with an initial target.",
+      "sentence": "Citrus fruit can taste sharp and sweet.",
+      "meaning": "Fruit such as oranges, lemons, or limes.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "recipe",
+      "normalised_word": "recipe",
+      "grapheme_segments": ["r", "e", "ci", "p", "e"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Three-syllable soft ci word in the middle.",
+      "sentence": "The recipe listed flour and eggs.",
+      "meaning": "Instructions for making food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "decimal",
+      "normalised_word": "decimal",
+      "grapheme_segments": ["d", "e", "ci", "m", "a", "l"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 64,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Three-syllable soft ci word used in maths.",
+      "sentence": "The decimal point was after the zero.",
+      "meaning": "A number written with a point to show parts of one.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "decision",
+      "normalised_word": "decision",
+      "grapheme_segments": ["d", "e", "ci", "s", "i", "o", "n"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 66,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Three-syllable soft ci word.",
+      "sentence": "The team made a fair decision.",
+      "meaning": "A choice made after thinking.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "musician",
+      "normalised_word": "musician",
+      "grapheme_segments": ["m", "u", "s", "i", "ci", "a", "n"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 70,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer soft ci word with several syllable parts.",
+      "sentence": "The musician played a gentle tune.",
+      "meaning": "A person who plays or writes music.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "magician",
+      "normalised_word": "magician",
+      "grapheme_segments": ["m", "a", "g", "i", "ci", "a", "n"],
+      "focus_graphemes": ["ci"],
+      "primary_focus_grapheme": "ci",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 70,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer soft ci word with several syllable parts.",
+      "sentence": "The magician pulled a scarf from a hat.",
+      "meaning": "A person who performs tricks for an audience.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ci",
+          "target_role": "primary",
+          "pattern_type": "soft_c",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "jaw",
+      "normalised_word": "jaw",
+      "grapheme_segments": ["j", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common aw word.",
+      "sentence": "Her jaw moved as she chewed.",
+      "meaning": "The bone area that holds the teeth.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "law",
+      "normalised_word": "law",
+      "grapheme_segments": ["l", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short common aw word.",
+      "sentence": "The class made a fair law for the game.",
+      "meaning": "A rule made for people to follow.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "paw",
+      "normalised_word": "paw",
+      "grapheme_segments": ["p", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common aw word.",
+      "sentence": "The toy dog had a soft paw.",
+      "meaning": "An animal foot with claws or pads.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "raw",
+      "normalised_word": "raw",
+      "grapheme_segments": ["r", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short common aw word.",
+      "sentence": "The raw carrot snapped loudly.",
+      "meaning": "Not cooked yet.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "claw",
+      "normalised_word": "claw",
+      "grapheme_segments": ["c", "l", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Aw word with an initial consonant blend.",
+      "sentence": "The model crab had one big claw.",
+      "meaning": "A sharp curved nail or pincer.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shawl",
+      "normalised_word": "shawl",
+      "grapheme_segments": ["sh", "aw", "l"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Aw word with an initial sh segment.",
+      "sentence": "Grandma folded the warm shawl.",
+      "meaning": "A large piece of cloth worn over the shoulders.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "thaw",
+      "normalised_word": "thaw",
+      "grapheme_segments": ["th", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Aw word with an initial th segment.",
+      "sentence": "The ice began to thaw in the sun.",
+      "meaning": "To melt after being frozen.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "seesaw",
+      "normalised_word": "seesaw",
+      "grapheme_segments": ["s", "ee", "s", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Two-syllable aw word with another vowel digraph.",
+      "sentence": "The seesaw tipped up and down.",
+      "meaning": "A playground board that moves up and down.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "treasure",
+      "normalised_word": "treasure",
+      "grapheme_segments": ["t", "r", "ea", "s", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 64,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with another vowel digraph.",
+      "sentence": "The treasure box held shiny buttons.",
+      "meaning": "Something valuable or special.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "measure",
+      "normalised_word": "measure",
+      "grapheme_segments": ["m", "ea", "s", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 64,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with another vowel digraph.",
+      "sentence": "Measure the ribbon before you cut it.",
+      "meaning": "To find the size or amount of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "feature",
+      "normalised_word": "feature",
+      "grapheme_segments": ["f", "ea", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 66,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with another vowel digraph.",
+      "sentence": "The best feature was the secret drawer.",
+      "meaning": "An important or noticeable part of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "adventure",
+      "normalised_word": "adventure",
+      "grapheme_segments": ["a", "d", "v", "e", "n", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 72,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with several consonants before the target.",
+      "sentence": "The story was full of adventure.",
+      "meaning": "An exciting experience or journey.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "furniture",
+      "normalised_word": "furniture",
+      "grapheme_segments": ["f", "ur", "n", "i", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 72,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with another r-controlled segment.",
+      "sentence": "The furniture was arranged neatly.",
+      "meaning": "Large useful things in a room, such as tables and chairs.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "culture",
+      "normalised_word": "culture",
+      "grapheme_segments": ["c", "u", "l", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 68,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Two-syllable ure word with a consonant cluster before the target.",
+      "sentence": "Food and music can show culture.",
+      "meaning": "The ideas, customs, and art shared by a group.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "temperature",
+      "normalised_word": "temperature",
+      "grapheme_segments": ["t", "e", "m", "p", "er", "a", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 76,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with an er segment.",
+      "sentence": "The temperature was lower in the shade.",
+      "meaning": "How hot or cold something is.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "signature",
+      "normalised_word": "signature",
+      "grapheme_segments": ["s", "i", "g", "n", "a", "t", "ure"],
+      "focus_graphemes": ["ure"],
+      "primary_focus_grapheme": "ure",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 74,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ure word with several consonants before the target.",
+      "sentence": "Write your signature at the bottom.",
+      "meaning": "Your name written in your own way.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ure",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "meal",
+      "normalised_word": "meal",
+      "grapheme_segments": ["m", "ea", "l"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ea word with a final consonant.",
+      "sentence": "The meal smelled warm and tasty.",
+      "meaning": "Food eaten at one time.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "heat",
+      "normalised_word": "heat",
+      "grapheme_segments": ["h", "ea", "t"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ea word with a final consonant.",
+      "sentence": "Heat from the sun dried the path.",
+      "meaning": "Warmth or a high temperature.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7e_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
           "difficulty_modifier": 0
         }
       ]

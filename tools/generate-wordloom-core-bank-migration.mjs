@@ -68,6 +68,36 @@ const PHASE_CONFIGS = new Map([
     includeExplicitHintSqlCheck: true,
     includeSchoolScopeSqlCheck: true,
   }],
+  ["7e", {
+    key: "7e",
+    sourceVersion: "wordloom_core_v1_phase_7e_2026_05_13",
+    migrationFilename: "20260513133000_wordloom_core_spelling_bank_phase_7e_bulk_topup.sql",
+    tempTablePrefix: "phase_7e",
+    expectedCountColumn: "expected_phase_7e_word_count",
+    title: "Phase 7E",
+    noteText: "Wordloom core v1 Phase 7E bulk top-up batch target",
+    linkNoteText: "Wordloom core v1 Phase 7E bulk top-up batch target link",
+    expectedCounts: new Map([
+      ["ear", 10],
+      ["er", 16],
+      ["oy", 10],
+      ["oi", 10],
+      ["ou", 14],
+      ["ow", 14],
+      ["th", 16],
+      ["ng", 14],
+      ["dge", 10],
+      ["tion", 14],
+      ["ur", 14],
+      ["ie", 10],
+      ["ci", 10],
+      ["aw", 8],
+      ["ure", 8],
+      ["ea", 2],
+    ]),
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -323,7 +353,7 @@ function parsePhaseArg(argv = []) {
   const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
   const config = PHASE_CONFIGS.get(phase);
   if (!config) {
-    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, or --phase=7d.`);
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, or --phase=7e.`);
   }
   return config;
 }
