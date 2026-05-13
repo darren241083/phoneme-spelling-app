@@ -23,6 +23,18 @@ const proofSetMigrationPath = path.join(
   "migrations",
   "20260508150000_wordloom_core_spelling_bank_proof_set.sql",
 );
+const sourceDataPath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
+const SOURCE_PLACEHOLDER_PATTERNS = [
+  /\bplaceholder\b/i,
+  /\btbd\b/i,
+  /\btodo\b/i,
+  /\blorem\b/i,
+  /\bsample sentence\b/i,
+  /\bexample sentence\b/i,
+  /\bmeaning goes here\b/i,
+  /\bdefinition goes here\b/i,
+  /\bneeds review\b/i,
+];
 
 function findStatementEnd(source, startIndex) {
   let inQuote = false;
@@ -205,6 +217,104 @@ function difficultyBandForLabel(label = "") {
   return "core";
 }
 
+function normalizeSourceText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function hasSourcePlaceholderText(value = "") {
+  return SOURCE_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(String(value || "")));
+}
+
+function isWeakSourceContext(value = "") {
+  const clean = String(value || "").trim();
+  return clean.length > 0 && clean.length < 12;
+}
+
+function isActiveApprovedSuitableSourceWord(word = {}) {
+  return word?.is_active === true
+    && normalizeSourceText(word?.approval_status) === "approved"
+    && normalizeSourceText(word?.suitability_status) === "suitable";
+}
+
+function countSourceDifficultyWindows(words, windows) {
+  return Object.fromEntries(
+    Object.entries(windows || {}).map(([key, window]) => {
+      const min = Number(window?.min);
+      const max = Number(window?.max);
+      const count = (Array.isArray(words) ? words : [])
+        .filter((word) => {
+          const score = Number(word?.difficulty_score);
+          return Number.isFinite(score)
+            && Number.isFinite(min)
+            && Number.isFinite(max)
+            && score >= min
+            && score <= max;
+        })
+        .length;
+      return [key, count];
+    }),
+  );
+}
+
+function buildSourceDataCoverageReport(source = {}) {
+  const metadata = source?.metadata && typeof source.metadata === "object" ? source.metadata : {};
+  const targets = Array.isArray(source?.targets) ? source.targets : [];
+  const words = Array.isArray(source?.words) ? source.words : [];
+  const activeApprovedSuitableWords = words.filter(isActiveApprovedSuitableSourceWord);
+  const difficultyWindows = metadata?.difficulty_windows && typeof metadata.difficulty_windows === "object"
+    ? metadata.difficulty_windows
+    : {};
+  const minimumPrimaryWords = Math.max(0, Number(metadata?.minimum_primary_words_per_active_target || 0));
+  const sourceTargets = targets
+    .map((target) => {
+      const focus = normalizeSourceText(target?.focus_grapheme);
+      const primaryWords = activeApprovedSuitableWords.filter((word) =>
+        (Array.isArray(word?.target_links) ? word.target_links : []).some((link) =>
+          normalizeSourceText(link?.target_role) === "primary"
+          && normalizeSourceText(link?.focus_grapheme) === focus
+        )
+      );
+      return {
+        grapheme: focus,
+        active: target?.is_active === true,
+        sourcePrimaryWordCount: primaryWords.length,
+        difficultyWindowCounts: countSourceDifficultyWindows(primaryWords, difficultyWindows),
+      };
+    })
+    .filter((target) => target.grapheme)
+    .sort((a, b) => a.grapheme.localeCompare(b.grapheme));
+  const context = {
+    missingSentenceCount: activeApprovedSuitableWords.filter((word) => !String(word?.sentence || "").trim()).length,
+    missingMeaningCount: activeApprovedSuitableWords.filter((word) => !String(word?.meaning || "").trim()).length,
+    weakSentenceCount: activeApprovedSuitableWords.filter((word) => isWeakSourceContext(word?.sentence)).length,
+    weakMeaningCount: activeApprovedSuitableWords.filter((word) => isWeakSourceContext(word?.meaning)).length,
+    placeholderContextCount: activeApprovedSuitableWords.filter((word) =>
+      hasSourcePlaceholderText(word?.sentence) || hasSourcePlaceholderText(word?.meaning)
+    ).length,
+  };
+  const warningCount = sourceTargets.filter((target) =>
+    target.active
+    && (
+      target.sourcePrimaryWordCount === 0
+      || (minimumPrimaryWords > 0 && target.sourcePrimaryWordCount < minimumPrimaryWords)
+    )
+  ).length
+    + context.missingSentenceCount
+    + context.missingMeaningCount
+    + context.weakSentenceCount
+    + context.weakMeaningCount
+    + context.placeholderContextCount;
+
+  return {
+    sourceVersion: String(metadata?.source_version || ""),
+    sourceTargetCount: targets.length,
+    sourceWordCount: words.length,
+    sourceValidationWarningCount: warningCount,
+    sourceTargets,
+    sourceContext: context,
+  };
+}
+
 function toAssignmentWordRow(proofWord) {
   const band = difficultyBandForLabel(proofWord.difficultyLabel);
   return {
@@ -375,6 +485,8 @@ function buildPlanForTarget({ target, targets, assignmentRows, pupilId }) {
 }
 
 const migrationSql = readFileSync(proofSetMigrationPath, "utf8");
+const sourceData = JSON.parse(readFileSync(sourceDataPath, "utf8"));
+const sourceCoverageReport = buildSourceDataCoverageReport(sourceData);
 const proofTargets = parseProofTargets(migrationSql);
 const proofWords = parseProofWords(migrationSql);
 const assignmentRows = proofWords.map((proofWord) => toAssignmentWordRow(proofWord));
@@ -482,6 +594,12 @@ const report = {
   targetCount: proofTargets.length,
   proofWordCount: proofWords.length,
   assignmentWordCount: EXPECTED_ASSIGNMENT_WORD_COUNT,
+  sourceVersion: sourceCoverageReport.sourceVersion,
+  sourceTargetCount: sourceCoverageReport.sourceTargetCount,
+  sourceWordCount: sourceCoverageReport.sourceWordCount,
+  sourceValidationWarningCount: sourceCoverageReport.sourceValidationWarningCount,
+  sourceTargets: sourceCoverageReport.sourceTargets,
+  sourceContext: sourceCoverageReport.sourceContext,
   expectedWarnings: Object.fromEntries(
     [...EXPECTED_LOW_COVERAGE_WARNINGS.entries()]
       .map(([grapheme, warning]) => [

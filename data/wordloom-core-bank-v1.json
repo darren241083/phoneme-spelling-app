@@ -1,0 +1,575 @@
+{
+  "$schema": "wordloom-core-bank-source-v1",
+  "metadata": {
+    "schema_version": "wordloom_core_bank_source_v1",
+    "source_version": "wordloom_core_v1_foundation_2026_05_13",
+    "status": "phase_7a_pilot",
+    "purpose": "Reviewable source-data foundation for the Wordloom-owned v1 core spelling bank before generated SQL migrations are introduced.",
+    "word_count_target_range": {
+      "min": 480,
+      "max": 720
+    },
+    "minimum_primary_words_per_active_target": 16,
+    "difficulty_score_range": {
+      "min": 0,
+      "max": 100
+    },
+    "difficulty_windows": {
+      "needs_support": {
+        "min": 15,
+        "max": 50
+      },
+      "core_developing": {
+        "min": 25,
+        "max": 60
+      },
+      "secure_expected": {
+        "min": 35,
+        "max": 65
+      },
+      "early_stretch": {
+        "min": 55,
+        "max": 80
+      }
+    },
+    "notes": [
+      "This file is intentionally a small pilot sample, not the full v1 bank.",
+      "The source is review-only in Phase 7A and is not loaded by the app or migrations yet.",
+      "Production SQL should be generated from this format in later Phase 7 slices after review."
+    ]
+  },
+  "targets": [
+    {
+      "focus_grapheme": "ai",
+      "display_label": "ai",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 10,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ee",
+      "display_label": "ee",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 20,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "oa",
+      "display_label": "oa",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 30,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "igh",
+      "display_label": "igh",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 40,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ar",
+      "display_label": "ar",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 50,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "or",
+      "display_label": "or",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 60,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "air",
+      "display_label": "air",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 70,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ear",
+      "display_label": "ear",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 80,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "er",
+      "display_label": "er",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 90,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "oy",
+      "display_label": "oy",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 100,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "oi",
+      "display_label": "oi",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 110,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ou",
+      "display_label": "ou",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 120,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ow",
+      "display_label": "ow",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 130,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "sh",
+      "display_label": "sh",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 140,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ch",
+      "display_label": "ch",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 150,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "th",
+      "display_label": "th",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 160,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ng",
+      "display_label": "ng",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 170,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ck",
+      "display_label": "ck",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 180,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "dge",
+      "display_label": "dge",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "secure_expected",
+      "sort_order": 190,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "tion",
+      "display_label": "tion",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "early_stretch",
+      "sort_order": 200,
+      "expected_primary_word_count_v1": 28,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ur",
+      "display_label": "ur",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 210,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ie",
+      "display_label": "ie",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "early_stretch",
+      "sort_order": 220,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ci",
+      "display_label": "ci",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "early_stretch",
+      "sort_order": 230,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "au",
+      "display_label": "au",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "secure_expected",
+      "sort_order": 240,
+      "expected_primary_word_count_v1": 24,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ay",
+      "display_label": "ay",
+      "stage_band": "floor_core",
+      "challenge_band": "needs_support",
+      "sort_order": 250,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ea",
+      "display_label": "ea",
+      "stage_band": "floor_core",
+      "challenge_band": "core_developing",
+      "sort_order": 260,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ew",
+      "display_label": "ew",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 270,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "ure",
+      "display_label": "ure",
+      "stage_band": "ceiling_challenge",
+      "challenge_band": "early_stretch",
+      "sort_order": 280,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "aw",
+      "display_label": "aw",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 290,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    },
+    {
+      "focus_grapheme": "tch",
+      "display_label": "tch",
+      "stage_band": "diagnostic",
+      "challenge_band": "secure_expected",
+      "sort_order": 300,
+      "expected_primary_word_count_v1": 20,
+      "is_active": true
+    }
+  ],
+  "words": [
+    {
+      "word": "rain",
+      "normalised_word": "rain",
+      "grapheme_segments": ["r", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 20,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common one-syllable ai word.",
+      "sentence": "Heavy rain fell after lunch.",
+      "meaning": "Water that falls from clouds.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "train",
+      "normalised_word": "train",
+      "grapheme_segments": ["t", "r", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with an initial consonant blend.",
+      "sentence": "The train stopped at the small station.",
+      "meaning": "A vehicle that runs on rails.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "day",
+      "normalised_word": "day",
+      "grapheme_segments": ["d", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 18,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ay word with the target at the end.",
+      "sentence": "The sunny day felt warm.",
+      "meaning": "A period of twenty-four hours.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "play",
+      "normalised_word": "play",
+      "grapheme_segments": ["p", "l", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ay word with an initial consonant blend.",
+      "sentence": "We can play outside after the lesson.",
+      "meaning": "To take part in a game or activity.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "beach",
+      "normalised_word": "beach",
+      "grapheme_segments": ["b", "ea", "ch"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with another multiletter grapheme.",
+      "sentence": "The beach was quiet in the morning.",
+      "meaning": "Land beside the sea, often covered with sand or stones.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dream",
+      "normalised_word": "dream",
+      "grapheme_segments": ["d", "r", "ea", "m"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with an initial consonant blend.",
+      "sentence": "She had a dream about flying.",
+      "meaning": "Images or events imagined while sleeping.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "chew",
+      "normalised_word": "chew",
+      "grapheme_segments": ["ch", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short ew word with an initial ch grapheme.",
+      "sentence": "Please chew your food slowly.",
+      "meaning": "To bite food into smaller pieces.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "screw",
+      "normalised_word": "screw",
+      "grapheme_segments": ["s", "c", "r", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Ew word with a longer initial consonant cluster.",
+      "sentence": "The loose screw fell from the shelf.",
+      "meaning": "A small metal fastener turned with a tool.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "long_vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "catch",
+      "normalised_word": "catch",
+      "grapheme_segments": ["c", "a", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with a short vowel before the target.",
+      "sentence": "Catch the ball with both hands.",
+      "meaning": "To stop and hold something that is moving.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "stitch",
+      "normalised_word": "stitch",
+      "grapheme_segments": ["s", "t", "i", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Tch word with an initial consonant cluster.",
+      "sentence": "One stitch held the torn cloth together.",
+      "meaning": "A loop of thread used when sewing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_foundation_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    }
+  ]
+}
