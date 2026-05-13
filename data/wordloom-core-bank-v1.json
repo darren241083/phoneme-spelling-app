@@ -3,8 +3,8 @@
   "metadata": {
     "schema_version": "wordloom_core_bank_source_v1",
     "source_version": "wordloom_core_v1_foundation_2026_05_13",
-    "status": "phase_7e_bulk_topups",
-    "purpose": "Reviewable source data for the Wordloom-owned v1 core spelling bank, moving toward approximately 1,000 production words and including reviewed Phase 7B, Phase 7C, Phase 7D, and Phase 7E production batches.",
+    "status": "phase_7f_bulk_common_target_strengthening",
+    "purpose": "Reviewable source data for the Wordloom-owned v1 core spelling bank, moving toward approximately 1,000 production words and including reviewed Phase 7B, Phase 7C, Phase 7D, Phase 7E, and Phase 7F production batches.",
     "word_count_target_range": {
       "min": 900,
       "max": 1050
@@ -39,6 +39,7 @@
       "Rows with source_version wordloom_core_v1_phase_7c_2026_05_13 are reviewed Wordloom-owned Phase 7C production batch content for aw, ure, and active target top-ups.",
       "Rows with source_version wordloom_core_v1_phase_7d_2026_05_13 are reviewed Wordloom-owned Phase 7D production proof-target top-up batch content.",
       "Rows with source_version wordloom_core_v1_phase_7e_2026_05_13 are reviewed Wordloom-owned Phase 7E production bulk top-up batch content.",
+      "Rows with source_version wordloom_core_v1_phase_7f_2026_05_13 are reviewed Wordloom-owned Phase 7F production bulk common-target strengthening batch content.",
       "Production SQL is generated from this format after source review."
     ]
   },
@@ -8371,6 +8372,4686 @@
           "focus_grapheme": "ea",
           "target_role": "primary",
           "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "aim",
+      "normalised_word": "aim",
+      "grapheme_segments": ["ai", "m"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 18,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ai word.",
+      "sentence": "Point carefully before you throw the beanbag.",
+      "meaning": "To point or direct something at a place.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "aid",
+      "normalised_word": "aid",
+      "grapheme_segments": ["ai", "d"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ai word.",
+      "sentence": "The guide gave aid to the new pupil.",
+      "meaning": "Help or support given to someone.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "paid",
+      "normalised_word": "paid",
+      "grapheme_segments": ["p", "ai", "d"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 3 segment parts.",
+      "sentence": "Mum paid for the bus ticket online.",
+      "meaning": "Gave money for something bought.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "nail",
+      "normalised_word": "nail",
+      "grapheme_segments": ["n", "ai", "l"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 3 segment parts.",
+      "sentence": "One nail held the picture frame in place.",
+      "meaning": "A small metal pin used to fasten things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "main",
+      "normalised_word": "main",
+      "grapheme_segments": ["m", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 3 segment parts.",
+      "sentence": "The main gate opened at eight.",
+      "meaning": "The most important one.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "gain",
+      "normalised_word": "gain",
+      "grapheme_segments": ["g", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 3 segment parts.",
+      "sentence": "You gain points for each correct answer.",
+      "meaning": "To get more of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "grain",
+      "normalised_word": "grain",
+      "grapheme_segments": ["g", "r", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "A grain of rice fell on the table.",
+      "meaning": "A tiny seed or small hard piece.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "drain",
+      "normalised_word": "drain",
+      "grapheme_segments": ["d", "r", "ai", "n"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "Water ran down the drain.",
+      "meaning": "A pipe or hole that carries water away.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "claim",
+      "normalised_word": "claim",
+      "grapheme_segments": ["c", "l", "ai", "m"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "You can claim a sticker after the quiz.",
+      "meaning": "To say that something is yours or is true.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "raise",
+      "normalised_word": "raise",
+      "grapheme_segments": ["r", "ai", "s", "e"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "Raise your hand when you are ready.",
+      "meaning": "To lift something higher.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "braid",
+      "normalised_word": "braid",
+      "grapheme_segments": ["b", "r", "ai", "d"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "She tied the ribbon around her braid.",
+      "meaning": "Hair woven into three or more parts.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "daisy",
+      "normalised_word": "daisy",
+      "grapheme_segments": ["d", "ai", "s", "y"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "A daisy grew beside the path.",
+      "meaning": "A small flower with white petals and a yellow centre.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "daily",
+      "normalised_word": "daily",
+      "grapheme_segments": ["d", "ai", "l", "y"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ai word with 4 segment parts.",
+      "sentence": "We do daily reading after lunch.",
+      "meaning": "Happening every day.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "rail",
+      "normalised_word": "rail",
+      "grapheme_segments": ["r", "ai", "l"],
+      "focus_graphemes": ["ai"],
+      "primary_focus_grapheme": "ai",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ai word with 3 segment parts.",
+      "sentence": "Hold the rail as you walk down the steps.",
+      "meaning": "A bar used for support or as a track.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ai",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "see",
+      "normalised_word": "see",
+      "grapheme_segments": ["s", "ee"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 18,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ee word.",
+      "sentence": "I can see the clock from here.",
+      "meaning": "To notice something with your eyes.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "free",
+      "normalised_word": "free",
+      "grapheme_segments": ["f", "r", "ee"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 3 segment parts.",
+      "sentence": "The library card is free for pupils.",
+      "meaning": "Costing no money.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "need",
+      "normalised_word": "need",
+      "grapheme_segments": ["n", "ee", "d"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 3 segment parts.",
+      "sentence": "You need a pencil for the lesson.",
+      "meaning": "To have to have something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "feel",
+      "normalised_word": "feel",
+      "grapheme_segments": ["f", "ee", "l"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 3 segment parts.",
+      "sentence": "The soft scarf can feel warm.",
+      "meaning": "To notice through touch or emotion.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "meet",
+      "normalised_word": "meet",
+      "grapheme_segments": ["m", "ee", "t"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 3 segment parts.",
+      "sentence": "Meet me by the classroom door.",
+      "meaning": "To come together with someone.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "week",
+      "normalised_word": "week",
+      "grapheme_segments": ["w", "ee", "k"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 3 segment parts.",
+      "sentence": "The club meets once each week.",
+      "meaning": "A period of seven days.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sheep",
+      "normalised_word": "sheep",
+      "grapheme_segments": ["sh", "ee", "p"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with another multiletter segment.",
+      "sentence": "The sheep followed the farmer into the field.",
+      "meaning": "A farm animal with a woolly coat.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sheet",
+      "normalised_word": "sheet",
+      "grapheme_segments": ["sh", "ee", "t"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with another multiletter segment.",
+      "sentence": "Write your name at the top of the sheet.",
+      "meaning": "A flat piece of paper or cloth.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sweet",
+      "normalised_word": "sweet",
+      "grapheme_segments": ["s", "w", "ee", "t"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with 4 segment parts.",
+      "sentence": "The apple tasted sweet and crisp.",
+      "meaning": "Having a taste like sugar.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sweep",
+      "normalised_word": "sweep",
+      "grapheme_segments": ["s", "w", "ee", "p"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ee word with 4 segment parts.",
+      "sentence": "Sweep the sand into a neat pile.",
+      "meaning": "To clean a floor with a brush.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "teeth",
+      "normalised_word": "teeth",
+      "grapheme_segments": ["t", "ee", "th"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ee word with another multiletter segment.",
+      "sentence": "Brush your teeth before bedtime.",
+      "meaning": "The hard white parts in your mouth used for biting.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "breeze",
+      "normalised_word": "breeze",
+      "grapheme_segments": ["b", "r", "ee", "z", "e"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ee word with 5 segment parts.",
+      "sentence": "A cool breeze moved the curtains.",
+      "meaning": "A gentle wind.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "between",
+      "normalised_word": "between",
+      "grapheme_segments": ["b", "e", "t", "w", "ee", "n"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ee word with 6 segment parts.",
+      "sentence": "The red book sat between two green books.",
+      "meaning": "In the space separating two things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "agree",
+      "normalised_word": "agree",
+      "grapheme_segments": ["a", "g", "r", "ee"],
+      "focus_graphemes": ["ee"],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ee word with 4 segment parts.",
+      "sentence": "The group can agree on one answer.",
+      "meaning": "To have the same opinion.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "oak",
+      "normalised_word": "oak",
+      "grapheme_segments": ["oa", "k"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common oa word.",
+      "sentence": "The oak table felt smooth.",
+      "meaning": "A strong tree or the wood from it.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "soak",
+      "normalised_word": "soak",
+      "grapheme_segments": ["s", "oa", "k"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common oa word with 3 segment parts.",
+      "sentence": "Soak the cloth in clean water.",
+      "meaning": "To make something very wet.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "loan",
+      "normalised_word": "loan",
+      "grapheme_segments": ["l", "oa", "n"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common oa word with 3 segment parts.",
+      "sentence": "The library loan lasts for two weeks.",
+      "meaning": "Something borrowed for a time.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "load",
+      "normalised_word": "load",
+      "grapheme_segments": ["l", "oa", "d"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common oa word with 3 segment parts.",
+      "sentence": "The van carried a heavy load.",
+      "meaning": "Something that is carried.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "oats",
+      "normalised_word": "oats",
+      "grapheme_segments": ["oa", "t", "s"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common oa word with 3 segment parts.",
+      "sentence": "Oats made the breakfast warm and filling.",
+      "meaning": "Grains used as food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "roast",
+      "normalised_word": "roast",
+      "grapheme_segments": ["r", "oa", "s", "t"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with 4 segment parts.",
+      "sentence": "Dad made roast potatoes for dinner.",
+      "meaning": "Cooked with dry heat in an oven.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cloak",
+      "normalised_word": "cloak",
+      "grapheme_segments": ["c", "l", "oa", "k"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with 4 segment parts.",
+      "sentence": "The cloak hung on a wooden peg.",
+      "meaning": "A loose coat without sleeves.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "groan",
+      "normalised_word": "groan",
+      "grapheme_segments": ["g", "r", "oa", "n"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with 4 segment parts.",
+      "sentence": "The old door gave a loud groan.",
+      "meaning": "A low sound made by a person or thing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "boast",
+      "normalised_word": "boast",
+      "grapheme_segments": ["b", "oa", "s", "t"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with 4 segment parts.",
+      "sentence": "Do not boast when you win a game.",
+      "meaning": "To talk too proudly about yourself.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "roam",
+      "normalised_word": "roam",
+      "grapheme_segments": ["r", "oa", "m"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common oa word with 3 segment parts.",
+      "sentence": "We can roam around the safe garden.",
+      "meaning": "To move about without a fixed path.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "coaster",
+      "normalised_word": "coaster",
+      "grapheme_segments": ["c", "oa", "s", "t", "er"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with another multiletter segment.",
+      "sentence": "Put the cup on a coaster.",
+      "meaning": "A small mat placed under a cup.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "oatmeal",
+      "normalised_word": "oatmeal",
+      "grapheme_segments": ["oa", "t", "m", "ea", "l"],
+      "focus_graphemes": ["oa"],
+      "primary_focus_grapheme": "oa",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common oa word with another multiletter segment.",
+      "sentence": "Oatmeal warmed the bowl at breakfast.",
+      "meaning": "A soft food made from oats.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "oa",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "delight",
+      "normalised_word": "delight",
+      "grapheme_segments": ["d", "e", "l", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common igh word with 5 segment parts.",
+      "sentence": "The puppet show brought delight to the class.",
+      "meaning": "A feeling of great pleasure.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "highway",
+      "normalised_word": "highway",
+      "grapheme_segments": ["h", "igh", "w", "ay"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common igh word with another multiletter segment.",
+      "sentence": "The highway curved past the town.",
+      "meaning": "A main road for travelling.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "midnight",
+      "normalised_word": "midnight",
+      "grapheme_segments": ["m", "i", "d", "n", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer igh word with several segment parts.",
+      "sentence": "The story clock chimed at midnight.",
+      "meaning": "Twelve o clock at night.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "daylight",
+      "normalised_word": "daylight",
+      "grapheme_segments": ["d", "ay", "l", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common igh word with another multiletter segment.",
+      "sentence": "Daylight filled the room by breakfast.",
+      "meaning": "Natural light from the sun.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mighty",
+      "normalised_word": "mighty",
+      "grapheme_segments": ["m", "igh", "t", "y"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common igh word with 4 segment parts.",
+      "sentence": "The mighty bridge crossed the river.",
+      "meaning": "Very strong or powerful.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "twilight",
+      "normalised_word": "twilight",
+      "grapheme_segments": ["t", "w", "i", "l", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer igh word with several segment parts.",
+      "sentence": "The garden looked calm in twilight.",
+      "meaning": "The soft light after sunset or before sunrise.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "spotlight",
+      "normalised_word": "spotlight",
+      "grapheme_segments": ["s", "p", "o", "t", "l", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer igh word with several segment parts.",
+      "sentence": "The singer stood in the spotlight.",
+      "meaning": "A strong light aimed at one place.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "upright",
+      "normalised_word": "upright",
+      "grapheme_segments": ["u", "p", "r", "igh", "t"],
+      "focus_graphemes": ["igh"],
+      "primary_focus_grapheme": "igh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common igh word with 5 segment parts.",
+      "sentence": "Sit upright on the chair.",
+      "meaning": "In a straight vertical position.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "igh",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "car",
+      "normalised_word": "car",
+      "grapheme_segments": ["c", "ar"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 18,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ar word.",
+      "sentence": "The car stopped beside the kerb.",
+      "meaning": "A road vehicle with wheels.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "arm",
+      "normalised_word": "arm",
+      "grapheme_segments": ["ar", "m"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 20,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ar word.",
+      "sentence": "He lifted one arm to wave.",
+      "meaning": "The body part from shoulder to hand.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "card",
+      "normalised_word": "card",
+      "grapheme_segments": ["c", "ar", "d"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ar word with 3 segment parts.",
+      "sentence": "Write your name on the card.",
+      "meaning": "A stiff piece of paper.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "yard",
+      "normalised_word": "yard",
+      "grapheme_segments": ["y", "ar", "d"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ar word with 3 segment parts.",
+      "sentence": "The class lined up in the yard.",
+      "meaning": "An open area beside a building.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "jar",
+      "normalised_word": "jar",
+      "grapheme_segments": ["j", "ar"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ar word.",
+      "sentence": "The jar held coloured pencils.",
+      "meaning": "A glass container with a wide top.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "scarf",
+      "normalised_word": "scarf",
+      "grapheme_segments": ["s", "c", "ar", "f"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ar word with 4 segment parts.",
+      "sentence": "The scarf kept her neck warm.",
+      "meaning": "A piece of cloth worn around the neck.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "smart",
+      "normalised_word": "smart",
+      "grapheme_segments": ["s", "m", "ar", "t"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ar word with 4 segment parts.",
+      "sentence": "That was a smart way to solve it.",
+      "meaning": "Clever or neat in appearance.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "part",
+      "normalised_word": "part",
+      "grapheme_segments": ["p", "ar", "t"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ar word with 3 segment parts.",
+      "sentence": "Read the first part of the story.",
+      "meaning": "One piece of something larger.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "party",
+      "normalised_word": "party",
+      "grapheme_segments": ["p", "ar", "t", "y"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ar word with 4 segment parts.",
+      "sentence": "The party games made everyone laugh.",
+      "meaning": "A happy event where people meet together.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "carpet",
+      "normalised_word": "carpet",
+      "grapheme_segments": ["c", "ar", "p", "e", "t"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ar word with 5 segment parts.",
+      "sentence": "The carpet felt soft under my feet.",
+      "meaning": "A thick covering for a floor.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "marker",
+      "normalised_word": "marker",
+      "grapheme_segments": ["m", "ar", "k", "er"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ar word with another multiletter segment.",
+      "sentence": "Use a marker to label the box.",
+      "meaning": "A pen used for writing clear marks.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "harvest",
+      "normalised_word": "harvest",
+      "grapheme_segments": ["h", "ar", "v", "e", "s", "t"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ar word with several segment parts.",
+      "sentence": "The harvest filled baskets with apples.",
+      "meaning": "The time when crops are gathered.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sparkle",
+      "normalised_word": "sparkle",
+      "grapheme_segments": ["s", "p", "ar", "k", "l", "e"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ar word with several segment parts.",
+      "sentence": "Tiny lights made the card sparkle.",
+      "meaning": "To shine with quick flashes of light.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "apart",
+      "normalised_word": "apart",
+      "grapheme_segments": ["a", "p", "ar", "t"],
+      "focus_graphemes": ["ar"],
+      "primary_focus_grapheme": "ar",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ar word with 4 segment parts.",
+      "sentence": "Keep the wet paintings apart.",
+      "meaning": "Separated from each other.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ar",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "for",
+      "normalised_word": "for",
+      "grapheme_segments": ["f", "or"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 18,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common or word.",
+      "sentence": "This book is for our reading table.",
+      "meaning": "Used to show who something is meant for.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "form",
+      "normalised_word": "form",
+      "grapheme_segments": ["f", "or", "m"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 3 segment parts.",
+      "sentence": "Fill in the form with your name.",
+      "meaning": "A paper or screen used to collect information.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sort",
+      "normalised_word": "sort",
+      "grapheme_segments": ["s", "or", "t"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 3 segment parts.",
+      "sentence": "Sort the buttons by colour.",
+      "meaning": "To put things into groups.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cord",
+      "normalised_word": "cord",
+      "grapheme_segments": ["c", "or", "d"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 3 segment parts.",
+      "sentence": "Tie the tag with a short cord.",
+      "meaning": "A strong thick string.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "torn",
+      "normalised_word": "torn",
+      "grapheme_segments": ["t", "or", "n"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 3 segment parts.",
+      "sentence": "The torn page was taped carefully.",
+      "meaning": "Ripped or split.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "worn",
+      "normalised_word": "worn",
+      "grapheme_segments": ["w", "or", "n"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 3 segment parts.",
+      "sentence": "The worn path led to the gate.",
+      "meaning": "Used so much that it looks old.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "story",
+      "normalised_word": "story",
+      "grapheme_segments": ["s", "t", "or", "y"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common or word with 4 segment parts.",
+      "sentence": "The story ended with a surprise.",
+      "meaning": "A tale about events or people.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "forest",
+      "normalised_word": "forest",
+      "grapheme_segments": ["f", "or", "e", "s", "t"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with 5 segment parts.",
+      "sentence": "The forest path was quiet.",
+      "meaning": "A large area covered with trees.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "order",
+      "normalised_word": "order",
+      "grapheme_segments": ["or", "d", "er"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with another multiletter segment.",
+      "sentence": "Put the cards in number order.",
+      "meaning": "The way things are arranged.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "orbit",
+      "normalised_word": "orbit",
+      "grapheme_segments": ["or", "b", "i", "t"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with 4 segment parts.",
+      "sentence": "The moon follows an orbit around Earth.",
+      "meaning": "The path one object takes around another.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "normal",
+      "normalised_word": "normal",
+      "grapheme_segments": ["n", "or", "m", "a", "l"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with 5 segment parts.",
+      "sentence": "It is normal to practise before a show.",
+      "meaning": "Usual or expected.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "support",
+      "normalised_word": "support",
+      "grapheme_segments": ["s", "u", "pp", "or", "t"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer or word with several segment parts.",
+      "sentence": "The shelf needs support at both ends.",
+      "meaning": "Help or something that holds weight.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "report",
+      "normalised_word": "report",
+      "grapheme_segments": ["r", "e", "p", "or", "t"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with 5 segment parts.",
+      "sentence": "Write a short report about the trip.",
+      "meaning": "A spoken or written account of something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "border",
+      "normalised_word": "border",
+      "grapheme_segments": ["b", "or", "d", "er"],
+      "focus_graphemes": ["or"],
+      "primary_focus_grapheme": "or",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common or word with another multiletter segment.",
+      "sentence": "Draw a border around the poster.",
+      "meaning": "A line or edge around something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "or",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shoe",
+      "normalised_word": "shoe",
+      "grapheme_segments": ["sh", "oe"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common sh word.",
+      "sentence": "Put each shoe under the bench.",
+      "meaning": "A covering worn on the foot.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shine",
+      "normalised_word": "shine",
+      "grapheme_segments": ["sh", "i", "n", "e"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 4 segment parts.",
+      "sentence": "The clean window will shine in the sun.",
+      "meaning": "To give out or reflect light.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "splash",
+      "normalised_word": "splash",
+      "grapheme_segments": ["s", "p", "l", "a", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 5 segment parts.",
+      "sentence": "A splash of water landed on the tray.",
+      "meaning": "A small amount of liquid thrown about.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shirt",
+      "normalised_word": "shirt",
+      "grapheme_segments": ["sh", "ir", "t"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with another multiletter segment.",
+      "sentence": "The blue shirt was in the drawer.",
+      "meaning": "A piece of clothing worn on the upper body.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cash",
+      "normalised_word": "cash",
+      "grapheme_segments": ["c", "a", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 3 segment parts.",
+      "sentence": "The shop kept cash in a small tin.",
+      "meaning": "Money in coins or notes.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "wash",
+      "normalised_word": "wash",
+      "grapheme_segments": ["w", "a", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 3 segment parts.",
+      "sentence": "Wash the paint from the brush.",
+      "meaning": "To clean with water.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "push",
+      "normalised_word": "push",
+      "grapheme_segments": ["p", "u", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 3 segment parts.",
+      "sentence": "Push the door gently.",
+      "meaning": "To move something away with force.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "shelf",
+      "normalised_word": "shelf",
+      "grapheme_segments": ["sh", "e", "l", "f"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common sh word with 4 segment parts.",
+      "sentence": "The game went back on the shelf.",
+      "meaning": "A flat board used for holding things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "show",
+      "normalised_word": "show",
+      "grapheme_segments": ["sh", "ow"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common sh word.",
+      "sentence": "Show your picture to the group.",
+      "meaning": "To let someone see something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "polish",
+      "normalised_word": "polish",
+      "grapheme_segments": ["p", "o", "l", "i", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common sh word with 5 segment parts.",
+      "sentence": "Polish the table with a soft cloth.",
+      "meaning": "To rub something until it shines.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "finish",
+      "normalised_word": "finish",
+      "grapheme_segments": ["f", "i", "n", "i", "sh"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common sh word with 5 segment parts.",
+      "sentence": "Finish the puzzle before snack time.",
+      "meaning": "To bring something to an end.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sunshine",
+      "normalised_word": "sunshine",
+      "grapheme_segments": ["s", "u", "n", "sh", "i", "n", "e"],
+      "focus_graphemes": ["sh"],
+      "primary_focus_grapheme": "sh",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common sh word with 7 segment parts.",
+      "sentence": "Sunshine warmed the classroom windows.",
+      "meaning": "Light and warmth from the sun.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "sh",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "check",
+      "normalised_word": "check",
+      "grapheme_segments": ["ch", "e", "ck"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with another multiletter segment.",
+      "sentence": "Check your bag before you leave.",
+      "meaning": "To look carefully to make sure something is right.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "chess",
+      "normalised_word": "chess",
+      "grapheme_segments": ["ch", "e", "ss"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with another multiletter segment.",
+      "sentence": "We played chess on a rainy day.",
+      "meaning": "A board game for two players.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "chest",
+      "normalised_word": "chest",
+      "grapheme_segments": ["ch", "e", "s", "t"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 32,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with 4 segment parts.",
+      "sentence": "The treasure chest held wooden blocks.",
+      "meaning": "A large box with a lid.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "child",
+      "normalised_word": "child",
+      "grapheme_segments": ["ch", "i", "l", "d"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with 4 segment parts.",
+      "sentence": "Each child chose a reading book.",
+      "meaning": "A young person.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "children",
+      "normalised_word": "children",
+      "grapheme_segments": ["ch", "i", "l", "d", "r", "e", "n"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ch word with 7 segment parts.",
+      "sentence": "The children shared the paints.",
+      "meaning": "Young people.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cherry",
+      "normalised_word": "cherry",
+      "grapheme_segments": ["ch", "e", "rr", "y"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ch word with another multiletter segment.",
+      "sentence": "A cherry sat on top of the cake.",
+      "meaning": "A small round red fruit.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "chance",
+      "normalised_word": "chance",
+      "grapheme_segments": ["ch", "a", "n", "c", "e"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ch word with 5 segment parts.",
+      "sentence": "You have a chance to try again.",
+      "meaning": "An opportunity to do something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "change",
+      "normalised_word": "change",
+      "grapheme_segments": ["ch", "a", "n", "g", "e"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ch word with 5 segment parts.",
+      "sentence": "Change seats after the bell.",
+      "meaning": "To make or become different.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "choose",
+      "normalised_word": "choose",
+      "grapheme_segments": ["ch", "oo", "s", "e"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ch word with another multiletter segment.",
+      "sentence": "Choose a book from the shelf.",
+      "meaning": "To pick one thing from a group.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "each",
+      "normalised_word": "each",
+      "grapheme_segments": ["ea", "ch"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ch word.",
+      "sentence": "Each pupil had a clean cup.",
+      "meaning": "Every one in a group.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "such",
+      "normalised_word": "such",
+      "grapheme_segments": ["s", "u", "ch"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with 3 segment parts.",
+      "sentence": "It was such a kind note.",
+      "meaning": "Of that kind or amount.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "which",
+      "normalised_word": "which",
+      "grapheme_segments": ["wh", "i", "ch"],
+      "focus_graphemes": ["ch"],
+      "primary_focus_grapheme": "ch",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ch word with another multiletter segment.",
+      "sentence": "Which colour do you prefer?",
+      "meaning": "Used to ask about one from a group.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ch",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "pack",
+      "normalised_word": "pack",
+      "grapheme_segments": ["p", "a", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 3 segment parts.",
+      "sentence": "Pack your reading book carefully.",
+      "meaning": "To put things into a bag or box.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "pick",
+      "normalised_word": "pick",
+      "grapheme_segments": ["p", "i", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 3 segment parts.",
+      "sentence": "Pick one card from the pile.",
+      "meaning": "To choose something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "lock",
+      "normalised_word": "lock",
+      "grapheme_segments": ["l", "o", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 3 segment parts.",
+      "sentence": "Lock the cupboard after art club.",
+      "meaning": "To fasten something with a key or catch.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "luck",
+      "normalised_word": "luck",
+      "grapheme_segments": ["l", "u", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 3 segment parts.",
+      "sentence": "Good luck with the quiz.",
+      "meaning": "Things happening by chance.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "stick",
+      "normalised_word": "stick",
+      "grapheme_segments": ["s", "t", "i", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 30,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 4 segment parts.",
+      "sentence": "A stick marked the start line.",
+      "meaning": "A thin piece of wood.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "truck",
+      "normalised_word": "truck",
+      "grapheme_segments": ["t", "r", "u", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 4 segment parts.",
+      "sentence": "The truck carried boxes to the hall.",
+      "meaning": "A large vehicle for carrying things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "track",
+      "normalised_word": "track",
+      "grapheme_segments": ["t", "r", "a", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 4 segment parts.",
+      "sentence": "The runners stayed on the track.",
+      "meaning": "A path or course for moving along.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "snack",
+      "normalised_word": "snack",
+      "grapheme_segments": ["s", "n", "a", "ck"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ck word with 4 segment parts.",
+      "sentence": "Eat your snack at break time.",
+      "meaning": "A small amount of food between meals.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "rocket",
+      "normalised_word": "rocket",
+      "grapheme_segments": ["r", "o", "ck", "e", "t"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ck word with 5 segment parts.",
+      "sentence": "The paper rocket flew across the room.",
+      "meaning": "A vehicle or model that shoots upward.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "jacket",
+      "normalised_word": "jacket",
+      "grapheme_segments": ["j", "a", "ck", "e", "t"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ck word with 5 segment parts.",
+      "sentence": "Hang your jacket on the peg.",
+      "meaning": "A short coat worn over clothes.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "bucket",
+      "normalised_word": "bucket",
+      "grapheme_segments": ["b", "u", "ck", "e", "t"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ck word with 5 segment parts.",
+      "sentence": "The bucket was full of shells.",
+      "meaning": "A round open container with a handle.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "packet",
+      "normalised_word": "packet",
+      "grapheme_segments": ["p", "a", "ck", "e", "t"],
+      "focus_graphemes": ["ck"],
+      "primary_focus_grapheme": "ck",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ck word with 5 segment parts.",
+      "sentence": "Open the packet of cards carefully.",
+      "meaning": "A small wrapped container or bag.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ck",
+          "target_role": "primary",
+          "pattern_type": "consonant_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "hay",
+      "normalised_word": "hay",
+      "grapheme_segments": ["h", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ay word.",
+      "sentence": "The hay was stacked in the barn.",
+      "meaning": "Dry grass used as food for farm animals.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "lay",
+      "normalised_word": "lay",
+      "grapheme_segments": ["l", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ay word.",
+      "sentence": "Lay the mat flat on the floor.",
+      "meaning": "To put something down gently.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "ray",
+      "normalised_word": "ray",
+      "grapheme_segments": ["r", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 22,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ay word.",
+      "sentence": "A ray of sunlight crossed the table.",
+      "meaning": "A narrow beam of light.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "bay",
+      "normalised_word": "bay",
+      "grapheme_segments": ["b", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ay word.",
+      "sentence": "The boat rested in the quiet bay.",
+      "meaning": "A part of the sea or lake surrounded by land.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "spray",
+      "normalised_word": "spray",
+      "grapheme_segments": ["s", "p", "r", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ay word with 4 segment parts.",
+      "sentence": "Spray a little water on the plant.",
+      "meaning": "To send out tiny drops of liquid.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "display",
+      "normalised_word": "display",
+      "grapheme_segments": ["d", "i", "s", "p", "l", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 6 segment parts.",
+      "sentence": "Display the posters along the wall.",
+      "meaning": "To show something where people can see it.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "holiday",
+      "normalised_word": "holiday",
+      "grapheme_segments": ["h", "o", "l", "i", "d", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 6 segment parts.",
+      "sentence": "The holiday gave us time to rest.",
+      "meaning": "Time away from school or work.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "player",
+      "normalised_word": "player",
+      "grapheme_segments": ["p", "l", "ay", "er"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with another multiletter segment.",
+      "sentence": "The player passed the ball quickly.",
+      "meaning": "A person who takes part in a game.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "playground",
+      "normalised_word": "playground",
+      "grapheme_segments": ["p", "l", "ay", "g", "r", "ou", "n", "d"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with another multiletter segment.",
+      "sentence": "The playground was ready for break.",
+      "meaning": "An outdoor place for children to play.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "monday",
+      "normalised_word": "monday",
+      "grapheme_segments": ["m", "o", "n", "d", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 5 segment parts.",
+      "sentence": "Monday is the first school day of the week.",
+      "meaning": "The day after Sunday.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "friday",
+      "normalised_word": "friday",
+      "grapheme_segments": ["f", "r", "i", "d", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 5 segment parts.",
+      "sentence": "Friday came at the end of the school week.",
+      "meaning": "The day after Thursday.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "maybe",
+      "normalised_word": "maybe",
+      "grapheme_segments": ["m", "ay", "b", "e"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 4 segment parts.",
+      "sentence": "Maybe we can read outside today.",
+      "meaning": "A word used when something might happen.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "yesterday",
+      "normalised_word": "yesterday",
+      "grapheme_segments": ["y", "e", "s", "t", "er", "d", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with another multiletter segment.",
+      "sentence": "Yesterday we planted beans.",
+      "meaning": "The day before today.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "delay",
+      "normalised_word": "delay",
+      "grapheme_segments": ["d", "e", "l", "ay"],
+      "focus_graphemes": ["ay"],
+      "primary_focus_grapheme": "ay",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ay word with 4 segment parts.",
+      "sentence": "A short delay gave us time to tidy.",
+      "meaning": "A wait before something happens.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ay",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sea",
+      "normalised_word": "sea",
+      "grapheme_segments": ["s", "ea"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 20,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ea word.",
+      "sentence": "The calm sea looked blue.",
+      "meaning": "A large area of salty water.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "tea",
+      "normalised_word": "tea",
+      "grapheme_segments": ["t", "ea"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 20,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ea word.",
+      "sentence": "Grandad poured tea into a mug.",
+      "meaning": "A warm drink made with leaves and water.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "pea",
+      "normalised_word": "pea",
+      "grapheme_segments": ["p", "ea"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 20,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ea word.",
+      "sentence": "One pea rolled across the plate.",
+      "meaning": "A small round green seed eaten as food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mean",
+      "normalised_word": "mean",
+      "grapheme_segments": ["m", "ea", "n"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with 3 segment parts.",
+      "sentence": "What does this word mean?",
+      "meaning": "To have a particular idea or message.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "bean",
+      "normalised_word": "bean",
+      "grapheme_segments": ["b", "ea", "n"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 24,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with 3 segment parts.",
+      "sentence": "The bean sprouted in the jar.",
+      "meaning": "A seed from a plant, often eaten as food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "seal",
+      "normalised_word": "seal",
+      "grapheme_segments": ["s", "ea", "l"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with 3 segment parts.",
+      "sentence": "Seal the envelope before you post it.",
+      "meaning": "To close something tightly.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "neat",
+      "normalised_word": "neat",
+      "grapheme_segments": ["n", "ea", "t"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with 3 segment parts.",
+      "sentence": "Keep your desk neat after art.",
+      "meaning": "Tidy and in order.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "steam",
+      "normalised_word": "steam",
+      "grapheme_segments": ["s", "t", "ea", "m"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with 4 segment parts.",
+      "sentence": "Steam rose from the warm soup.",
+      "meaning": "Hot mist made when water boils.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "feast",
+      "normalised_word": "feast",
+      "grapheme_segments": ["f", "ea", "s", "t"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with 4 segment parts.",
+      "sentence": "The picnic felt like a small feast.",
+      "meaning": "A large special meal.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "least",
+      "normalised_word": "least",
+      "grapheme_segments": ["l", "ea", "s", "t"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 36,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with 4 segment parts.",
+      "sentence": "Take the least heavy box first.",
+      "meaning": "The smallest amount or lowest number.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "peach",
+      "normalised_word": "peach",
+      "grapheme_segments": ["p", "ea", "ch"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 34,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with another multiletter segment.",
+      "sentence": "A peach rolled from the bowl.",
+      "meaning": "A soft round fruit with a stone inside.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "read",
+      "normalised_word": "read",
+      "grapheme_segments": ["r", "ea", "d"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "floor_core",
+      "difficulty_score": 26,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Common ea word with 3 segment parts.",
+      "sentence": "Read the sign before you enter.",
+      "meaning": "To look at words and understand them.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "season",
+      "normalised_word": "season",
+      "grapheme_segments": ["s", "ea", "s", "o", "n"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with 5 segment parts.",
+      "sentence": "Spring is my favourite season.",
+      "meaning": "One part of the year with its own weather.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "reason",
+      "normalised_word": "reason",
+      "grapheme_segments": ["r", "ea", "s", "o", "n"],
+      "focus_graphemes": ["ea"],
+      "primary_focus_grapheme": "ea",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ea word with 5 segment parts.",
+      "sentence": "Give a reason for your answer.",
+      "meaning": "An explanation for why something happens.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ea",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dew",
+      "normalised_word": "dew",
+      "grapheme_segments": ["d", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "floor_core",
+      "difficulty_score": 28,
+      "difficulty_label": "Easier",
+      "difficulty_reason": "Short common ew word.",
+      "sentence": "Dew sparkled on the grass at morning play.",
+      "meaning": "Tiny drops of water that form overnight.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "jewel",
+      "normalised_word": "jewel",
+      "grapheme_segments": ["j", "ew", "e", "l"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ew word with 4 segment parts.",
+      "sentence": "The pretend crown had a red jewel.",
+      "meaning": "A precious stone used for decoration.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "fewest",
+      "normalised_word": "fewest",
+      "grapheme_segments": ["f", "ew", "e", "s", "t"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ew word with 5 segment parts.",
+      "sentence": "This jar has the fewest counters.",
+      "meaning": "The smallest number of things.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "newer",
+      "normalised_word": "newer",
+      "grapheme_segments": ["n", "ew", "er"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ew word with another multiletter segment.",
+      "sentence": "The newer pencil has a sharp point.",
+      "meaning": "More recently made or bought.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "newest",
+      "normalised_word": "newest",
+      "grapheme_segments": ["n", "ew", "e", "s", "t"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ew word with 5 segment parts.",
+      "sentence": "The newest book is on display.",
+      "meaning": "Made or added most recently.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "renew",
+      "normalised_word": "renew",
+      "grapheme_segments": ["r", "e", "n", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common ew word with 4 segment parts.",
+      "sentence": "Renew the library book before Friday.",
+      "meaning": "To make something start again or last longer.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "cashew",
+      "normalised_word": "cashew",
+      "grapheme_segments": ["c", "a", "sh", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ew word with several segment parts.",
+      "sentence": "A cashew sat beside the raisins.",
+      "meaning": "A curved nut used as food.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "nephew",
+      "normalised_word": "nephew",
+      "grapheme_segments": ["n", "e", "ph", "ew"],
+      "focus_graphemes": ["ew"],
+      "primary_focus_grapheme": "ew",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer ew word with several segment parts.",
+      "sentence": "My nephew likes building towers.",
+      "meaning": "The son of your brother or sister.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ew",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "airplane",
+      "normalised_word": "airplane",
+      "grapheme_segments": ["air", "p", "l", "a", "n", "e"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with 6 segment parts.",
+      "sentence": "The airplane crossed the cloudy sky.",
+      "meaning": "A vehicle with wings that flies.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "airfield",
+      "normalised_word": "airfield",
+      "grapheme_segments": ["air", "f", "ie", "l", "d"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with another multiletter segment.",
+      "sentence": "The small airfield had one runway.",
+      "meaning": "A place where aircraft can take off and land.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "airline",
+      "normalised_word": "airline",
+      "grapheme_segments": ["air", "l", "i", "n", "e"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with 5 segment parts.",
+      "sentence": "The airline printed the ticket.",
+      "meaning": "A company that carries people by plane.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "armchair",
+      "normalised_word": "armchair",
+      "grapheme_segments": ["ar", "m", "ch", "air"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with another multiletter segment.",
+      "sentence": "The armchair stood by the window.",
+      "meaning": "A comfortable chair with side supports for arms.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "staircase",
+      "normalised_word": "staircase",
+      "grapheme_segments": ["s", "t", "air", "c", "a", "s", "e"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with 7 segment parts.",
+      "sentence": "The staircase led to the art room.",
+      "meaning": "A set of stairs inside a building.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "fairground",
+      "normalised_word": "fairground",
+      "grapheme_segments": ["f", "air", "g", "r", "ou", "n", "d"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer air word with several segment parts.",
+      "sentence": "The fairground lights shone after sunset.",
+      "meaning": "A place with rides, stalls, and games.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "hairband",
+      "normalised_word": "hairband",
+      "grapheme_segments": ["h", "air", "b", "a", "n", "d"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with 6 segment parts.",
+      "sentence": "The red hairband kept her hair tidy.",
+      "meaning": "A band worn to hold hair back.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dairy",
+      "normalised_word": "dairy",
+      "grapheme_segments": ["d", "air", "y"],
+      "focus_graphemes": ["air"],
+      "primary_focus_grapheme": "air",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common air word with 3 segment parts.",
+      "sentence": "The dairy shelf held milk and yogurt.",
+      "meaning": "Foods made from milk, or a place that sells them.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "air",
+          "target_role": "primary",
+          "pattern_type": "r_controlled_vowel",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "because",
+      "normalised_word": "because",
+      "grapheme_segments": ["b", "e", "c", "au", "s", "e"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common au word with 6 segment parts.",
+      "sentence": "We stayed inside because it rained.",
+      "meaning": "For the reason that.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "august",
+      "normalised_word": "august",
+      "grapheme_segments": ["au", "g", "u", "s", "t"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 56,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "August often brings warm afternoons.",
+      "meaning": "The month after July.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "audio",
+      "normalised_word": "audio",
+      "grapheme_segments": ["au", "d", "i", "o"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The tablet played clear audio.",
+      "meaning": "Sound that can be heard or recorded.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "audience",
+      "normalised_word": "audience",
+      "grapheme_segments": ["au", "d", "i", "e", "n", "c", "e"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 62,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The audience clapped after the song.",
+      "meaning": "People watching or listening to a performance.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "automatic",
+      "normalised_word": "automatic",
+      "grapheme_segments": ["au", "t", "o", "m", "a", "t", "i", "c"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 68,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The automatic door opened slowly.",
+      "meaning": "Working by itself with little help.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "dinosaur",
+      "normalised_word": "dinosaur",
+      "grapheme_segments": ["d", "i", "n", "o", "s", "au", "r"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The museum had a tall dinosaur model.",
+      "meaning": "A large reptile that lived long ago.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "applaud",
+      "normalised_word": "applaud",
+      "grapheme_segments": ["a", "p", "p", "l", "au", "d"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The class began to applaud the reader.",
+      "meaning": "To clap to show that you enjoyed something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sausage",
+      "normalised_word": "sausage",
+      "grapheme_segments": ["s", "au", "s", "a", "g", "e"],
+      "focus_graphemes": ["au"],
+      "primary_focus_grapheme": "au",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer au word with several segment parts.",
+      "sentence": "The sausage roll was still warm.",
+      "meaning": "A tube-shaped food made from seasoned meat or vegetables.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "au",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "drawn",
+      "normalised_word": "drawn",
+      "grapheme_segments": ["d", "r", "aw", "n"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with 4 segment parts.",
+      "sentence": "A map was drawn on the board.",
+      "meaning": "Made as a picture with lines.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "drawer",
+      "normalised_word": "drawer",
+      "grapheme_segments": ["d", "r", "aw", "er"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with another multiletter segment.",
+      "sentence": "The ruler was in the top drawer.",
+      "meaning": "A sliding box in furniture used for storage.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "lawnmower",
+      "normalised_word": "lawnmower",
+      "grapheme_segments": ["l", "aw", "n", "m", "ow", "er"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 58,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer aw word with several segment parts.",
+      "sentence": "The lawnmower stood beside the shed.",
+      "meaning": "A machine used to cut grass.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "strawberry",
+      "normalised_word": "strawberry",
+      "grapheme_segments": ["s", "t", "r", "aw", "b", "e", "rr", "y"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 60,
+      "difficulty_label": "Stretch",
+      "difficulty_reason": "Longer aw word with several segment parts.",
+      "sentence": "A strawberry topped the pudding.",
+      "meaning": "A small red fruit with tiny seeds on the outside.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sawdust",
+      "normalised_word": "sawdust",
+      "grapheme_segments": ["s", "aw", "d", "u", "s", "t"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with 6 segment parts.",
+      "sentence": "Sawdust covered the workshop floor.",
+      "meaning": "Tiny bits of wood made by cutting.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "awesome",
+      "normalised_word": "awesome",
+      "grapheme_segments": ["aw", "e", "s", "o", "m", "e"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with 6 segment parts.",
+      "sentence": "The view from the hill was awesome.",
+      "meaning": "Very good or impressive.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "awning",
+      "normalised_word": "awning",
+      "grapheme_segments": ["aw", "n", "i", "ng"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with another multiletter segment.",
+      "sentence": "The awning made shade over the shop.",
+      "meaning": "A cover stretched out above a door or window.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "flaw",
+      "normalised_word": "flaw",
+      "grapheme_segments": ["f", "l", "aw"],
+      "focus_graphemes": ["aw"],
+      "primary_focus_grapheme": "aw",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common aw word with 3 segment parts.",
+      "sentence": "There was one small flaw in the plan.",
+      "meaning": "A small mistake or weak part.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "aw",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sketch",
+      "normalised_word": "sketch",
+      "grapheme_segments": ["s", "k", "e", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 4 segment parts.",
+      "sentence": "Sketch the shape before you colour it.",
+      "meaning": "To make a quick drawing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "stretch",
+      "normalised_word": "stretch",
+      "grapheme_segments": ["s", "t", "r", "e", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 46,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 5 segment parts.",
+      "sentence": "Stretch the string across the table.",
+      "meaning": "To make something longer or wider by pulling.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "scratch",
+      "normalised_word": "scratch",
+      "grapheme_segments": ["s", "c", "r", "a", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 5 segment parts.",
+      "sentence": "Scratch a line in the damp sand.",
+      "meaning": "To mark a surface by scraping it.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "clutch",
+      "normalised_word": "clutch",
+      "grapheme_segments": ["c", "l", "u", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 4 segment parts.",
+      "sentence": "Clutch the rope with both hands.",
+      "meaning": "To hold something tightly.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "kitchen",
+      "normalised_word": "kitchen",
+      "grapheme_segments": ["k", "i", "tch", "e", "n"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 50,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 5 segment parts.",
+      "sentence": "The kitchen smelled of warm bread.",
+      "meaning": "A room where food is prepared.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "latch",
+      "normalised_word": "latch",
+      "grapheme_segments": ["l", "a", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 3 segment parts.",
+      "sentence": "Lift the latch to open the gate.",
+      "meaning": "A small fastener for a door or gate.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "notch",
+      "normalised_word": "notch",
+      "grapheme_segments": ["n", "o", "tch"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with 3 segment parts.",
+      "sentence": "Cut one notch in the craft stick.",
+      "meaning": "A small cut or mark on an edge.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "matching",
+      "normalised_word": "matching",
+      "grapheme_segments": ["m", "a", "tch", "i", "ng"],
+      "focus_graphemes": ["tch"],
+      "primary_focus_grapheme": "tch",
+      "stage_band": "diagnostic",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common tch word with another multiletter segment.",
+      "sentence": "Find the matching sock in the basket.",
+      "meaning": "Going well with another thing or looking the same.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_7f_2026_05_13",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
           "difficulty_modifier": 0
         }
       ]
