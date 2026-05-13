@@ -5,7 +5,7 @@ create extension if not exists pgtap with schema extensions;
 
 set local search_path = public, extensions;
 
-select plan(20);
+select plan(21);
 
 create temporary table phase_7c_expected_targets (
   focus_grapheme text primary key,
