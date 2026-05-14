@@ -246,7 +246,7 @@ test("generated runtime source is not selected as an approved source candidate",
   assertJsonEqual(words(result), []);
 });
 
-test("wordloom core source is selected before legacy teacher rows", () => {
+test("incorrect or review-due usage outranks source priority", () => {
   const result = selectApprovedTargetWords({
     focusGrapheme: "ph",
     challengeLevel: "needs_support",
@@ -255,6 +255,28 @@ test("wordloom core source is selected before legacy teacher rows", () => {
       ["phase", { count: 2, incorrectCount: 2, lastSeenAt: 1000, reviewDue: true }],
       ["phone", { count: 1, incorrectCount: 0, lastSeenAt: 2000, recentlySeen: true, recentlySecure: true }],
     ]),
+    candidates: [
+      wordRow({ id: "teacher-1", word: "phase", score: 30, source: "teacher" }),
+      wordRow({
+        id: "core-1",
+        word: "phone",
+        score: 30,
+        source: "wordloom_core",
+        approvalStatus: "approved",
+        suitabilityStatus: "suitable",
+      }),
+    ],
+  });
+
+  assert.equal(result.status, APPROVED_TARGET_SELECTOR_STATUS_READY);
+  assertJsonEqual(words(result), ["phase"]);
+});
+
+test("neutral wordloom core source is selected before legacy teacher rows", () => {
+  const result = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 1,
     candidates: [
       wordRow({ id: "teacher-1", word: "phase", score: 30, source: "teacher" }),
       wordRow({

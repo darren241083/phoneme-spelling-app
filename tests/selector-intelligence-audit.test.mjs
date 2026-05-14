@@ -8,10 +8,9 @@ const {
 } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
 
 const TESTS = [];
-const AUDIT_VERSION = "selector_intelligence_audit_v1";
+const AUDIT_VERSION = "selector_intelligence_audit_v2";
 const AUDIT_NOW_ISO = "2026-05-14T12:00:00.000Z";
 const ASSIGNMENT_LENGTH = 10;
-const RECENT_UNIQUE_WORD_LIMIT = 4;
 const RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 function test(name, fn) {
@@ -468,14 +467,9 @@ function buildUsageStats(attempts = []) {
 
   const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
   const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - RECENT_WINDOW_MS : 0;
-  const recentWords = new Set();
-  for (const event of [...events].sort((a, b) => b.seenAt - a.seenAt)) {
-    if (recentWords.size >= RECENT_UNIQUE_WORD_LIMIT) break;
-    if (event.seenAt > 0 && event.seenAt >= recentCutoff) recentWords.add(event.word);
-  }
 
   for (const current of usage.values()) {
-    current.recentlySeen = current.lastSeenAt > 0 && recentWords.has(current.word);
+    current.recentlySeen = current.lastSeenAt > 0 && current.lastSeenAt >= recentCutoff;
     current.recentlySecure = current.recentlySeen
       && current.latestCorrect === true
       && current.latestAttemptNumber <= 1
@@ -692,6 +686,29 @@ function summarizeRepeatedSelections(cycleSummaries, getter) {
     .map(([value, count]) => ({ value, count }));
 }
 
+function summarizeCycleToCycleOverlap(cycleSummaries) {
+  const overlaps = [];
+  for (let index = 1; index < cycleSummaries.length; index += 1) {
+    const previous = cycleSummaries[index - 1];
+    const current = cycleSummaries[index];
+    const previousWords = new Set((previous.words || []).map((word) => word.word));
+    const currentWords = (current.words || []).map((word) => word.word);
+    const repeatedWords = currentWords.filter((word) => previousWords.has(word));
+    const previousSelectedWords = (previous.words || []).map((word) => word.word);
+    overlaps.push({
+      fromCycle: previous.cycle,
+      toCycle: current.cycle,
+      repeatedWordCount: repeatedWords.length,
+      overlapRate: roundOne(repeatedWords.length / Math.max(1, currentWords.length)),
+      identicalToPrevious: repeatedWords.length === currentWords.length
+        && previousSelectedWords.length === currentWords.length
+        && currentWords.every((word) => previousWords.has(word)),
+      repeatedWords,
+    });
+  }
+  return overlaps;
+}
+
 function runRepeatGenerationAudit(scenario, cycleCount = 3) {
   let attempts = [...(scenario.initialAttempts || [])];
   const cycles = [];
@@ -707,6 +724,8 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
       repeatedFromPriorCount: summary.repetitionSignals.repeatedFromPriorCount,
       recentlySecureReuseCount: summary.repetitionSignals.recentlySecureReuseCount,
       incorrectReuseCount: summary.repetitionSignals.incorrectReuseCount,
+      reviewDueReuseCount: summary.repetitionSignals.reviewDueReuseCount,
+      protectedReuseCount: summary.repetitionSignals.incorrectReuseCount + summary.repetitionSignals.reviewDueReuseCount,
       safeWordReuseCount: summary.repetitionSignals.safeWordReuseCount,
       words: summary.words,
     });
@@ -715,15 +734,22 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
 
   const repeatedWords = summarizeRepeatedSelections(cycles, (word) => word.word);
   const repeatedGraphemes = summarizeRepeatedSelections(cycles, (word) => word.focusGrapheme);
+  const cycleToCycleOverlap = summarizeCycleToCycleOverlap(cycles);
+  const totalRecentlySecureReuseCount = cycles.reduce((sum, cycle) => sum + cycle.recentlySecureReuseCount, 0);
   const totalSafeWordReuseCount = cycles.reduce((sum, cycle) => sum + cycle.safeWordReuseCount, 0);
+  const totalProtectedReuseCount = cycles.reduce((sum, cycle) => sum + cycle.protectedReuseCount, 0);
 
   return {
     profileId: scenario.id,
     cycleCount,
     repeatedWordSelections: repeatedWords,
     repeatedGraphemeSelections: repeatedGraphemes,
+    cycleToCycleOverlap,
     totalRepeatedWordCount: repeatedWords.reduce((sum, item) => sum + item.count, 0),
+    totalRecentlySecureReuseCount,
     totalSafeWordReuseCount,
+    totalProtectedReuseCount,
+    maxCycleToCycleOverlapCount: cycleToCycleOverlap.reduce((max, item) => Math.max(max, item.repeatedWordCount), 0),
     cycles: cycles.map((cycle) => ({
       cycle: cycle.cycle,
       wordCount: cycle.wordCount,
@@ -732,6 +758,8 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
       repeatedFromPriorCount: cycle.repeatedFromPriorCount,
       recentlySecureReuseCount: cycle.recentlySecureReuseCount,
       incorrectReuseCount: cycle.incorrectReuseCount,
+      reviewDueReuseCount: cycle.reviewDueReuseCount,
+      protectedReuseCount: cycle.protectedReuseCount,
       safeWordReuseCount: cycle.safeWordReuseCount,
       selectedWords: cycle.words.map((word) => word.word),
       selectedGraphemes: cycle.words.map((word) => word.focusGrapheme),
@@ -857,6 +885,12 @@ function runUsageProbeReport() {
       })],
     ]),
   });
+  const neutralSourcePriority = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 1,
+    candidates: [phone, teacherPhase],
+  });
 
   return {
     recentSecureAvoided: {
@@ -877,7 +911,12 @@ function runUsageProbeReport() {
     sourcePriorityBeforeUsage: {
       selectedWords: selectedWords(sourcePriorityBeforeUsage),
       status: sourcePriorityBeforeUsage.status,
-      interpretation: "Core-bank source priority is applied before usage history when ranking target candidates.",
+      interpretation: "Protected usage spacing is applied before source priority when ranking target candidates.",
+    },
+    neutralSourcePriority: {
+      selectedWords: selectedWords(neutralSourcePriority),
+      status: neutralSourcePriority.status,
+      interpretation: "Wordloom core source priority remains a tie-break among neutral same-tier candidates.",
     },
   };
 }
@@ -963,7 +1002,7 @@ function buildSelectorIntelligenceAuditReport() {
 
 function printSelectorIntelligenceAudit(report) {
   console.log("SELECTOR_INTELLIGENCE_AUDIT_SUMMARY");
-  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | fallback | repeatWords");
+  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | fallback | repeatWords | maxOverlap | recentSecureReuse | safeReuse | protectedReuse");
   const repeatByProfile = new Map(report.repeatGeneration.map((item) => [item.profileId, item]));
   for (const profile of report.profiles) {
     const repeat = repeatByProfile.get(profile.id);
@@ -976,6 +1015,10 @@ function printSelectorIntelligenceAudit(report) {
       profile.difficulty.stretch.average,
       profile.fallback.fallbackCount,
       repeat?.repeatedWordSelections.length || 0,
+      repeat?.maxCycleToCycleOverlapCount || 0,
+      repeat?.totalRecentlySecureReuseCount || 0,
+      repeat?.totalSafeWordReuseCount || 0,
+      repeat?.totalProtectedReuseCount || 0,
     ].join(" | "));
   }
   console.log(`SELECTOR_INTELLIGENCE_AUDIT_JSON ${JSON.stringify(report)}`);
@@ -1023,29 +1066,34 @@ test("audit output includes source, fallback, support ladder, and stretch qualit
   );
 });
 
-test("repeat generation audit exposes repeated words and graphemes", () => {
+test("repeat generation audit shows avoidable repetition is reduced", () => {
   assert.equal(AUDIT_REPORT.repeatGeneration.length, 4);
   for (const repeatReport of AUDIT_REPORT.repeatGeneration) {
     assert.equal(repeatReport.cycleCount, 3);
     assert.equal(repeatReport.cycles.length, 3);
+    assert.equal(repeatReport.cycleToCycleOverlap.length, 2);
     assert.ok(repeatReport.repeatedGraphemeSelections.length > 0);
   }
-  assert.ok(
-    AUDIT_REPORT.repeatGeneration.some((report) => report.repeatedWordSelections.length > 0),
-    "At least one profile should expose repeated word selection across repeat generations."
-  );
-  assert.ok(
-    AUDIT_REPORT.repeatGeneration.some((report) => report.totalSafeWordReuseCount > 0),
-    "At least one profile should expose safe-word reuse across repeat generations."
-  );
+  const totalSafeWordReuseCount = AUDIT_REPORT.repeatGeneration.reduce((sum, report) => sum + report.totalSafeWordReuseCount, 0);
+  const totalRecentlySecureReuseCount = AUDIT_REPORT.repeatGeneration.reduce((sum, report) => sum + report.totalRecentlySecureReuseCount, 0);
+  const totalProtectedReuseCount = AUDIT_REPORT.repeatGeneration.reduce((sum, report) => sum + report.totalProtectedReuseCount, 0);
+  const identicalRepeatCycles = AUDIT_REPORT.repeatGeneration
+    .flatMap((report) => report.cycleToCycleOverlap)
+    .filter((overlap) => overlap.identicalToPrevious);
+
+  assert.equal(identicalRepeatCycles.length, 0, "Repeat cycles should not select an identical word set when alternatives exist.");
+  assert.ok(totalSafeWordReuseCount < 41, "Safe-word reuse should be reduced from the v1 audit baseline.");
+  assert.ok(totalRecentlySecureReuseCount < 29, "Recently secure reuse should be reduced from the v1 audit baseline.");
+  assert.ok(totalProtectedReuseCount > 0, "Previously incorrect or review-due words should remain protected and reusable.");
 });
 
 test("usage probes document recent secure, incorrect, fallback, and source-priority handling", () => {
   assertJsonEqual(AUDIT_REPORT.usageProbes.recentSecureAvoided.selectedWords, ["phase"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.incorrectPreferred.selectedWords, ["phone"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.recentSecureFallbackEligible.selectedWords, ["phone"]);
-  assertJsonEqual(AUDIT_REPORT.usageProbes.sourcePriorityBeforeUsage.selectedWords, ["phone"]);
-  assert.ok(AUDIT_REPORT.observedConcerns.some((concern) => concern.id === "source_priority_before_usage"));
+  assertJsonEqual(AUDIT_REPORT.usageProbes.sourcePriorityBeforeUsage.selectedWords, ["phase"]);
+  assertJsonEqual(AUDIT_REPORT.usageProbes.neutralSourcePriority.selectedWords, ["phone"]);
+  assert.equal(AUDIT_REPORT.observedConcerns.some((concern) => concern.id === "source_priority_before_usage"), false);
 });
 
 let failureCount = 0;

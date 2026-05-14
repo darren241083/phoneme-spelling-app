@@ -61,7 +61,6 @@ const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
   secure_expected: 1,
   early_stretch: 1,
 };
-const USAGE_RECENT_UNIQUE_WORD_LIMIT = 4;
 const USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 function normalizeToken(value) {
@@ -422,14 +421,9 @@ function buildWordUsageStats(attempts) {
 
   const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
   const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - USAGE_RECENT_WINDOW_MS : 0;
-  const recentWords = new Set();
-  for (const event of [...events].sort((a, b) => b.seenAt - a.seenAt)) {
-    if (recentWords.size >= USAGE_RECENT_UNIQUE_WORD_LIMIT) break;
-    if (event.seenAt > 0 && event.seenAt >= recentCutoff) recentWords.add(event.word);
-  }
 
   for (const current of usage.values()) {
-    current.recentlySeen = current.lastSeenAt > 0 && recentWords.has(current.word);
+    current.recentlySeen = current.lastSeenAt > 0 && current.lastSeenAt >= recentCutoff;
     current.recentlySecure = current.recentlySeen
       && current.latestCorrect === true
       && current.latestAttemptNumber <= 1
@@ -1019,6 +1013,11 @@ function rankApprovedTargetCandidates(items, {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
     if (b.coverage !== a.coverage) return b.coverage - a.coverage;
 
+    const usageA = getUsageMeta(a, usageByWord);
+    const usageB = getUsageMeta(b, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "target");
+    if (usageDiff) return usageDiff;
+
     const sourcePriorityA = Number(a.sourcePriority ?? getSelectorSourcePriority(a.selectionSource));
     const sourcePriorityB = Number(b.sourcePriority ?? getSelectorSourcePriority(b.selectionSource));
     if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
@@ -1030,11 +1029,6 @@ function rankApprovedTargetCandidates(items, {
     const aIdeal = idealWords.has(a.word);
     const bIdeal = idealWords.has(b.word);
     if (Number(bIdeal) !== Number(aIdeal)) return Number(bIdeal) - Number(aIdeal);
-
-    const usageA = getUsageMeta(a, usageByWord);
-    const usageB = getUsageMeta(b, usageByWord);
-    const usageDiff = compareUsageForTarget(usageA, usageB);
-    if (usageDiff) return usageDiff;
 
     const sentenceDiff = Number(!!b.sentence) - Number(!!a.sentence);
     if (sentenceDiff) return sentenceDiff;
@@ -1135,6 +1129,27 @@ function getUsageMeta(candidate, usageByWord) {
   return usageByWord.get(normalizeWord(candidate?.word || "")) || buildDefaultUsageMeta(normalizeWord(candidate?.word || ""));
 }
 
+function getUsageSpacingTier(usage = {}) {
+  if (Number(usage?.incorrectCount || 0) > 0 || !!usage?.reviewDue) return 0;
+  if (!Number(usage?.count || 0)) return 1;
+  if (usage?.recentlySecure) return 3;
+  if (usage?.recentlySeen) return 2;
+  return 1;
+}
+
+function getUsageComparatorForRole(role = "target") {
+  if (role === "review") return compareUsageForReview;
+  if (role === "stretch") return compareUsageForStretch;
+  return compareUsageForTarget;
+}
+
+function compareUsageSpacingForRole(usageA, usageB, role = "target") {
+  const tierA = getUsageSpacingTier(usageA);
+  const tierB = getUsageSpacingTier(usageB);
+  if (tierA !== tierB) return tierA - tierB;
+  return getUsageComparatorForRole(role)(usageA, usageB);
+}
+
 function compareBooleanDesc(a, b) {
   return Number(!!b) - Number(!!a);
 }
@@ -1182,16 +1197,16 @@ function sortCandidatesForRole(candidates, {
     const coverageDiff = getCandidateCoverage(b, cleanGrapheme) - getCandidateCoverage(a, cleanGrapheme);
     if (coverageDiff) return coverageDiff;
 
+    const usageA = getUsageMeta(a, usageByWord);
+    const usageB = getUsageMeta(b, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, role);
+    if (usageDiff) return usageDiff;
+
     const sourcePriorityA = getSelectorSourcePriority(getCandidateSelectionSource(a));
     const sourcePriorityB = getSelectorSourcePriority(getCandidateSelectionSource(b));
     if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
 
-    const usageA = getUsageMeta(a, usageByWord);
-    const usageB = getUsageMeta(b, usageByWord);
-
     if (role === "review") {
-      const usageDiff = compareUsageForReview(usageA, usageB);
-      if (usageDiff) return usageDiff;
       if (getCandidateDifficultyScore(a) !== getCandidateDifficultyScore(b)) {
         return getCandidateDifficultyScore(a) - getCandidateDifficultyScore(b);
       }
@@ -1199,11 +1214,7 @@ function sortCandidatesForRole(candidates, {
       if (getCandidateDifficultyScore(b) !== getCandidateDifficultyScore(a)) {
         return getCandidateDifficultyScore(b) - getCandidateDifficultyScore(a);
       }
-      const usageDiff = compareUsageForStretch(usageA, usageB);
-      if (usageDiff) return usageDiff;
     } else {
-      const usageDiff = compareUsageForTarget(usageA, usageB);
-      if (usageDiff) return usageDiff;
       const distanceA = Math.abs(getCandidateDifficultyScore(a) - 50);
       const distanceB = Math.abs(getCandidateDifficultyScore(b) - 50);
       if (distanceA !== distanceB) return distanceA - distanceB;
