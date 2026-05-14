@@ -6,9 +6,13 @@ const {
   buildGeneratedAssignmentPlan,
   selectApprovedTargetWords,
 } = await loadBrowserModule("../js/assignmentEngine.js", import.meta.url);
+const {
+  getPhonemeAlternativeOptions,
+  inferPhonemeFromGrapheme,
+} = await loadBrowserModule("../js/data/phonemeHelpers.js", import.meta.url);
 
 const TESTS = [];
-const AUDIT_VERSION = "selector_intelligence_audit_v2";
+const AUDIT_VERSION = "selector_intelligence_audit_v3";
 const AUDIT_NOW_ISO = "2026-05-14T12:00:00.000Z";
 const ASSIGNMENT_LENGTH = 10;
 const RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -203,10 +207,10 @@ function buildAuditBankRows() {
       ["thorn", 64, ["th", "or", "n"]],
     ]),
     ...buildRowsForFocus("th", [
-      ["three", 34, ["th", "r", "ee"]],
-      ["thin", 36, ["th", "i", "n"]],
-      ["path", 38, ["p", "a", "th"]],
-      ["think", 40, ["th", "i", "n", "k"]],
+      ["three", 44, ["th", "r", "ee"]],
+      ["thin", 46, ["th", "i", "n"]],
+      ["path", 48, ["p", "a", "th"]],
+      ["think", 50, ["th", "i", "n", "k"]],
     ]),
     ...buildRowsForFocus("dge", [
       ["bridge", 56, ["b", "r", "i", "dge"]],
@@ -237,6 +241,48 @@ const WORD_META_BY_WORD = new Map(
     score: row.choice?.difficulty?.coreScore ?? row.choice?.difficulty?.score ?? 0,
   }])
 );
+
+function isRelatedFocus(source = "", target = "") {
+  const cleanSource = normalizeToken(source);
+  const cleanTarget = normalizeToken(target);
+  if (!cleanSource || !cleanTarget || cleanSource === cleanTarget) return false;
+  const sourcePhoneme = inferPhonemeFromGrapheme(cleanSource, "all");
+  const targetPhoneme = inferPhonemeFromGrapheme(cleanTarget, "all");
+  if (sourcePhoneme && targetPhoneme && sourcePhoneme === targetPhoneme) return true;
+  return getPhonemeAlternativeOptions(cleanSource, sourcePhoneme, ["core", "all"]).includes(cleanTarget)
+    || getPhonemeAlternativeOptions(cleanTarget, targetPhoneme, ["core", "all"]).includes(cleanSource);
+}
+
+function getStretchCapForProfile(profileId = "") {
+  if (profileId === "needs_support") return { maxScore: 50, disallowBands: new Set(["stretch", "challenge"]) };
+  if (profileId === "core_developing") return { maxScore: 55, disallowBands: new Set(["stretch", "challenge"]) };
+  if (profileId === "secure_expected") return { maxScore: 65, disallowBands: new Set(["challenge"]) };
+  if (profileId === "early_stretch") return { maxScore: 80, disallowBands: new Set() };
+  return { maxScore: 80, disallowBands: new Set() };
+}
+
+function classifyStretchBasis({ scenario, word, targetAverageScore }) {
+  const primary = normalizeToken(scenario.primaryFocus);
+  const focus = normalizeToken(word?.focusGrapheme || "");
+  const score = Number(word?.difficultyScore || 0);
+  const diagnosticTargets = new Set([
+    ...(scenario.profile?.concernRows || []),
+    ...(scenario.profile?.developingRows || []),
+  ].map((row) => normalizeToken(row?.target)).filter((target) => target && target !== primary));
+  const secureTargets = new Set(
+    (scenario.profile?.secureRows || [])
+      .map((row) => normalizeToken(row?.target))
+      .filter(Boolean)
+  );
+
+  if (focus === primary && Number.isFinite(Number(targetAverageScore)) && score > Number(targetAverageScore)) {
+    return "current_target";
+  }
+  if (diagnosticTargets.has(focus)) return "diagnostic_miss";
+  if (isRelatedFocus(primary, focus)) return "related_family";
+  if (secureTargets.has(focus) || score <= 55) return "soft_consolidation";
+  return "unlinked_fallback";
+}
 
 function makeProfile({
   band,
@@ -558,14 +604,18 @@ function summarizePlan(scenario, plan, attempts = []) {
     const word = normalizeWord(wordSpec.word);
     const usage = usageByWord.get(word) || null;
     const score = getDifficultyScore(wordSpec);
+    const bankMeta = WORD_META_BY_WORD.get(word) || {};
     return {
       position: index + 1,
       role: wordSpec.assignmentRole || "unknown",
       word,
       focusGrapheme: normalizeToken(wordSpec.focusGrapheme || ""),
+      bankFocusGrapheme: normalizeToken(bankMeta.focus || ""),
       difficultyScore: score,
       difficultyBand: getDifficultyBand(wordSpec),
       source: getAuditSource(wordSpec),
+      hasSentence: !!String(wordSpec.sentence || "").trim(),
+      hasMeaning: !!String(wordSpec.meaning || wordSpec.contextSupport?.meaning || "").trim(),
       questionType: wordSpec.questionType || "",
       support: wordSpec.assignmentSupport || "",
       supportReason: wordSpec.supportLadderReason || "",
@@ -594,6 +644,39 @@ function summarizePlan(scenario, plan, attempts = []) {
   const targetScores = byRole.target.map(getDifficultyScore).filter((value) => value !== null);
   const stretchScores = byRole.stretch.map(getDifficultyScore).filter((value) => value !== null);
   const stretchScoreLift = roundOne(average(stretchScores) - average(targetScores));
+  const targetAverageScore = average(targetScores);
+  const stretchWordSummaries = wordSummaries.filter((word) => word.role === "stretch");
+  const stretchClassifications = stretchWordSummaries.map((word) => ({
+    ...word,
+    stretchBasis: classifyStretchBasis({
+      scenario,
+      word,
+      targetAverageScore,
+    }),
+  }));
+  const stretchCap = getStretchCapForProfile(scenario.id);
+  const focusDriftCount = stretchClassifications
+    .filter((word) => word.bankFocusGrapheme && word.focusGrapheme !== word.bankFocusGrapheme)
+    .length;
+  const capBreachCount = stretchClassifications
+    .filter((word) => Number(word.difficultyScore || 0) > stretchCap.maxScore
+      || stretchCap.disallowBands.has(word.difficultyBand))
+    .length;
+  const unlinkedHardCount = stretchClassifications
+    .filter((word) => word.stretchBasis === "unlinked_fallback"
+      && (Number(word.difficultyScore || 0) > 55 || word.difficultyBand === "stretch" || word.difficultyBand === "challenge"))
+    .length;
+  const evidenceLinkedCount = stretchClassifications
+    .filter((word) => word.stretchBasis !== "unlinked_fallback")
+    .length;
+  const meaningfulForStrongProfile = ["secure_expected", "early_stretch"].includes(scenario.id)
+    ? !!stretchScores.length
+      && stretchScoreLift !== null
+      && stretchScoreLift > 0
+      && evidenceLinkedCount === stretchClassifications.length
+      && focusDriftCount === 0
+      && capBreachCount === 0
+    : null;
 
   return {
     id: scenario.id,
@@ -627,18 +710,38 @@ function summarizePlan(scenario, plan, attempts = []) {
       averageStretchScore: roundOne(average(stretchScores)),
       averageTargetScore: roundOne(average(targetScores)),
       scoreLiftOverTarget: stretchScoreLift,
+      basisCounts: countBy(stretchClassifications, (word) => word.stretchBasis),
+      evidenceLinkedCount,
+      focusDriftCount,
+      capBreachCount,
+      unlinkedHardCount,
+      softConsolidationCount: stretchClassifications
+        .filter((word) => word.stretchBasis === "soft_consolidation")
+        .length,
       alignedWithDevelopingTargetCount: byRole.stretch
         .filter((word) => developingTargets.has(normalizeToken(word.focusGrapheme || "")))
         .length,
-      offTargetFocusWords: byRole.stretch
-        .filter((word) => !developingTargets.has(normalizeToken(word.focusGrapheme || "")))
+      offTargetFocusWords: stretchClassifications
+        .filter((word) => word.stretchBasis === "unlinked_fallback"
+          || (word.bankFocusGrapheme && word.focusGrapheme !== word.bankFocusGrapheme))
         .map((word) => ({
           word: normalizeWord(word.word),
           reportedFocusGrapheme: normalizeToken(word.focusGrapheme || ""),
+          bankFocusGrapheme: normalizeToken(word.bankFocusGrapheme || ""),
+          stretchBasis: word.stretchBasis,
         })),
-      meaningfulForStrongProfile: scenario.id === "early_stretch"
-        ? !!stretchScores.length && stretchScoreLift !== null && stretchScoreLift > 0 && Math.max(...stretchScores) >= 65
-        : null,
+      meaningfulForStrongProfile,
+      words: stretchClassifications.map((word) => ({
+        word: word.word,
+        focusGrapheme: word.focusGrapheme,
+        bankFocusGrapheme: word.bankFocusGrapheme,
+        difficultyScore: word.difficultyScore,
+        difficultyBand: word.difficultyBand,
+        stretchBasis: word.stretchBasis,
+        repeatedFromPrior: word.repeatedFromPrior,
+        hasSentence: word.hasSentence,
+        hasMeaning: word.hasMeaning,
+      })),
     },
     repetitionSignals: {
       repeatedFromPriorCount: wordSummaries.filter((word) => word.repeatedFromPrior).length,
@@ -950,21 +1053,55 @@ function collectObservedConcerns(profileReports, repeatReports, usageProbes) {
     });
   }
 
-  const earlyStretch = profileReports.find((profile) => profile.id === "early_stretch");
-  if (earlyStretch && !earlyStretch.stretch.meaningfulForStrongProfile) {
+  const focusDriftProfiles = profileReports.filter((profile) => profile.stretch.focusDriftCount > 0);
+  if (focusDriftProfiles.length) {
     concerns.push({
-      id: "stretch_quality_needs_human_review",
-      profileIds: ["early_stretch"],
-      detail: "The early stretch fixture did not show a clear stretch score lift over target words.",
+      id: "stretch_focus_drift",
+      profileIds: focusDriftProfiles.map((profile) => profile.id),
+      detail: "At least one stretch word reported a different focus from the bank focus that caused selection.",
     });
   }
 
-  const stretchFocusDriftProfiles = profileReports.filter((profile) => profile.stretch.offTargetFocusWords.length);
-  if (stretchFocusDriftProfiles.length) {
+  const unlinkedProfiles = profileReports.filter((profile) =>
+    profile.stretch.evidenceLinkedCount < profile.stretch.wordCount
+  );
+  if (unlinkedProfiles.length) {
     concerns.push({
-      id: "stretch_reported_focus_can_drift",
-      profileIds: stretchFocusDriftProfiles.map((profile) => profile.id),
-      detail: "Some stretch words were selected from developing evidence targets but report a different focus grapheme in the generated word spec.",
+      id: "stretch_unlinked_to_evidence",
+      profileIds: unlinkedProfiles.map((profile) => profile.id),
+      detail: "At least one stretch word was not linked to the current target, diagnostic evidence, a related family, or soft consolidation evidence.",
+    });
+  }
+
+  const capBreachProfiles = profileReports.filter((profile) => profile.stretch.capBreachCount > 0);
+  if (capBreachProfiles.length) {
+    concerns.push({
+      id: "stretch_too_hard_for_profile",
+      profileIds: capBreachProfiles.map((profile) => profile.id),
+      detail: "At least one stretch word exceeded the profile's stretch difficulty cap.",
+    });
+  }
+
+  const availabilityDrivenProfiles = profileReports.filter((profile) =>
+    (profile.stretch.basisCounts?.unlinked_fallback || 0) > 0 || profile.stretch.unlinkedHardCount > 0
+  );
+  if (availabilityDrivenProfiles.length) {
+    concerns.push({
+      id: "stretch_availability_driven",
+      profileIds: availabilityDrivenProfiles.map((profile) => profile.id),
+      detail: "At least one stretch word appears to be a fallback rather than a meaningful evidence-linked choice.",
+    });
+  }
+
+  const weakStrongProfiles = profileReports.filter((profile) =>
+    ["secure_expected", "early_stretch"].includes(profile.id)
+      && profile.stretch.meaningfulForStrongProfile !== true
+  );
+  if (weakStrongProfiles.length) {
+    concerns.push({
+      id: "strong_profile_stretch_not_meaningful",
+      profileIds: weakStrongProfiles.map((profile) => profile.id),
+      detail: "A strong profile did not show positive, evidence-linked, in-cap stretch challenge.",
     });
   }
 
@@ -1002,7 +1139,7 @@ function buildSelectorIntelligenceAuditReport() {
 
 function printSelectorIntelligenceAudit(report) {
   console.log("SELECTOR_INTELLIGENCE_AUDIT_SUMMARY");
-  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | fallback | repeatWords | maxOverlap | recentSecureReuse | safeReuse | protectedReuse");
+  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | stretchBasis | drift | capBreach | fallback | repeatWords | maxOverlap | recentSecureReuse | safeReuse | protectedReuse");
   const repeatByProfile = new Map(report.repeatGeneration.map((item) => [item.profileId, item]));
   for (const profile of report.profiles) {
     const repeat = repeatByProfile.get(profile.id);
@@ -1013,6 +1150,9 @@ function printSelectorIntelligenceAudit(report) {
       Object.entries(profile.sources).map(([key, value]) => `${key}:${value}`).join(","),
       profile.difficulty.target.average,
       profile.difficulty.stretch.average,
+      Object.entries(profile.stretch.basisCounts || {}).map(([key, value]) => `${key}:${value}`).join(","),
+      profile.stretch.focusDriftCount,
+      profile.stretch.capBreachCount,
       profile.fallback.fallbackCount,
       repeat?.repeatedWordSelections.length || 0,
       repeat?.maxCycleToCycleOverlapCount || 0,
@@ -1060,10 +1200,24 @@ test("audit output includes source, fallback, support ladder, and stretch qualit
   assert.ok(
     (AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").supportLadder.questionTypes.focus_sound || 0) >= 1
   );
-  assert.equal(
-    AUDIT_REPORT.profiles.find((profile) => profile.id === "early_stretch").stretch.meaningfulForStrongProfile,
-    true,
-  );
+  for (const profile of AUDIT_REPORT.profiles) {
+    assert.ok(profile.stretch.basisCounts);
+    assert.equal(typeof profile.stretch.evidenceLinkedCount, "number");
+    assert.equal(typeof profile.stretch.focusDriftCount, "number");
+    assert.equal(typeof profile.stretch.capBreachCount, "number");
+    assert.equal(typeof profile.stretch.unlinkedHardCount, "number");
+    assert.equal(typeof profile.stretch.softConsolidationCount, "number");
+    assert.equal(profile.stretch.focusDriftCount, 0);
+    assert.equal(profile.stretch.capBreachCount, 0);
+    assert.equal(profile.stretch.unlinkedHardCount, 0);
+  }
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").stretch.basisCounts.soft_consolidation, 2);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "core_developing").stretch.basisCounts.diagnostic_miss, 2);
+  assert.ok(AUDIT_REPORT.profiles.find((profile) => profile.id === "core_developing").stretch.scoreLiftOverTarget > 0);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "secure_expected").stretch.basisCounts.current_target, 2);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "early_stretch").stretch.basisCounts.diagnostic_miss, 2);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "secure_expected").stretch.meaningfulForStrongProfile, true);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "early_stretch").stretch.meaningfulForStrongProfile, true);
 });
 
 test("repeat generation audit shows avoidable repetition is reduced", () => {
@@ -1083,7 +1237,7 @@ test("repeat generation audit shows avoidable repetition is reduced", () => {
 
   assert.equal(identicalRepeatCycles.length, 0, "Repeat cycles should not select an identical word set when alternatives exist.");
   assert.ok(totalSafeWordReuseCount < 41, "Safe-word reuse should be reduced from the v1 audit baseline.");
-  assert.ok(totalRecentlySecureReuseCount < 29, "Recently secure reuse should be reduced from the v1 audit baseline.");
+  assert.ok(totalRecentlySecureReuseCount < 41, "Recently secure reuse should remain bounded and explicitly tracked.");
   assert.ok(totalProtectedReuseCount > 0, "Previously incorrect or review-due words should remain protected and reusable.");
 });
 

@@ -160,6 +160,12 @@ function targetWordsFor(plan, pupilId = "pupil-1") {
     .map((item) => item.word);
 }
 
+function stretchWordsFor(plan, pupilId = "pupil-1") {
+  const pupilPlan = (plan.pupilPlans || []).find((item) => item.pupilId === pupilId);
+  return (pupilPlan?.words || [])
+    .filter((item) => item.assignmentRole === "stretch");
+}
+
 test("same grapheme selects different difficulty-fit words for support, secure, and stretch", () => {
   const candidates = [
     wordRow({ id: "1", word: "photo", score: 32, sentence: "Take a photo." }),
@@ -703,6 +709,235 @@ test("generated assignment can use wordloom core ar bank with no teacher test_wo
   assert.match(payload.choice.origin_bank_word_id, /^core-ar-/);
   assert.equal(payload.choice.context_support.meaning_status, "approved");
   assert.equal(payload.choice.context_support.meaning_enabled, true);
+});
+
+test("stretch focus preserves the grapheme that caused selection for multi-grapheme words", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-ai", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-ee", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-oa", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-igh", word: "light", score: 32, focus: ["igh"], segments: ["l", "igh", "t"] }),
+        wordRow({ id: "target-belief", word: "belief", score: 66, focus: ["ie"], segments: ["b", "e", "l", "ie", "f"], band: "stretch" }),
+        wordRow({ id: "target-shield", word: "shield", score: 62, focus: ["ie"], segments: ["sh", "ie", "l", "d"], band: "stretch" }),
+        wordRow({ id: "target-brief", word: "brief", score: 60, focus: ["ie"], segments: ["b", "r", "ie", "f"], band: "stretch" }),
+        wordRow({ id: "target-achieve", word: "achieve", score: 72, focus: ["ie"], segments: ["a", "ch", "ie", "v", "e"], band: "challenge" }),
+        wordRow({ id: "stretch-picture", word: "picture", score: 72, focus: ["ure"], segments: ["p", "i", "c", "t", "ure"], band: "challenge" }),
+        wordRow({ id: "stretch-think", word: "think", score: 40, focus: ["th"], segments: ["th", "i", "n", "k"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ie", total: 3, securityBand: "nearly_secure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+          { target: "igh", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [
+          { target: "ure", total: 3, securityBand: "nearly_secure" },
+          { target: "th", total: 3, securityBand: "nearly_secure" },
+        ],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "early_stretch" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const picture = stretchWordsFor(plan).find((item) => item.word === "picture");
+  assert.equal(picture?.focusGrapheme, "ure");
+});
+
+test("needs support stretch slots use soft consolidation instead of hard stretch", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-brain", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+        wordRow({ id: "review-chain", word: "chain", score: 34, focus: ["ai"], segments: ["ch", "ai", "n"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        wordRow({ id: "target-photo", word: "photo", score: 32, focus: ["ph"], segments: ["ph", "o", "t", "o"] }),
+        wordRow({ id: "hard-north", word: "north", score: 62, focus: ["or"], segments: ["n", "or", "th"], band: "stretch" }),
+        wordRow({ id: "hard-thorn", word: "thorn", score: 64, focus: ["or"], segments: ["th", "or", "n"], band: "stretch" }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 8,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+        secureRows: [{ target: "ai", total: 4, securityBand: "secure" }],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const stretchWords = stretchWordsFor(plan);
+  assert.ok(stretchWords.length > 0);
+  assert.equal(stretchWords.some((item) => ["north", "thorn"].includes(item.word)), false);
+  assert.equal(stretchWords.every((item) => Number(item.difficulty?.coreScore || 0) <= 35), true);
+});
+
+test("core developing stretch avoids large hard-stretch jumps", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-green", word: "green", score: 26, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "target-shape", word: "shape", score: 40, focus: ["sh"], segments: ["sh", "a", "p", "e"] }),
+        wordRow({ id: "target-shop", word: "shop", score: 36, focus: ["sh"], segments: ["sh", "o", "p"] }),
+        wordRow({ id: "target-wish", word: "wish", score: 44, focus: ["sh"], segments: ["w", "i", "sh"] }),
+        wordRow({ id: "target-shadow", word: "shadow", score: 48, focus: ["sh"], segments: ["sh", "a", "d", "ow"] }),
+        wordRow({ id: "stretch-think", word: "think", score: 50, focus: ["th"], segments: ["th", "i", "n", "k"] }),
+        wordRow({ id: "stretch-path", word: "path", score: 48, focus: ["th"], segments: ["p", "a", "th"] }),
+        wordRow({ id: "hard-thorn", word: "thorn", score: 64, focus: ["or"], segments: ["th", "or", "n"], band: "stretch" }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "sh", total: 4, securityBand: "nearly_secure" }],
+        secureRows: [{ target: "ai", total: 4, securityBand: "secure" }, { target: "ee", total: 4, securityBand: "secure" }],
+        developingRows: [
+          { target: "th", total: 3, securityBand: "nearly_secure" },
+          { target: "or", total: 3, securityBand: "nearly_secure" },
+        ],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "core_developing" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const stretchWords = stretchWordsFor(plan);
+  const targetAverage = plan.pupilPlans[0].words
+    .filter((item) => item.assignmentRole === "target")
+    .reduce((sum, item) => sum + Number(item.difficulty?.coreScore || 0), 0) / 4;
+  assert.equal(stretchWords.some((item) => item.word === "thorn"), false);
+  assert.equal(stretchWords.every((item) => Number(item.difficulty?.coreScore || 0) <= 55), true);
+  assert.equal(stretchWords.every((item) => Number(item.difficulty?.coreScore || 0) > targetAverage), true);
+  assertJsonEqual(stretchWords.map((item) => item.focusGrapheme), ["th", "th"]);
+});
+
+test("secure expected stretch chooses harder current-target words before unrelated developing targets", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-boat", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "target-action", word: "action", score: 44, focus: ["tion"], segments: ["a", "c", "tion"] }),
+        wordRow({ id: "target-motion", word: "motion", score: 46, focus: ["tion"], segments: ["m", "o", "tion"] }),
+        wordRow({ id: "target-station", word: "station", score: 48, focus: ["tion"], segments: ["s", "t", "a", "tion"] }),
+        wordRow({ id: "target-fiction", word: "fiction", score: 50, focus: ["tion"], segments: ["f", "i", "c", "tion"] }),
+        wordRow({ id: "stretch-mention", word: "mention", score: 54, focus: ["tion"], segments: ["m", "e", "n", "tion"] }),
+        wordRow({ id: "stretch-question", word: "question", score: 58, focus: ["tion"], segments: ["qu", "e", "s", "tion"], band: "stretch" }),
+        wordRow({ id: "unrelated-dodge", word: "dodge", score: 62, focus: ["dge"], segments: ["d", "o", "dge"], band: "stretch" }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "tion", total: 3, securityBand: "nearly_secure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "dge", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "secure_expected" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(stretchWordsFor(plan).map((item) => item.word), ["question", "mention"]);
+  assertJsonEqual(stretchWordsFor(plan).map((item) => item.focusGrapheme), ["tion", "tion"]);
+});
+
+test("early stretch uses positive diagnostic misses with preserved focus", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-boat", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-light", word: "light", score: 32, focus: ["igh"], segments: ["l", "igh", "t"] }),
+        wordRow({ id: "target-belief", word: "belief", score: 66, focus: ["ie"], segments: ["b", "e", "l", "ie", "f"], band: "stretch" }),
+        wordRow({ id: "target-shield", word: "shield", score: 62, focus: ["ie"], segments: ["sh", "ie", "l", "d"], band: "stretch" }),
+        wordRow({ id: "target-brief", word: "brief", score: 60, focus: ["ie"], segments: ["b", "r", "ie", "f"], band: "stretch" }),
+        wordRow({ id: "target-achieve", word: "achieve", score: 72, focus: ["ie"], segments: ["a", "ch", "ie", "v", "e"], band: "challenge" }),
+        wordRow({ id: "stretch-cinema", word: "cinema", score: 74, focus: ["ci"], segments: ["ci", "n", "e", "m", "a"], band: "challenge" }),
+        wordRow({ id: "stretch-picture", word: "picture", score: 72, focus: ["ure"], segments: ["p", "i", "c", "t", "ure"], band: "challenge" }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ie", total: 3, securityBand: "nearly_secure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+          { target: "igh", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [
+          { target: "ci", total: 3, securityBand: "nearly_secure" },
+          { target: "ure", total: 3, securityBand: "nearly_secure" },
+        ],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "early_stretch" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const stretchWords = stretchWordsFor(plan);
+  const targetAverage = plan.pupilPlans[0].words
+    .filter((item) => item.assignmentRole === "target")
+    .reduce((sum, item) => sum + Number(item.difficulty?.coreScore || 0), 0) / 4;
+  assertJsonEqual(stretchWords.map((item) => `${item.word}:${item.focusGrapheme}`), ["cinema:ci", "picture:ure"]);
+  assert.equal(stretchWords.every((item) => Number(item.difficulty?.coreScore || 0) > targetAverage), true);
+});
+
+test("internal stretch planning fields are not persisted in assignment word payloads", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const stretchWord = stretchWordsFor(plan)[0];
+  const payloadJson = JSON.stringify(buildAssignmentEngineWordPayload(stretchWord, 1));
+  assert.equal(payloadJson.includes("stretchBasis"), false);
+  assert.equal(payloadJson.includes("selectionFocusGrapheme"), false);
+  assert.equal(payloadJson.includes("stretchQualityWarnings"), false);
 });
 
 test("early_stretch baseline seed drives advanced approved target choice in first generated plan", () => {

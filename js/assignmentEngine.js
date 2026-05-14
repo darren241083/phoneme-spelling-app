@@ -35,6 +35,64 @@ const APPROVED_TARGET_CHALLENGE_WINDOWS = {
   secure_expected: { min: 35, max: 60, center: 48, hardMax: 65 },
   early_stretch: { min: 55, max: 75, center: 65, hardMax: 80 },
 };
+const STRETCH_BASIS_CURRENT_TARGET = "current_target";
+const STRETCH_BASIS_DIAGNOSTIC_MISS = "diagnostic_miss";
+const STRETCH_BASIS_RELATED_FAMILY = "related_family";
+const STRETCH_BASIS_SOFT_CONSOLIDATION = "soft_consolidation";
+const STRETCH_BASIS_UNLINKED_FALLBACK = "unlinked_fallback";
+const STRETCH_POLICY_BY_BAND = {
+  needs_support: {
+    maxScore: 50,
+    maxLift: null,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+    requirePositiveLift: false,
+    basisOrder: [
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  core_developing: {
+    maxScore: 55,
+    maxLift: 14,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  secure_expected: {
+    maxScore: 65,
+    maxLift: null,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_CURRENT_TARGET,
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_RELATED_FAMILY,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  early_stretch: {
+    maxScore: 80,
+    maxLift: null,
+    allowStretchBand: true,
+    allowChallengeBand: true,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_CURRENT_TARGET,
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_RELATED_FAMILY,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+};
 
 const SECTION_RATIOS = {
   review: 0.4,
@@ -872,6 +930,20 @@ function getSelectorDifficultyBandKey(difficulty = {}) {
   );
 }
 
+function difficultyBandKeyForScore(score) {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return "unknown";
+  if (value <= 35) return "easier";
+  if (value <= 55) return "core";
+  if (value <= 70) return "stretch";
+  return "challenge";
+}
+
+function getCandidateDifficultyBandKey(candidate = {}) {
+  return getSelectorDifficultyBandKey(candidate?.difficulty || {})
+    || difficultyBandKeyForScore(getCandidateDifficultyScore(candidate));
+}
+
 function resolveSelectorChallengeWindow(challengeLevel = "") {
   const key = normalizeMetadataKey(challengeLevel);
   return {
@@ -1316,6 +1388,258 @@ function pickApprovedTargetCandidatesByGraphemeOrder({
   return selected;
 }
 
+function averageCandidateDifficultyScore(candidates = []) {
+  const scores = (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => getCandidateDifficultyScore(candidate))
+    .filter((score) => Number.isFinite(score) && score > 0);
+  return scores.length
+    ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+    : null;
+}
+
+function resolveStretchPolicy(band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const key = APPROVED_TARGET_CHALLENGE_WINDOWS[band] ? band : APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL;
+  return STRETCH_POLICY_BY_BAND[key] || STRETCH_POLICY_BY_BAND[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL];
+}
+
+function getCandidateSelectionCoverage(candidate, grapheme) {
+  const focus = normalizeToken(grapheme);
+  if (!focus) return 0;
+  if ((candidate?.focusTargetLinks || []).some((item) => item?.focusGrapheme === focus)) return 2;
+  return getCandidateCoverage(candidate, focus);
+}
+
+function getCandidateSelectionFocuses(candidate = {}) {
+  return normalizeFocusList([
+    ...(candidate?.focusTargetLinks || []).map((item) => item?.focusGrapheme || ""),
+    ...(Array.isArray(candidate?.focusGraphemes) ? candidate.focusGraphemes : []),
+    ...(Array.isArray(candidate?.segments) ? candidate.segments : []),
+  ]);
+}
+
+function getEvidenceTargetList(profile, fallbackProfile, keys = [], exclude = []) {
+  return getUniqueTargetList(
+    keys.flatMap((key) => getProfileRows(profile, fallbackProfile, key)),
+    exclude,
+  );
+}
+
+function getDiagnosticStretchTargets(profile, fallbackProfile, primaryTarget = "") {
+  return getEvidenceTargetList(profile, fallbackProfile, ["concernRows", "developingRows"], [primaryTarget]);
+}
+
+function getSoftConsolidationTargets(profile, fallbackProfile, primaryTarget = "") {
+  return getEvidenceTargetList(profile, fallbackProfile, ["secureRows", "developingRows", "concernRows"], [primaryTarget]);
+}
+
+function areRelatedGraphemes(source = "", target = "") {
+  const cleanSource = normalizeToken(source);
+  const cleanTarget = normalizeToken(target);
+  if (!cleanSource || !cleanTarget || cleanSource === cleanTarget) return false;
+  const sourcePhoneme = inferPhonemeFromGrapheme(cleanSource, "all");
+  const targetPhoneme = inferPhonemeFromGrapheme(cleanTarget, "all");
+  if (sourcePhoneme && targetPhoneme && sourcePhoneme === targetPhoneme) return true;
+  return getPhonemeAlternativeOptions(cleanSource, sourcePhoneme, ["core", "all"]).includes(cleanTarget)
+    || getPhonemeAlternativeOptions(cleanTarget, targetPhoneme, ["core", "all"]).includes(cleanSource);
+}
+
+function buildExactFocusStretchRecords({ candidates = [], focusTargets = [], basis = "" } = {}) {
+  const records = [];
+  const seen = new Set();
+  for (const focusTarget of focusTargets || []) {
+    const focus = normalizeToken(focusTarget);
+    if (!focus) continue;
+    for (const candidate of candidates || []) {
+      const word = normalizeWord(candidate?.word || "");
+      const coverage = getCandidateSelectionCoverage(candidate, focus);
+      if (!word || coverage <= 0) continue;
+      const key = `${basis}::${word}::${focus}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage,
+      });
+    }
+  }
+  return records;
+}
+
+function buildRelatedFamilyStretchRecords({ candidates = [], primaryTarget = "" } = {}) {
+  const records = [];
+  const seen = new Set();
+  const primary = normalizeToken(primaryTarget);
+  if (!primary) return records;
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word) continue;
+    for (const focus of getCandidateSelectionFocuses(candidate)) {
+      if (!areRelatedGraphemes(primary, focus)) continue;
+      const key = `${word}::${focus}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis: STRETCH_BASIS_RELATED_FAMILY,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage: getCandidateSelectionCoverage(candidate, focus) || 1,
+      });
+    }
+  }
+  return records;
+}
+
+function buildUnlinkedFallbackStretchRecords({ candidates = [], linkedTargets = new Set() } = {}) {
+  const records = [];
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word) continue;
+    const selectionFocusGrapheme = getCandidateSelectionFocuses(candidate)
+      .find((focus) => !linkedTargets.has(focus))
+      || getCandidateSelectionFocuses(candidate)[0]
+      || normalizeToken(chooseBestFocusGrapheme(candidate?.segments || []));
+    if (!selectionFocusGrapheme) continue;
+    records.push({
+      basis: STRETCH_BASIS_UNLINKED_FALLBACK,
+      candidate,
+      word,
+      selectionFocusGrapheme,
+      coverage: getCandidateSelectionCoverage(candidate, selectionFocusGrapheme) || 0,
+    });
+  }
+  return records;
+}
+
+function isStretchRecordAllowed(record = {}, {
+  policy = null,
+  targetAverageScore = null,
+} = {}) {
+  if (!record?.candidate || !record.word) return false;
+  const score = getCandidateDifficultyScore(record.candidate);
+  if (!Number.isFinite(score) || score <= 0) return false;
+
+  const bandKey = getCandidateDifficultyBandKey(record.candidate);
+  const basis = record.basis || "";
+  const isSoftFallback = basis === STRETCH_BASIS_SOFT_CONSOLIDATION
+    || basis === STRETCH_BASIS_UNLINKED_FALLBACK;
+  const maxScore = isSoftFallback
+    ? Math.min(Number(policy?.maxScore ?? 55), 55)
+    : Number(policy?.maxScore ?? 80);
+  if (score > maxScore) return false;
+  const hasTargetAverage = targetAverageScore !== null
+    && targetAverageScore !== undefined
+    && Number.isFinite(Number(targetAverageScore));
+  const hasMaxLift = policy?.maxLift !== null
+    && policy?.maxLift !== undefined
+    && Number.isFinite(Number(policy.maxLift));
+  if (!isSoftFallback && hasMaxLift && hasTargetAverage) {
+    if (score - Number(targetAverageScore) > Number(policy.maxLift)) return false;
+  }
+  if (!policy?.allowChallengeBand && bandKey === "challenge") return false;
+  if (!policy?.allowStretchBand && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  if (isSoftFallback && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  if (!isSoftFallback && policy?.requirePositiveLift && hasTargetAverage) {
+    return score > Number(targetAverageScore);
+  }
+  return true;
+}
+
+function rankStretchCandidateRecords(records = [], { usageByWord = new Map() } = {}) {
+  return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
+    const coverageDiff = Number(b.coverage || 0) - Number(a.coverage || 0);
+    if (coverageDiff) return coverageDiff;
+
+    const usageA = getUsageMeta(a.candidate, usageByWord);
+    const usageB = getUsageMeta(b.candidate, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "stretch");
+    if (usageDiff) return usageDiff;
+
+    const sourcePriorityA = getSelectorSourcePriority(getCandidateSelectionSource(a.candidate));
+    const sourcePriorityB = getSelectorSourcePriority(getCandidateSelectionSource(b.candidate));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    const scoreDiff = getCandidateDifficultyScore(b.candidate) - getCandidateDifficultyScore(a.candidate);
+    if (scoreDiff) return scoreDiff;
+
+    const sentenceDiff = Number(!!b.candidate?.sentence) - Number(!!a.candidate?.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = String(a.word || "").localeCompare(String(b.word || ""));
+    if (wordDiff) return wordDiff;
+    return String(a.selectionFocusGrapheme || "").localeCompare(String(b.selectionFocusGrapheme || ""));
+  });
+}
+
+function pickStretchCandidateRecords({
+  count = 0,
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  targetAverageScore = null,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+} = {}) {
+  const safeCount = Math.max(0, Number(count || 0));
+  if (!safeCount) return [];
+  const policy = resolveStretchPolicy(challengeLevel);
+  const primary = normalizeToken(primaryTarget);
+  const diagnosticTargets = getDiagnosticStretchTargets(profile, fallbackProfile, primary);
+  const softTargets = getSoftConsolidationTargets(profile, fallbackProfile, primary);
+  const linkedTargets = new Set([primary, ...diagnosticTargets, ...softTargets].filter(Boolean));
+  const groups = {
+    [STRETCH_BASIS_CURRENT_TARGET]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: [primary],
+      basis: STRETCH_BASIS_CURRENT_TARGET,
+    }),
+    [STRETCH_BASIS_DIAGNOSTIC_MISS]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: diagnosticTargets,
+      basis: STRETCH_BASIS_DIAGNOSTIC_MISS,
+    }),
+    [STRETCH_BASIS_RELATED_FAMILY]: buildRelatedFamilyStretchRecords({
+      candidates,
+      primaryTarget: primary,
+    }),
+    [STRETCH_BASIS_SOFT_CONSOLIDATION]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: softTargets.length ? softTargets : [primary],
+      basis: STRETCH_BASIS_SOFT_CONSOLIDATION,
+    }),
+    [STRETCH_BASIS_UNLINKED_FALLBACK]: buildUnlinkedFallbackStretchRecords({
+      candidates,
+      linkedTargets,
+    }),
+  };
+
+  const selected = [];
+  const selectedWords = new Set();
+  for (const basis of policy.basisOrder || []) {
+    const ranked = rankStretchCandidateRecords(
+      (groups[basis] || []).filter((record) => isStretchRecordAllowed(record, {
+        policy,
+        targetAverageScore,
+      })),
+      { usageByWord },
+    );
+    for (const record of ranked) {
+      if (selected.length >= safeCount) break;
+      if (usedWords.has(record.word) || selectedWords.has(record.word)) continue;
+      usedWords.add(record.word);
+      selectedWords.add(record.word);
+      selected.push(record);
+    }
+    if (selected.length >= safeCount) break;
+  }
+  return selected;
+}
+
 function resolveQuestionTypeForSupport(support) {
   if (support === "focus") return "focus_sound";
   if (support === "supported") return "segmented_spelling";
@@ -1644,11 +1968,13 @@ function buildWordSpec(candidate, {
   role,
   support = "independent",
   focusGrapheme = "",
+  selectionFocusGrapheme = "",
   targetReason = "",
   supportLadderBand = "",
   supportLadderReason = "",
 }) {
-  const focus = normalizeToken(focusGrapheme)
+  const focus = normalizeToken(selectionFocusGrapheme)
+    || normalizeToken(focusGrapheme)
     || normalizeToken(chooseBestFocusGrapheme(candidate?.focusGraphemes || candidate?.segments || []))
     || normalizeToken(candidate?.focusGraphemes?.[0] || "");
   const questionType = resolveQuestionTypeForSupport(support);
@@ -1811,13 +2137,6 @@ function buildPupilPlan({
     (profile?.secureRows?.length ? profile.secureRows : fallbackProfile?.secureRows) || [],
     [primaryTarget]
   );
-  const stretchTargets = getUniqueTargetList(
-    [
-      ...(profile?.developingRows || []),
-      ...((fallbackProfile?.developingRows || []).filter((item) => !profile?.developingRows?.some((own) => own.target === item.target))),
-    ],
-    [primaryTarget]
-  );
   const secondaryTargetList = getUniqueTargetList(
     [
       ...(profile?.concernRows || []),
@@ -1881,20 +2200,23 @@ function buildPupilPlan({
     targetReason: "target_independent",
   }));
 
-  const stretchCandidates = pickCandidatesByGraphemeOrder({
+  const stretchRecords = pickStretchCandidateRecords({
     count: composition.stretch,
-    graphemeOrder: stretchTargets,
-    role: "stretch",
     candidates: usableCandidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    targetAverageScore: averageCandidateDifficultyScore(targetCandidates),
     usageByWord: effectiveUsageByWord,
     usedWords,
-    fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
   });
 
-  const stretchSpecs = stretchCandidates.map((candidate) => buildWordSpec(candidate, {
+  const stretchSpecs = stretchRecords.map((record) => buildWordSpec(record.candidate, {
     role: "stretch",
     support: "independent",
-    focusGrapheme: chooseBestFocusGrapheme(candidate.segments) || primaryTarget,
+    focusGrapheme: record.selectionFocusGrapheme || primaryTarget,
+    selectionFocusGrapheme: record.selectionFocusGrapheme || primaryTarget,
     targetReason: "stretch_probe",
   }));
 
