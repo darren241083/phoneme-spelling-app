@@ -40,6 +40,56 @@ const STRETCH_BASIS_DIAGNOSTIC_MISS = "diagnostic_miss";
 const STRETCH_BASIS_RELATED_FAMILY = "related_family";
 const STRETCH_BASIS_SOFT_CONSOLIDATION = "soft_consolidation";
 const STRETCH_BASIS_UNLINKED_FALLBACK = "unlinked_fallback";
+const REVIEW_BASIS_PROTECTED_REVIEW = "protected_review";
+const REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION = "nearly_secure_consolidation";
+const REVIEW_BASIS_SECURE_REVIEW = "secure_review";
+const REVIEW_BASIS_RELATED_FAMILY_REVIEW = "related_family_review";
+const REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW = "last_resort_safe_review";
+const REVIEW_BASIS_RANK = {
+  [REVIEW_BASIS_PROTECTED_REVIEW]: 0,
+  [REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION]: 1,
+  [REVIEW_BASIS_SECURE_REVIEW]: 2,
+  [REVIEW_BASIS_RELATED_FAMILY_REVIEW]: 3,
+  [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
+};
+const REVIEW_SOURCE_PRIORITIES = {
+  [APPROVED_TARGET_TEACHER_SOURCE]: 0,
+  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 1,
+};
+const REVIEW_POLICY_BY_BAND = {
+  needs_support: {
+    center: 34,
+    maxScore: 45,
+    hardMax: 50,
+    lastResortMaxScore: 40,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+  },
+  core_developing: {
+    center: 42,
+    maxScore: 55,
+    hardMax: 60,
+    lastResortMaxScore: 50,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+  },
+  secure_expected: {
+    center: 50,
+    maxScore: 60,
+    hardMax: 65,
+    lastResortMaxScore: 55,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+  },
+  early_stretch: {
+    center: 58,
+    maxScore: 70,
+    hardMax: 75,
+    lastResortMaxScore: 60,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+  },
+};
 const STRETCH_POLICY_BY_BAND = {
   needs_support: {
     maxScore: 50,
@@ -1443,6 +1493,232 @@ function areRelatedGraphemes(source = "", target = "") {
     || getPhonemeAlternativeOptions(cleanTarget, targetPhoneme, ["core", "all"]).includes(cleanSource);
 }
 
+function resolveReviewPolicy(band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const key = resolveSelectorChallengeWindow(band).key;
+  return REVIEW_POLICY_BY_BAND[key] || REVIEW_POLICY_BY_BAND[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL];
+}
+
+function getReviewSourcePriority(source = "") {
+  const cleanSource = normalizeMetadataKey(source);
+  return Object.prototype.hasOwnProperty.call(REVIEW_SOURCE_PRIORITIES, cleanSource)
+    ? REVIEW_SOURCE_PRIORITIES[cleanSource]
+    : getSelectorSourcePriority(cleanSource);
+}
+
+function getRowsForTargetSet(profile, fallbackProfile, key, exclude = []) {
+  return new Set(getUniqueTargetList(getProfileRows(profile, fallbackProfile, key), exclude));
+}
+
+function getNearlySecureReviewTargets(profile, fallbackProfile, primaryTarget = "") {
+  const primary = normalizeToken(primaryTarget);
+  const rows = [
+    ...getProfileRows(profile, fallbackProfile, "developingRows"),
+    ...getProfileRows(profile, fallbackProfile, "concernRows")
+      .filter((row) => normalizeMetadataKey(row?.securityBand || row?.security_band || "") === "nearly_secure"),
+  ];
+  return new Set(getUniqueTargetList(rows, [primary]));
+}
+
+function getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget = "") {
+  const primary = normalizeToken(primaryTarget);
+  return getUniqueTargetList([
+    ...(profile?.concernRows || []),
+    ...((fallbackProfile?.concernRows || [])
+      .filter((item) => !profile?.concernRows?.some((own) => normalizeToken(own?.target) === normalizeToken(item?.target)))),
+  ], [primary]);
+}
+
+function getRelatedFamilyTargetsFromCandidates(candidates = [], primaryTarget = "", exclude = []) {
+  const primary = normalizeToken(primaryTarget);
+  const blocked = new Set((Array.isArray(exclude) ? exclude : []).map((item) => normalizeToken(item)).filter(Boolean));
+  const targets = [];
+  if (!primary) return targets;
+
+  for (const candidate of candidates || []) {
+    for (const focus of getCandidateSelectionFocuses(candidate)) {
+      if (!focus || blocked.has(focus) || !areRelatedGraphemes(primary, focus)) continue;
+      if (!targets.includes(focus)) targets.push(focus);
+    }
+  }
+
+  return targets;
+}
+
+function getTargetConsolidationFallbackList({
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  candidates = [],
+  exclude = [],
+} = {}) {
+  const primary = normalizeToken(primaryTarget);
+  const blocked = [primary, ...(Array.isArray(exclude) ? exclude : [])];
+  const developingTargets = getUniqueTargetList([
+    ...(profile?.developingRows || []),
+    ...((fallbackProfile?.developingRows || [])
+      .filter((item) => !profile?.developingRows?.some((own) => normalizeToken(own?.target) === normalizeToken(item?.target)))),
+  ], blocked);
+  const relatedTargets = getRelatedFamilyTargetsFromCandidates(candidates, primary, [...blocked, ...developingTargets]);
+  return [...developingTargets, ...relatedTargets];
+}
+
+function classifyReviewBasisForFocus(focus, {
+  usage = null,
+  nearlySecureTargets = new Set(),
+  secureTargets = new Set(),
+  primaryTarget = "",
+} = {}) {
+  if (Number(usage?.incorrectCount || 0) > 0 || usage?.reviewDue) return REVIEW_BASIS_PROTECTED_REVIEW;
+  if (nearlySecureTargets.has(focus)) return REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION;
+  if (secureTargets.has(focus)) return REVIEW_BASIS_SECURE_REVIEW;
+  if (areRelatedGraphemes(primaryTarget, focus)) return REVIEW_BASIS_RELATED_FAMILY_REVIEW;
+  return REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW;
+}
+
+function buildReviewCandidateRecords({
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  usageByWord = new Map(),
+} = {}) {
+  const primary = normalizeToken(primaryTarget);
+  const nearlySecureTargets = getNearlySecureReviewTargets(profile, fallbackProfile, primary);
+  const secureTargets = getRowsForTargetSet(profile, fallbackProfile, "secureRows", [primary]);
+  const records = [];
+  const seen = new Set();
+
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word || getCandidateCoverage(candidate, primary) > 0) continue;
+    const usage = getUsageMeta(candidate, usageByWord);
+    const focuses = getCandidateSelectionFocuses(candidate)
+      .filter((focus) => focus && focus !== primary);
+    const focusList = focuses.length
+      ? focuses
+      : [normalizeToken(chooseBestFocusGrapheme(candidate?.segments || []))].filter(Boolean);
+
+    for (const focus of focusList) {
+      const basis = classifyReviewBasisForFocus(focus, {
+        usage,
+        nearlySecureTargets,
+        secureTargets,
+        primaryTarget: primary,
+      });
+      const key = `${word}::${focus}::${basis}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage: getCandidateSelectionCoverage(candidate, focus) || getCandidateCoverage(candidate, focus),
+      });
+    }
+  }
+
+  return records;
+}
+
+function isReviewRecordAllowed(record = {}, {
+  policy = null,
+} = {}) {
+  if (!record?.candidate || !record.word) return false;
+  const score = getCandidateDifficultyScore(record.candidate);
+  if (!Number.isFinite(score) || score <= 0) return false;
+  const bandKey = getCandidateDifficultyBandKey(record.candidate);
+  const maxScore = record.basis === REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW
+    ? Number(policy?.lastResortMaxScore ?? policy?.maxScore ?? 55)
+    : Number(policy?.maxScore ?? 70);
+  if (score > Math.min(Number(policy?.hardMax ?? maxScore), maxScore)) return false;
+  if (!policy?.allowChallengeBand && bandKey === "challenge") return false;
+  if (!policy?.allowStretchBand && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  return true;
+}
+
+function rankReviewCandidateRecords(records = [], {
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  usageByWord = new Map(),
+} = {}) {
+  const policy = resolveReviewPolicy(challengeLevel);
+  return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
+    const aProtected = a.basis === REVIEW_BASIS_PROTECTED_REVIEW;
+    const bProtected = b.basis === REVIEW_BASIS_PROTECTED_REVIEW;
+    if (aProtected !== bProtected) return Number(bProtected) - Number(aProtected);
+
+    const usageA = getUsageMeta(a.candidate, usageByWord);
+    const usageB = getUsageMeta(b.candidate, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "review");
+    if (usageDiff) return usageDiff;
+
+    const basisDiff = (REVIEW_BASIS_RANK[a.basis] ?? 99) - (REVIEW_BASIS_RANK[b.basis] ?? 99);
+    if (basisDiff) return basisDiff;
+
+    const coverageDiff = Number(b.coverage || 0) - Number(a.coverage || 0);
+    if (coverageDiff) return coverageDiff;
+
+    const sourcePriorityA = getReviewSourcePriority(getCandidateSelectionSource(a.candidate));
+    const sourcePriorityB = getReviewSourcePriority(getCandidateSelectionSource(b.candidate));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    const distanceA = Math.abs(getCandidateDifficultyScore(a.candidate) - policy.center);
+    const distanceB = Math.abs(getCandidateDifficultyScore(b.candidate) - policy.center);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+
+    const sentenceDiff = Number(!!b.candidate?.sentence) - Number(!!a.candidate?.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = String(a.word || "").localeCompare(String(b.word || ""));
+    if (wordDiff) return wordDiff;
+    return String(a.selectionFocusGrapheme || "").localeCompare(String(b.selectionFocusGrapheme || ""));
+  });
+}
+
+function pickReviewCandidateRecords({
+  count = 0,
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+  allowedBases = null,
+} = {}) {
+  const safeCount = Math.max(0, Number(count || 0));
+  if (!safeCount) return [];
+  const policy = resolveReviewPolicy(challengeLevel);
+  const basisFilter = Array.isArray(allowedBases) && allowedBases.length
+    ? new Set(allowedBases)
+    : null;
+  const records = buildReviewCandidateRecords({
+    candidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    usageByWord,
+  })
+    .filter((record) => !basisFilter || basisFilter.has(record.basis))
+    .filter((record) => isReviewRecordAllowed(record, { policy }));
+  const ranked = rankReviewCandidateRecords(records, {
+    challengeLevel,
+    usageByWord,
+  });
+  const selected = [];
+  const selectedWords = new Set();
+
+  for (const record of ranked) {
+    if (selected.length >= safeCount) break;
+    if (usedWords.has(record.word) || selectedWords.has(record.word)) continue;
+    usedWords.add(record.word);
+    selectedWords.add(record.word);
+    selected.push(record);
+  }
+
+  return selected;
+}
+
 function buildExactFocusStretchRecords({ candidates = [], focusTargets = [], basis = "" } = {}) {
   const records = [];
   const seen = new Set();
@@ -2130,38 +2406,10 @@ function buildPupilPlan({
     };
   }
 
-  const reservedPrimarySlots = Math.min(composition.target, Math.max(2, composition.target - 1));
   const targetChallengeLevel = resolveProfileChallengeLevel(profile || fallbackProfile);
 
-  const reviewTargets = getUniqueTargetList(
-    (profile?.secureRows?.length ? profile.secureRows : fallbackProfile?.secureRows) || [],
-    [primaryTarget]
-  );
-  const secondaryTargetList = getUniqueTargetList(
-    [
-      ...(profile?.concernRows || []),
-      ...((fallbackProfile?.concernRows || []).filter((item) => !profile?.concernRows?.some((own) => own.target === item.target))),
-    ],
-    [primaryTarget]
-  );
-
-  const reviewCandidates = pickCandidatesByGraphemeOrder({
-    count: composition.review,
-    graphemeOrder: reviewTargets,
-    role: "review",
-    candidates: usableCandidates,
-    usageByWord: effectiveUsageByWord,
-    usedWords,
-    fallbackFilter: (candidate) => !candidate.segments.includes(primaryTarget),
-  }).map((candidate) => buildWordSpec(candidate, {
-    role: "review",
-    support: "independent",
-    focusGrapheme: chooseBestFocusGrapheme(candidate.segments) || candidate.focusGraphemes?.[0] || "",
-    targetReason: "review_retention",
-  }));
-
   const primaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
-    count: reservedPrimarySlots,
+    count: composition.target,
     graphemeOrder: [primaryTarget],
     candidates,
     challengeLevel: targetChallengeLevel,
@@ -2169,16 +2417,36 @@ function buildPupilPlan({
     usedWords,
   });
 
-  const remainingTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
+  const secondaryTargetList = getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget);
+  const secondaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
     count: Math.max(0, composition.target - primaryTargetCandidates.length),
-    graphemeOrder: [primaryTarget, ...secondaryTargetList],
+    graphemeOrder: secondaryTargetList,
+    candidates,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+  });
+  const consolidationTargetList = getTargetConsolidationFallbackList({
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    candidates,
+    exclude: secondaryTargetList,
+  });
+  const consolidationTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
+    count: Math.max(0, composition.target - primaryTargetCandidates.length - secondaryTargetCandidates.length),
+    graphemeOrder: consolidationTargetList,
     candidates,
     challengeLevel: targetChallengeLevel,
     usageByWord: effectiveUsageByWord,
     usedWords,
   });
 
-  const targetCandidates = [...primaryTargetCandidates, ...remainingTargetCandidates].slice(0, composition.target);
+  const targetCandidates = [
+    ...primaryTargetCandidates,
+    ...secondaryTargetCandidates,
+    ...consolidationTargetCandidates,
+  ].slice(0, composition.target);
   const primaryTargetSelectionCount = targetCandidates
     .filter((candidate) => getCandidateCoverage(candidate, primaryTarget) > 0)
     .length;
@@ -2200,6 +2468,18 @@ function buildPupilPlan({
     targetReason: "target_independent",
   }));
 
+  const protectedReviewRecords = pickReviewCandidateRecords({
+    count: composition.review,
+    candidates: usableCandidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+    allowedBases: [REVIEW_BASIS_PROTECTED_REVIEW],
+  });
+
   const stretchRecords = pickStretchCandidateRecords({
     count: composition.stretch,
     candidates: usableCandidates,
@@ -2220,28 +2500,38 @@ function buildPupilPlan({
     targetReason: "stretch_probe",
   }));
 
-  const specs = [...reviewCandidates, ...targetSpecs, ...stretchSpecs];
-  const fallbackTargets = getUniqueTargetList(
-    [
-      ...((profile?.secureRows?.length ? profile.secureRows : fallbackProfile?.secureRows) || []),
-      ...(profile?.developingRows || []),
-      ...((fallbackProfile?.developingRows || []).filter((item) => !profile?.developingRows?.some((own) => own.target === item.target))),
-      ...(profile?.concernRows || []),
-      ...((fallbackProfile?.concernRows || []).filter((item) => !profile?.concernRows?.some((own) => own.target === item.target))),
-    ],
-    [primaryTarget]
-  );
-  const fallbackCandidates = pickCandidatesByGraphemeOrder({
-    count: Math.max(0, composition.totalWords - specs.length),
-    graphemeOrder: fallbackTargets,
-    role: "review",
-    candidates: usableCandidates.filter((candidate) => getCandidateCoverage(candidate, primaryTarget) === 0),
+  const reviewRecords = pickReviewCandidateRecords({
+    count: Math.max(0, composition.review - protectedReviewRecords.length),
+    candidates: usableCandidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
     usageByWord: effectiveUsageByWord,
     usedWords,
-  }).map((candidate) => buildWordSpec(candidate, {
+  });
+  const reviewCandidates = [...protectedReviewRecords, ...reviewRecords].map((record) => buildWordSpec(record.candidate, {
     role: "review",
     support: "independent",
-    focusGrapheme: chooseBestFocusGrapheme(candidate.segments) || candidate.focusGraphemes?.[0] || "",
+    focusGrapheme: record.selectionFocusGrapheme || chooseBestFocusGrapheme(record.candidate.segments) || record.candidate.focusGraphemes?.[0] || "",
+    targetReason: "review_retention",
+  }));
+
+  const specs = [...reviewCandidates, ...targetSpecs, ...stretchSpecs];
+  const fallbackRecords = pickReviewCandidateRecords({
+    count: Math.max(0, composition.totalWords - specs.length),
+    candidates: usableCandidates.filter((candidate) => getCandidateCoverage(candidate, primaryTarget) === 0),
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+  });
+  const fallbackCandidates = fallbackRecords.map((record) => buildWordSpec(record.candidate, {
+    role: "review",
+    support: "independent",
+    focusGrapheme: record.selectionFocusGrapheme || chooseBestFocusGrapheme(record.candidate.segments) || record.candidate.focusGraphemes?.[0] || "",
     targetReason: "review_retention",
   }));
   specs.push(...fallbackCandidates);

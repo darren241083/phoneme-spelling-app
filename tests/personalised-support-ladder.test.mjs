@@ -62,7 +62,7 @@ function buildWordBank(targetScores) {
       wordRow({ id: "target-ph-3", word: "phase", focus: "ph", segments: ["ph", "a", "s", "e"], score: targetScores[2] }),
       wordRow({ id: "target-ph-4", word: "graph", focus: "ph", segments: ["g", "r", "a", "ph"], score: targetScores[3] }),
       wordRow({ id: "stretch-or-1", word: "storm", focus: "or", segments: ["s", "t", "or", "m"], score: 50 }),
-      wordRow({ id: "stretch-or-2", word: "short", focus: "or", segments: ["sh", "or", "t"], score: 52 }),
+      wordRow({ id: "stretch-or-2", word: "short", focus: "or", segments: ["sh", "or", "t"], score: 50 }),
     ],
   }];
 }

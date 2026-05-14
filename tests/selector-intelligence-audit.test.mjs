@@ -12,10 +12,15 @@ const {
 } = await loadBrowserModule("../js/data/phonemeHelpers.js", import.meta.url);
 
 const TESTS = [];
-const AUDIT_VERSION = "selector_intelligence_audit_v3";
+const AUDIT_VERSION = "selector_intelligence_audit_v4";
 const AUDIT_NOW_ISO = "2026-05-14T12:00:00.000Z";
 const ASSIGNMENT_LENGTH = 10;
 const RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const REVIEW_BASIS_PROTECTED_REVIEW = "protected_review";
+const REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION = "nearly_secure_consolidation";
+const REVIEW_BASIS_SECURE_REVIEW = "secure_review";
+const REVIEW_BASIS_RELATED_FAMILY_REVIEW = "related_family_review";
+const REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW = "last_resort_safe_review";
 
 function test(name, fn) {
   TESTS.push({ name, fn });
@@ -251,6 +256,35 @@ function isRelatedFocus(source = "", target = "") {
   if (sourcePhoneme && targetPhoneme && sourcePhoneme === targetPhoneme) return true;
   return getPhonemeAlternativeOptions(cleanSource, sourcePhoneme, ["core", "all"]).includes(cleanTarget)
     || getPhonemeAlternativeOptions(cleanTarget, targetPhoneme, ["core", "all"]).includes(cleanSource);
+}
+
+function scenarioTargetSet(scenario, key, { includeNearlyConcerns = false } = {}) {
+  const rows = [
+    ...(scenario.profile?.[key] || []),
+    ...(includeNearlyConcerns
+      ? (scenario.profile?.concernRows || [])
+        .filter((row) => normalizeToken(row?.target || "") !== normalizeToken(scenario.primaryFocus || ""))
+        .filter((row) => normalizeToken(row?.securityBand || row?.security_band || "") === "nearly_secure")
+      : []),
+  ];
+  return new Set(
+    rows
+      .map((row) => normalizeToken(row?.target || ""))
+      .filter(Boolean)
+      .filter((target) => target !== normalizeToken(scenario.primaryFocus || ""))
+  );
+}
+
+function classifyReviewBasis({ scenario, word } = {}) {
+  const focus = normalizeToken(word?.focusGrapheme || "");
+  const usage = word?.usage || {};
+  if ((usage.incorrectCount || 0) > 0 || usage.reviewDue) return REVIEW_BASIS_PROTECTED_REVIEW;
+  if (scenarioTargetSet(scenario, "developingRows", { includeNearlyConcerns: true }).has(focus)) {
+    return REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION;
+  }
+  if (scenarioTargetSet(scenario, "secureRows").has(focus)) return REVIEW_BASIS_SECURE_REVIEW;
+  if (isRelatedFocus(scenario.primaryFocus, focus)) return REVIEW_BASIS_RELATED_FAMILY_REVIEW;
+  return REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW;
 }
 
 function getStretchCapForProfile(profileId = "") {
@@ -677,6 +711,19 @@ function summarizePlan(scenario, plan, attempts = []) {
       && focusDriftCount === 0
       && capBreachCount === 0
     : null;
+  const expectedComposition = buildAutoAssignmentComposition(ASSIGNMENT_LENGTH);
+  const reviewWordSummaries = wordSummaries.filter((word) => word.role === "review");
+  const reviewClassifications = reviewWordSummaries.map((word) => ({
+    ...word,
+    reviewBasis: classifyReviewBasis({ scenario, word }),
+  }));
+  const fallbackReviewClassifications = reviewClassifications
+    .filter((word) => word.position > expectedComposition.review);
+  const secondaryWeakTargets = scenarioTargetSet(scenario, "concernRows");
+  const shortfallFilledBySecondaryWeakTarget = wordSummaries
+    .filter((word) => word.role === "target")
+    .filter((word) => word.focusGrapheme !== scenario.primaryFocus && secondaryWeakTargets.has(word.focusGrapheme))
+    .length;
 
   return {
     id: scenario.id,
@@ -696,6 +743,14 @@ function summarizePlan(scenario, plan, attempts = []) {
     fallback: {
       used: fallbackCount > 0,
       fallbackCount,
+      targetShortfall: fallbackCount,
+      shortfallFilledBySecondaryWeakTarget,
+      fallbackReviewCount: fallbackReviewClassifications.length,
+      basisCounts: countBy(fallbackReviewClassifications, (word) => word.reviewBasis),
+      unlinkedFallbackCount: fallbackReviewClassifications
+        .filter((word) => word.reviewBasis === REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW)
+        .length,
+      sourceCounts: countBy(fallbackReviewClassifications, (word) => word.source),
       coverageWarnings: coverageWarnings.map((warning) => ({
         type: warning?.type || "",
         focusGrapheme: warning?.focusGrapheme || "",
@@ -741,6 +796,28 @@ function summarizePlan(scenario, plan, attempts = []) {
         repeatedFromPrior: word.repeatedFromPrior,
         hasSentence: word.hasSentence,
         hasMeaning: word.hasMeaning,
+      })),
+    },
+    review: {
+      wordCount: reviewClassifications.length,
+      basisCounts: countBy(reviewClassifications, (word) => word.reviewBasis),
+      repeatedFromPriorCount: reviewClassifications.filter((word) => word.repeatedFromPrior).length,
+      safeReviewReuseCount: reviewClassifications
+        .filter((word) => Number(word.difficultyScore || 0) <= 35 && word.repeatedFromPrior)
+        .length,
+      recentlySecureReuseCount: reviewClassifications.filter((word) => word.usage?.recentlySecure).length,
+      protectedReuseCount: reviewClassifications
+        .filter((word) => (word.usage?.incorrectCount || 0) > 0 || word.usage?.reviewDue)
+        .length,
+      sourceCounts: countBy(reviewClassifications, (word) => word.source),
+      fallbackReviewCount: fallbackReviewClassifications.length,
+      words: reviewClassifications.map((word) => ({
+        word: word.word,
+        focusGrapheme: word.focusGrapheme,
+        difficultyScore: word.difficultyScore,
+        source: word.source,
+        reviewBasis: word.reviewBasis,
+        repeatedFromPrior: word.repeatedFromPrior,
       })),
     },
     repetitionSignals: {
@@ -830,6 +907,10 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
       reviewDueReuseCount: summary.repetitionSignals.reviewDueReuseCount,
       protectedReuseCount: summary.repetitionSignals.incorrectReuseCount + summary.repetitionSignals.reviewDueReuseCount,
       safeWordReuseCount: summary.repetitionSignals.safeWordReuseCount,
+      reviewRepeatedFromPriorCount: summary.review.repeatedFromPriorCount,
+      safeReviewReuseCount: summary.review.safeReviewReuseCount,
+      recentlySecureReviewReuseCount: summary.review.recentlySecureReuseCount,
+      protectedReviewReuseCount: summary.review.protectedReuseCount,
       words: summary.words,
     });
     attempts = appendSyntheticCycleAttempts({ scenario, attempts, summary, cycle });
@@ -841,6 +922,9 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
   const totalRecentlySecureReuseCount = cycles.reduce((sum, cycle) => sum + cycle.recentlySecureReuseCount, 0);
   const totalSafeWordReuseCount = cycles.reduce((sum, cycle) => sum + cycle.safeWordReuseCount, 0);
   const totalProtectedReuseCount = cycles.reduce((sum, cycle) => sum + cycle.protectedReuseCount, 0);
+  const totalReviewRepeatCount = cycles.reduce((sum, cycle) => sum + cycle.reviewRepeatedFromPriorCount, 0);
+  const totalSafeReviewReuseCount = cycles.reduce((sum, cycle) => sum + cycle.safeReviewReuseCount, 0);
+  const totalProtectedReviewReuseCount = cycles.reduce((sum, cycle) => sum + cycle.protectedReviewReuseCount, 0);
 
   return {
     profileId: scenario.id,
@@ -852,6 +936,9 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
     totalRecentlySecureReuseCount,
     totalSafeWordReuseCount,
     totalProtectedReuseCount,
+    totalReviewRepeatCount,
+    totalSafeReviewReuseCount,
+    totalProtectedReviewReuseCount,
     maxCycleToCycleOverlapCount: cycleToCycleOverlap.reduce((max, item) => Math.max(max, item.repeatedWordCount), 0),
     cycles: cycles.map((cycle) => ({
       cycle: cycle.cycle,
@@ -864,6 +951,10 @@ function runRepeatGenerationAudit(scenario, cycleCount = 3) {
       reviewDueReuseCount: cycle.reviewDueReuseCount,
       protectedReuseCount: cycle.protectedReuseCount,
       safeWordReuseCount: cycle.safeWordReuseCount,
+      reviewRepeatedFromPriorCount: cycle.reviewRepeatedFromPriorCount,
+      safeReviewReuseCount: cycle.safeReviewReuseCount,
+      recentlySecureReviewReuseCount: cycle.recentlySecureReviewReuseCount,
+      protectedReviewReuseCount: cycle.protectedReviewReuseCount,
       selectedWords: cycle.words.map((word) => word.word),
       selectedGraphemes: cycle.words.map((word) => word.focusGrapheme),
     })),
@@ -1053,6 +1144,57 @@ function collectObservedConcerns(profileReports, repeatReports, usageProbes) {
     });
   }
 
+  const nonEvidenceReviewProfiles = profileReports.filter((profile) =>
+    (profile.review.basisCounts?.[REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW] || 0) > 0
+  );
+  if (nonEvidenceReviewProfiles.length) {
+    concerns.push({
+      id: "review_not_evidence_linked",
+      profileIds: nonEvidenceReviewProfiles.map((profile) => profile.id),
+      detail: "At least one review word was selected as a last-resort safe review rather than from protected, developing, secure, or related evidence.",
+    });
+  }
+
+  const lastResortFallbackProfiles = profileReports.filter((profile) =>
+    profile.fallback.unlinkedFallbackCount > 0
+      && (
+        (profile.review.basisCounts?.[REVIEW_BASIS_PROTECTED_REVIEW] || 0)
+        + (profile.review.basisCounts?.[REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION] || 0)
+        + (profile.review.basisCounts?.[REVIEW_BASIS_SECURE_REVIEW] || 0)
+        + (profile.review.basisCounts?.[REVIEW_BASIS_RELATED_FAMILY_REVIEW] || 0)
+      ) > 0
+  );
+  if (lastResortFallbackProfiles.length) {
+    concerns.push({
+      id: "last_resort_fallback_used_when_evidence_exists",
+      profileIds: lastResortFallbackProfiles.map((profile) => profile.id),
+      detail: "A fallback review slot used last-resort safe review even though the profile had some evidence-linked review choices.",
+    });
+  }
+
+  const needsSupportSafeReviewProfiles = repeatReports.filter((profile) =>
+    profile.profileId === "needs_support" && profile.totalSafeReviewReuseCount > 0
+  );
+  if (needsSupportSafeReviewProfiles.length) {
+    concerns.push({
+      id: "needs_support_safe_review_recycling",
+      profileIds: needsSupportSafeReviewProfiles.map((profile) => profile.profileId),
+      detail: "Needs-support repeat generation still reuses some safe review words when low primary coverage leaves few alternatives.",
+    });
+  }
+
+  const strongProfileUnlinkedFallback = profileReports.filter((profile) =>
+    ["secure_expected", "early_stretch"].includes(profile.id)
+      && profile.fallback.unlinkedFallbackCount > 0
+  );
+  if (strongProfileUnlinkedFallback.length) {
+    concerns.push({
+      id: "strong_profile_unlinked_fallback",
+      profileIds: strongProfileUnlinkedFallback.map((profile) => profile.id),
+      detail: "A strong profile used an unlinked fallback review word instead of evidence-linked challenge or consolidation.",
+    });
+  }
+
   const focusDriftProfiles = profileReports.filter((profile) => profile.stretch.focusDriftCount > 0);
   if (focusDriftProfiles.length) {
     concerns.push({
@@ -1139,7 +1281,7 @@ function buildSelectorIntelligenceAuditReport() {
 
 function printSelectorIntelligenceAudit(report) {
   console.log("SELECTOR_INTELLIGENCE_AUDIT_SUMMARY");
-  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | stretchBasis | drift | capBreach | fallback | repeatWords | maxOverlap | recentSecureReuse | safeReuse | protectedReuse");
+  console.log("profile | primary | mix | sources | targetAvg | stretchAvg | reviewBasis | stretchBasis | fallbackReview | unlinkedFallback | repeatWords | maxOverlap | reviewRepeats | safeReviewReuse | protectedReviewReuse");
   const repeatByProfile = new Map(report.repeatGeneration.map((item) => [item.profileId, item]));
   for (const profile of report.profiles) {
     const repeat = repeatByProfile.get(profile.id);
@@ -1150,15 +1292,15 @@ function printSelectorIntelligenceAudit(report) {
       Object.entries(profile.sources).map(([key, value]) => `${key}:${value}`).join(","),
       profile.difficulty.target.average,
       profile.difficulty.stretch.average,
+      Object.entries(profile.review.basisCounts || {}).map(([key, value]) => `${key}:${value}`).join(","),
       Object.entries(profile.stretch.basisCounts || {}).map(([key, value]) => `${key}:${value}`).join(","),
-      profile.stretch.focusDriftCount,
-      profile.stretch.capBreachCount,
-      profile.fallback.fallbackCount,
+      profile.fallback.fallbackReviewCount,
+      profile.fallback.unlinkedFallbackCount,
       repeat?.repeatedWordSelections.length || 0,
       repeat?.maxCycleToCycleOverlapCount || 0,
-      repeat?.totalRecentlySecureReuseCount || 0,
-      repeat?.totalSafeWordReuseCount || 0,
-      repeat?.totalProtectedReuseCount || 0,
+      repeat?.totalReviewRepeatCount || 0,
+      repeat?.totalSafeReviewReuseCount || 0,
+      repeat?.totalProtectedReviewReuseCount || 0,
     ].join(" | "));
   }
   console.log(`SELECTOR_INTELLIGENCE_AUDIT_JSON ${JSON.stringify(report)}`);
@@ -1202,6 +1344,17 @@ test("audit output includes source, fallback, support ladder, and stretch qualit
   );
   for (const profile of AUDIT_REPORT.profiles) {
     assert.ok(profile.stretch.basisCounts);
+    assert.ok(profile.review.basisCounts);
+    assert.equal(typeof profile.review.repeatedFromPriorCount, "number");
+    assert.equal(typeof profile.review.safeReviewReuseCount, "number");
+    assert.equal(typeof profile.review.recentlySecureReuseCount, "number");
+    assert.equal(typeof profile.review.protectedReuseCount, "number");
+    assert.equal(typeof profile.fallback.targetShortfall, "number");
+    assert.equal(typeof profile.fallback.shortfallFilledBySecondaryWeakTarget, "number");
+    assert.equal(typeof profile.fallback.fallbackReviewCount, "number");
+    assert.equal(typeof profile.fallback.unlinkedFallbackCount, "number");
+    assert.ok(profile.fallback.basisCounts);
+    assert.ok(profile.fallback.sourceCounts);
     assert.equal(typeof profile.stretch.evidenceLinkedCount, "number");
     assert.equal(typeof profile.stretch.focusDriftCount, "number");
     assert.equal(typeof profile.stretch.capBreachCount, "number");
@@ -1212,6 +1365,11 @@ test("audit output includes source, fallback, support ladder, and stretch qualit
     assert.equal(profile.stretch.unlinkedHardCount, 0);
   }
   assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").stretch.basisCounts.soft_consolidation, 2);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").fallback.targetShortfall, 2);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").fallback.fallbackReviewCount, 2);
+  assert.equal((AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").fallback.basisCounts.secure_review || 0) >= 1, true);
+  assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").fallback.unlinkedFallbackCount, 0);
+  assert.equal((AUDIT_REPORT.profiles.find((profile) => profile.id === "core_developing").review.basisCounts.nearly_secure_consolidation || 0) >= 1, true);
   assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "core_developing").stretch.basisCounts.diagnostic_miss, 2);
   assert.ok(AUDIT_REPORT.profiles.find((profile) => profile.id === "core_developing").stretch.scoreLiftOverTarget > 0);
   assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "secure_expected").stretch.basisCounts.current_target, 2);
@@ -1227,6 +1385,9 @@ test("repeat generation audit shows avoidable repetition is reduced", () => {
     assert.equal(repeatReport.cycles.length, 3);
     assert.equal(repeatReport.cycleToCycleOverlap.length, 2);
     assert.ok(repeatReport.repeatedGraphemeSelections.length > 0);
+    assert.equal(typeof repeatReport.totalReviewRepeatCount, "number");
+    assert.equal(typeof repeatReport.totalSafeReviewReuseCount, "number");
+    assert.equal(typeof repeatReport.totalProtectedReviewReuseCount, "number");
   }
   const totalSafeWordReuseCount = AUDIT_REPORT.repeatGeneration.reduce((sum, report) => sum + report.totalSafeWordReuseCount, 0);
   const totalRecentlySecureReuseCount = AUDIT_REPORT.repeatGeneration.reduce((sum, report) => sum + report.totalRecentlySecureReuseCount, 0);

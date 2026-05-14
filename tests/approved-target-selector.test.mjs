@@ -144,6 +144,9 @@ function usageAwareTeacherTests({ includePhase = true } = {}) {
     test_words: [
       wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
       wordRow({ id: "review-train", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+      wordRow({ id: "review-brain", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+      wordRow({ id: "review-chain", word: "chain", score: 34, focus: ["ai"], segments: ["ch", "ai", "n"] }),
+      wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
       wordRow({ id: "stretch-storm", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
       wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
       ...(includePhase
@@ -158,6 +161,12 @@ function targetWordsFor(plan, pupilId = "pupil-1") {
   return (pupilPlan?.words || [])
     .filter((item) => item.assignmentRole === "target")
     .map((item) => item.word);
+}
+
+function reviewWordsFor(plan, pupilId = "pupil-1") {
+  const pupilPlan = (plan.pupilPlans || []).find((item) => item.pupilId === pupilId);
+  return (pupilPlan?.words || [])
+    .filter((item) => item.assignmentRole === "review");
 }
 
 function stretchWordsFor(plan, pupilId = "pupil-1") {
@@ -516,6 +525,121 @@ test("recently secure words are reduced in priority but remain eligible as fallb
   assertJsonEqual(targetWordsFor(plan), ["phone"]);
 });
 
+test("review prefers previously incorrect evidence over neutral easy secure words", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-brain", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+        wordRow({ id: "review-chain", word: "chain", score: 34, focus: ["ai"], segments: ["ch", "ai", "n"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ],
+    }],
+    attempts: [
+      usageAttempt({ word: "train", correct: false, attemptNumber: 2, focus: "ai", segments: ["t", "r", "ai", "n"] }),
+    ],
+    totalWords: 2,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assert.equal(reviewWordsFor(plan).some((item) => item.word === "train"), true);
+});
+
+test("review avoids recently secure easy words when equivalent alternatives exist", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-brain", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+        wordRow({ id: "review-chain", word: "chain", score: 34, focus: ["ai"], segments: ["ch", "ai", "n"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ],
+    }],
+    attempts: [
+      usageAttempt({ word: "rain", correct: true, attemptNumber: 1, focus: "ai", segments: ["r", "ai", "n"] }),
+    ],
+    totalWords: 2,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const reviewWords = reviewWordsFor(plan).map((item) => item.word);
+  assert.equal(reviewWords.includes("rain"), false);
+  assert.equal(reviewWords.includes("train"), true);
+});
+
+test("review uses nearly secure consolidation before generic secure review", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "secure-rain", word: "rain", score: 34, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "secure-paint", word: "paint", score: 32, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "developing-seed", word: "seed", score: 30, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "developing-green", word: "green", score: 32, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 2,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 3, securityBand: "insecure" }],
+        secureRows: [{ target: "ai", total: 4, securityBand: "secure" }],
+        developingRows: [{ target: "ee", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assert.equal(reviewWordsFor(plan).some((item) => item.focusGrapheme === "ee"), true);
+});
+
+test("low primary coverage uses developing consolidation target before review fallback", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "secure-rain", word: "rain", score: 34, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "secure-train", word: "train", score: 32, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "secure-paint", word: "paint", score: 30, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "developing-seed", word: "seed", score: 32, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 5,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 3, securityBand: "insecure" }],
+        secureRows: [{ target: "ai", total: 4, securityBand: "secure" }],
+        developingRows: [{ target: "ee", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(
+    plan.pupilPlans[0].words
+      .filter((item) => item.assignmentRole === "target")
+      .map((item) => `${item.word}:${item.focusGrapheme}`),
+    ["phone:ph", "seed:ee"],
+  );
+});
+
 test("multi-pupil generated assignment uses pupil-specific word usage history", () => {
   const plan = buildGeneratedAssignmentPlan({
     pupilIds: ["pupil-1", "pupil-2"],
@@ -594,9 +718,13 @@ test("generated assignment uses partial primary target coverage and fills safely
         wordRow({ id: "review-ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
         wordRow({ id: "review-ai-2", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
         wordRow({ id: "review-ai-3", word: "paint", score: 26, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "review-ai-4", word: "snail", score: 30, focus: ["ai"], segments: ["s", "n", "ai", "l"] }),
+        wordRow({ id: "review-ai-5", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
         wordRow({ id: "review-ee-1", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
         wordRow({ id: "review-ee-2", word: "green", score: 25, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
         wordRow({ id: "review-ee-3", word: "sleep", score: 26, focus: ["ee"], segments: ["s", "l", "ee", "p"] }),
+        wordRow({ id: "review-ee-4", word: "queen", score: 30, focus: ["ee"], segments: ["qu", "ee", "n"] }),
+        wordRow({ id: "review-ee-5", word: "three", score: 34, focus: ["ee"], segments: ["th", "r", "ee"] }),
         wordRow({ id: "stretch-or-1", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
         wordRow({ id: "stretch-or-2", word: "short", score: 60, focus: ["or"], segments: ["sh", "or", "t"] }),
         wordRow({ id: "target-ph-1", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
@@ -679,8 +807,8 @@ test("generated assignment can use wordloom core ar bank with no teacher test_wo
         core({ id: "ar-2", word: "sharp", score: 38, focus: ["ar"], segments: ["sh", "ar", "p"] }),
         core({ id: "ar-3", word: "start", score: 42, focus: ["ar"], segments: ["s", "t", "ar", "t"] }),
         core({ id: "ar-4", word: "garden", score: 46, focus: ["ar"], segments: ["g", "ar", "d", "e", "n"] }),
-        core({ id: "or-1", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
-        core({ id: "or-2", word: "short", score: 60, focus: ["or"], segments: ["sh", "or", "t"] }),
+        core({ id: "or-1", word: "storm", score: 48, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        core({ id: "or-2", word: "short", score: 50, focus: ["or"], segments: ["sh", "or", "t"] }),
       ],
     }],
     attempts: [],
@@ -761,6 +889,8 @@ test("needs support stretch slots use soft consolidation instead of hard stretch
       test_words: [
         wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
         wordRow({ id: "review-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-paint", word: "paint", score: 28, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "review-snail", word: "snail", score: 30, focus: ["ai"], segments: ["s", "n", "ai", "l"] }),
         wordRow({ id: "review-brain", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
         wordRow({ id: "review-chain", word: "chain", score: 34, focus: ["ai"], segments: ["ch", "ai", "n"] }),
         wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
