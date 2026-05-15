@@ -52,6 +52,13 @@ const REVIEW_BASIS_RANK = {
   [REVIEW_BASIS_RELATED_FAMILY_REVIEW]: 3,
   [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
 };
+const NEEDS_SUPPORT_THIN_REVIEW_BASIS_RANK = {
+  [REVIEW_BASIS_PROTECTED_REVIEW]: 0,
+  [REVIEW_BASIS_SECURE_REVIEW]: 1,
+  [REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION]: 2,
+  [REVIEW_BASIS_RELATED_FAMILY_REVIEW]: 3,
+  [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
+};
 const REVIEW_SOURCE_PRIORITIES = {
   [APPROVED_TARGET_TEACHER_SOURCE]: 0,
   [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 1,
@@ -1640,6 +1647,8 @@ function isReviewRecordAllowed(record = {}, {
 function rankReviewCandidateRecords(records = [], {
   challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
   usageByWord = new Map(),
+  basisRank = REVIEW_BASIS_RANK,
+  rankBasisBeforeUsage = false,
 } = {}) {
   const policy = resolveReviewPolicy(challengeLevel);
   return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
@@ -1647,13 +1656,15 @@ function rankReviewCandidateRecords(records = [], {
     const bProtected = b.basis === REVIEW_BASIS_PROTECTED_REVIEW;
     if (aProtected !== bProtected) return Number(bProtected) - Number(aProtected);
 
+    const basisDiff = (basisRank[a.basis] ?? 99) - (basisRank[b.basis] ?? 99);
+    if (rankBasisBeforeUsage && basisDiff) return basisDiff;
+
     const usageA = getUsageMeta(a.candidate, usageByWord);
     const usageB = getUsageMeta(b.candidate, usageByWord);
     const usageDiff = compareUsageSpacingForRole(usageA, usageB, "review");
     if (usageDiff) return usageDiff;
 
-    const basisDiff = (REVIEW_BASIS_RANK[a.basis] ?? 99) - (REVIEW_BASIS_RANK[b.basis] ?? 99);
-    if (basisDiff) return basisDiff;
+    if (!rankBasisBeforeUsage && basisDiff) return basisDiff;
 
     const coverageDiff = Number(b.coverage || 0) - Number(a.coverage || 0);
     if (coverageDiff) return coverageDiff;
@@ -1685,6 +1696,8 @@ function pickReviewCandidateRecords({
   usageByWord = new Map(),
   usedWords = new Set(),
   allowedBases = null,
+  basisRank = REVIEW_BASIS_RANK,
+  rankBasisBeforeUsage = false,
 } = {}) {
   const safeCount = Math.max(0, Number(count || 0));
   if (!safeCount) return [];
@@ -1704,6 +1717,8 @@ function pickReviewCandidateRecords({
   const ranked = rankReviewCandidateRecords(records, {
     challengeLevel,
     usageByWord,
+    basisRank,
+    rankBasisBeforeUsage,
   });
   const selected = [];
   const selectedWords = new Set();
@@ -1860,6 +1875,7 @@ function pickStretchCandidateRecords({
   targetAverageScore = null,
   usageByWord = new Map(),
   usedWords = new Set(),
+  allowUnlinkedFallback = true,
 } = {}) {
   const safeCount = Math.max(0, Number(count || 0));
   if (!safeCount) return [];
@@ -1896,7 +1912,9 @@ function pickStretchCandidateRecords({
 
   const selected = [];
   const selectedWords = new Set();
-  for (const basis of policy.basisOrder || []) {
+  const basisOrder = (policy.basisOrder || [])
+    .filter((basis) => allowUnlinkedFallback || basis !== STRETCH_BASIS_UNLINKED_FALLBACK);
+  for (const basis of basisOrder) {
     const ranked = rankStretchCandidateRecords(
       (groups[basis] || []).filter((record) => isStretchRecordAllowed(record, {
         policy,
@@ -2375,6 +2393,16 @@ function buildTargetCoverageWarning({
   };
 }
 
+function isNeedsSupportThinTargetCoverage({
+  challengeLevel = "",
+  requestedTargetCount = 0,
+  primaryTargetCandidates = [],
+} = {}) {
+  return normalizeMetadataKey(challengeLevel) === "needs_support"
+    && Math.max(0, Number(requestedTargetCount || 0)) > 0
+    && (Array.isArray(primaryTargetCandidates) ? primaryTargetCandidates.length : 0) < Math.max(0, Number(requestedTargetCount || 0));
+}
+
 function buildPupilPlan({
   pupilId,
   profile,
@@ -2416,8 +2444,21 @@ function buildPupilPlan({
     usageByWord: effectiveUsageByWord,
     usedWords,
   });
+  const needsSupportThinTargetCoverage = isNeedsSupportThinTargetCoverage({
+    challengeLevel: targetChallengeLevel,
+    requestedTargetCount: composition.target,
+    primaryTargetCandidates,
+  });
+  const thinCoverageReviewRankOptions = needsSupportThinTargetCoverage
+    ? {
+      basisRank: NEEDS_SUPPORT_THIN_REVIEW_BASIS_RANK,
+      rankBasisBeforeUsage: true,
+    }
+    : {};
 
-  const secondaryTargetList = getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget);
+  const secondaryTargetList = needsSupportThinTargetCoverage
+    ? getSecondaryWeakTargetList(profile, null, primaryTarget)
+    : getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget);
   const secondaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
     count: Math.max(0, composition.target - primaryTargetCandidates.length),
     graphemeOrder: secondaryTargetList,
@@ -2433,14 +2474,16 @@ function buildPupilPlan({
     candidates,
     exclude: secondaryTargetList,
   });
-  const consolidationTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
-    count: Math.max(0, composition.target - primaryTargetCandidates.length - secondaryTargetCandidates.length),
-    graphemeOrder: consolidationTargetList,
-    candidates,
-    challengeLevel: targetChallengeLevel,
-    usageByWord: effectiveUsageByWord,
-    usedWords,
-  });
+  const consolidationTargetCandidates = needsSupportThinTargetCoverage
+    ? []
+    : pickApprovedTargetCandidatesByGraphemeOrder({
+      count: Math.max(0, composition.target - primaryTargetCandidates.length - secondaryTargetCandidates.length),
+      graphemeOrder: consolidationTargetList,
+      candidates,
+      challengeLevel: targetChallengeLevel,
+      usageByWord: effectiveUsageByWord,
+      usedWords,
+    });
 
   const targetCandidates = [
     ...primaryTargetCandidates,
@@ -2478,18 +2521,20 @@ function buildPupilPlan({
     usageByWord: effectiveUsageByWord,
     usedWords,
     allowedBases: [REVIEW_BASIS_PROTECTED_REVIEW],
+    ...thinCoverageReviewRankOptions,
   });
 
   const stretchRecords = pickStretchCandidateRecords({
     count: composition.stretch,
     candidates: usableCandidates,
     profile,
-    fallbackProfile,
+    fallbackProfile: needsSupportThinTargetCoverage ? null : fallbackProfile,
     primaryTarget,
     challengeLevel: targetChallengeLevel,
     targetAverageScore: averageCandidateDifficultyScore(targetCandidates),
     usageByWord: effectiveUsageByWord,
     usedWords,
+    allowUnlinkedFallback: !needsSupportThinTargetCoverage,
   });
 
   const stretchSpecs = stretchRecords.map((record) => buildWordSpec(record.candidate, {
@@ -2509,6 +2554,7 @@ function buildPupilPlan({
     challengeLevel: targetChallengeLevel,
     usageByWord: effectiveUsageByWord,
     usedWords,
+    ...thinCoverageReviewRankOptions,
   });
   const reviewCandidates = [...protectedReviewRecords, ...reviewRecords].map((record) => buildWordSpec(record.candidate, {
     role: "review",
@@ -2527,6 +2573,7 @@ function buildPupilPlan({
     challengeLevel: targetChallengeLevel,
     usageByWord: effectiveUsageByWord,
     usedWords,
+    ...thinCoverageReviewRankOptions,
   });
   const fallbackCandidates = fallbackRecords.map((record) => buildWordSpec(record.candidate, {
     role: "review",

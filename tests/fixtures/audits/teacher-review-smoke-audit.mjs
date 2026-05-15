@@ -866,7 +866,7 @@ export function renderTeacherReviewSmokeAudit(report = buildTeacherReviewSmokeAu
     `Audit version: ${report.auditVersion}`,
     `Generated at: ${report.generatedAt}`,
     `Assignment length: ${report.assignmentLength}`,
-    `Selector behaviour: existing selector only; no Selector V2 changes.`,
+    `Selector behaviour: Selector V2 needs-support fallback tightening enabled.`,
     `Expected composition: ${report.expectedComposition.review} review / ${report.expectedComposition.target} target / ${report.expectedComposition.stretch} stretch`,
     "",
     ...report.scenarios.map((scenario) => renderScenario(scenario)),

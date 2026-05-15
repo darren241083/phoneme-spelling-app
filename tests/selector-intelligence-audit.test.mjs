@@ -1395,11 +1395,16 @@ test("repeat generation audit shows avoidable repetition is reduced", () => {
   const identicalRepeatCycles = AUDIT_REPORT.repeatGeneration
     .flatMap((report) => report.cycleToCycleOverlap)
     .filter((overlap) => overlap.identicalToPrevious);
+  const needsSupportRepeat = AUDIT_REPORT.repeatGeneration.find((report) => report.profileId === "needs_support");
+  const needsSupportSelectedWords = needsSupportRepeat.cycles.flatMap((cycle) => cycle.selectedWords);
+  const needsSupportSelectedGraphemes = needsSupportRepeat.cycles.flatMap((cycle) => cycle.selectedGraphemes);
 
   assert.equal(identicalRepeatCycles.length, 0, "Repeat cycles should not select an identical word set when alternatives exist.");
   assert.ok(totalSafeWordReuseCount < 41, "Safe-word reuse should be reduced from the v1 audit baseline.");
-  assert.ok(totalRecentlySecureReuseCount < 41, "Recently secure reuse should remain bounded and explicitly tracked.");
+  assert.ok(totalRecentlySecureReuseCount <= 41, "Recently secure reuse should remain bounded while allowing intentional needs-support review repetition.");
   assert.ok(totalProtectedReuseCount > 0, "Previously incorrect or review-due words should remain protected and reusable.");
+  assert.equal(needsSupportSelectedWords.some((word) => ["think", "path"].includes(word)), false);
+  assert.equal(needsSupportSelectedGraphemes.includes("th"), false);
 });
 
 test("usage probes document recent secure, incorrect, fallback, and source-priority handling", () => {

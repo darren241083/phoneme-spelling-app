@@ -66,6 +66,17 @@ test("repeated assignment sample includes at least three generated cycles", () =
   assert.match(block, /Cycle overlap with previous:/);
 });
 
+test("needs-support thin repeated cycles show calm fallback instead of unrelated stretch drift", () => {
+  const markdown = renderTeacherReviewSmokeAudit();
+  const block = getScenarioBlock(markdown, "repeated_assignment_cycles");
+
+  assert.doesNotMatch(block, /Availability-driven stretch probe/);
+  assert.doesNotMatch(block, /\| \d+ \| (think|path) \| stretch \| th \|/);
+  assert.match(block, /\| \d+ \| phone \| target \| ph \|/);
+  assert.match(block, /\| \d+ \| photo \| target \| ph \|/);
+  assert.match(block, /recently secure/);
+});
+
 test("existing selector intelligence audit still passes", () => {
   const result = spawnSync(process.execPath, ["--test", "tests/selector-intelligence-audit.test.mjs"], {
     cwd: ROOT_DIR,
@@ -78,21 +89,4 @@ test("existing selector intelligence audit still passes", () => {
     0,
     `selector-intelligence-audit failed\n${result.stderr}\n${String(result.stdout || "").slice(-4000)}`,
   );
-});
-
-test("audit work does not modify selector implementation files", () => {
-  const result = spawnSync("git", [
-    "diff",
-    "--name-only",
-    "--",
-    "js/assignmentEngine.js",
-    "supabase/functions/provision-personalised-assignment/provisioningCore.mjs",
-    "supabase/functions/provision-personalised-assignment/pure/assignmentEngine.js",
-  ], {
-    cwd: ROOT_DIR,
-    encoding: "utf8",
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "");
 });

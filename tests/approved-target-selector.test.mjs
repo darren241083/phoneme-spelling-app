@@ -606,7 +606,7 @@ test("review uses nearly secure consolidation before generic secure review", () 
   assert.equal(reviewWordsFor(plan).some((item) => item.focusGrapheme === "ee"), true);
 });
 
-test("low primary coverage uses developing consolidation target before review fallback", () => {
+test("low primary coverage routes developing consolidation into review fallback", () => {
   const plan = buildGeneratedAssignmentPlan({
     pupilIds: ["pupil-1"],
     teacherTests: [{
@@ -636,8 +636,56 @@ test("low primary coverage uses developing consolidation target before review fa
     plan.pupilPlans[0].words
       .filter((item) => item.assignmentRole === "target")
       .map((item) => `${item.word}:${item.focusGrapheme}`),
-    ["phone:ph", "seed:ee"],
+    ["phone:ph"],
   );
+  assert.equal(
+    plan.pupilPlans[0].words
+      .filter((item) => item.assignmentRole === "review")
+      .some((item) => item.word === "seed" && item.focusGrapheme === "ee"),
+    true,
+  );
+});
+
+test("needs support with stronger primary coverage keeps normal target variety", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "target-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "target-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "target-paint", word: "paint", score: 28, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
+        wordRow({ id: "target-snail", word: "snail", score: 30, focus: ["ai"], segments: ["s", "n", "ai", "l"] }),
+        wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-green", word: "green", score: 26, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "review-boat", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-coat", word: "coat", score: 28, focus: ["oa"], segments: ["c", "oa", "t"] }),
+        wordRow({ id: "stretch-shell", word: "shell", score: 34, focus: ["sh"], segments: ["sh", "e", "ll"] }),
+        wordRow({ id: "stretch-shop", word: "shop", score: 36, focus: ["sh"], segments: ["sh", "o", "p"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 10,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ai", total: 5, securityBand: "insecure" }],
+        secureRows: [
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "sh", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const pupilWords = plan.pupilPlans[0]?.words || [];
+  const targetWords = pupilWords.filter((item) => item.assignmentRole === "target");
+  assert.equal(targetWords.length, 4);
+  assert.equal(targetWords.every((item) => item.focusGrapheme === "ai"), true);
+  assert.equal(new Set(targetWords.map((item) => item.word)).size, 4);
+  assert.equal(stretchWordsFor(plan).length, 2);
 });
 
 test("multi-pupil generated assignment uses pupil-specific word usage history", () => {
