@@ -1577,6 +1577,21 @@ function normalizePersonalisedGenerationRunRow(row) {
   return normalized;
 }
 
+function normalizePersonalisedGenerationRunPupilRow(row) {
+  if (!row || typeof row !== "object") return null;
+  return {
+    id: String(row?.id || ""),
+    run_id: String(row?.run_id || ""),
+    class_id: String(row?.class_id || ""),
+    pupil_id: String(row?.pupil_id || ""),
+    assignment_id: String(row?.assignment_id || "").trim() || null,
+    status: String(row?.status || "skipped").trim().toLowerCase() || "skipped",
+    skip_reason: String(row?.skip_reason || "").trim().toLowerCase() || null,
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+  };
+}
+
 function normalizePersonalisedAutomationPolicyRow(row) {
   if (!row || typeof row !== "object") return null;
   const targets = Array.isArray(row?.personalised_automation_policy_targets)
@@ -5492,6 +5507,72 @@ export async function updatePersonalisedGenerationRun({
   }
 
   return normalizePersonalisedGenerationRunRow(data || { id: safeRunId, teacher_id: context.teacherId, ...payload });
+}
+
+export async function listRecentPersonalisedGenerationRuns({
+  limit = 10,
+  automationPolicyId = "",
+  includePupilRows = true,
+} = {}) {
+  const context = await requireCentralOwnerContext({
+    message: "Central-owner access is required to view personalised automation run outcomes.",
+  });
+  const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit || 10))));
+  const safePolicyId = String(automationPolicyId || "").trim();
+
+  let query = supabase
+    .from(PERSONALISED_GENERATION_RUN_TABLE)
+    .select("*")
+    .eq("teacher_id", context.teacherId)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  if (safePolicyId) {
+    query = query.eq("automation_policy_id", safePolicyId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingPersonalisedGenerationRunTableError(error) || isMissingPersonalisedGenerationRunColumnError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const runs = (Array.isArray(data) ? data : [])
+    .map(normalizePersonalisedGenerationRunRow)
+    .filter(Boolean);
+  if (!includePupilRows || !runs.length) return runs.map((run) => ({ ...run, pupilRows: [] }));
+
+  const runIds = runs.map((run) => String(run?.id || "").trim()).filter(Boolean);
+  let pupilQuery = supabase
+    .from(PERSONALISED_GENERATION_RUN_PUPIL_TABLE)
+    .select("id, run_id, class_id, pupil_id, assignment_id, status, skip_reason, created_at, updated_at")
+    .in("run_id", runIds)
+    .order("created_at", { ascending: true });
+  pupilQuery = applyActiveSchoolFilter(pupilQuery, context.accessContext);
+
+  const { data: pupilData, error: pupilError } = await pupilQuery;
+  if (pupilError) {
+    if (isMissingPersonalisedGenerationRunPupilTableError(pupilError)) {
+      return runs.map((run) => ({ ...run, pupilRows: [] }));
+    }
+    throw pupilError;
+  }
+
+  const rowsByRunId = new Map();
+  for (const row of Array.isArray(pupilData) ? pupilData : []) {
+    const normalized = normalizePersonalisedGenerationRunPupilRow(row);
+    if (!normalized?.run_id) continue;
+    const next = rowsByRunId.get(normalized.run_id) || [];
+    next.push(normalized);
+    rowsByRunId.set(normalized.run_id, next);
+  }
+
+  return runs.map((run) => ({
+    ...run,
+    pupilRows: rowsByRunId.get(String(run?.id || "")) || [],
+  }));
 }
 
 export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {

@@ -96,6 +96,7 @@ import {
   listStaffRoleAssignments,
   listStaffScopeAssignments,
   listPersonalisedAutomationPolicies,
+  listRecentPersonalisedGenerationRuns,
   listClassAutoAssignPolicies,
   movePupilFormMembership,
   normalizeClassType,
@@ -123,7 +124,7 @@ import {
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
   withActiveSchoolId,
-} from "./db.js?v=1.50";
+} from "./db.js?v=1.51";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -139,7 +140,13 @@ import {
   parsePupilImportCsv,
 } from "./pupilCsvImport.js?v=1.4";
 import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
-import { buildAutomationRunFeedbackNotice } from "./automationRunFeedback.js?v=1.0";
+import {
+  buildAutomationRunFeedbackNotice,
+  buildAutomationRunOutcomeViewModel,
+  buildCoverageWarningDisplay,
+  buildGeneratedAssignmentExplainabilitySummary,
+  normalizeCoverageWarnings,
+} from "./automationRunFeedback.js?v=1.1";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -725,6 +732,7 @@ const state = {
   automationSelectionExplicit: false,
   automationSelectionOpenedThisSession: false,
   automationDraftsByKey: {},
+  automationRecentRuns: [],
   automationAction: createDefaultAutomationActionState(),
   automationDismissedPolicyAlertKeys: [],
   interventionGroup: createDefaultInterventionGroupState(),
@@ -4132,6 +4140,108 @@ async function refreshAutomationPoliciesAfterMutation(actionLabel = "update") {
   }
 }
 
+function getAutomationRecentRuns() {
+  return Array.isArray(state.automationRecentRuns) ? state.automationRecentRuns : [];
+}
+
+function getLatestAutomationRunForPolicy(policyId = "") {
+  const safePolicyId = String(policyId || "").trim();
+  const runs = getAutomationRecentRuns()
+    .filter((run) => !isSpellingBeeAutomationPolicy(run));
+  if (safePolicyId) {
+    return runs.find((run) => String(run?.automation_policy_id || "").trim() === safePolicyId) || null;
+  }
+  return runs[0] || null;
+}
+
+function renderAutomationOutcomeChips(chips = []) {
+  const visible = (Array.isArray(chips) ? chips : []).filter((item) => Number(item?.count || 0) > 0);
+  if (!visible.length) return "";
+  return `
+    <div class="td-automation-outcome-chips">
+      ${visible.map((item) => `
+        <span class="td-automation-outcome-chip td-automation-outcome-chip--${escapeAttr(String(item?.key || item?.reason || "other").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase())}">
+          ${escapeHtml(`${item.label}: ${item.count}`)}
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAutomationCoverageDisplay(display, { compact = false } = {}) {
+  const coverage = display || buildCoverageWarningDisplay(null);
+  const warningItems = Array.isArray(coverage?.warnings) ? coverage.warnings : [];
+  const className = [
+    "td-automation-coverage",
+    `td-automation-coverage--${String(coverage?.state || "not_recorded").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase()}`,
+    compact ? "td-automation-coverage--compact" : "",
+  ].filter(Boolean).join(" ");
+  return `
+    <div class="${className}">
+      <span>${escapeHtml(coverage?.message || "Coverage warnings not recorded for this run.")}</span>
+      ${warningItems.length ? `
+        <ul>
+          ${warningItems.slice(0, compact ? 2 : 4).map((warning) => `<li>${escapeHtml(warning?.displayCopy || warning?.message || "Coverage warning recorded.")}</li>`).join("")}
+        </ul>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderAutomationLatestRunOutcomePanel(run, {
+  policySelected = false,
+  isSpellingBeePolicy = false,
+} = {}) {
+  if (!canManageAutomation()) return "";
+  if (isSpellingBeePolicy) return "";
+  if (!run) {
+    return `
+      <div class="td-automation-run-outcome td-automation-run-outcome--empty">
+        <div class="td-automation-run-outcome-head">
+          <strong>Latest run outcome</strong>
+          <span>${escapeHtml(policySelected ? "No run recorded for this policy yet." : "No personalised run recorded yet.")}</span>
+        </div>
+        <p>${escapeHtml(policySelected ? "Run this policy to see generated, waiting, skipped, and already assigned pupils here." : "Select and run a personalised policy to see the outcome here.")}</p>
+      </div>
+    `;
+  }
+
+  const view = buildAutomationRunOutcomeViewModel({ run });
+  const completedAt = run?.finished_at || run?.updated_at || run?.created_at || "";
+  const classRows = Array.isArray(view?.classRows) ? view.classRows : [];
+  return `
+    <div class="td-automation-run-outcome td-automation-run-outcome--${escapeAttr(view.type || "info")}">
+      <div class="td-automation-run-outcome-head">
+        <strong>Latest run outcome</strong>
+        <span>${escapeHtml(completedAt ? formatDate(completedAt) : "Date not recorded")}</span>
+      </div>
+      <div class="td-automation-run-outcome-summary">
+        <div>
+          <strong>${escapeHtml(view.headline)}</strong>
+          <p>${escapeHtml(view.nextAction)}</p>
+        </div>
+        ${renderAutomationOutcomeChips(view.statusCounts)}
+      </div>
+      ${renderAutomationOutcomeChips(view.reasonChips)}
+      ${renderAutomationCoverageDisplay(view.coverageDisplay, { compact: true })}
+      ${classRows.length ? `
+        <div class="td-automation-run-outcome-classes">
+          ${classRows.slice(0, 4).map((row) => `
+            <div class="td-automation-run-outcome-class">
+              <div>
+                <strong>${escapeHtml(row.className)}</strong>
+                <span>${escapeHtml(row.statusLabel)}</span>
+              </div>
+              <span>${escapeHtml(`${row.includedCount} generated, ${row.waitingCount} waiting, ${row.skippedCount} skipped`)}</span>
+            </div>
+          `).join("")}
+          ${classRows.length > 4 ? `<div class="td-automation-run-outcome-more">${escapeHtml(`+${classRows.length - 4} more group${classRows.length - 4 === 1 ? "" : "s"}`)}</div>` : ""}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
 function markCurrentAutomationPolicySaved(
   savedPolicy = null,
   {
@@ -5123,8 +5233,9 @@ async function loadDashboardData() {
   const teacherId = state.user.id;
   const accessContext = await readStaffAccessContext();
   state.accessContext = accessContext || createDefaultAccessContext(teacherId);
+  const canLoadAutomationRuns = canManageAutomation();
 
-  const [classes, tests, assignments, _analyticsThreads, classPolicies, appRole, automationPolicies] = await Promise.all([
+  const [classes, tests, assignments, _analyticsThreads, classPolicies, appRole, automationPolicies, automationRecentRuns] = await Promise.all([
     loadClasses(),
     loadTests(),
     loadAssignments(),
@@ -5132,6 +5243,9 @@ async function loadDashboardData() {
     listClassAutoAssignPolicies(),
     readTeacherAppRole(),
     listPersonalisedAutomationPolicies({ includeArchived: true }),
+    canLoadAutomationRuns
+      ? listRecentPersonalisedGenerationRuns({ limit: 20, includePupilRows: true })
+      : Promise.resolve([]),
   ]);
 
   state.classes = classes;
@@ -5141,6 +5255,7 @@ async function loadDashboardData() {
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
+  state.automationRecentRuns = Array.isArray(automationRecentRuns) ? automationRecentRuns : [];
   const profileSyncNotice = consumeLatestStaffProfileSyncNotice();
   restoreAutomationPolicyDraft();
   state.automationSelectedPolicyKey = getExplicitAutomationSelectedPolicyKey();
@@ -5157,6 +5272,7 @@ async function loadDashboardData() {
   if (!canManageAutomation()) {
     state.createAutoAssignOpen = false;
     state.automationPolicies = [];
+    state.automationRecentRuns = [];
     state.automationDraftsByKey = {};
     state.automationSelectedPolicyKey = "";
   }
@@ -12913,6 +13029,7 @@ async function handleRunNowPersonalisedGeneration() {
           pupilIds: includedPupilIds,
           policy: effectivePolicy,
         });
+        const coverageWarnings = normalizeCoverageWarnings(plan?.coverageWarnings);
         created = await createGeneratedAssignmentForClass({
           classId,
           className,
@@ -12957,6 +13074,7 @@ async function handleRunNowPersonalisedGeneration() {
           skippedCount: skippedRows.length,
           waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
+          coverageWarnings,
         });
       } catch (classError) {
         console.error("run now personalised generation class error:", {
@@ -12989,6 +13107,7 @@ async function handleRunNowPersonalisedGeneration() {
     }
 
     const runStatus = errorCount > 0 && includedPupilCount === 0 ? "failed" : "completed";
+    const coverageWarnings = classResults.flatMap((result) => normalizeCoverageWarnings(result?.coverageWarnings));
     await updatePersonalisedGenerationRun({
       runId: runRecord.id,
       status: runStatus,
@@ -12999,6 +13118,7 @@ async function handleRunNowPersonalisedGeneration() {
         classes: classResults,
         errorCount,
         waitingPupilCount,
+        coverageWarnings,
         automationPolicyId: effectivePolicy.id || null,
         policySnapshot: effectivePolicy,
         derivedDeadlineAt: deadlineIso,
@@ -14971,6 +15091,11 @@ function renderCreateBar() {
     automationRunPolicy,
     automationIsNewDraft ? "New policy draft" : "Selected policy"
   );
+  const latestAutomationRun = getLatestAutomationRunForPolicy(selectedAutomationPolicyId);
+  const latestAutomationRunOutcomeHtml = renderAutomationLatestRunOutcomePanel(latestAutomationRun, {
+    policySelected: !!selectedAutomationPolicyId,
+    isSpellingBeePolicy: automationIsSpellingBee,
+  });
   const automationStatusBadge = getAutomationPolicyStatusBadgeMeta(automationRunPolicy, {
     isDraft: automationIsNewDraft && !savedAutomationPolicy,
   });
@@ -15891,6 +16016,7 @@ function renderCreateBar() {
                               </div>
                             </div>
                           ` : ""}
+                          ${latestAutomationRunOutcomeHtml}
                         </div>
 
                         <div class="td-automation-policy-actions">
@@ -18974,6 +19100,59 @@ function renderAssignmentResultsMatrix(analytics, options = {}) {
   `;
 }
 
+function findAutomationRunClassForAssignment(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return null;
+  for (const run of getAutomationRecentRuns()) {
+    const classResults = Array.isArray(run?.summary?.classes) ? run.summary.classes : [];
+    const classResult = classResults.find((item) => String(item?.assignmentId || item?.assignment_id || "").trim() === safeAssignmentId);
+    if (classResult) return { run, classResult };
+  }
+  return null;
+}
+
+function renderGeneratedAssignmentCoverage(analytics) {
+  const match = findAutomationRunClassForAssignment(analytics?.assignmentId || "");
+  const display = match
+    ? buildCoverageWarningDisplay(match.classResult, {
+      notRecordedMessage: "Coverage warnings not recorded for this assignment.",
+      clearMessage: "No coverage warnings recorded for this assignment.",
+    })
+    : buildCoverageWarningDisplay(null, {
+      notRecordedMessage: "Coverage warnings not recorded for this assignment.",
+      clearMessage: "No coverage warnings recorded for this assignment.",
+    });
+  return renderAutomationCoverageDisplay(display, { compact: true });
+}
+
+function renderGeneratedAssignmentExplainability(pupil, sections = []) {
+  const summary = buildGeneratedAssignmentExplainabilitySummary({
+    sections,
+    words: pupil?.targetWords || [],
+    pupil,
+  });
+  const roleChips = summary.roleItems
+    .map((item) => `<span class="td-generated-explain-chip">${escapeHtml(`${item.label}: ${item.count}`)}</span>`)
+    .join("");
+  const supportChips = summary.supportItems
+    .map((item) => `<span class="td-generated-explain-chip">${escapeHtml(`${item.label}: ${item.count}`)}</span>`)
+    .join("");
+
+  return `
+    <div class="td-generated-explainability">
+      <div class="td-generated-explainability-head">
+        <span>${escapeHtml(`Focus: ${summary.focusLabel}`)}</span>
+        <span>${escapeHtml(`Mix: ${summary.roleMixText}`)}</span>
+      </div>
+      <p>${escapeHtml(summary.whySentence)}</p>
+      <div class="td-generated-explainability-chips">
+        ${roleChips}
+        ${supportChips}
+      </div>
+    </div>
+  `;
+}
+
 function renderGeneratedAssignmentResults(analytics, options = {}) {
   const highlightedPupilId = String(options?.highlightedPupilId || "");
   const visiblePupilIds = Array.isArray(options?.visiblePupilIds)
@@ -18992,6 +19171,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
 
   return `
     <div class="td-generated-results-shell">
+      ${renderGeneratedAssignmentCoverage(analytics)}
       ${rows.map((pupil) => {
         const pupilId = String(pupil?.pupilId || "");
         const isHighlighted = highlightedPupilId && pupilId === highlightedPupilId;
@@ -19025,6 +19205,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
               </div>
               ${renderPupilSignalBadge({ tone: pupil?.signalTone, label: pupil?.signalLabel })}
             </div>
+            ${renderGeneratedAssignmentExplainability(pupil, sections)}
             <div class="td-generated-results-sections">
               ${sections.map((section) => `
                 <section class="td-generated-results-section">
@@ -19040,6 +19221,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
                           <span class="td-generated-results-note">${escapeHtml(describeAssignmentTargetReason(item))}</span>
                         </div>
                         <div class="td-generated-results-item-meta">
+                          ${item?.focusGrapheme ? `<span class="td-generated-results-tag">${escapeHtml(item.focusGrapheme)}</span>` : ""}
                           <span class="td-generated-results-tag">${escapeHtml(getAssignmentSupportLabel(item?.assignmentSupport || "independent"))}</span>
                           ${renderAssignmentStatusDot(item)}
                         </div>
@@ -27381,6 +27563,107 @@ function injectStyles() {
       line-height:1.4;
     }
 
+    .td-automation-run-outcome{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      margin-top:12px;
+      padding:12px;
+      border:1px solid #dbe3ee;
+      border-radius:8px;
+      background:#fff;
+    }
+
+    .td-automation-run-outcome--success{
+      border-color:#bbf7d0;
+      background:#f0fdf4;
+    }
+
+    .td-automation-run-outcome--warning{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .td-automation-run-outcome--error{
+      border-color:#fecaca;
+      background:#fef2f2;
+    }
+
+    .td-automation-run-outcome-head,
+    .td-automation-run-outcome-summary,
+    .td-automation-run-outcome-class{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+
+    .td-automation-run-outcome-head strong,
+    .td-automation-run-outcome-summary strong,
+    .td-automation-run-outcome-class strong{
+      color:#0f172a;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-run-outcome-head span,
+    .td-automation-run-outcome-class span,
+    .td-automation-run-outcome-more{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.35;
+    }
+
+    .td-automation-run-outcome-summary p,
+    .td-automation-run-outcome--empty p{
+      margin:3px 0 0;
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-automation-outcome-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+    }
+
+    .td-automation-outcome-chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:24px;
+      padding:4px 8px;
+      border:1px solid #dbe3ee;
+      border-radius:999px;
+      background:#fff;
+      color:#334155;
+      font-size:0.74rem;
+      font-weight:800;
+      line-height:1.2;
+      white-space:nowrap;
+    }
+
+    .td-automation-coverage{
+      color:#475569;
+      font-size:0.8rem;
+      line-height:1.4;
+    }
+
+    .td-automation-coverage--warning{
+      color:#92400e;
+    }
+
+    .td-automation-coverage ul{
+      margin:5px 0 0 18px;
+      padding:0;
+    }
+
+    .td-automation-run-outcome-classes{
+      display:grid;
+      gap:6px;
+    }
+
     .td-automation-policy-actions{
       display:flex;
       align-items:center;
@@ -34290,6 +34573,53 @@ function injectStyles() {
       margin-top:6px;
       color:#64748b;
       font-size:0.88rem;
+    }
+
+    .td-generated-explainability{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      margin-bottom:14px;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#f8fafc;
+    }
+
+    .td-generated-explainability-head,
+    .td-generated-explainability-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 10px;
+      align-items:center;
+    }
+
+    .td-generated-explainability-head span{
+      color:#334155;
+      font-size:0.82rem;
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-generated-explainability p{
+      margin:0;
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-generated-explain-chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:24px;
+      padding:4px 8px;
+      border:1px solid #dbe3ee;
+      border-radius:999px;
+      background:#fff;
+      color:#334155;
+      font-size:0.74rem;
+      font-weight:800;
+      line-height:1.2;
     }
 
     .td-generated-results-sections{

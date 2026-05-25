@@ -3,6 +3,12 @@ import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
   buildAutomationRunFeedbackNotice,
+  buildAutomationRunOutcomeViewModel,
+  buildCoverageWarningDisplay,
+  buildGeneratedAssignmentExplainabilitySummary,
+  formatCoverageWarningCopy,
+  getAutomationRunReasonLabel,
+  getAutomationRunStatusLabel,
   summarizeAutomationRunSkipReasons,
   summarizeAutomationRunWaitingReasons,
 } = await loadBrowserModule("../js/automationRunFeedback.js", import.meta.url);
@@ -148,6 +154,134 @@ test("active personalised assignment remains a skipped blocked case", () => {
     notice.message,
     "No personalised tests generated. 1 pupil already has an active personalised assignment."
   );
+});
+
+test("run outcome view model groups status and reason copy", () => {
+  const view = buildAutomationRunOutcomeViewModel({
+    run: {
+      status: "completed",
+      included_pupil_count: 3,
+      skipped_pupil_count: 2,
+      summary: {
+        waitingPupilCount: 2,
+        errorCount: 1,
+        coverageWarnings: [],
+        classes: [{
+          className: "Maple",
+          status: "generated",
+          includedCount: 3,
+          waitingCount: 2,
+          skippedCount: 2,
+          waitingReasons: {
+            baseline_incomplete: 1,
+            no_baseline_assignment: 1,
+          },
+          skipReasons: {
+            active_automated_assignment: 1,
+            duplicate_pupil_in_run: 1,
+          },
+          coverageWarnings: [],
+        }],
+      },
+      pupilRows: [
+        { status: "included" },
+        { status: "waiting", skip_reason: "baseline_incomplete" },
+        { status: "skipped", skip_reason: "active_automated_assignment" },
+      ],
+    },
+  });
+
+  assert.equal(view.headline, "3 pupils generated/provisioned");
+  assert.equal(view.counts.waiting, 2);
+  assert.equal(view.counts.alreadyAssigned, 1);
+  assert.equal(view.counts.duplicate, 1);
+  assert.equal(view.counts.errors, 1);
+  assert.deepEqual(
+    plain(view.reasonChips.map((item) => `${item.label}:${item.count}`)),
+    [
+      "Already assigned:1",
+      "Baseline incomplete:1",
+      "Baseline not created yet:1",
+      "Duplicate group membership:1",
+    ]
+  );
+});
+
+test("run status and reason labels use teacher-facing copy", () => {
+  assert.equal(getAutomationRunStatusLabel("included"), "Generated/provisioned");
+  assert.equal(getAutomationRunStatusLabel("waiting"), "Waiting for baseline");
+  assert.equal(getAutomationRunStatusLabel("provisioning"), "Provisioning");
+  assert.equal(getAutomationRunStatusLabel("failed"), "Error");
+  assert.equal(getAutomationRunReasonLabel("baseline_incomplete"), "Baseline incomplete");
+  assert.equal(getAutomationRunReasonLabel("no_baseline_assignment"), "Baseline not created yet");
+  assert.equal(getAutomationRunReasonLabel("active_automated_assignment"), "Already assigned");
+  assert.equal(getAutomationRunReasonLabel("duplicate_pupil_in_run"), "Duplicate group membership");
+});
+
+test("coverage warning display distinguishes missing legacy data from clear new data", () => {
+  const missing = buildCoverageWarningDisplay({});
+  assert.equal(missing.state, "not_recorded");
+  assert.equal(missing.message, "Coverage warnings not recorded for this run.");
+
+  const clear = buildCoverageWarningDisplay({ coverageWarnings: [] });
+  assert.equal(clear.state, "clear");
+  assert.equal(clear.message, "No coverage warnings recorded for this run.");
+
+  const warning = {
+    focusGrapheme: "tion",
+    requestedTargetCount: 4,
+    selectedTargetCount: 1,
+    fallbackCount: 3,
+  };
+  assert.equal(
+    formatCoverageWarningCopy(warning),
+    "Only 1 of 4 requested target slots could use approved tion words; 3 slots used safe fallback, review, or consolidation words."
+  );
+  const display = buildCoverageWarningDisplay({ coverageWarnings: [warning] });
+  assert.equal(display.state, "warning");
+  assert.equal(display.warnings[0].displayCopy, formatCoverageWarningCopy(warning));
+});
+
+test("generated assignment explainability summarizes role mix support mix and focus", () => {
+  const summary = buildGeneratedAssignmentExplainabilitySummary({
+    sections: [
+      {
+        key: "review",
+        items: [
+          { word: "ship", focusGrapheme: "sh", assignmentSupport: "independent", targetReason: "review_retention" },
+        ],
+      },
+      {
+        key: "target",
+        items: [
+          { word: "shop", focusGrapheme: "sh", assignmentSupport: "focus", targetReason: "target_supported" },
+          { word: "shed", focusGrapheme: "sh", assignmentSupport: "supported", targetReason: "target_supported" },
+        ],
+      },
+      {
+        key: "stretch",
+        items: [
+          { word: "splash", focusGrapheme: "sh", assignmentSupport: "independent", targetReason: "stretch_probe" },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(summary.focusGrapheme, "sh");
+  assert.equal(summary.roleMixText, "Review 1, Target 2, Stretch 1");
+  assert.equal(summary.supportMixText, "Independent 2, Focus 1, Segmented support 1");
+  assert.match(summary.whySentence, /Targets sh with a blend of review, target, and stretch words/);
+});
+
+test("generated assignment explainability falls back for missing legacy metadata", () => {
+  const summary = buildGeneratedAssignmentExplainabilitySummary({
+    words: [{ word: "ship" }, { word: "shop" }],
+  });
+
+  assert.equal(summary.focusLabel, "Not recorded");
+  assert.equal(summary.roleMixText, "Not recorded");
+  assert.equal(summary.supportMixText, "Not recorded");
+  assert.equal(summary.whySentence, "Legacy assignment metadata is limited, so only available word details are shown.");
 });
 
 for (const { name, fn } of TESTS) {
