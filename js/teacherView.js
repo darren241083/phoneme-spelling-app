@@ -141,10 +141,13 @@ import {
 } from "./pupilCsvImport.js?v=1.4";
 import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
 import {
+  buildAssignmentSourceViewModel,
   buildAutomationRunFeedbackNotice,
   buildAutomationRunOutcomeViewModel,
   buildCoverageWarningDisplay,
   buildGeneratedAssignmentExplainabilitySummary,
+  buildRecentPersonalisedRunActivityRows,
+  getAutomationRunStatusLabel,
   normalizeCoverageWarnings,
 } from "./automationRunFeedback.js?v=1.1";
 import {
@@ -4154,6 +4157,12 @@ function getLatestAutomationRunForPolicy(policyId = "") {
   return runs[0] || null;
 }
 
+function getAutomationRunById(runId = "") {
+  const safeRunId = String(runId || "").trim();
+  if (!safeRunId) return null;
+  return getAutomationRecentRuns().find((run) => String(run?.id || "").trim() === safeRunId) || null;
+}
+
 function renderAutomationOutcomeChips(chips = []) {
   const visible = (Array.isArray(chips) ? chips : []).filter((item) => Number(item?.count || 0) > 0);
   if (!visible.length) return "";
@@ -4208,17 +4217,21 @@ function renderAutomationLatestRunOutcomePanel(run, {
 
   const view = buildAutomationRunOutcomeViewModel({ run });
   const completedAt = run?.finished_at || run?.updated_at || run?.created_at || "";
+  const completedLabel = view?.staleState?.stale
+    ? `Updated ${formatDate(view.staleState.lastUpdate || completedAt)}`
+    : (completedAt ? formatDate(completedAt) : "Date not recorded");
   const classRows = Array.isArray(view?.classRows) ? view.classRows : [];
   return `
     <div class="td-automation-run-outcome td-automation-run-outcome--${escapeAttr(view.type || "info")}">
       <div class="td-automation-run-outcome-head">
         <strong>Latest run outcome</strong>
-        <span>${escapeHtml(completedAt ? formatDate(completedAt) : "Date not recorded")}</span>
+        <span>${escapeHtml(`${view?.staleState?.stale ? "Run still marked in progress" : getAutomationRunStatusLabel(run?.status || "completed")} - ${completedLabel}`)}</span>
       </div>
       <div class="td-automation-run-outcome-summary">
         <div>
           <strong>${escapeHtml(view.headline)}</strong>
           <p>${escapeHtml(view.nextAction)}</p>
+          ${view.rerunSafetyCopy ? `<p>${escapeHtml(view.rerunSafetyCopy)}</p>` : ""}
         </div>
         ${renderAutomationOutcomeChips(view.statusCounts)}
       </div>
@@ -4234,10 +4247,67 @@ function renderAutomationLatestRunOutcomePanel(run, {
               </div>
               <span>${escapeHtml(`${row.includedCount} generated, ${row.waitingCount} waiting, ${row.skippedCount} skipped`)}</span>
             </div>
+            ${renderAutomationOutcomeChips(row.reasonChips)}
+            ${row.error ? `<div class="td-automation-run-outcome-more">${escapeHtml(row.error)}</div>` : ""}
           `).join("")}
           ${classRows.length > 4 ? `<div class="td-automation-run-outcome-more">${escapeHtml(`+${classRows.length - 4} more group${classRows.length - 4 === 1 ? "" : "s"}`)}</div>` : ""}
         </div>
       ` : ""}
+    </div>
+  `;
+}
+
+function renderAutomationRecentActivityCounts(counts = {}) {
+  return renderAutomationOutcomeChips([
+    { key: "generated", label: "Generated/provisioned", count: counts.generated },
+    { key: "waiting", label: "Waiting for baseline", count: counts.waiting },
+    { key: "skipped", label: "Skipped", count: counts.skipped },
+    { key: "already_assigned", label: "Already assigned", count: counts.alreadyAssigned },
+  ]);
+}
+
+function renderRecentPersonalisedActivityPanel() {
+  if (!canManageAutomation()) return "";
+  const rows = buildRecentPersonalisedRunActivityRows({
+    runs: getAutomationRecentRuns(),
+    limit: 5,
+    now: new Date(),
+  });
+
+  return `
+    <div class="td-automation-run-outcome td-automation-run-outcome--activity">
+      <div class="td-automation-run-outcome-head">
+        <strong>Recent personalised activity</strong>
+        <span>${escapeHtml(rows.length ? "Latest 5 runs" : "No runs yet")}</span>
+      </div>
+      ${rows.length ? `
+        <div class="td-automation-activity-list">
+          ${rows.map((row) => {
+            const timestampLabel = row.timestamp
+              ? `${row.timestampKind === "finished" ? "Finished" : row.timestampKind === "started" ? "Started" : "Updated"} ${formatDate(row.timestamp)}`
+              : "Time not recorded";
+            return `
+              <article class="td-automation-activity-row td-automation-activity-row--${escapeAttr(row.tone || "info")}">
+                <div class="td-automation-activity-head">
+                  <div>
+                    <strong>${escapeHtml(row.policyName || "Policy snapshot")}</strong>
+                    <span>${escapeHtml(timestampLabel)}</span>
+                  </div>
+                  <span class="td-automation-policy-status-badge is-${escapeAttr(row.tone || "info")}">${escapeHtml(row.statusLabel || "Run")}</span>
+                </div>
+                <div class="td-automation-activity-summary">
+                  <span>${escapeHtml(row.headline || "Run outcome")}</span>
+                  ${renderAutomationRecentActivityCounts(row.counts)}
+                </div>
+                ${row.rerunSafetyCopy ? `<p>${escapeHtml(row.rerunSafetyCopy)}</p>` : ""}
+                ${renderAutomationCoverageDisplay(row.coverageHealth, { compact: true })}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      ` : `
+        <p>No personalised automation runs have been recorded yet.</p>
+      `}
     </div>
   `;
 }
@@ -15096,6 +15166,9 @@ function renderCreateBar() {
     policySelected: !!selectedAutomationPolicyId,
     isSpellingBeePolicy: automationIsSpellingBee,
   });
+  const recentPersonalisedActivityHtml = automationIsSpellingBee
+    ? ""
+    : renderRecentPersonalisedActivityPanel();
   const automationStatusBadge = getAutomationPolicyStatusBadgeMeta(automationRunPolicy, {
     isDraft: automationIsNewDraft && !savedAutomationPolicy,
   });
@@ -16017,6 +16090,7 @@ function renderCreateBar() {
                             </div>
                           ` : ""}
                           ${latestAutomationRunOutcomeHtml}
+                          ${recentPersonalisedActivityHtml}
                         </div>
 
                         <div class="td-automation-policy-actions">
@@ -19155,6 +19229,7 @@ function renderGeneratedAssignmentExplainability(pupil, sections = []) {
 
 function renderGeneratedAssignmentResults(analytics, options = {}) {
   const highlightedPupilId = String(options?.highlightedPupilId || "");
+  const showCoverage = options?.showCoverage !== false;
   const visiblePupilIds = Array.isArray(options?.visiblePupilIds)
     ? new Set(options.visiblePupilIds.map((value) => String(value || "")).filter(Boolean))
     : null;
@@ -19171,7 +19246,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
 
   return `
     <div class="td-generated-results-shell">
-      ${renderGeneratedAssignmentCoverage(analytics)}
+      ${showCoverage ? renderGeneratedAssignmentCoverage(analytics) : ""}
       ${rows.map((pupil) => {
         const pupilId = String(pupil?.pupilId || "");
         const isHighlighted = highlightedPupilId && pupilId === highlightedPupilId;
@@ -25556,6 +25631,9 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
       </div>
     `;
   }
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const provenanceLine = getAssignmentProvenanceLine(item);
+  const generatedCoverageHtml = analytics?.isGenerated ? renderGeneratedAssignmentCoverage(analytics) : "";
 
   return `
     <div class="${panelClasses}">
@@ -25584,16 +25662,21 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
         </div>
       </div>
 
+      ${generatedCoverageHtml}
       ${renderAssignmentProgressHero(analytics)}
 
       <div class="td-results-grid td-results-grid--analytics">
         <section class="td-results-block td-results-block--wide">
             <div class="td-class-results-selected">
               <div class="td-class-results-selected-head">
-                <strong>${escapeHtml(item?.tests?.title || "Untitled test")}</strong>
-                <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+                <div>
+                  <strong>${escapeHtml(item?.tests?.title || "Untitled test")}</strong>
+                  <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+                  ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
+                </div>
+                ${sourceBadgeHtml}
               </div>
-            ${renderAssignmentResultsTable(analytics)}
+            ${renderAssignmentResultsTable(analytics, { showCoverage: !analytics?.isGenerated })}
           </div>
         </section>
       </div>
@@ -25702,6 +25785,8 @@ function renderAssignmentCardCompact(item) {
   const assignmentId = String(item.id);
   const title = item.tests?.title || "Untitled test";
   const className = item.classes?.name || "Unknown class";
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const provenanceLine = getAssignmentProvenanceLine(item);
   const isResultsOpen =
     state.activePanel?.type === "results-assignment" &&
     String(state.activePanel.id) === assignmentId;
@@ -25718,8 +25803,12 @@ function renderAssignmentCardCompact(item) {
     <article class="td-assignment-card ${isActive ? "is-active" : ""}" data-assignment-card-id="${escapeAttr(assignmentId)}">
       <div class="td-card-row">
         <div class="td-card-main">
-          <div class="td-card-title">${escapeHtml(title)}</div>
+          <div class="td-card-title td-card-title--with-badges">
+            <span>${escapeHtml(title)}</span>
+            ${sourceBadgeHtml}
+          </div>
           <div class="td-card-subtitle">Class: ${escapeHtml(className)}</div>
+          ${provenanceLine ? `<div class="td-card-subtitle">${escapeHtml(provenanceLine)}</div>` : ""}
 
           <div class="td-assignment-meta td-assignment-meta--stack td-assignment-meta--compact">
             <span class="td-assignment-chip">${renderIconLabel("calendar", dueLabel)}</span>
@@ -25751,6 +25840,8 @@ function renderClassResultsRow(item) {
   const title = item?.tests?.title || "Untitled test";
   const status = getAssignmentStatus(item);
   const analyticsState = state.analyticsByAssignment[assignmentId];
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const provenanceLine = getAssignmentProvenanceLine(item);
 
   if (analyticsState?.status === "ready") {
     const analytics = analyticsState.data?.current;
@@ -25769,8 +25860,10 @@ function renderClassResultsRow(item) {
           <div class="td-class-results-copy">
             <strong>${escapeHtml(title)}</strong>
             <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+            ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
           </div>
           <div class="td-class-results-actions">
+            ${sourceBadgeHtml}
             <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
             <button
               class="td-btn td-btn--tiny td-btn--ghost"
@@ -25802,8 +25895,10 @@ function renderClassResultsRow(item) {
         <div class="td-class-results-copy">
           <strong>${escapeHtml(title)}</strong>
           <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+          ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
         </div>
         <div class="td-class-results-actions">
+          ${sourceBadgeHtml}
           <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
           <button
             class="td-btn td-btn--tiny td-btn--ghost"
@@ -26328,7 +26423,7 @@ function renderClassResultsPanel(cls) {
               <select id="${escapeAttr(assignmentSelectId)}" class="td-input" data-field="class-results-assignment" data-class-id="${escapeAttr(classId)}">
                 ${items.map((item) => `
                   <option value="${escapeAttr(item.id)}" ${String(item.id) === selectedAssignmentId ? "selected" : ""}>
-                    ${escapeHtml(item?.tests?.title || "Untitled test")} (${escapeHtml(getAssignmentReferenceLabel(item))})
+                    ${escapeHtml(getAssignmentOptionLabel(item))}
                   </option>
                 `).join("")}
               </select>
@@ -26362,8 +26457,12 @@ function renderClassResultsPanel(cls) {
                   : `
             <div class="td-class-results-selected">
               <div class="td-class-results-selected-head">
-                <strong>${escapeHtml(selectedItem?.tests?.title || "Untitled test")}</strong>
-                <span>${escapeHtml(getAssignmentReferenceLabel(selectedItem))}</span>
+                <div>
+                  <strong>${escapeHtml(selectedItem?.tests?.title || "Untitled test")}</strong>
+                  <span>${escapeHtml(getAssignmentReferenceLabel(selectedItem))}</span>
+                  ${getAssignmentProvenanceLine(selectedItem) ? `<span>${escapeHtml(getAssignmentProvenanceLine(selectedItem))}</span>` : ""}
+                </div>
+                ${getAssignmentSourceBadgeHtml(selectedItem, { compact: true })}
               </div>
               ${renderAssignmentResultsTable(selectedAnalyticsState.data?.current)}
             </div>
@@ -26557,6 +26656,58 @@ function findTestRecord(testId) {
 
 function isAutoGeneratedAssignment(item) {
   return !!findTestRecord(item?.test_id)?.is_auto_generated;
+}
+
+function isBaselineAssignmentRecord(item) {
+  const test = findTestRecord(item?.test_id);
+  return isBaselineAssignmentWordRows(test?.test_words || []);
+}
+
+function isSpellingBeeAssignmentRecord(item) {
+  return String(item?.automation_kind || "").trim().toLowerCase() === ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE;
+}
+
+function getAssignmentSourceView(item) {
+  const runId = String(item?.automation_run_id || "").trim();
+  return buildAssignmentSourceViewModel({
+    assignment: item,
+    isGenerated: isAutoGeneratedAssignment(item),
+    isBaseline: isBaselineAssignmentRecord(item),
+    isSpellingBee: isSpellingBeeAssignmentRecord(item),
+    run: runId ? getAutomationRunById(runId) : null,
+  });
+}
+
+function getAssignmentSourceBadgeHtml(item, { compact = false } = {}) {
+  const source = getAssignmentSourceView(item);
+  const className = [
+    compact ? "td-assignment-chip" : "td-pill",
+    "td-assignment-source-badge",
+    `td-assignment-source-badge--${source.key}`,
+  ].join(" ");
+  return `<span class="${escapeAttr(className)}" title="${escapeAttr(source.detail || source.label)}">${escapeHtml(source.label)}</span>`;
+}
+
+function getAssignmentProvenanceLine(item) {
+  const source = getAssignmentSourceView(item);
+  const parts = [];
+  if (source.timestamp) {
+    parts.push(`Generated ${formatDate(source.timestamp)}`);
+  }
+  if (source.policyName) {
+    parts.push(`Policy: ${source.policyName}`);
+  } else if (source.runId) {
+    parts.push(`Run: ${source.runId.slice(0, 8)}`);
+  } else if (source.key === "legacy_personalised") {
+    parts.push("Generated before run history was stored");
+  }
+  return parts.join(" - ");
+}
+
+function getAssignmentOptionLabel(item) {
+  const title = item?.tests?.title || "Untitled test";
+  const source = getAssignmentSourceView(item);
+  return `${title} - ${source.label} - ${getAssignmentReferenceLabel(item)}`;
 }
 
 function renderTestMeta(test) {
@@ -27589,6 +27740,10 @@ function injectStyles() {
       background:#fef2f2;
     }
 
+    .td-automation-run-outcome--activity{
+      background:#f8fafc;
+    }
+
     .td-automation-run-outcome-head,
     .td-automation-run-outcome-summary,
     .td-automation-run-outcome-class{
@@ -27616,7 +27771,8 @@ function injectStyles() {
     }
 
     .td-automation-run-outcome-summary p,
-    .td-automation-run-outcome--empty p{
+    .td-automation-run-outcome--empty p,
+    .td-automation-activity-row p{
       margin:3px 0 0;
       color:#475569;
       font-size:0.82rem;
@@ -27662,6 +27818,62 @@ function injectStyles() {
     .td-automation-run-outcome-classes{
       display:grid;
       gap:6px;
+    }
+
+    .td-automation-activity-list{
+      display:grid;
+      gap:8px;
+    }
+
+    .td-automation-activity-row{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:10px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#fff;
+    }
+
+    .td-automation-activity-row--success{
+      border-color:#bbf7d0;
+    }
+
+    .td-automation-activity-row--warning{
+      border-color:#fde68a;
+    }
+
+    .td-automation-activity-row--error{
+      border-color:#fecaca;
+    }
+
+    .td-automation-activity-head,
+    .td-automation-activity-summary{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .td-automation-activity-head div{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+
+    .td-automation-activity-head strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.25;
+    }
+
+    .td-automation-activity-head span,
+    .td-automation-activity-summary > span{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.35;
     }
 
     .td-automation-policy-actions{
@@ -27759,6 +27971,26 @@ function injectStyles() {
     .td-automation-policy-status-badge.is-draft{
       background:#eef2f7;
       color:#475569;
+    }
+
+    .td-automation-policy-status-badge.is-success{
+      background:#dcfce7;
+      color:#166534;
+    }
+
+    .td-automation-policy-status-badge.is-warning{
+      background:#fef3c7;
+      color:#92400e;
+    }
+
+    .td-automation-policy-status-badge.is-error{
+      background:#fee2e2;
+      color:#991b1b;
+    }
+
+    .td-automation-policy-status-badge.is-info{
+      background:#dbeafe;
+      color:#1d4ed8;
     }
 
     .td-input--textarea{
@@ -32064,6 +32296,44 @@ function injectStyles() {
     }
 
     .td-assignment-chip--status{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+      color:#1d4ed8;
+    }
+
+    .td-card-title--with-badges{
+      align-items:flex-start;
+    }
+
+    .td-assignment-source-badge{
+      flex:0 0 auto;
+    }
+
+    .td-assignment-source-badge--generated_by_policy{
+      background:#f0fdf4;
+      border-color:#bbf7d0;
+      color:#166534;
+    }
+
+    .td-assignment-source-badge--legacy_personalised{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+
+    .td-assignment-source-badge--baseline{
+      background:#eef2f7;
+      border-color:#cbd5e1;
+      color:#334155;
+    }
+
+    .td-assignment-source-badge--teacher_created{
+      background:#fff;
+      border-color:#dbe3ee;
+      color:#475569;
+    }
+
+    .td-assignment-source-badge--spelling_bee{
       background:#eff6ff;
       border-color:#bfdbfe;
       color:#1d4ed8;
