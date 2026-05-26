@@ -23891,6 +23891,7 @@ function renderAssignmentLifecycleFilters() {
         </button>
       `).join("")}
     </div>
+    <p class="td-assignment-lifecycle-helper">Needs attention includes expired, stale, unknown, or assignments missing participant data.</p>
   `;
 }
 
@@ -25970,13 +25971,15 @@ function renderAssignmentCard(item) {
 function formatAssignmentLifecycleProgressLabel(lifecycle, analytics = null) {
   if (lifecycle?.hasCounts) {
     const total = Math.max(0, Number(lifecycle.totalPupilCount || 0));
-    const started = Math.max(0, Number(lifecycle.startedCount || 0));
     const completed = Math.max(0, Number(lifecycle.completedCount || 0));
-    const waiting = Math.max(0, Number(lifecycle.waitingCount || 0));
-    return `${started}/${total} started - ${completed}/${total} done - ${waiting} waiting`;
+    if (total > 0) return completed >= total ? `${completed}/${total} complete` : `${completed}/${total} done`;
   }
-  if (analytics) return `${analytics.completedCount}/${analytics.rosterCount} done`;
-  return "Lifecycle counts pending";
+  if (analytics) {
+    const total = Math.max(0, Number(analytics.rosterCount || 0));
+    const completed = Math.max(0, Number(analytics.completedCount || 0));
+    if (total > 0) return completed >= total ? `${completed}/${total} complete` : `${completed}/${total} done`;
+  }
+  return "Progress pending";
 }
 
 function formatAssignmentLifecycleTargetLabel(lifecycle) {
@@ -25994,11 +25997,46 @@ function renderAssignmentLifecycleBadge(lifecycle) {
   return `<span class="td-assignment-chip td-assignment-lifecycle-badge td-assignment-lifecycle-badge--${escapeAttr(key)}" title="${escapeAttr(detail)}">${escapeHtml(label)}</span>`;
 }
 
-function renderAssignmentLifecycleWarning(lifecycle) {
-  if (!lifecycle?.warning) return "";
+function getAssignmentLifecycleSignalText(lifecycle) {
+  const key = String(lifecycle?.key || "").trim().toLowerCase();
+  if (key === "expired") return "Expired - deadline passed";
+  if (key === "stale") return "Stale - no recent activity";
+  if (key === "needs_attention") return "Needs attention - participant data missing";
+  return "";
+}
+
+function renderAssignmentLifecycleSignal(lifecycle) {
+  const signal = getAssignmentLifecycleSignalText(lifecycle);
+  if (!signal) return "";
   return `
-    <div class="td-assignment-lifecycle-note td-assignment-lifecycle-note--${escapeAttr(lifecycle.tone || "warning")}">
-      ${escapeHtml(lifecycle.warning)}
+    <div class="td-assignment-lifecycle-signal td-assignment-lifecycle-signal--${escapeAttr(lifecycle.tone || "warning")}">
+      ${escapeHtml(signal)}
+    </div>
+  `;
+}
+
+function renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics = null) {
+  const createdAt = lifecycle?.createdAt || item?.created_at || item?.createdAt || "";
+  const targeted = Math.max(0, Number(lifecycle?.targetedPupilCount || 0));
+  const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
+  const started = Math.max(0, Number(lifecycle?.startedCount || 0));
+  const waiting = Math.max(0, Number(lifecycle?.waitingCount || 0));
+  const details = [];
+
+  if (createdAt) details.push(`Created ${formatDate(createdAt)}`);
+  if (targeted > 0) details.push(`${targeted} targeted pupil${targeted === 1 ? "" : "s"}`);
+  if (lifecycle?.hasCounts && total > 0) {
+    details.push(`Started ${started}/${total}`);
+    details.push(`${waiting} waiting`);
+  }
+  if (analytics && analytics.averageIndicatorScore != null) {
+    details.push(`Average SAI ${formatAverageIndicatorValue(analytics.averageIndicatorScore)}`);
+  }
+  if (!details.length) return "";
+
+  return `
+    <div class="td-assignment-secondary-details">
+      ${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
     </div>
   `;
 }
@@ -26018,14 +26056,21 @@ function renderAssignmentCardCompact(item) {
   const isActive = isResultsOpen;
   const analyticsReady = state.analyticsByAssignment[assignmentId]?.status === "ready";
   const analytics = analyticsReady ? state.analyticsByAssignment[assignmentId].data.current : null;
-  const dueLabel = item.deadline ? `Due ${formatDate(item.deadline)}` : "No due date";
-  const createdLabel = item.created_at ? `Created ${formatDate(item.created_at)}` : "Created date unknown";
+  const dueAt = lifecycle?.dueAt || item.deadline || item.end_at || item.endAt || "";
+  const dueLabel = dueAt ? `Due ${formatDate(dueAt)}` : "No due date";
   const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
-  const scoreLabel = analytics ? `${formatAverageIndicatorValue(analytics.averageIndicatorScore)} attainment` : "No indicator yet";
-  const targetLabel = formatAssignmentLifecycleTargetLabel(lifecycle);
+  const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
+  const cardClasses = [
+    "td-assignment-card",
+    "td-assignment-card--lifecycle",
+    `td-assignment-card--lifecycle-${lifecycleKey}`,
+    isActive ? "is-active" : "",
+    isClosedStaleState ? "td-assignment-card--closed-stale-state" : "",
+  ].filter(Boolean).join(" ");
 
   return `
-    <article class="td-assignment-card ${isActive ? "is-active" : ""}" data-assignment-card-id="${escapeAttr(assignmentId)}">
+    <article class="${escapeAttr(cardClasses)}" data-assignment-card-id="${escapeAttr(assignmentId)}">
       <div class="td-card-row">
         <div class="td-card-main">
           <div class="td-card-title td-card-title--with-badges">
@@ -26038,12 +26083,9 @@ function renderAssignmentCardCompact(item) {
           <div class="td-assignment-meta td-assignment-meta--stack td-assignment-meta--compact">
             ${renderAssignmentLifecycleBadge(lifecycle)}
             <span class="td-assignment-chip">${renderIconLabel("calendar", dueLabel)}</span>
-            <span class="td-assignment-chip">${renderIconLabel("clock", createdLabel)}</span>
             <span class="td-assignment-chip">${renderIconLabel("checkCircle", progressLabel)}</span>
-            ${targetLabel ? `<span class="td-assignment-chip">${renderIconLabel("users", targetLabel)}</span>` : ""}
-            <span class="td-assignment-chip">${renderIconLabel("award", scoreLabel)}</span>
           </div>
-          ${renderAssignmentLifecycleWarning(lifecycle)}
+          ${isResultsOpen ? renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics) : renderAssignmentLifecycleSignal(lifecycle)}
         </div>
 
         <div class="td-card-actions">
@@ -32436,6 +32478,11 @@ function injectStyles() {
       box-shadow:0 14px 30px rgba(15,23,42,0.06);
     }
 
+    .td-assignment-card--closed-stale-state{
+      background:#fff;
+      box-shadow:0 6px 16px rgba(15,23,42,0.025);
+    }
+
     .td-test-card.is-flash,
     .td-class-card.is-flash{
       animation:tdFlash 2s ease;
@@ -32456,6 +32503,11 @@ function injectStyles() {
       justify-content:space-between;
       gap:16px;
       padding:16px;
+    }
+
+    .td-assignment-card--closed-stale-state .td-card-row{
+      gap:12px;
+      padding:12px 14px;
     }
 
     .td-card-main{
@@ -32613,6 +32665,27 @@ function injectStyles() {
       color:#92400e;
     }
 
+    .td-assignment-lifecycle-signal{
+      margin-top:8px;
+      color:#92400e;
+      font-size:0.84rem;
+      font-weight:700;
+      line-height:1.35;
+    }
+
+    .td-assignment-secondary-details{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 12px;
+      margin-top:10px;
+      padding-top:10px;
+      border-top:1px solid #eef2f7;
+      color:#64748b;
+      font-size:0.84rem;
+      font-weight:600;
+      line-height:1.35;
+    }
+
     .td-assignment-lifecycle-note,
     .td-assignment-lifecycle-status,
     .td-assignment-duplicate-warning{
@@ -32650,6 +32723,30 @@ function injectStyles() {
       flex:0 0 auto;
     }
 
+    .td-assignment-card--lifecycle .td-assignment-source-badge{
+      background:#f8fafc;
+      border-color:#dbe3ee;
+      color:#475569;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--generated_by_policy{
+      background:#f7fdf9;
+      border-color:#d6eadc;
+      color:#2f6b47;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--legacy_personalised{
+      background:#fffaf0;
+      border-color:#eadbb2;
+      color:#7c5e1f;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--spelling_bee{
+      background:#f8fbff;
+      border-color:#d8e6f7;
+      color:#365f8f;
+    }
+
     .td-assignment-source-badge--generated_by_policy{
       background:#f0fdf4;
       border-color:#bbf7d0;
@@ -32685,6 +32782,17 @@ function injectStyles() {
       flex-wrap:wrap;
       gap:8px;
       margin-bottom:14px;
+    }
+
+    .td-assignment-lifecycle-filters{
+      margin-bottom:6px;
+    }
+
+    .td-assignment-lifecycle-helper{
+      margin:0 0 14px;
+      color:#64748b;
+      font-size:0.86rem;
+      line-height:1.4;
     }
 
     .td-filter-chip{
