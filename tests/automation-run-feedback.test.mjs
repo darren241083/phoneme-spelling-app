@@ -3,6 +3,7 @@ import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
   buildAssignmentResultsFraming,
+  buildAssignmentSourceFilterCounts,
   buildAssignmentSourceViewModel,
   buildAutomationRunFeedbackNotice,
   buildAutomationRunOutcomeViewModel,
@@ -11,6 +12,9 @@ const {
   buildCoverageWarningDisplay,
   buildGeneratedAssignmentExplainabilitySummary,
   buildRecentPersonalisedRunActivityRows,
+  doesAssignmentSourceMatchFilter,
+  getAssignmentSourceFilterKey,
+  getAssignmentSourceFilterOptions,
   formatCoverageWarningCopy,
   getAutomationRunReasonLabel,
   getAutomationRunStatusLabel,
@@ -72,6 +76,49 @@ test("assignment source labels distinguish teacher policy legacy baseline and Be
     buildAssignmentSourceViewModel({ assignment: { automation_kind: "spelling_bee" }, isSpellingBee: true }).label,
     "Spelling Bee"
   );
+});
+
+test("assignment source filter maps known source keys to source groups", () => {
+  const labelsByKey = Object.fromEntries(
+    getAssignmentSourceFilterOptions().map((option) => [option.key, option.label])
+  );
+
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("generated_by_policy")], "Automated");
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("legacy_personalised")], "Automated");
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("teacher_created")], "Teacher-created");
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("baseline")], "Baseline");
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("spelling_bee")], "Spelling Bee");
+});
+
+test("all sources filter matches all known source keys", () => {
+  for (const sourceKey of [
+    "generated_by_policy",
+    "legacy_personalised",
+    "teacher_created",
+    "baseline",
+    "spelling_bee",
+  ]) {
+    assert.equal(doesAssignmentSourceMatchFilter(sourceKey, "all"), true);
+  }
+});
+
+test("assignment source filter counts include all sources and each source group", () => {
+  const counts = buildAssignmentSourceFilterCounts([
+    "generated_by_policy",
+    "legacy_personalised",
+    "teacher_created",
+    "baseline",
+    "spelling_bee",
+    "generated_by_policy",
+  ]);
+
+  assert.deepEqual(plain(counts), {
+    all: 6,
+    automated: 3,
+    teacher_created: 1,
+    baseline: 1,
+    spelling_bee: 1,
+  });
 });
 
 test("assignment results framing distinguishes personalised outcomes from standard results", () => {

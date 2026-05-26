@@ -56,6 +56,25 @@ const PERSONALISED_ASSIGNMENT_RESULTS_FRAMING = {
   introNote: "Each pupil may have received a personalised word set. Use this view to compare completion, accuracy and target progress, not identical question-by-question scores.",
 };
 
+export const ASSIGNMENT_SOURCE_FILTER_OPTIONS = [
+  { key: "all", label: "All sources" },
+  { key: "automated", label: "Automated" },
+  { key: "teacher_created", label: "Teacher-created" },
+  { key: "baseline", label: "Baseline" },
+  { key: "spelling_bee", label: "Spelling Bee" },
+];
+
+const AUTOMATED_ASSIGNMENT_SOURCE_KEYS = new Set([
+  "generated_by_policy",
+  "legacy_personalised",
+]);
+
+const DIRECT_ASSIGNMENT_SOURCE_FILTER_KEYS = new Set([
+  "teacher_created",
+  "baseline",
+  "spelling_bee",
+]);
+
 function toCount(value) {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
@@ -78,6 +97,18 @@ function addCount(counts, key, value = 1) {
 
 function normalizeKey(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function isKnownAssignmentSourceFilterKey(filterKey = "") {
+  const key = normalizeKey(filterKey);
+  return ASSIGNMENT_SOURCE_FILTER_OPTIONS.some((option) => option.key === key);
+}
+
+function getSourceKeyValue(source = "") {
+  if (source && typeof source === "object") {
+    return source.key || source.sourceKey || source.source_key || "";
+  }
+  return source;
 }
 
 function getObjectValue(row, camelKey, snakeKey = "") {
@@ -197,6 +228,39 @@ export function summarizeAutomationRunSkipReasons(classResults = []) {
 
 export function summarizeAutomationRunWaitingReasons(classResults = []) {
   return summarizeReasonCounts(classResults, "waitingReasons");
+}
+
+export function getAssignmentSourceFilterOptions() {
+  return ASSIGNMENT_SOURCE_FILTER_OPTIONS.map((option) => ({ ...option }));
+}
+
+export function getAssignmentSourceFilterKey(sourceKey = "") {
+  const key = normalizeKey(sourceKey);
+  if (AUTOMATED_ASSIGNMENT_SOURCE_KEYS.has(key)) return "automated";
+  if (DIRECT_ASSIGNMENT_SOURCE_FILTER_KEYS.has(key)) return key;
+  return "";
+}
+
+export function doesAssignmentSourceMatchFilter(sourceKey = "", filterKey = "all") {
+  const sourceFilterKey = getAssignmentSourceFilterKey(sourceKey);
+  const filter = isKnownAssignmentSourceFilterKey(filterKey) ? normalizeKey(filterKey) : "all";
+  if (filter === "all") return !!sourceFilterKey;
+  return sourceFilterKey === filter;
+}
+
+export function buildAssignmentSourceFilterCounts(sourceKeys = []) {
+  const counts = Object.fromEntries(
+    ASSIGNMENT_SOURCE_FILTER_OPTIONS.map((option) => [option.key, 0])
+  );
+
+  for (const source of Array.isArray(sourceKeys) ? sourceKeys : []) {
+    const filterKey = getAssignmentSourceFilterKey(getSourceKeyValue(source));
+    if (!filterKey || !Object.prototype.hasOwnProperty.call(counts, filterKey)) continue;
+    counts.all += 1;
+    counts[filterKey] += 1;
+  }
+
+  return counts;
 }
 
 function getSkipCount(skipReasonCounts, key) {

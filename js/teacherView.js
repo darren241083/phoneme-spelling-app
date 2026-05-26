@@ -141,6 +141,7 @@ import {
 } from "./pupilCsvImport.js?v=1.4";
 import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
 import {
+  buildAssignmentSourceFilterCounts,
   buildAssignmentResultsFraming,
   buildAssignmentSourceViewModel,
   buildAutomationRunFeedbackNotice,
@@ -148,9 +149,11 @@ import {
   buildCoverageWarningDisplay,
   buildGeneratedAssignmentExplainabilitySummary,
   buildRecentPersonalisedRunActivityRows,
+  doesAssignmentSourceMatchFilter,
+  getAssignmentSourceFilterOptions,
   getAutomationRunStatusLabel,
   normalizeCoverageWarnings,
-} from "./automationRunFeedback.js?v=1.2";
+} from "./automationRunFeedback.js?v=1.3";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
@@ -730,6 +733,7 @@ const state = {
   },
   assignmentLifecycle: {
     filter: "all",
+    sourceFilter: "all",
     summariesByAssignmentId: {},
     status: "idle",
     message: "",
@@ -11530,6 +11534,15 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "set-assignment-source-filter") {
+    const filterKey = String(button.dataset.filterKey || "all");
+    state.assignmentLifecycle.sourceFilter = getAssignmentSourceFilterOptions().some((option) => option.key === filterKey)
+      ? filterKey
+      : "all";
+    paint();
+    return;
+  }
+
   if (action === "open-results-assignment") {
     const assignmentId = button.dataset.assignmentId;
     if (!assignmentId) return;
@@ -11554,6 +11567,7 @@ async function onRootClick(event) {
 
     openDashboardSection("upcoming");
     state.assignmentLifecycle.filter = "all";
+    state.assignmentLifecycle.sourceFilter = "all";
     state.activePanel = { type: "results-assignment", id: assignmentId };
     paint();
     await ensureAssignmentAnalytics(assignmentId, { force: true });
@@ -23861,20 +23875,50 @@ function getAssignmentLifecycleFilter() {
     : "all";
 }
 
-function getAssignmentLifecycleModels() {
-  return (state.assignments || []).map((item) => getAssignmentLifecycleModel(item));
+function getAssignmentSourceFilter() {
+  const current = String(state.assignmentLifecycle.sourceFilter || "all");
+  return getAssignmentSourceFilterOptions().some((option) => option.key === current)
+    ? current
+    : "all";
+}
+
+function getAssignmentLifecycleEntries() {
+  return (state.assignments || []).map((item) => ({
+    item,
+    lifecycle: getAssignmentLifecycleModel(item),
+    source: getAssignmentSourceView(item),
+  }));
 }
 
 function getFilteredAssignmentLifecycleItems() {
-  const filter = getAssignmentLifecycleFilter();
-  return (state.assignments || []).filter((item) =>
-    doesAssignmentMatchLifecycleFilter(getAssignmentLifecycleModel(item), filter)
-  );
+  const lifecycleFilter = getAssignmentLifecycleFilter();
+  const sourceFilter = getAssignmentSourceFilter();
+  return getAssignmentLifecycleEntries()
+    .filter(({ lifecycle, source }) =>
+      doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
+      && doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
+    )
+    .map(({ item }) => item);
 }
 
 function renderAssignmentLifecycleFilters() {
   const filter = getAssignmentLifecycleFilter();
-  const counts = buildAssignmentLifecycleFilterCounts(getAssignmentLifecycleModels());
+  const sourceFilter = getAssignmentSourceFilter();
+  const entries = getAssignmentLifecycleEntries();
+  const sourceMatchedEntries = entries.filter(({ source }) =>
+    doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
+  );
+  const lifecycleMatchedEntries = entries.filter(({ lifecycle }) =>
+    doesAssignmentMatchLifecycleFilter(lifecycle, filter)
+  );
+  const lifecycleCounts = buildAssignmentLifecycleFilterCounts(
+    sourceMatchedEntries.map(({ lifecycle }) => lifecycle)
+  );
+  const sourceCounts = buildAssignmentSourceFilterCounts(
+    lifecycleMatchedEntries.map(({ source }) => source?.key)
+  );
+  const sourceOptions = getAssignmentSourceFilterOptions();
+
   return `
     <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
       ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
@@ -23887,7 +23931,22 @@ function renderAssignmentLifecycleFilters() {
           aria-selected="${filter === option.key ? "true" : "false"}"
         >
           ${escapeHtml(option.label)}
-          <span>${escapeHtml(String(counts[option.key] || 0))}</span>
+          <span>${escapeHtml(String(lifecycleCounts[option.key] || 0))}</span>
+        </button>
+      `).join("")}
+    </div>
+    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment source filters">
+      ${sourceOptions.map((option) => `
+        <button
+          type="button"
+          class="td-filter-chip ${sourceFilter === option.key ? "is-active" : ""}"
+          data-action="set-assignment-source-filter"
+          data-filter-key="${escapeAttr(option.key)}"
+          role="tab"
+          aria-selected="${sourceFilter === option.key ? "true" : "false"}"
+        >
+          ${escapeHtml(option.label)}
+          <span>${escapeHtml(String(sourceCounts[option.key] || 0))}</span>
         </button>
       `).join("")}
     </div>
@@ -23929,7 +23988,7 @@ function renderSectionUpcomingAssignments() {
                 : `
             <div class="td-empty">
               <strong>No assignments in this view.</strong>
-              <p>Use another lifecycle filter to see the rest of the assignment history.</p>
+              <p>Try another lifecycle or source filter to see the rest of the assignment history.</p>
             </div>
           `
               : `
