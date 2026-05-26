@@ -151,6 +151,15 @@ import {
   normalizeCoverageWarnings,
 } from "./automationRunFeedback.js?v=1.1";
 import {
+  ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
+  ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+  buildAssignmentLifecycleFilterCounts,
+  buildAssignmentLifecycleModel,
+  buildDuplicateManualAssignmentWarningModel,
+  doesAssignmentMatchLifecycleFilter,
+  groupAssignmentLifecycleInputs,
+} from "./assignmentLifecycleView.js?v=1.0";
+import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
   AUTO_ASSIGN_POLICY_LENGTH_MIN,
@@ -717,6 +726,13 @@ const state = {
   assignmentResultsUi: {
     visiblePupilRows: {},
     expandedPupilRows: {},
+  },
+  assignmentLifecycle: {
+    filter: "all",
+    summariesByAssignmentId: {},
+    status: "idle",
+    message: "",
+    manualAssignClassByTestId: {},
   },
   classResultsUi: {
     rangeByClass: {},
@@ -5322,6 +5338,7 @@ async function loadDashboardData() {
   state.tests = tests;
   syncSelectedTestIdsWithLoadedTests();
   state.assignments = sortAssignmentsForAttention(assignments);
+  await refreshAssignmentLifecycleSummaries();
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
@@ -6519,6 +6536,77 @@ async function loadAssignments() {
   }
 
   return (data || []).map((item) => ({ ...item, deadline: item.end_at || null }));
+}
+
+async function refreshAssignmentLifecycleSummaries() {
+  const assignments = Array.isArray(state.assignments) ? state.assignments : [];
+  const assignmentIds = normalizeIdList(assignments.map((item) => item?.id));
+  const classIds = normalizeIdList(assignments.map((item) => item?.class_id));
+
+  state.assignmentLifecycle.status = assignmentIds.length ? "loading" : "ready";
+  state.assignmentLifecycle.message = "";
+  state.assignmentLifecycle.summariesByAssignmentId = {};
+
+  if (!assignmentIds.length) return;
+
+  try {
+    const statusQuery = supabase
+      .from("assignment_pupil_statuses")
+      .select("assignment_id, pupil_id, status, started_at, completed_at, last_opened_at, last_activity_at, total_words, updated_at, created_at")
+      .in("assignment_id", assignmentIds);
+
+    const targetQuery = supabase
+      .from("assignment_pupil_target_words")
+      .select("assignment_id, pupil_id, created_at")
+      .in("assignment_id", assignmentIds);
+
+    let membershipQuery = classIds.length
+      ? supabase
+        .from("pupil_classes")
+        .select("class_id, pupil_id")
+        .in("class_id", classIds)
+        .eq("active", true)
+      : Promise.resolve({ data: [], error: null });
+    if (classIds.length) {
+      membershipQuery = applyActiveSchoolFilter(membershipQuery, state.accessContext);
+    }
+
+    const [statusRes, targetRes, membershipRes] = await Promise.all([
+      statusQuery,
+      targetQuery,
+      membershipQuery,
+    ]);
+
+    if (statusRes.error && !isMissingAssignmentStatusTableError(statusRes.error)) throw statusRes.error;
+    if (targetRes.error && !isMissingAssignmentTargetTableError(targetRes.error)) throw targetRes.error;
+    if (membershipRes.error) throw membershipRes.error;
+
+    state.assignmentLifecycle.summariesByAssignmentId = groupAssignmentLifecycleInputs({
+      assignments,
+      statusRows: statusRes.error ? [] : (statusRes.data || []),
+      targetRows: targetRes.error ? [] : (targetRes.data || []),
+      membershipRows: membershipRes.data || [],
+      now: new Date(),
+      staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+    });
+    state.assignmentLifecycle.status = "ready";
+  } catch (error) {
+    console.warn("assignment lifecycle summary error:", error);
+    state.assignmentLifecycle.summariesByAssignmentId = Object.fromEntries(
+      assignments
+        .filter((assignment) => assignment?.id)
+        .map((assignment) => [
+          String(assignment.id),
+          buildAssignmentLifecycleModel({
+            assignment,
+            now: new Date(),
+            staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+          }),
+        ])
+    );
+    state.assignmentLifecycle.status = "error";
+    state.assignmentLifecycle.message = "Lifecycle counts are partially unavailable.";
+  }
 }
 
 function getAnalyticsTargetSettingsFromSource(source) {
@@ -9830,6 +9918,17 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="manual-assignment-class-select"]')) {
+    const testId = String(target.dataset.testId || "").trim();
+    if (!testId) return;
+    state.assignmentLifecycle.manualAssignClassByTestId = {
+      ...state.assignmentLifecycle.manualAssignClassByTestId,
+      [testId]: String(target.value || "").trim(),
+    };
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="pupil-placement-form-select"]')) {
     setPupilPlacementSelectedFormId(target.dataset.pupilId || "", target.value || "");
     paint();
@@ -11421,6 +11520,15 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "set-assignment-lifecycle-filter") {
+    const filterKey = String(button.dataset.filterKey || "all");
+    state.assignmentLifecycle.filter = ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === filterKey)
+      ? filterKey
+      : "all";
+    paint();
+    return;
+  }
+
   if (action === "open-results-assignment") {
     const assignmentId = button.dataset.assignmentId;
     if (!assignmentId) return;
@@ -11444,6 +11552,7 @@ async function onRootClick(event) {
     if (!assignmentId) return;
 
     openDashboardSection("upcoming");
+    state.assignmentLifecycle.filter = "all";
     state.activePanel = { type: "results-assignment", id: assignmentId };
     paint();
     await ensureAssignmentAnalytics(assignmentId, { force: true });
@@ -13706,6 +13815,10 @@ async function handleAssignTest(form) {
     }
   }
 
+  state.assignmentLifecycle.manualAssignClassByTestId = {
+    ...state.assignmentLifecycle.manualAssignClassByTestId,
+    [testId]: "",
+  };
   await loadDashboardData();
   openDashboardSection("upcoming");
   state.activePanel = null;
@@ -23730,13 +23843,73 @@ function renderInlineAnalyticsAssistant() {
   });
 }
 
+function getAssignmentLifecycleModel(item) {
+  const assignmentId = String(item?.id || "").trim();
+  return state.assignmentLifecycle.summariesByAssignmentId?.[assignmentId]
+    || buildAssignmentLifecycleModel({
+      assignment: item,
+      now: new Date(),
+      staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+    });
+}
+
+function getAssignmentLifecycleFilter() {
+  const current = String(state.assignmentLifecycle.filter || "all");
+  return ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === current)
+    ? current
+    : "all";
+}
+
+function getAssignmentLifecycleModels() {
+  return (state.assignments || []).map((item) => getAssignmentLifecycleModel(item));
+}
+
+function getFilteredAssignmentLifecycleItems() {
+  const filter = getAssignmentLifecycleFilter();
+  return (state.assignments || []).filter((item) =>
+    doesAssignmentMatchLifecycleFilter(getAssignmentLifecycleModel(item), filter)
+  );
+}
+
+function renderAssignmentLifecycleFilters() {
+  const filter = getAssignmentLifecycleFilter();
+  const counts = buildAssignmentLifecycleFilterCounts(getAssignmentLifecycleModels());
+  return `
+    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
+      ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
+        <button
+          type="button"
+          class="td-filter-chip ${filter === option.key ? "is-active" : ""}"
+          data-action="set-assignment-lifecycle-filter"
+          data-filter-key="${escapeAttr(option.key)}"
+          role="tab"
+          aria-selected="${filter === option.key ? "true" : "false"}"
+        >
+          ${escapeHtml(option.label)}
+          <span>${escapeHtml(String(counts[option.key] || 0))}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAssignmentLifecycleStatusMessage() {
+  if (state.assignmentLifecycle.status !== "error" || !state.assignmentLifecycle.message) return "";
+  return `
+    <div class="td-assignment-lifecycle-status" role="status">
+      ${escapeHtml(state.assignmentLifecycle.message)}
+    </div>
+  `;
+}
+
 function renderSectionUpcomingAssignments() {
   const isOpen = state.sections.upcoming;
+  const visibleAssignments = getFilteredAssignmentLifecycleItems();
 
   return `
     <section class="td-section td-section--upcoming">
       ${renderCollapsibleSectionHeader({
-        title: "Upcoming assignments",
+        title: "Assignment lifecycle",
         section: "upcoming",
         isOpen,
       })}
@@ -23745,9 +23918,18 @@ function renderSectionUpcomingAssignments() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${state.assignments.length ? renderAssignmentLifecycleFilters() : ""}
+          ${renderAssignmentLifecycleStatusMessage()}
           ${
             state.assignments.length
-              ? `<div class="td-list">${state.assignments.map(renderAssignmentCardCompact).join("")}</div>`
+              ? visibleAssignments.length
+                ? `<div class="td-list">${visibleAssignments.map(renderAssignmentCardCompact).join("")}</div>`
+                : `
+            <div class="td-empty">
+              <strong>No assignments in this view.</strong>
+              <p>Use another lifecycle filter to see the rest of the assignment history.</p>
+            </div>
+          `
               : `
             <div class="td-empty">
               <strong>No assignments yet.</strong>
@@ -25781,23 +25963,61 @@ function renderAssignmentCard(item) {
   `;
 }
 
+function formatAssignmentLifecycleProgressLabel(lifecycle, analytics = null) {
+  if (lifecycle?.hasCounts) {
+    const total = Math.max(0, Number(lifecycle.totalPupilCount || 0));
+    const started = Math.max(0, Number(lifecycle.startedCount || 0));
+    const completed = Math.max(0, Number(lifecycle.completedCount || 0));
+    const waiting = Math.max(0, Number(lifecycle.waitingCount || 0));
+    return `${started}/${total} started - ${completed}/${total} done - ${waiting} waiting`;
+  }
+  if (analytics) return `${analytics.completedCount}/${analytics.rosterCount} done`;
+  return "Lifecycle counts pending";
+}
+
+function formatAssignmentLifecycleTargetLabel(lifecycle) {
+  const targeted = Math.max(0, Number(lifecycle?.targetedPupilCount || 0));
+  const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
+  if (targeted > 0) return `${targeted} targeted pupil${targeted === 1 ? "" : "s"}`;
+  if (total > 0) return `${total} pupil${total === 1 ? "" : "s"}`;
+  return "";
+}
+
+function renderAssignmentLifecycleBadge(lifecycle) {
+  const key = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const label = lifecycle?.label || "Unknown";
+  const detail = lifecycle?.detail || "Derived lifecycle display signal.";
+  return `<span class="td-assignment-chip td-assignment-lifecycle-badge td-assignment-lifecycle-badge--${escapeAttr(key)}" title="${escapeAttr(detail)}">${escapeHtml(label)}</span>`;
+}
+
+function renderAssignmentLifecycleWarning(lifecycle) {
+  if (!lifecycle?.warning) return "";
+  return `
+    <div class="td-assignment-lifecycle-note td-assignment-lifecycle-note--${escapeAttr(lifecycle.tone || "warning")}">
+      ${escapeHtml(lifecycle.warning)}
+    </div>
+  `;
+}
+
 function renderAssignmentCardCompact(item) {
   const assignmentId = String(item.id);
   const title = item.tests?.title || "Untitled test";
   const className = item.classes?.name || "Unknown class";
   const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
   const provenanceLine = getAssignmentProvenanceLine(item);
+  const lifecycle = getAssignmentLifecycleModel(item);
   const isResultsOpen =
     state.activePanel?.type === "results-assignment" &&
     String(state.activePanel.id) === assignmentId;
 
-  const status = getAssignmentStatus(item);
   const isActive = isResultsOpen;
   const analyticsReady = state.analyticsByAssignment[assignmentId]?.status === "ready";
   const analytics = analyticsReady ? state.analyticsByAssignment[assignmentId].data.current : null;
   const dueLabel = item.deadline ? `Due ${formatDate(item.deadline)}` : "No due date";
-  const progressLabel = analytics ? `${analytics.completedCount}/${analytics.rosterCount} done` : "Results pending";
+  const createdLabel = item.created_at ? `Created ${formatDate(item.created_at)}` : "Created date unknown";
+  const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
   const scoreLabel = analytics ? `${formatAverageIndicatorValue(analytics.averageIndicatorScore)} attainment` : "No indicator yet";
+  const targetLabel = formatAssignmentLifecycleTargetLabel(lifecycle);
 
   return `
     <article class="td-assignment-card ${isActive ? "is-active" : ""}" data-assignment-card-id="${escapeAttr(assignmentId)}">
@@ -25811,11 +26031,14 @@ function renderAssignmentCardCompact(item) {
           ${provenanceLine ? `<div class="td-card-subtitle">${escapeHtml(provenanceLine)}</div>` : ""}
 
           <div class="td-assignment-meta td-assignment-meta--stack td-assignment-meta--compact">
+            ${renderAssignmentLifecycleBadge(lifecycle)}
             <span class="td-assignment-chip">${renderIconLabel("calendar", dueLabel)}</span>
+            <span class="td-assignment-chip">${renderIconLabel("clock", createdLabel)}</span>
             <span class="td-assignment-chip">${renderIconLabel("checkCircle", progressLabel)}</span>
+            ${targetLabel ? `<span class="td-assignment-chip">${renderIconLabel("users", targetLabel)}</span>` : ""}
             <span class="td-assignment-chip">${renderIconLabel("award", scoreLabel)}</span>
-            <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
           </div>
+          ${renderAssignmentLifecycleWarning(lifecycle)}
         </div>
 
         <div class="td-card-actions">
@@ -25973,6 +26196,38 @@ function renderClassResultsPanelLegacy(cls) {
   `;
 }
 
+function getManualAssignmentSelectedClassId(testId = "") {
+  return String(state.assignmentLifecycle.manualAssignClassByTestId?.[String(testId || "").trim()] || "").trim();
+}
+
+function getManualAssignmentDuplicateWarning(testId = "") {
+  return buildDuplicateManualAssignmentWarningModel({
+    assignments: state.assignments,
+    testId,
+    classId: getManualAssignmentSelectedClassId(testId),
+  });
+}
+
+function renderManualAssignmentDuplicateWarning(testId = "") {
+  const warning = getManualAssignmentDuplicateWarning(testId);
+  if (!warning.hasDuplicate || !warning.assignmentId) return "";
+
+  return `
+    <div class="td-assignment-duplicate-warning" role="status">
+      <strong>Check existing assignment first</strong>
+      <p>${escapeHtml(warning.message)}</p>
+      <button
+        class="td-btn td-btn--tiny td-btn--ghost"
+        type="button"
+        data-action="jump-assignment-results"
+        data-assignment-id="${escapeAttr(warning.assignmentId)}"
+      >
+        View existing assignment
+      </button>
+    </div>
+  `;
+}
+
 function renderTestCard(test) {
   const canEditTest = canEditTestRecord(test);
   const canAssignTest = canAssignFromTestRecord(test);
@@ -25987,6 +26242,7 @@ function renderTestCard(test) {
   const testId = String(test?.id || "").trim();
   const isSelected = getSelectedTestIds().includes(testId);
   const title = test.title || "Untitled test";
+  const selectedManualClassId = getManualAssignmentSelectedClassId(testId);
 
   return `
     <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""} ${isSelected ? "is-selected" : ""}">
@@ -26047,12 +26303,12 @@ function renderTestCard(test) {
             <div class="td-form-grid td-form-grid--assign">
               <label class="td-field">
                 <span>Class</span>
-                <select class="td-input" name="class_id" required>
+                <select class="td-input" name="class_id" data-field="manual-assignment-class-select" data-test-id="${escapeAttr(test.id)}" required>
                   <option value="">Select class...</option>
                   ${assignableClasses
                     .map(
                       (cls) =>
-                        `<option value="${escapeAttr(cls.id)}">${escapeHtml(cls.name || "Untitled class")}</option>`
+                        `<option value="${escapeAttr(cls.id)}" ${String(cls.id) === selectedManualClassId ? "selected" : ""}>${escapeHtml(cls.name || "Untitled class")}</option>`
                     )
                     .join("")}
                 </select>
@@ -26076,6 +26332,8 @@ function renderTestCard(test) {
                 <input class="td-input" type="datetime-local" name="deadline" />
               </label>
             </div>
+
+            ${renderManualAssignmentDuplicateWarning(test.id)}
 
             <div class="td-form-actions">
               <button class="td-btn td-btn--primary" type="submit">Assign</button>
@@ -32301,6 +32559,63 @@ function injectStyles() {
       color:#1d4ed8;
     }
 
+    .td-assignment-lifecycle-badge{
+      background:#f8fafc;
+      border-color:#cbd5e1;
+      color:#334155;
+    }
+
+    .td-assignment-lifecycle-badge--complete{
+      background:#f0fdf4;
+      border-color:#bbf7d0;
+      color:#166534;
+    }
+
+    .td-assignment-lifecycle-badge--in_progress,
+    .td-assignment-lifecycle-badge--waiting,
+    .td-assignment-lifecycle-badge--no_deadline{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+      color:#1d4ed8;
+    }
+
+    .td-assignment-lifecycle-badge--expired,
+    .td-assignment-lifecycle-badge--stale,
+    .td-assignment-lifecycle-badge--needs_attention{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+
+    .td-assignment-lifecycle-note,
+    .td-assignment-lifecycle-status,
+    .td-assignment-duplicate-warning{
+      margin-top:10px;
+      border:1px solid #fde68a;
+      border-radius:12px;
+      background:#fffbeb;
+      color:#92400e;
+      padding:10px 12px;
+      font-size:0.88rem;
+      font-weight:700;
+    }
+
+    .td-assignment-duplicate-warning{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-assignment-duplicate-warning p{
+      margin:0;
+      color:#92400e;
+      font-weight:600;
+    }
+
+    .td-assignment-lifecycle-status{
+      margin:0 0 14px;
+    }
+
     .td-card-title--with-badges{
       align-items:flex-start;
     }
@@ -32369,6 +32684,12 @@ function injectStyles() {
       border-color:#bfdbfe;
       background:#eff6ff;
       color:#1d4ed8;
+    }
+
+    .td-filter-chip span{
+      margin-left:6px;
+      color:inherit;
+      opacity:.76;
     }
 
     .td-results-grid{
