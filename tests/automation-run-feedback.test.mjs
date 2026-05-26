@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  buildAssignmentResultsFraming,
   buildAssignmentSourceViewModel,
   buildAutomationRunFeedbackNotice,
   buildAutomationRunOutcomeViewModel,
@@ -70,6 +71,45 @@ test("assignment source labels distinguish teacher policy legacy baseline and Be
   assert.equal(
     buildAssignmentSourceViewModel({ assignment: { automation_kind: "spelling_bee" }, isSpellingBee: true }).label,
     "Spelling Bee"
+  );
+});
+
+test("assignment results framing distinguishes personalised outcomes from standard results", () => {
+  assert.deepEqual(
+    plain(buildAssignmentResultsFraming("teacher_created")),
+    {
+      closedButtonLabel: "View results",
+      openButtonLabel: "Hide results",
+      resultsHeading: "Results",
+      progressHeading: "Class progress",
+      introNote: "",
+    }
+  );
+
+  assert.deepEqual(
+    plain(buildAssignmentResultsFraming("generated_by_policy")),
+    {
+      closedButtonLabel: "View personalised outcomes",
+      openButtonLabel: "Hide personalised outcomes",
+      resultsHeading: "Personalised outcomes",
+      progressHeading: "Personalised progress",
+      introNote: "Each pupil may have received a personalised word set. Use this view to compare completion, accuracy and target progress, not identical question-by-question scores.",
+    }
+  );
+
+  assert.deepEqual(
+    plain(buildAssignmentResultsFraming("legacy_personalised")),
+    plain(buildAssignmentResultsFraming("generated_by_policy"))
+  );
+
+  assert.deepEqual(
+    plain(buildAssignmentResultsFraming("baseline")),
+    plain(buildAssignmentResultsFraming("teacher_created"))
+  );
+
+  assert.deepEqual(
+    plain(buildAssignmentResultsFraming("")),
+    plain(buildAssignmentResultsFraming("teacher_created"))
   );
 });
 

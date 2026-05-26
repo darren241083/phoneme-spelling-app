@@ -141,6 +141,7 @@ import {
 } from "./pupilCsvImport.js?v=1.4";
 import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
 import {
+  buildAssignmentResultsFraming,
   buildAssignmentSourceViewModel,
   buildAutomationRunFeedbackNotice,
   buildAutomationRunOutcomeViewModel,
@@ -149,7 +150,7 @@ import {
   buildRecentPersonalisedRunActivityRows,
   getAutomationRunStatusLabel,
   normalizeCoverageWarnings,
-} from "./automationRunFeedback.js?v=1.1";
+} from "./automationRunFeedback.js?v=1.2";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
@@ -25500,7 +25501,7 @@ function renderClassComparisonCompact(rows) {
   `;
 }
 
-function renderAssignmentProgressHero(analytics) {
+function renderAssignmentProgressHero(analytics, { progressHeading = "Class progress" } = {}) {
   const rosterCount = Math.max(1, Number(analytics?.rosterCount || 0));
   const completed = Math.max(0, Number(analytics?.completedCount || 0));
   const started = Math.max(0, Number(analytics?.startedCount || 0));
@@ -25517,7 +25518,7 @@ function renderAssignmentProgressHero(analytics) {
     <section class="td-progress-hero">
       <div class="td-progress-hero-head">
         <div>
-          <h5>Class progress</h5>
+          <h5>${escapeHtml(progressHeading || "Class progress")}</h5>
           <p>${escapeHtml(summaryText)}</p>
         </div>
       </div>
@@ -25768,16 +25769,18 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
   const assignmentId = String(item.id);
   const analyticsState = state.analyticsByAssignment[assignmentId];
   const panelClasses = ["td-inline-panel", "td-inline-panel--attached", panelClassName].filter(Boolean).join(" ");
+  const framing = getAssignmentResultsFraming(item);
+  const statusCopy = getAssignmentResultsStatusCopy(framing);
 
   if (!analyticsState || analyticsState.status === "loading") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>Loading results...</strong>
+          <strong>${escapeHtml(statusCopy.loading)}</strong>
           <p>Pulling the latest pupil attempts for this assignment.</p>
         </div>
       </div>
@@ -25788,11 +25791,11 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>Could not load analytics.</strong>
+          <strong>${escapeHtml(statusCopy.error)}</strong>
           <p>${escapeHtml(analyticsState.message || "Please try again.")}</p>
         </div>
       </div>
@@ -25804,11 +25807,11 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>No analytics available yet.</strong>
+          <strong>${escapeHtml(statusCopy.empty)}</strong>
         </div>
       </div>
     `;
@@ -25820,7 +25823,7 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
   return `
     <div class="${panelClasses}">
       <div class="td-inline-head">
-        <h4>Results</h4>
+        <h4>${escapeHtml(framing.resultsHeading)}</h4>
         <div class="td-inline-actions">
           <button
             type="button"
@@ -25845,7 +25848,8 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
       </div>
 
       ${generatedCoverageHtml}
-      ${renderAssignmentProgressHero(analytics)}
+      ${renderAssignmentResultsIntroNote(framing)}
+      ${renderAssignmentProgressHero(analytics, { progressHeading: framing.progressHeading })}
 
       <div class="td-results-grid td-results-grid--analytics">
         <section class="td-results-block td-results-block--wide">
@@ -26004,6 +26008,7 @@ function renderAssignmentCardCompact(item) {
   const title = item.tests?.title || "Untitled test";
   const className = item.classes?.name || "Unknown class";
   const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const resultsFraming = getAssignmentResultsFraming(item);
   const provenanceLine = getAssignmentProvenanceLine(item);
   const lifecycle = getAssignmentLifecycleModel(item);
   const isResultsOpen =
@@ -26048,7 +26053,7 @@ function renderAssignmentCardCompact(item) {
             data-action="open-results-assignment"
             data-assignment-id="${escapeAttr(assignmentId)}"
           >
-            ${isResultsOpen ? "Hide results" : "View results"}
+            ${escapeHtml(isResultsOpen ? resultsFraming.openButtonLabel : resultsFraming.closedButtonLabel)}
           </button>
         </div>
       </div>
@@ -26647,6 +26652,8 @@ function renderClassResultsPanel(cls) {
   const selectedItem = items.find((item) => String(item?.id || "") === selectedAssignmentId) || null;
   const selectedAnalyticsState = selectedAssignmentId ? state.analyticsByAssignment[selectedAssignmentId] : null;
   const selectedAnalytics = selectedAnalyticsState?.status === "ready" ? selectedAnalyticsState.data?.current : null;
+  const selectedFraming = selectedItem ? getAssignmentResultsFraming(selectedItem) : buildAssignmentResultsFraming();
+  const selectedStatusCopy = getAssignmentResultsStatusCopy(selectedFraming);
 
   return `
     <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm">
@@ -26673,7 +26680,7 @@ function renderClassResultsPanel(cls) {
             <div class="td-field td-field--compact td-field--results-select">
               <div class="td-field-label-row">
                 <label for="${escapeAttr(assignmentSelectId)}">Recent assignments</label>
-                ${renderInfoTip("Choose from the five most recent assignments for this class to open the pupil-by-word results table.", {
+                ${renderInfoTip("Choose from the five most recent assignments for this class. Teacher-created assignments open a pupil-by-word table; personalised assignments open pupil-by-pupil outcomes.", {
                   label: "About recent assignments",
                   align: "start",
                 })}
@@ -26692,7 +26699,7 @@ function renderClassResultsPanel(cls) {
 
           ${
             items.length && selectedAnalytics
-              ? `${renderAssignmentProgressHero(selectedAnalytics)}`
+              ? `${renderAssignmentProgressHero(selectedAnalytics, { progressHeading: selectedFraming.progressHeading })}`
               : ""
           }
 
@@ -26702,13 +26709,13 @@ function renderClassResultsPanel(cls) {
               : !selectedAnalyticsState || selectedAnalyticsState.status === "loading"
                 ? `
             <div class="td-empty td-empty--compact">
-              <strong>Loading assignment results...</strong>
+              <strong>${escapeHtml(selectedFraming.introNote ? selectedStatusCopy.loading : "Loading assignment results...")}</strong>
             </div>
           `
                 : selectedAnalyticsState.status === "error"
                   ? `
             <div class="td-empty td-empty--compact">
-              <strong>Could not load this assignment.</strong>
+              <strong>${escapeHtml(selectedFraming.introNote ? selectedStatusCopy.error : "Could not load this assignment.")}</strong>
               <p>${escapeHtml(selectedAnalyticsState.message || "Please try again.")}</p>
             </div>
           `
@@ -26722,6 +26729,7 @@ function renderClassResultsPanel(cls) {
                 </div>
                 ${getAssignmentSourceBadgeHtml(selectedItem, { compact: true })}
               </div>
+              ${renderAssignmentResultsIntroNote(selectedFraming)}
               ${renderAssignmentResultsTable(selectedAnalyticsState.data?.current)}
             </div>
           `
@@ -26934,6 +26942,24 @@ function getAssignmentSourceView(item) {
     isSpellingBee: isSpellingBeeAssignmentRecord(item),
     run: runId ? getAutomationRunById(runId) : null,
   });
+}
+
+function getAssignmentResultsFraming(item) {
+  return buildAssignmentResultsFraming(getAssignmentSourceView(item).key);
+}
+
+function renderAssignmentResultsIntroNote(framing) {
+  const note = String(framing?.introNote || "").trim();
+  return note ? renderResultsBlockNote(note) : "";
+}
+
+function getAssignmentResultsStatusCopy(framing) {
+  const isPersonalised = String(framing?.resultsHeading || "") === "Personalised outcomes";
+  return {
+    loading: isPersonalised ? "Loading personalised outcomes..." : "Loading results...",
+    error: isPersonalised ? "Could not load personalised outcomes." : "Could not load analytics.",
+    empty: isPersonalised ? "No personalised outcomes available yet." : "No analytics available yet.",
+  };
 }
 
 function getAssignmentSourceBadgeHtml(item, { compact = false } = {}) {

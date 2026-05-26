@@ -40,6 +40,22 @@ const GENERATED_ASSIGNMENT_SUPPORT_LABELS = {
   supported: "Segmented support",
 };
 
+const DEFAULT_ASSIGNMENT_RESULTS_FRAMING = {
+  closedButtonLabel: "View results",
+  openButtonLabel: "Hide results",
+  resultsHeading: "Results",
+  progressHeading: "Class progress",
+  introNote: "",
+};
+
+const PERSONALISED_ASSIGNMENT_RESULTS_FRAMING = {
+  closedButtonLabel: "View personalised outcomes",
+  openButtonLabel: "Hide personalised outcomes",
+  resultsHeading: "Personalised outcomes",
+  progressHeading: "Personalised progress",
+  introNote: "Each pupil may have received a personalised word set. Use this view to compare completion, accuracy and target progress, not identical question-by-question scores.",
+};
+
 function toCount(value) {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
@@ -322,6 +338,14 @@ export function buildAssignmentSourceViewModel({
     policyName: runPolicyName,
     timestamp: runTimestamp,
   };
+}
+
+export function buildAssignmentResultsFraming(sourceKey = "") {
+  const key = normalizeKey(sourceKey);
+  if (key === "generated_by_policy" || key === "legacy_personalised") {
+    return { ...PERSONALISED_ASSIGNMENT_RESULTS_FRAMING };
+  }
+  return { ...DEFAULT_ASSIGNMENT_RESULTS_FRAMING };
 }
 
 function sumClassCount(classResults = [], key = "") {
