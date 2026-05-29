@@ -76,7 +76,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.99");
+      const module = await import("./teacherView.js?v=7.00");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -90,7 +90,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.70");
+      const module = await import("./pupilView.js?v=3.71");
       return module.renderPupilView;
     },
     () => {

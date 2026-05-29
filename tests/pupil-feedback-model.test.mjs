@@ -259,6 +259,31 @@ test("progress card excludes practice assignment rows from recent results", () =
   assert.deepEqual(model.recentResults.map((item) => item.title), ["Friday task"]);
 });
 
+test("progress card excludes extra challenge assignment rows from recent results", () => {
+  const model = buildPupilProgressCardModel({
+    assignments: [
+      assignment({
+        id: "extra-1",
+        title: "Extra challenge",
+        attemptSource: "extra_challenge",
+        completedAt: "2026-04-05T09:00:00.000Z",
+      }),
+      assignment({
+        id: "task-1",
+        title: "Friday task",
+        completedAt: "2026-04-04T09:00:00.000Z",
+      }),
+    ],
+    practiceModel: null,
+    progress: {
+      attemptHistory: [],
+      practiseNext: [],
+    },
+  });
+
+  assert.deepEqual(model.recentResults.map((item) => item.title), ["Friday task"]);
+});
+
 test("progress card improved-word count excludes baseline attempts", () => {
   const model = buildPupilProgressCardModel({
     assignments: [],
@@ -286,6 +311,47 @@ test("progress card improved-word count excludes baseline attempts", () => {
 
   const gettingStronger = model.blocks.find((item) => item.key === "getting_stronger");
   assert.equal(gettingStronger, undefined);
+});
+
+test("progress card improved-word count excludes extra challenge attempts", () => {
+  const model = buildPupilProgressCardModel({
+    assignments: [],
+    practiceModel: null,
+    progress: {
+      attemptHistory: [
+        attempt({
+          testWordId: "w1",
+          word: "rain",
+          correct: false,
+          createdAt: "2026-04-01T09:00:00.000Z",
+          attemptSource: "extra_challenge",
+        }),
+        attempt({
+          testWordId: "w1",
+          word: "rain",
+          correct: true,
+          createdAt: "2026-04-02T09:00:00.000Z",
+          attemptSource: "extra_challenge",
+        }),
+        attempt({
+          testWordId: "w2",
+          word: "train",
+          correct: false,
+          createdAt: "2026-04-03T09:00:00.000Z",
+        }),
+        attempt({
+          testWordId: "w2",
+          word: "train",
+          correct: true,
+          createdAt: "2026-04-04T09:00:00.000Z",
+        }),
+      ],
+      practiseNext: [],
+    },
+  });
+  const gettingStronger = model.blocks.find((item) => item.key === "getting_stronger");
+
+  assert.deepEqual(JSON.parse(JSON.stringify(gettingStronger?.chips)), ["train"]);
 });
 
 test("progress card next focus prefers practice focus over progress focus", () => {

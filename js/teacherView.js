@@ -153,7 +153,8 @@ import {
   getAssignmentSourceFilterOptions,
   getAutomationRunStatusLabel,
   normalizeCoverageWarnings,
-} from "./automationRunFeedback.js?v=1.3";
+} from "./automationRunFeedback.js?v=1.4";
+import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
@@ -8928,8 +8929,7 @@ function formatAnalyticsShortDayLabel(value) {
 }
 
 function isVisualTrendEvidenceAttempt(attempt) {
-  const attemptSource = String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase();
-  return attemptSource !== "practice" && attemptSource !== "baseline";
+  return isCoreProgressAttemptSource(attempt?.attempt_source || attempt?.attemptSource);
 }
 
 function buildVisualTrendAttemptKey(attempt) {

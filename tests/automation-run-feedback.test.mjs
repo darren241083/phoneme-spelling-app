@@ -76,6 +76,23 @@ test("assignment source labels distinguish teacher policy legacy baseline and Be
     buildAssignmentSourceViewModel({ assignment: { automation_kind: "spelling_bee" }, isSpellingBee: true }).label,
     "Spelling Bee"
   );
+  assert.deepEqual(
+    plain(buildAssignmentSourceViewModel({ assignment: { evidence_source: "extra_challenge" } })),
+    {
+      key: "extra_challenge",
+      label: "Extra challenge",
+      tone: "info",
+      detail: "Voluntary post-core challenge completed after required work.",
+      runId: "",
+      runMatched: false,
+      policyName: "",
+      timestamp: "",
+    }
+  );
+  assert.equal(
+    buildAssignmentSourceViewModel({ assignment: { assignment_source: "extra_challenge" } }).label,
+    "Extra challenge"
+  );
 });
 
 test("assignment source filter maps known source keys to source groups", () => {
@@ -88,6 +105,8 @@ test("assignment source filter maps known source keys to source groups", () => {
   assert.equal(labelsByKey[getAssignmentSourceFilterKey("teacher_created")], "Teacher-created");
   assert.equal(labelsByKey[getAssignmentSourceFilterKey("baseline")], "Baseline");
   assert.equal(labelsByKey[getAssignmentSourceFilterKey("spelling_bee")], "Spelling Bee");
+  assert.equal(labelsByKey[getAssignmentSourceFilterKey("extra_challenge")], "Extra challenge");
+  assert.equal(doesAssignmentSourceMatchFilter("extra_challenge", "automated"), false);
 });
 
 test("all sources filter matches all known source keys", () => {
@@ -97,6 +116,7 @@ test("all sources filter matches all known source keys", () => {
     "teacher_created",
     "baseline",
     "spelling_bee",
+    "extra_challenge",
   ]) {
     assert.equal(doesAssignmentSourceMatchFilter(sourceKey, "all"), true);
   }
@@ -109,15 +129,17 @@ test("assignment source filter counts include all sources and each source group"
     "teacher_created",
     "baseline",
     "spelling_bee",
+    "extra_challenge",
     "generated_by_policy",
   ]);
 
   assert.deepEqual(plain(counts), {
-    all: 6,
+    all: 7,
     automated: 3,
     teacher_created: 1,
     baseline: 1,
     spelling_bee: 1,
+    extra_challenge: 1,
   });
 });
 

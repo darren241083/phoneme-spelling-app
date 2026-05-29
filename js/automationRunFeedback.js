@@ -1,3 +1,8 @@
+import {
+  EVIDENCE_SOURCE_EXTRA_CHALLENGE,
+  isExtraChallengeAssignmentSource,
+} from "./evidenceSources.js?v=1.0";
+
 const BASELINE_INCOMPLETE_REASON = "baseline_incomplete";
 const NO_BASELINE_ASSIGNMENT_REASON = "no_baseline_assignment";
 const ACTIVE_AUTOMATED_ASSIGNMENT_REASON = "active_automated_assignment";
@@ -62,6 +67,7 @@ export const ASSIGNMENT_SOURCE_FILTER_OPTIONS = [
   { key: "teacher_created", label: "Teacher-created" },
   { key: "baseline", label: "Baseline" },
   { key: "spelling_bee", label: "Spelling Bee" },
+  { key: "extra_challenge", label: "Extra challenge" },
 ];
 
 const AUTOMATED_ASSIGNMENT_SOURCE_KEYS = new Set([
@@ -73,6 +79,7 @@ const DIRECT_ASSIGNMENT_SOURCE_FILTER_KEYS = new Set([
   "teacher_created",
   "baseline",
   "spelling_bee",
+  "extra_challenge",
 ]);
 
 function toCount(value) {
@@ -334,6 +341,19 @@ export function buildAssignmentSourceViewModel({
   const runFinishedAt = matchedRun ? getRunFinishedAt(matchedRun) : "";
   const runStartedAt = matchedRun ? getRunStartedAt(matchedRun) : "";
   const runTimestamp = runFinishedAt || runStartedAt;
+
+  if (isExtraChallengeAssignmentSource(source)) {
+    return {
+      key: EVIDENCE_SOURCE_EXTRA_CHALLENGE,
+      label: "Extra challenge",
+      tone: "info",
+      detail: "Voluntary post-core challenge completed after required work.",
+      runId: automationRunId,
+      runMatched: !!matchedRun,
+      policyName: runPolicyName,
+      timestamp: runTimestamp,
+    };
+  }
 
   if (isSpellingBee || automationKind === "spelling_bee") {
     return {

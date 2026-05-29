@@ -43,7 +43,8 @@ import {
   buildPupilSpellingStagePlaceholderModel,
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
-} from "./pupilFeedbackModel.js?v=1.6";
+} from "./pupilFeedbackModel.js?v=1.7";
+import { isTrustedProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -437,8 +438,10 @@ function buildPupilAttainmentCardBodyHtml(progress) {
 }
 
 function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map(), wordRowsById = new Map()) {
+  const trustedAttempts = (Array.isArray(attempts) ? attempts : [])
+    .filter((attempt) => isTrustedProgressAttemptSource(attempt?.attempt_source || attempt?.attemptSource));
   const latestByWord = new Map();
-  for (const attempt of attempts || []) {
+  for (const attempt of trustedAttempts) {
     const key = String(attempt?.assignment_target_id || attempt?.test_word_id || attempt?.word_text || "");
     if (!key) continue;
     latestByWord.set(key, attempt);
@@ -560,7 +563,7 @@ async function loadPupilProgress(pupilId) {
     .limit(600);
   if (error) return null;
 
-  const attempts = (data || []).filter((item) => String(item?.attempt_source || "").trim().toLowerCase() !== "practice");
+  const attempts = (data || []).filter((item) => isTrustedProgressAttemptSource(item?.attempt_source));
   const testWordIds = [...new Set(
     attempts
       .map((item) => String(item?.test_word_id || "").trim())

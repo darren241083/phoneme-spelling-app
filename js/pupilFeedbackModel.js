@@ -1,3 +1,5 @@
+import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
+
 function parseDateMs(value) {
   const ms = new Date(value || "").getTime();
   return Number.isFinite(ms) ? ms : 0;
@@ -49,26 +51,14 @@ function buildEncouragement({ wordsChecked = 0, pendingAssignments = 0, complete
   return "Every checked word helps build your progress.";
 }
 
-function normalizeAttemptSource(value = "") {
-  return normalizeText(value).toLowerCase();
-}
-
-function isBaselineAttempt(attempt = null) {
-  return normalizeAttemptSource(attempt?.attempt_source || attempt?.attemptSource) === "baseline";
-}
-
-function isPracticeAttempt(attempt = null) {
-  return normalizeAttemptSource(attempt?.attempt_source || attempt?.attemptSource) === "practice";
-}
-
 function isIncludedProgressAttempt(attempt = null) {
-  return !!attempt && !isBaselineAttempt(attempt) && !isPracticeAttempt(attempt);
+  return !!attempt && isCoreProgressAttemptSource(attempt?.attempt_source || attempt?.attemptSource);
 }
 
 function isIncludedRecentResult(item = null) {
   if (!item?.completed) return false;
   if (item?.isBaseline || item?.isSpellingBee) return false;
-  return normalizeAttemptSource(item?.attempt_source || item?.attemptSource) !== "practice";
+  return isCoreProgressAttemptSource(item?.attempt_source || item?.attemptSource);
 }
 
 function formatCountLabel(value = 0, singular = "task", plural = "tasks") {
