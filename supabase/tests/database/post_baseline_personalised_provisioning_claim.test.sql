@@ -52,6 +52,9 @@ declare
   active_assignment_test_id uuid;
   active_assignment_word_id uuid;
   active_assignment_id uuid;
+  extra_assignment_test_id uuid;
+  extra_assignment_word_id uuid;
+  extra_assignment_id uuid;
   final_assignment_test_id uuid;
   final_assignment_id uuid;
   first_claim jsonb;
@@ -660,6 +663,99 @@ begin
     'assigned'
   );
 
+  insert into public.tests (
+    teacher_id,
+    title,
+    status,
+    question_type,
+    analytics_target_words_enabled,
+    analytics_target_words_per_pupil
+  )
+  values (
+    teacher_user_id,
+    'pgTAP Existing Extra Challenge Test',
+    'published',
+    'segmented_spelling',
+    true,
+    10
+  )
+  returning id into extra_assignment_test_id;
+
+  insert into public.test_words (test_id, position, word, sentence, segments, choice)
+  values (
+    extra_assignment_test_id,
+    1,
+    'challenge',
+    null,
+    '["ch","a","ll","e","n","ge"]'::jsonb,
+    '{"source":"assignment_engine","baseline_v2":false}'::jsonb
+  )
+  returning id into extra_assignment_word_id;
+
+  insert into public.assignments_v2 (
+    teacher_id,
+    class_id,
+    test_id,
+    mode,
+    max_attempts,
+    question_type,
+    analytics_target_words_enabled,
+    analytics_target_words_per_pupil,
+    evidence_source,
+    automation_kind,
+    automation_source,
+    automation_run_id,
+    automation_triggered_by
+  )
+  values (
+    teacher_user_id,
+    form_class_id,
+    extra_assignment_test_id,
+    'practice',
+    3,
+    'segmented_spelling',
+    true,
+    10,
+    'extra_challenge',
+    'personalised',
+    'manual_run_now',
+    live_run_id,
+    teacher_user_id
+  )
+  returning id into extra_assignment_id;
+
+  insert into public.assignment_pupil_target_words (
+    teacher_id,
+    assignment_id,
+    pupil_id,
+    test_word_id,
+    focus_grapheme
+  )
+  values (
+    teacher_user_id,
+    extra_assignment_id,
+    ready_pupil_id,
+    extra_assignment_word_id,
+    'ch'
+  );
+
+  insert into public.assignment_pupil_statuses (
+    teacher_id,
+    assignment_id,
+    class_id,
+    test_id,
+    pupil_id,
+    status
+  )
+  values (
+    teacher_user_id,
+    extra_assignment_id,
+    form_class_id,
+    extra_assignment_test_id,
+    ready_pupil_id,
+    'assigned'
+  );
+
   first_claim := public.claim_waiting_personalised_generation_run_pupil(ready_pupil_id);
   insert into post_baseline_claim_results (name, result)
   values ('first_claim', first_claim);
@@ -808,7 +904,7 @@ select ok(
 select is(
   (select result ->> 'status' from post_baseline_claim_results where name = 'first_claim'),
   'claimed',
-  'baseline-ready waiting pupil can be claimed'
+  'baseline-ready waiting pupil can be claimed even with an active extra challenge assignment'
 );
 
 select is(

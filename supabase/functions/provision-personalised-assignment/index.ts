@@ -29,6 +29,7 @@ const corsHeaders = {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CLAIMED_STATUS = "claimed";
 const BASELINE_STANDARD_KEY = "core_v2";
+const EVIDENCE_SOURCE_ASSIGNED_CORE = "assigned_core";
 const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -324,6 +325,7 @@ async function hasActivePersonalisedAssignment(
     .select("id, class_id, test_id, created_at")
     .in("class_id", classIds)
     .eq("school_id", schoolId)
+    .eq("evidence_source", EVIDENCE_SOURCE_ASSIGNED_CORE)
     .eq("automation_kind", AUTOMATION_KIND_PERSONALISED)
     .eq("automation_source", AUTOMATION_SOURCE_MANUAL_RUN_NOW)
     .order("created_at", { ascending: false })
@@ -653,6 +655,7 @@ async function createGeneratedAssignment(
       end_at: deadlineIso || null,
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
+      evidence_source: EVIDENCE_SOURCE_ASSIGNED_CORE,
       automation_kind: AUTOMATION_KIND_PERSONALISED,
       automation_source: AUTOMATION_SOURCE_MANUAL_RUN_NOW,
       automation_run_id: runId,

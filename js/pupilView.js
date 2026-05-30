@@ -44,7 +44,10 @@ import {
   buildPupilSpellingStageModel,
   buildPupilSpellingBeeSummaryModel,
 } from "./pupilFeedbackModel.js?v=1.7";
-import { isTrustedProgressAttemptSource } from "./evidenceSources.js?v=1.0";
+import {
+  isExtraChallengeAssignmentSource,
+  isTrustedProgressAttemptSource,
+} from "./evidenceSources.js?v=1.0";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -2314,7 +2317,10 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       console.warn(assignmentLoadWarning, error);
       return [];
     });
-    const dashboardAssignments = loadedAssignments.filter((item) => !item?.isBaseline);
+    const dashboardAssignments = loadedAssignments.filter((item) =>
+      !item?.isBaseline
+      && !isExtraChallengeAssignmentSource(item)
+    );
     const [practiceModel, progress] = await Promise.all([
       loadPracticeModel(pupilId),
       loadPupilProgress(pupilId),

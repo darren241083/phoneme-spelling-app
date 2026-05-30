@@ -77,6 +77,8 @@ const WORDLOOM_CORE_SUITABILITY_STATUS_ORDER = ["suitable", "caution", "exclude"
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
 export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
 export const ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
+export const EVIDENCE_SOURCE_ASSIGNED_CORE = "assigned_core";
+export const EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
 export const CLASS_TYPE_FORM = "form";
 export const CLASS_TYPE_SUBJECT = "subject";
 export const CLASS_TYPE_INTERVENTION = "intervention";
@@ -5756,6 +5758,15 @@ function compareBaselineGateRuntimeAssignments(a, b) {
   return compareBaselineGateAssignments(a, b);
 }
 
+function normalizeAssignmentEvidenceSource(value = "") {
+  const key = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+  if (key === EVIDENCE_SOURCE_EXTRA_CHALLENGE) return EVIDENCE_SOURCE_EXTRA_CHALLENGE;
+  return EVIDENCE_SOURCE_ASSIGNED_CORE;
+}
+
 async function buildBaselineGateStateFromRuntimeAssignments({
   runtimePayload = null,
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
@@ -5858,6 +5869,13 @@ function normalizePupilRuntimeAssignmentRow(row = {}) {
   const isSpellingBee = !!(source?.isSpellingBee ?? source?.is_spelling_bee);
   const isGenerated = !!(source?.isGenerated ?? source?.is_generated);
   const isBaseline = !!(source?.isBaseline ?? source?.is_baseline);
+  const evidenceSource = normalizeAssignmentEvidenceSource(
+    source?.evidence_source
+    || source?.evidenceSource
+    || source?.assignment_source
+    || source?.assignmentSource
+  );
+  const isExtraChallenge = evidenceSource === EVIDENCE_SOURCE_EXTRA_CHALLENGE;
   const spellingBeeResult = normalizeSpellingBeeResultRow(
     source?.spellingBeeResult ?? source?.spelling_bee_result
   );
@@ -5880,15 +5898,24 @@ function normalizePupilRuntimeAssignmentRow(row = {}) {
     automation_source: String(source?.automation_source || source?.automationSource || "").trim() || null,
     automation_run_id: String(source?.automation_run_id || source?.automationRunId || "").trim() || null,
     automation_triggered_by: String(source?.automation_triggered_by || source?.automationTriggeredBy || "").trim() || null,
+    evidence_source: evidenceSource,
+    evidenceSource,
+    assignment_source: evidenceSource,
+    assignmentSource: evidenceSource,
     end_at: source?.end_at || source?.endAt || null,
     created_at: source?.created_at || source?.createdAt || null,
     analytics_target_words_enabled: !!(source?.analytics_target_words_enabled ?? source?.analyticsTargetWordsEnabled),
     analytics_target_words_per_pupil: Math.max(0, Number(source?.analytics_target_words_per_pupil ?? source?.analyticsTargetWordsPerPupil ?? 0)),
-    attempt_source: String(source?.attempt_source || source?.attemptSource || "teacher_assigned").trim(),
-    assignmentOrigin: String(source?.assignmentOrigin || source?.assignment_origin || source?.attempt_source || "teacher_assigned").trim(),
+    attempt_source: isExtraChallenge
+      ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
+      : String(source?.attempt_source || source?.attemptSource || "teacher_assigned").trim(),
+    assignmentOrigin: isExtraChallenge
+      ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
+      : String(source?.assignmentOrigin || source?.assignment_origin || source?.attempt_source || "teacher_assigned").trim(),
     isSpellingBee,
     isGenerated,
     isBaseline,
+    isExtraChallenge,
     assignmentStatus: String(source?.assignmentStatus || source?.assignment_status || "assigned").trim() || "assigned",
     spellingBeeLengthMode: isSpellingBee
       ? normalizeSpellingBeeLengthMode(source?.spellingBeeLengthMode || source?.spelling_bee_length_mode)
