@@ -72,6 +72,7 @@ test("practice evidence is real spelling evidence only", () => {
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "correct", focus: "ai", correct: true })), false);
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "practice", focus: "ai", source: "practice" })), false);
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "baseline", focus: "ai", source: "baseline" })), false);
+  assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "extra", focus: "ai", source: "extra_challenge" })), false);
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "blank", focus: "ai", typed: "" })), false);
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "legacy", focus: "ai", mode: "" })), false);
   assert.equal(isEligiblePracticeEvidenceAttempt(attempt({ id: "supported", focus: "ai", mode: "type_what_you_hear" })), false);

@@ -10,6 +10,8 @@ import {
   buildPlacementCurrentProfiles,
   buildProvisioningPlan,
   buildPublicProvisioningResponse,
+  hasIncompleteRequiredCoreRuntimeAssignment,
+  isRequiredCoreRuntimeAssignment,
   mapWordloomCoreBankRowsToWordRows,
 } from "../supabase/functions/provision-personalised-assignment/provisioningCore.mjs";
 import {
@@ -25,8 +27,53 @@ const response = buildPublicProvisioningResponse({
 assert.deepEqual(Object.keys(response).sort(), ["assignmentId", "status"]);
 assert.equal(response.status, "provisioned");
 assert.equal(response.assignmentId, "11111111-1111-4111-8111-111111111111");
+assert.deepEqual(buildPublicProvisioningResponse({
+  status: "already_active",
+  assignmentId: "22222222-2222-4222-8222-222222222222",
+}), {
+  status: "already_active",
+  assignmentId: "22222222-2222-4222-8222-222222222222",
+});
 assert.deepEqual(buildPublicProvisioningResponse({ status: "not_ready" }), { status: "not_ready" });
+assert.deepEqual(buildPublicProvisioningResponse({ status: "not_eligible" }), { status: "not_eligible" });
+assert.deepEqual(buildPublicProvisioningResponse({ status: "not_enough_evidence" }), { status: "not_enough_evidence" });
+assert.deepEqual(buildPublicProvisioningResponse({ status: "error" }), { status: "error" });
 assert.deepEqual(buildPublicProvisioningResponse({ status: "unexpected" }), { status: "generation_failed" });
+
+function runtimeAssignment({
+  evidenceSource = "assigned_core",
+  attemptSource = "teacher_assigned",
+  mode = "test",
+  completed = false,
+} = {}) {
+  return {
+    evidence_source: evidenceSource,
+    assignment_source: evidenceSource,
+    attempt_source: attemptSource,
+    mode,
+    completed,
+  };
+}
+
+const teacherPracticeModeCore = runtimeAssignment({
+  attemptSource: "teacher_assigned",
+  mode: "practice",
+});
+const autoPracticeModeCore = runtimeAssignment({
+  attemptSource: "auto_assigned",
+  mode: "practice",
+});
+const explicitPracticeRuntime = runtimeAssignment({
+  attemptSource: "practice",
+  mode: "test",
+});
+
+assert.equal(isRequiredCoreRuntimeAssignment(teacherPracticeModeCore), true);
+assert.equal(isRequiredCoreRuntimeAssignment(autoPracticeModeCore), true);
+assert.equal(isRequiredCoreRuntimeAssignment(explicitPracticeRuntime), false);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([teacherPracticeModeCore]), true);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([autoPracticeModeCore]), true);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([explicitPracticeRuntime]), false);
 
 function coreBankWord({ id, word, segments, focus, score = 42 }) {
   return {
@@ -338,6 +385,53 @@ const usageAwareTargetWords = provisionedWithUsageAwareSelection.plan.pupilPlans
   .filter((word) => word.assignmentRole === "target")
   .map((word) => word.word);
 assert.deepEqual(usageAwareTargetWords, ["motion"]);
+
+const provisionedWithoutExtraChallengeUsage = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: baselineAttemptRows,
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+const provisionedIgnoringExtraChallengeUsage = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [
+    ...baselineAttemptRows,
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "extra-assignment",
+      test_word_id: "extra-action",
+      word_text: "action",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "extra_challenge",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["a", "c", "tion"],
+      typed: "action",
+    },
+  ],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+assert.deepEqual(
+  provisionedIgnoringExtraChallengeUsage.plan.pupilPlans[0].words.map((word) => word.word),
+  provisionedWithoutExtraChallengeUsage.plan.pupilPlans[0].words.map((word) => word.word),
+);
 
 const provisionedWithLowCoverageFallback = buildProvisioningPlan({
   pupilId: "pupil-one",

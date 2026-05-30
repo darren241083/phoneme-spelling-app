@@ -9,7 +9,7 @@ export const PRACTICE_STATUS_READY = "ready";
 export const PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE = "not_enough_evidence";
 export const PRACTICE_STATUS_NOT_ENOUGH_WORDS = "not_enough_words";
 
-const BLOCKED_EVIDENCE_SOURCES = new Set(["baseline", "practice"]);
+const BLOCKED_EVIDENCE_SOURCES = new Set(["baseline", "practice", "extra_challenge", "extrachallenge"]);
 const BLOCKED_EVIDENCE_MODES = new Set(["practice", "learn"]);
 const ELIGIBLE_EVIDENCE_TIERS = new Set(["independent", "diagnostic"]);
 

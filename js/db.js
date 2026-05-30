@@ -109,6 +109,9 @@ const PERSONALISED_PROVISIONING_STATUS_VALUES = new Set([
   "already_active",
   "already_provisioning",
   "provisioned",
+  "not_eligible",
+  "not_enough_evidence",
+  "error",
   "generation_failed",
 ]);
 const PERSONALISED_PROVISIONING_SAFE_STATUSES = new Set([
@@ -6113,6 +6116,43 @@ function normalizePersonalisedProvisioningResult(payload, fallback = {}) {
   };
 }
 
+const EXTRA_CHALLENGE_PROVISIONING_STATUS_VALUES = new Set([
+  "provisioned",
+  "already_active",
+  "not_eligible",
+  "not_enough_evidence",
+  "error",
+]);
+
+function normalizeExtraChallengeProvisioningResult(payload, fallback = {}) {
+  const data = parseSupabaseFunctionPayload(payload);
+  const row = data && typeof data === "object" ? data : {};
+  const rawStatus = String(row?.status || fallback.status || "error").trim().toLowerCase() || "error";
+  const status = EXTRA_CHALLENGE_PROVISIONING_STATUS_VALUES.has(rawStatus)
+    ? rawStatus
+    : (rawStatus === "generation_failed" ? "error" : "error");
+  const assignmentId = (status === "provisioned" || status === "already_active")
+    ? String(row?.assignmentId || row?.assignment_id || fallback.assignmentId || "").trim()
+    : "";
+  const ok = status === "provisioned" || status === "already_active";
+  const error = ok
+    ? ""
+    : String(
+      row?.error
+      || row?.message
+      || fallback.error
+      || `Extra challenge provisioning returned ${status}.`
+    ).trim();
+  return {
+    ok,
+    status,
+    provisioned: status === "provisioned",
+    alreadyActive: status === "already_active",
+    assignmentId,
+    error,
+  };
+}
+
 export async function provisionWaitingPersonalisedAssignmentAfterBaseline({ pupilId = "" } = {}) {
   const safePupilId = String(pupilId || "").trim();
   if (!safePupilId) {
@@ -6139,6 +6179,39 @@ export async function provisionWaitingPersonalisedAssignmentAfterBaseline({ pupi
     return normalizePersonalisedProvisioningResult(null, {
       status: "generation_failed",
       error: String(error?.message || error || "Personalised provisioning request failed.").trim(),
+    });
+  }
+}
+
+export async function provisionExtraChallengeAssignment({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizeExtraChallengeProvisioningResult(null, {
+      status: "not_eligible",
+      error: "Missing pupil id.",
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke(PERSONALISED_PROVISIONING_FUNCTION, {
+      body: {
+        action: "extra_challenge",
+        pupilId: safePupilId,
+      },
+    });
+
+    if (error) {
+      return normalizeExtraChallengeProvisioningResult(null, {
+        status: "error",
+        error: await extractSupabaseFunctionErrorMessage(error) || "Extra challenge request failed.",
+      });
+    }
+
+    return normalizeExtraChallengeProvisioningResult(data);
+  } catch (error) {
+    return normalizeExtraChallengeProvisioningResult(null, {
+      status: "error",
+      error: String(error?.message || error || "Extra challenge request failed.").trim(),
     });
   }
 }
@@ -6517,7 +6590,7 @@ export async function listPupilPracticeEvidenceAttempts({
     .select("id, test_word_id, test_id, correct, typed, mode, pattern_type, focus_grapheme, target_graphemes, word_text, word, attempt_source, created_at")
     .eq("pupil_id", safePupilId)
     .eq("correct", false)
-    .not("attempt_source", "in", '("practice","baseline")')
+    .not("attempt_source", "in", '("practice","baseline","extra_challenge")')
     .order("created_at", { ascending: false })
     .limit(safeLimit);
 

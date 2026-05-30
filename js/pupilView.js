@@ -4,6 +4,7 @@ import {
   markAssignmentComplete,
   markAssignmentSessionOpened,
   normalizeSchoolSummary,
+  provisionExtraChallengeAssignment,
   provisionWaitingPersonalisedAssignmentAfterBaseline,
   readPupilBaselineGateState,
   readPupilRuntimeAssignments,
@@ -48,6 +49,10 @@ import {
   isExtraChallengeAssignmentSource,
   isTrustedProgressAttemptSource,
 } from "./evidenceSources.js?v=1.0";
+import {
+  buildExtraChallengeCardModel,
+  findActiveExtraChallengeAssignment,
+} from "./pupilExtraChallenge.js?v=1.0";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -57,6 +62,10 @@ const pupilDashboardState = {
   beeLeaderboardOpenByAssignment: {},
   openNextTeachingFocus: "",
   openHeroStageHelp: "",
+  extraChallenge: {
+    busy: false,
+    message: "",
+  },
 };
 let pupilHeroStageOutsideClickHandler = null;
 let pupilHeroStageEscapeHandler = null;
@@ -1254,6 +1263,7 @@ function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, se
 }
 
 function getDisplayedAssignmentTitle(item) {
+  if (isExtraChallengeAssignmentSource(item)) return "Extra challenge";
   return String(item?.pupilTitle || item?.title || "Test").trim() || "Test";
 }
 
@@ -1994,6 +2004,33 @@ function renderAssignmentsEmptyState() {
   `;
 }
 
+function renderExtraChallengeCard(model = null) {
+  if (!model) return "";
+  const state = String(model?.state || "").trim();
+  const isBusy = !!pupilDashboardState.extraChallenge?.busy;
+  const message = String(pupilDashboardState.extraChallenge?.message || "").trim();
+
+  return `
+    <section class="card pupilSectionCard pupilExtraChallengeCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("spark", model.title || "Ready for another challenge?")}</h3>
+        </div>
+      </div>
+      <p class="pupilEmptyText">${escapeHtml(model.body || "")}</p>
+      ${message ? `<p class="pupilEmptyText pupilExtraChallengeMessage" role="status">${escapeHtml(message)}</p>` : ""}
+      <button
+        class="btn primary start-test-btn"
+        type="button"
+        data-action="start-extra-challenge"
+        data-extra-challenge-state="${escapeHtml(state)}"
+        data-assignment-id="${escapeHtml(String(model.assignmentId || ""))}"
+        ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+      >${escapeHtml(model.buttonLabel || "Start my challenge")}</button>
+    </section>
+  `;
+}
+
 function getPracticeEmptyText(practiceModel = null) {
   const status = String(practiceModel?.status || PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE).trim();
   if (status === PRACTICE_STATUS_NOT_ENOUGH_WORDS) return "Practice words are not ready yet.";
@@ -2059,11 +2096,14 @@ function renderCompletionSummary(item, result) {
   const totalCorrect = Number(result?.totalCorrect || 0);
   const incorrectCount = Math.max(0, totalWords - totalCorrect);
   const averageAttempts = Number(result?.averageAttempts || 0);
+  const completionLabel = item.attempt_source === "practice"
+    ? "practice"
+    : (isExtraChallengeAssignmentSource(item) ? "the challenge" : "the test");
 
   return `
     <div class="pupil-header">
       <h2>${escapeHtml(getDisplayedAssignmentTitle(item) || "Activity complete")}</h2>
-      <p class="muted">You finished ${item.attempt_source === "practice" ? "practice" : "the test"}.</p>
+      <p class="muted">You finished ${completionLabel}.</p>
     </div>
     <section class="card test-card resultCardInline">
       <div class="resultSummaryGrid">
@@ -2182,8 +2222,31 @@ function renderSpellingBeeAlreadyStarted() {
   `;
 }
 
-function attachDashboardEvents(containerEl, session, assignments, practiceModel, progress) {
+async function openExtraChallengeFromAssignments({
+  containerEl,
+  session,
+  assignments = [],
+  practicePacks = [],
+  assignmentId = "",
+} = {}) {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const assignment = (Array.isArray(assignments) ? assignments : []).find((item) =>
+    safeAssignmentId && String(item?.id || "") === safeAssignmentId
+  ) || findActiveExtraChallengeAssignment(assignments);
+  if (!assignment) return false;
+  await openSession(containerEl, session, assignment, assignments, practicePacks);
+  return true;
+}
+
+function renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+}
+
+function attachDashboardEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
   const practicePacks = getPracticePacks(practiceModel);
+  const allAssignments = Array.isArray(dashboardOptions?.allAssignments) && dashboardOptions.allAssignments.length
+    ? dashboardOptions.allAssignments
+    : assignments;
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.starting === "true") return;
@@ -2205,12 +2268,70 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
     });
   });
 
+  containerEl.querySelectorAll('[data-action="start-extra-challenge"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (button.dataset.starting === "true") return;
+      button.dataset.starting = "true";
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+      pupilDashboardState.extraChallenge = {
+        busy: true,
+        message: "",
+      };
+
+      const state = String(button.getAttribute("data-extra-challenge-state") || "");
+      const assignmentId = String(button.getAttribute("data-assignment-id") || "");
+      const pupilId = String(session?.pupil_id || "").trim();
+
+      if (state === "continue") {
+        const opened = await openExtraChallengeFromAssignments({
+          containerEl,
+          session,
+          assignments: allAssignments,
+          practicePacks,
+          assignmentId,
+        });
+        pupilDashboardState.extraChallenge.busy = false;
+        if (!opened) {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+        }
+        return;
+      }
+
+      const result = await provisionExtraChallengeAssignment({ pupilId });
+      if (result?.status === "provisioned" || result?.status === "already_active") {
+        const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
+          console.warn("load pupil assignments after extra challenge provision error:", error);
+          return [];
+        });
+        const opened = await openExtraChallengeFromAssignments({
+          containerEl,
+          session,
+          assignments: refreshedAssignments,
+          practicePacks,
+          assignmentId: result.assignmentId,
+        });
+        pupilDashboardState.extraChallenge.busy = false;
+        if (!opened) {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+        }
+        return;
+      }
+
+      pupilDashboardState.extraChallenge = {
+        busy: false,
+        message: "No extra challenge is ready just yet. Check back after your next task.",
+      };
+      renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+    });
+  });
+
   containerEl.querySelectorAll('[data-action="toggle-pupil-section"]').forEach((button) => {
     button.addEventListener("click", () => {
       const key = String(button.getAttribute("data-section") || "");
       if (!Object.prototype.hasOwnProperty.call(pupilDashboardState.expandedSections, key)) return;
       pupilDashboardState.expandedSections[key] = !pupilDashboardState.expandedSections[key];
-      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
@@ -2222,7 +2343,7 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
       pupilDashboardState.openNextTeachingFocus = normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus) === focus
         ? ""
         : focus;
-      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
@@ -2231,7 +2352,7 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
       const stageKey = String(button.getAttribute("data-stage-key") || "").trim().toLowerCase();
       if (!PUPIL_HERO_STAGE_STEPS.some((item) => item.key === stageKey)) return;
       pupilDashboardState.openHeroStageHelp = pupilDashboardState.openHeroStageHelp === stageKey ? "" : stageKey;
-      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
@@ -2239,7 +2360,7 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
     button.addEventListener("click", () => {
       pupilDashboardState.openHeroStageHelp = "";
       pupilDashboardState.openNextTeachingFocus = "";
-      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
@@ -2251,15 +2372,15 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
         ...(pupilDashboardState.beeLeaderboardOpenByAssignment || {}),
         [assignmentId]: !pupilDashboardState.beeLeaderboardOpenByAssignment?.[assignmentId],
       };
-      renderDashboard(containerEl, session, assignments, practiceModel, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
-  bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress);
+  bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
   bindAccessibilityControlEvents(containerEl);
 }
 
-function bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress) {
+function bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
   if (pupilHeroStageOutsideClickHandler) {
     document.removeEventListener("click", pupilHeroStageOutsideClickHandler);
   }
@@ -2272,13 +2393,13 @@ function bindHeroStageHelpDismissEvents(containerEl, session, assignments, pract
     const target = event?.target;
     if (target?.closest?.('[data-action="toggle-hero-stage-help"], .pupilHeroStageBandBubble')) return;
     pupilDashboardState.openHeroStageHelp = "";
-    renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
   };
 
   pupilHeroStageEscapeHandler = (event) => {
     if (event?.key !== "Escape" || !pupilDashboardState.openHeroStageHelp) return;
     pupilDashboardState.openHeroStageHelp = "";
-    renderDashboard(containerEl, session, assignments, practiceModel, progress);
+    renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
   };
 
   document.addEventListener("click", pupilHeroStageOutsideClickHandler);
@@ -2321,11 +2442,24 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       !item?.isBaseline
       && !isExtraChallengeAssignmentSource(item)
     );
+    const extraChallengeModel = buildExtraChallengeCardModel({
+      assignments: loadedAssignments,
+      pupilId,
+    });
+    if (!extraChallengeModel) {
+      pupilDashboardState.extraChallenge = {
+        busy: false,
+        message: "",
+      };
+    }
     const [practiceModel, progress] = await Promise.all([
       loadPracticeModel(pupilId),
       loadPupilProgress(pupilId),
     ]);
-    renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress);
+    renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress, {
+      allAssignments: loadedAssignments,
+      extraChallengeModel,
+    });
   };
 
   let resolvedGate = null;
@@ -2698,19 +2832,21 @@ async function openSession(containerEl, session, item, assignments, practicePack
   });
 }
 
-function renderDashboard(containerEl, session, assignments, practiceModel, progress) {
+function renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
   const name = session?.first_name || session?.username || "Pupil";
+  const extraChallengeModel = dashboardOptions?.extraChallengeModel || null;
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
       ${renderRecentTasksSection(assignments, practiceModel, progress)}
       ${renderPupilDashboardMiniCards(assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
+      ${renderExtraChallengeCard(extraChallengeModel)}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}
     </div>
   `;
-  attachDashboardEvents(containerEl, session, assignments, practiceModel, progress);
+  attachDashboardEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
 }
 
 export async function renderPupilView(containerEl, session) {

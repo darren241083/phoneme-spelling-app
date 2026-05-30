@@ -99,6 +99,43 @@ test("wrapper sends only pupil id to the personalised provisioning function", as
   });
 });
 
+test("extra challenge wrapper sends explicit action and pupil id", async () => {
+  const {
+    provisionExtraChallengeAssignment,
+    calls,
+  } = loadDbHelpers({
+    invokeImpl: async () => ({
+      data: {
+        status: "provisioned",
+        assignmentId: "33333333-3333-4333-8333-333333333333",
+      },
+      error: null,
+    }),
+  });
+
+  const result = await provisionExtraChallengeAssignment({
+    pupilId: ` ${PUPIL_ID} `,
+  });
+
+  assert.deepEqual(plain(calls), [{
+    name: "provision-personalised-assignment",
+    options: {
+      body: {
+        action: "extra_challenge",
+        pupilId: PUPIL_ID,
+      },
+    },
+  }]);
+  assert.deepEqual(plain(result), {
+    ok: true,
+    status: "provisioned",
+    provisioned: true,
+    alreadyActive: false,
+    assignmentId: "33333333-3333-4333-8333-333333333333",
+    error: "",
+  });
+});
+
 test("wrapper treats no-op statuses as safe dashboard outcomes", async () => {
   const {
     provisionWaitingPersonalisedAssignmentAfterBaseline,
@@ -174,6 +211,71 @@ test("wrapper normalizes thrown errors without throwing", async () => {
   assert.equal(result.provisioned, false);
   assert.equal(result.assignmentId, "");
   assert.match(result.error, /Network unavailable/);
+});
+
+test("extra challenge wrapper normalizes already active with assignment id", async () => {
+  const {
+    provisionExtraChallengeAssignment,
+  } = loadDbHelpers({
+    invokeImpl: async () => ({
+      data: {
+        status: "already_active",
+        assignmentId: "44444444-4444-4444-8444-444444444444",
+      },
+      error: null,
+    }),
+  });
+
+  const result = await provisionExtraChallengeAssignment({ pupilId: PUPIL_ID });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "already_active");
+  assert.equal(result.alreadyActive, true);
+  assert.equal(result.assignmentId, "44444444-4444-4444-8444-444444444444");
+});
+
+test("extra challenge wrapper normalizes not eligible and not enough evidence", async () => {
+  const first = loadDbHelpers({
+    invokeImpl: async () => ({
+      data: { status: "not_eligible" },
+      error: null,
+    }),
+  });
+  const notEligible = await first.provisionExtraChallengeAssignment({ pupilId: PUPIL_ID });
+
+  const second = loadDbHelpers({
+    invokeImpl: async () => ({
+      data: { status: "not_enough_evidence" },
+      error: null,
+    }),
+  });
+  const notEnoughEvidence = await second.provisionExtraChallengeAssignment({ pupilId: PUPIL_ID });
+
+  assert.equal(notEligible.ok, false);
+  assert.equal(notEligible.status, "not_eligible");
+  assert.equal(notEligible.assignmentId, "");
+  assert.equal(notEnoughEvidence.ok, false);
+  assert.equal(notEnoughEvidence.status, "not_enough_evidence");
+  assert.equal(notEnoughEvidence.assignmentId, "");
+});
+
+test("extra challenge wrapper normalizes invoke failures to error", async () => {
+  const {
+    provisionExtraChallengeAssignment,
+  } = loadDbHelpers({
+    invokeImpl: async () => ({
+      data: null,
+      error: { message: "Edge function unavailable" },
+    }),
+  });
+
+  const result = await provisionExtraChallengeAssignment({ pupilId: PUPIL_ID });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "error");
+  assert.equal(result.provisioned, false);
+  assert.equal(result.assignmentId, "");
+  assert.match(result.error, /Edge function unavailable/);
 });
 
 for (const { name, fn } of TESTS) {

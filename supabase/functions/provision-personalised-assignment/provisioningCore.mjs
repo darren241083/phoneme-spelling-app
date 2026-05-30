@@ -30,6 +30,9 @@ const PUBLIC_STATUSES = new Set([
   "already_active",
   "already_provisioning",
   "provisioned",
+  "not_eligible",
+  "not_enough_evidence",
+  "error",
   "generation_failed",
 ]);
 
@@ -51,7 +54,7 @@ export function buildPublicProvisioningResponse({ status = "", assignmentId = ""
     status: PUBLIC_STATUSES.has(cleanStatus) ? cleanStatus : "generation_failed",
   };
   const cleanAssignmentId = normalizeId(assignmentId);
-  if (response.status === "provisioned" && cleanAssignmentId) {
+  if ((response.status === "provisioned" || response.status === "already_active") && cleanAssignmentId) {
     response.assignmentId = cleanAssignmentId;
   }
   return response;
@@ -63,6 +66,94 @@ export function buildProvisioningPolicy(runRow = null) {
     support_preset: runRow?.support_preset,
     allow_starter_fallback: runRow?.allow_starter_fallback,
   });
+}
+
+function normalizeRuntimeSourceKey(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function getRuntimeEvidenceSource(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return normalizeRuntimeSourceKey(
+    item.evidence_source
+    || item.evidenceSource
+    || item.assignment_source
+    || item.assignmentSource
+    || ""
+  ) || "assigned_core";
+}
+
+function getRuntimeAttemptSource(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return normalizeRuntimeSourceKey(item.attempt_source || item.attemptSource || "");
+}
+
+export function isRuntimeAssignmentCompleted(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return item.completed === true
+    || !!item.completed_at
+    || !!item.completedAt
+    || normalizeRuntimeSourceKey(item.assignmentStatus || item.assignment_status) === "completed";
+}
+
+function isRuntimeBaselineAssignment(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return item.isBaseline === true
+    || item.is_baseline === true
+    || getRuntimeAttemptSource(item) === "baseline";
+}
+
+function isRuntimeSpellingBeeAssignment(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return item.isSpellingBee === true
+    || item.is_spelling_bee === true
+    || getRuntimeAttemptSource(item) === "spelling_bee"
+    || normalizeRuntimeSourceKey(item.automation_kind || item.automationKind) === "spelling_bee";
+}
+
+function isRuntimePracticeAssignment(assignment = null) {
+  return getRuntimeAttemptSource(assignment) === "practice";
+}
+
+function isRuntimeExtraChallengeAssignment(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return getRuntimeEvidenceSource(item) === "extra_challenge"
+    || item.isExtraChallenge === true
+    || item.is_extra_challenge === true
+    || getRuntimeAttemptSource(item) === "extra_challenge";
+}
+
+export function isRequiredCoreRuntimeAssignment(assignment = null) {
+  const item = assignment && typeof assignment === "object" ? assignment : {};
+  return getRuntimeEvidenceSource(item) === "assigned_core"
+    && !isRuntimeBaselineAssignment(item)
+    && !isRuntimeSpellingBeeAssignment(item)
+    && !isRuntimePracticeAssignment(item)
+    && !isRuntimeExtraChallengeAssignment(item);
+}
+
+export function findActiveExtraChallengeRuntimeAssignment(assignments = []) {
+  return (Array.isArray(assignments) ? assignments : []).find((assignment) =>
+    isRuntimeExtraChallengeAssignment(assignment)
+    && !isRuntimeAssignmentCompleted(assignment)
+  ) || null;
+}
+
+export function hasIncompleteRequiredCoreRuntimeAssignment(assignments = []) {
+  return (Array.isArray(assignments) ? assignments : []).some((assignment) =>
+    isRequiredCoreRuntimeAssignment(assignment)
+    && !isRuntimeAssignmentCompleted(assignment)
+  );
+}
+
+export function hasCompletedRequiredCoreRuntimeAssignment(assignments = []) {
+  return (Array.isArray(assignments) ? assignments : []).some((assignment) =>
+    isRequiredCoreRuntimeAssignment(assignment)
+    && isRuntimeAssignmentCompleted(assignment)
+  );
 }
 
 export function buildAutoAssignedPoolEntries(pupilPlans) {
@@ -184,6 +275,10 @@ export function isBaselineAttemptRow(attempt, baselineAssignmentMetaById) {
 
 export function isPracticeAttemptRow(attempt) {
   return String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase() === "practice";
+}
+
+export function isExtraChallengeAttemptRow(attempt) {
+  return String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase() === "extra_challenge";
 }
 
 export function getIndependentAttemptRows(attempts) {
@@ -394,7 +489,11 @@ export function buildPlacementCurrentProfiles({
     const pupilAttempts = (Array.isArray(attempts) ? attempts : [])
       .filter((attempt) => normalizeId(attempt?.pupil_id) === pupilId);
     const liveAttempts = pupilAttempts
-      .filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt));
+      .filter((attempt) =>
+        !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
+        && !isPracticeAttemptRow(attempt)
+        && !isExtraChallengeAttemptRow(attempt)
+      );
     const liveIndependentAttempts = getIndependentAttemptRows(liveAttempts);
     if (liveIndependentAttempts.length >= BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS) continue;
 
@@ -494,7 +593,11 @@ export function buildProvisioningPlan({
     resolvedWordMap,
   });
   const nonBaselineAttempts = (Array.isArray(attemptRows) ? attemptRows : [])
-    .filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt));
+    .filter((attempt) =>
+      !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
+      && !isPracticeAttemptRow(attempt)
+      && !isExtraChallengeAttemptRow(attempt)
+    );
   const wordloomCoreTests = Array.isArray(wordloomCoreWordRows) && wordloomCoreWordRows.length
     ? [{
       id: "wordloom-core-spelling-bank",

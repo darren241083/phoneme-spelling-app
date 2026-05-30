@@ -15,6 +15,9 @@ import {
   buildPublicProvisioningResponse,
   buildPupilWordCountByPupil,
   chunkList,
+  findActiveExtraChallengeRuntimeAssignment,
+  hasCompletedRequiredCoreRuntimeAssignment,
+  hasIncompleteRequiredCoreRuntimeAssignment,
   isCompletedAssignmentStatusRow,
   mapWordloomCoreBankRowsToWordRows,
   normalizeId,
@@ -30,6 +33,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const CLAIMED_STATUS = "claimed";
 const BASELINE_STANDARD_KEY = "core_v2";
 const EVIDENCE_SOURCE_ASSIGNED_CORE = "assigned_core";
+const EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
+const EXTRA_CHALLENGE_ACTION = "extra_challenge";
+const EXTRA_CHALLENGE_ASSIGNMENT_LENGTH = 5;
+const EXTRA_CHALLENGE_SUPPORT_PRESET = "balanced";
 const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -53,8 +60,8 @@ function isUuid(value: unknown) {
   return UUID_PATTERN.test(String(value || "").trim());
 }
 
-function publicStatus(status = "", httpStatus = 200) {
-  return json(buildPublicProvisioningResponse({ status }), httpStatus);
+function publicStatus(status = "", httpStatus = 200, assignmentId = "") {
+  return json(buildPublicProvisioningResponse({ status, assignmentId }), httpStatus);
 }
 
 function getSupabaseEnv() {
@@ -296,12 +303,12 @@ function mergeBaselineAssignments(...assignmentGroups: Record<string, unknown>[]
 
 function buildNonPracticeAttemptFilter(schoolId = "") {
   const safeSchoolId = normalizeId(schoolId);
-  if (!safeSchoolId) return "attempt_source.is.null,attempt_source.neq.practice";
+  if (!safeSchoolId) return "attempt_source.is.null,and(attempt_source.neq.practice,attempt_source.neq.extra_challenge)";
   return [
     `and(school_id.eq.${safeSchoolId},attempt_source.is.null)`,
-    `and(school_id.eq.${safeSchoolId},attempt_source.neq.practice)`,
+    `and(school_id.eq.${safeSchoolId},attempt_source.neq.practice,attempt_source.neq.extra_challenge)`,
     "and(school_id.is.null,attempt_source.is.null)",
-    "and(school_id.is.null,attempt_source.neq.practice)",
+    "and(school_id.is.null,attempt_source.neq.practice,attempt_source.neq.extra_challenge)",
   ].join(",");
 }
 
@@ -382,7 +389,9 @@ async function readAttemptsForPupil(
     .order("created_at", { ascending: false })
     .limit(1000);
   if (error) throw error;
-  return data || [];
+  return (data || []).filter((row: Record<string, unknown>) =>
+    String(row?.attempt_source || row?.attemptSource || "").trim().toLowerCase() !== EVIDENCE_SOURCE_EXTRA_CHALLENGE
+  );
 }
 
 async function readTeacherTests(
@@ -483,6 +492,82 @@ async function readCompletedBaselineStatusRows(
   }
 
   return (data || []).filter((row: Record<string, unknown>) => isCompletedAssignmentStatusRow(row));
+}
+
+function normalizeSourceKey(value: unknown = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+async function readRuntimeAssignmentsForPupil(serviceClient: ServiceClient, pupilId: string) {
+  const { data, error } = await serviceClient.rpc("read_pupil_runtime_assignments", {
+    requested_pupil_id: pupilId,
+  });
+  if (error) throw error;
+  const rows = Array.isArray(data?.assignments)
+    ? data.assignments
+    : Array.isArray(data)
+      ? data
+      : [];
+  return rows as Record<string, unknown>[];
+}
+
+async function readExtraChallengeContext(serviceClient: ServiceClient, pupilId: string) {
+  const { data: pupilRow, error: pupilError } = await serviceClient
+    .from("pupils")
+    .select("id, school_id, is_active, archived_at")
+    .eq("id", pupilId)
+    .eq("is_active", true)
+    .is("archived_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (pupilError) throw pupilError;
+  if (!pupilRow) return null;
+
+  const { data: membershipRows, error: membershipError } = await serviceClient
+    .from("pupil_classes")
+    .select("class_id, school_id, classes(id, teacher_id, name, class_type, school_id)")
+    .eq("pupil_id", pupilId)
+    .eq("active", true);
+  if (membershipError) throw membershipError;
+
+  const pupilSchoolId = normalizeId((pupilRow as Record<string, unknown>).school_id);
+  const candidates = (membershipRows || [])
+    .map((row: Record<string, unknown>) => {
+      const classRow = (Array.isArray(row.classes) ? row.classes[0] : row.classes) as Record<string, unknown> | null;
+      const schoolId = normalizeId(classRow?.school_id || row.school_id || pupilSchoolId);
+      return {
+        classId: normalizeId(row.class_id || classRow?.id),
+        classRow,
+        schoolId,
+      };
+    })
+    .filter((item) =>
+      item.classId
+      && item.classRow
+      && normalizeId(item.classRow.teacher_id)
+      && item.schoolId
+      && (!pupilSchoolId || item.schoolId === pupilSchoolId)
+    )
+    .sort((a, b) => {
+      const aForm = normalizeSourceKey(a.classRow?.class_type) === "form" ? 0 : 1;
+      const bForm = normalizeSourceKey(b.classRow?.class_type) === "form" ? 0 : 1;
+      if (aForm !== bForm) return aForm - bForm;
+      return String(a.classRow?.name || "").localeCompare(String(b.classRow?.name || ""));
+    });
+
+  const selected = candidates[0] || null;
+  if (!selected) return null;
+
+  return {
+    pupilId,
+    schoolId: selected.schoolId,
+    classId: selected.classId,
+    classRow: selected.classRow,
+    teacherId: normalizeId(selected.classRow?.teacher_id),
+  };
 }
 
 function normalizeWordloomCoreReadLimit(value: unknown = null) {
@@ -588,6 +673,9 @@ async function createGeneratedAssignment(
     deadlineIso,
     plan,
     artifacts,
+    evidenceSource = EVIDENCE_SOURCE_ASSIGNED_CORE,
+    automationSource = AUTOMATION_SOURCE_MANUAL_RUN_NOW,
+    titleOverride = "",
   }: {
     teacherId: string;
     schoolId: string;
@@ -597,15 +685,22 @@ async function createGeneratedAssignment(
     deadlineIso: string | null;
     plan: Record<string, unknown>;
     artifacts?: CreatedArtifacts;
+    evidenceSource?: string;
+    automationSource?: string | null;
+    titleOverride?: string;
   },
 ) {
   let createdTestId = "";
   let createdAssignmentId = "";
 
-  const title = buildAssignmentTitle({
+  const title = String(titleOverride || "").trim() || buildAssignmentTitle({
     className: className || "Class",
     focusGrapheme: String(plan?.clearFocusGrapheme || ""),
   });
+  const safeEvidenceSource = normalizeSourceKey(evidenceSource) === EVIDENCE_SOURCE_EXTRA_CHALLENGE
+    ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
+    : EVIDENCE_SOURCE_ASSIGNED_CORE;
+  const safeAutomationSource = String(automationSource || "").trim() || null;
 
   const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback(
     serviceClient,
@@ -655,10 +750,10 @@ async function createGeneratedAssignment(
       end_at: deadlineIso || null,
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
-      evidence_source: EVIDENCE_SOURCE_ASSIGNED_CORE,
+      evidence_source: safeEvidenceSource,
       automation_kind: AUTOMATION_KIND_PERSONALISED,
-      automation_source: AUTOMATION_SOURCE_MANUAL_RUN_NOW,
-      automation_run_id: runId,
+      automation_source: safeAutomationSource,
+      automation_run_id: normalizeId(runId) || null,
       automation_triggered_by: teacherId,
     },
     "id, created_at",
@@ -771,6 +866,154 @@ async function cleanupGeneratedArtifacts(
   }
 }
 
+async function buildProvisioningInputsForContext(
+  serviceClient: ServiceClient,
+  context: {
+    pupilId: string;
+    teacherId: string;
+    schoolId: string;
+    classId: string;
+  },
+  completedBaselineAssignmentId: string,
+) {
+  const [
+    attemptRows,
+    teacherTests,
+    completedBaselineAssignments,
+    classBaselineAssignments,
+    wordloomCoreWordRows,
+  ] = await Promise.all([
+    readAttemptsForPupil(serviceClient, {
+      pupilId: context.pupilId,
+      schoolId: context.schoolId,
+    }),
+    readTeacherTests(serviceClient, {
+      teacherId: context.teacherId,
+      schoolId: context.schoolId,
+    }),
+    readBaselineAssignmentsById(serviceClient, {
+      assignmentIds: [completedBaselineAssignmentId],
+      schoolId: context.schoolId,
+    }),
+    readBaselineAssignmentsForClass(serviceClient, {
+      classId: context.classId,
+      schoolId: context.schoolId,
+    }),
+    readWordloomCoreSpellingBankWordRows(serviceClient),
+  ]);
+  const baselineAssignments = mergeBaselineAssignments(completedBaselineAssignments, classBaselineAssignments);
+  const baselineStatusRows = await readCompletedBaselineStatusRows(serviceClient, {
+    assignmentIds: baselineAssignments.map((assignment: Record<string, unknown>) => normalizeId(assignment.id)),
+    pupilId: context.pupilId,
+    schoolId: context.schoolId,
+  });
+  const attemptDerivedBaselineStatusRows = buildAttemptDerivedBaselineStatusRows({
+    pupilId: context.pupilId,
+    completedAssignmentId: completedBaselineAssignmentId,
+    baselineAssignments,
+    baselineStatusRows,
+    attemptRows,
+  });
+
+  return {
+    attemptRows,
+    teacherTests,
+    baselineAssignments,
+    baselineStatusRows: [
+      ...baselineStatusRows,
+      ...attemptDerivedBaselineStatusRows,
+    ],
+    wordloomCoreWordRows,
+  };
+}
+
+async function handleExtraChallengeProvisioning(serviceClient: ServiceClient, pupilId: string) {
+  const context = await readExtraChallengeContext(serviceClient, pupilId);
+  if (!context) return publicStatus("not_eligible");
+
+  const baselineGateState = await readBaselineGateState(serviceClient, context.pupilId);
+  if (getBaselineGateStatus(baselineGateState) !== "ready") {
+    return publicStatus("not_eligible");
+  }
+
+  const runtimeAssignments = await readRuntimeAssignmentsForPupil(serviceClient, context.pupilId);
+  if (hasIncompleteRequiredCoreRuntimeAssignment(runtimeAssignments)) {
+    return publicStatus("not_eligible");
+  }
+  if (!hasCompletedRequiredCoreRuntimeAssignment(runtimeAssignments)) {
+    return publicStatus("not_eligible");
+  }
+
+  const activeExtraChallenge = findActiveExtraChallengeRuntimeAssignment(runtimeAssignments);
+  const activeExtraChallengeId = normalizeId(activeExtraChallenge?.id);
+  if (activeExtraChallengeId) {
+    return publicStatus("already_active", 200, activeExtraChallengeId);
+  }
+
+  const completedBaselineAssignmentId = getCompletedBaselineAssignmentId(baselineGateState);
+  const inputs = await buildProvisioningInputsForContext(
+    serviceClient,
+    context,
+    completedBaselineAssignmentId,
+  );
+
+  let plan: Record<string, unknown> | null = null;
+  try {
+    const built = buildProvisioningPlan({
+      pupilId: context.pupilId,
+      teacherTests: inputs.teacherTests,
+      attemptRows: inputs.attemptRows,
+      baselineAssignments: inputs.baselineAssignments,
+      baselineStatusRows: inputs.baselineStatusRows,
+      wordloomCoreWordRows: inputs.wordloomCoreWordRows,
+      policy: {
+        assignment_length: EXTRA_CHALLENGE_ASSIGNMENT_LENGTH,
+        support_preset: EXTRA_CHALLENGE_SUPPORT_PRESET,
+        allow_starter_fallback: false,
+      },
+      resolvedWordMap: null,
+    });
+    plan = built.plan;
+  } catch (error) {
+    console.log("Extra challenge not ready:", error);
+    return publicStatus("not_enough_evidence");
+  }
+
+  const createdArtifacts: CreatedArtifacts = {
+    assignmentId: "",
+    testId: "",
+  };
+
+  try {
+    const created = await createGeneratedAssignment(serviceClient, {
+      teacherId: context.teacherId,
+      schoolId: context.schoolId,
+      classId: context.classId,
+      className: String(context.classRow?.name || "Class"),
+      runId: "",
+      deadlineIso: null,
+      plan,
+      artifacts: createdArtifacts,
+      evidenceSource: EVIDENCE_SOURCE_EXTRA_CHALLENGE,
+      automationSource: null,
+      titleOverride: "Extra challenge",
+    });
+
+    return publicStatus("provisioned", 200, created.assignmentId);
+  } catch (error) {
+    console.error("Extra challenge provisioning failed:", error);
+    const hasArtifacts = !!(createdArtifacts.assignmentId || createdArtifacts.testId);
+    if (hasArtifacts) {
+      await cleanupGeneratedArtifacts(serviceClient, {
+        ...createdArtifacts,
+        teacherId: context.teacherId,
+        schoolId: context.schoolId,
+      });
+    }
+    return publicStatus("error", 500);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -785,6 +1028,7 @@ Deno.serve(async (req) => {
   let teacherId = "";
   let schoolId = "";
   let completedClaim = false;
+  let requestedAction = "";
   const createdArtifacts: CreatedArtifacts = {
     assignmentId: "",
     testId: "",
@@ -796,6 +1040,8 @@ Deno.serve(async (req) => {
     if (!isUuid(pupilId)) {
       return publicStatus("invalid_pupil");
     }
+    const action = normalizeSourceKey(body?.action || body?.mode || "");
+    requestedAction = action;
 
     const { supabaseUrl, supabaseServiceRoleKey } = getSupabaseEnv();
     serviceClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -803,6 +1049,10 @@ Deno.serve(async (req) => {
         persistSession: false,
       },
     });
+
+    if (action === EXTRA_CHALLENGE_ACTION) {
+      return await handleExtraChallengeProvisioning(serviceClient, pupilId);
+    }
 
     const claim = await claimWaitingRunPupil(serviceClient, pupilId);
     const claimStatus = String(claim.status || "").trim().toLowerCase();
@@ -943,6 +1193,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json(buildPublicProvisioningResponse({ status: "generation_failed" }), 500);
+    return json(buildPublicProvisioningResponse({
+      status: requestedAction === EXTRA_CHALLENGE_ACTION ? "error" : "generation_failed",
+    }), 500);
   }
 });
