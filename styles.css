@@ -2917,6 +2917,86 @@ body.acc-text-large #viewPupil .spellLoomToken{
   line-height:1.6;
 }
 
+.pupilMainActionCard{
+  padding:18px 20px;
+  border-color:#cbd5e1;
+  background:#ffffff;
+}
+
+.pupilMainActionCard--core{
+  border-color:#bfdbfe;
+  background:#f8fbff;
+}
+
+.pupilMainActionCard--extra_start,
+.pupilMainActionCard--extra_continue{
+  border-color:#bbf7d0;
+  background:#f7fff9;
+}
+
+.pupilMainActionContent{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+}
+
+.pupilMainActionText{
+  min-width:0;
+}
+
+.pupilMainActionText h3{
+  margin:0;
+  font-size:24px;
+  line-height:1.2;
+}
+
+.pupilMainActionText p{
+  margin:8px 0 0 0;
+  color:var(--muted);
+  font-size:16px;
+  line-height:1.45;
+}
+
+.pupilMainActionText .pupilMainActionMessage{
+  color:#92400e;
+  font-weight:700;
+}
+
+.pupilMainActionControls{
+  flex:0 0 auto;
+}
+
+.pupilMainActionButton{
+  min-width:178px;
+  min-height:50px;
+  margin-top:0;
+}
+
+.pupilResultActions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:16px;
+}
+
+.pupilResultActions .start-test-btn{
+  margin-top:0;
+}
+
+.pupilResultNextChallengeButton{
+  min-width:176px;
+}
+
+.pupilResultExtraChallengeMessage{
+  margin:12px 0 0 0;
+  color:#92400e;
+  font-size:15px;
+  font-weight:700;
+  line-height:1.45;
+}
+
 @media (max-width:720px){
   .pupilHeroCard{
     padding:22px 18px;
@@ -2962,6 +3042,19 @@ body.acc-text-large #viewPupil .spellLoomToken{
   .pupilSectionHead{
     flex-direction:column;
     align-items:stretch;
+  }
+  .pupilMainActionCard{
+    padding:18px;
+  }
+  .pupilMainActionContent,
+  .pupilResultActions{
+    flex-direction:column;
+    align-items:stretch;
+  }
+  .pupilMainActionButton,
+  .pupilResultActions .btn{
+    width:100%;
+    min-height:52px;
   }
   .practice-card .start-test-btn{
     width:100%;

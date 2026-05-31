@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  buildCompletionExtraChallengeActionModel,
   buildExtraChallengeCardModel,
+  buildExtraChallengeUnavailableMessage,
+  buildPupilDashboardMainActionModel,
   findActiveExtraChallengeAssignment,
   getRequiredCoreAssignments,
   hasCompletedRequiredCoreAssignment,
@@ -39,6 +42,57 @@ function assignment({
 }
 
 const PUPIL_ID = "11111111-1111-4111-8111-111111111111";
+
+test("result next challenge CTA appears for required core completion", () => {
+  const model = buildCompletionExtraChallengeActionModel(assignment({ id: "core-done", completed: true }));
+
+  assert.equal(model?.state, "start");
+  assert.equal(model?.buttonLabel, "Next challenge");
+});
+
+test("result next challenge CTA is hidden for baseline completion", () => {
+  const model = buildCompletionExtraChallengeActionModel(assignment({
+    id: "baseline-done",
+    isBaseline: true,
+    attemptSource: "baseline",
+    completed: true,
+  }));
+
+  assert.equal(model, null);
+});
+
+test("result next challenge CTA is hidden for practice completion", () => {
+  const model = buildCompletionExtraChallengeActionModel(assignment({
+    id: "practice-done",
+    attemptSource: "practice",
+    completed: true,
+  }));
+
+  assert.equal(model, null);
+});
+
+test("result next challenge CTA is hidden for Spelling Bee completion", () => {
+  const model = buildCompletionExtraChallengeActionModel(assignment({
+    id: "bee-done",
+    isSpellingBee: true,
+    attemptSource: "spelling_bee",
+    completed: true,
+  }));
+
+  assert.equal(model, null);
+});
+
+test("result next challenge CTA says Another challenge after extra challenge completion", () => {
+  const model = buildCompletionExtraChallengeActionModel(assignment({
+    id: "extra-done",
+    evidenceSource: "extra_challenge",
+    attemptSource: "extra_challenge",
+    completed: true,
+  }));
+
+  assert.equal(model?.state, "start");
+  assert.equal(model?.buttonLabel, "Another challenge");
+});
 
 test("required core detection excludes baseline Spelling Bee practice and extra challenge", () => {
   const rows = [
@@ -159,6 +213,72 @@ test("completed extra challenge alone does not make the start card eligible", ()
 test("missing pupil id hides the card", () => {
   const rows = [assignment({ id: "core-1", completed: true })];
   assert.equal(buildExtraChallengeCardModel({ assignments: rows, pupilId: " " }), null);
+});
+
+test("dashboard main action prioritizes incomplete core over extra challenge start", () => {
+  const model = buildPupilDashboardMainActionModel({
+    pupilId: PUPIL_ID,
+    assignments: [
+      assignment({ id: "core-done", completed: true }),
+      assignment({ id: "core-waiting", completed: false }),
+    ],
+  });
+
+  assert.equal(model?.kind, "core");
+  assert.equal(model?.title, "Today's challenge");
+  assert.equal(model?.buttonLabel, "Start challenge");
+  assert.equal(model?.assignmentId, "core-waiting");
+});
+
+test("dashboard main action continues active extra challenge", () => {
+  const model = buildPupilDashboardMainActionModel({
+    pupilId: PUPIL_ID,
+    assignments: [
+      assignment({ id: "core-done", completed: true }),
+      assignment({ id: "extra-active", evidenceSource: "extra_challenge", attemptSource: "extra_challenge" }),
+    ],
+  });
+
+  assert.equal(model?.kind, "extra_continue");
+  assert.equal(model?.title, "Continue challenge");
+  assert.equal(model?.buttonLabel, "Continue my challenge");
+  assert.equal(model?.assignmentId, "extra-active");
+});
+
+test("dashboard main action starts next challenge after completed core", () => {
+  const model = buildPupilDashboardMainActionModel({
+    pupilId: PUPIL_ID,
+    assignments: [
+      assignment({ id: "core-done", completed: true }),
+    ],
+  });
+
+  assert.equal(model?.kind, "extra_start");
+  assert.equal(model?.title, "Next challenge");
+  assert.equal(model?.buttonLabel, "Start my challenge");
+});
+
+test("dashboard main action hides next challenge when no core is completed", () => {
+  const model = buildPupilDashboardMainActionModel({
+    pupilId: PUPIL_ID,
+    assignments: [],
+  });
+
+  assert.equal(model?.kind, "complete");
+  assert.equal(model?.title, "All done for now");
+  assert.equal(model?.buttonLabel, "");
+});
+
+test("extra challenge failure copy stays pupil safe", () => {
+  const message = buildExtraChallengeUnavailableMessage({
+    status: "not_eligible",
+    error: "Edge Function returned not_enough_evidence",
+  });
+
+  assert.equal(message, "No extra challenge is ready just yet. Check back after your next task.");
+  assert.equal(message.includes("not_eligible"), false);
+  assert.equal(message.includes("not_enough_evidence"), false);
+  assert.equal(message.includes("Edge Function"), false);
 });
 
 let failures = 0;

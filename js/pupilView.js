@@ -50,9 +50,12 @@ import {
   isTrustedProgressAttemptSource,
 } from "./evidenceSources.js?v=1.0";
 import {
+  buildCompletionExtraChallengeActionModel,
+  buildExtraChallengeUnavailableMessage,
   buildExtraChallengeCardModel,
+  buildPupilDashboardMainActionModel,
   findActiveExtraChallengeAssignment,
-} from "./pupilExtraChallenge.js?v=1.0";
+} from "./pupilExtraChallenge.js?v=1.1";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
@@ -2031,6 +2034,51 @@ function renderExtraChallengeCard(model = null) {
   `;
 }
 
+function renderPupilDashboardMainAction(model = null) {
+  if (!model) return "";
+  const kind = String(model?.kind || "").trim();
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const isBusy = isExtraAction && !!pupilDashboardState.extraChallenge?.busy;
+  const message = isExtraAction ? String(pupilDashboardState.extraChallenge?.message || "").trim() : "";
+  const icon = kind === "core" ? "checkCircle" : (isExtraAction ? "spark" : "award");
+  const buttonLabel = String(model?.buttonLabel || "").trim();
+  const assignmentId = String(model?.assignmentId || "").trim();
+  const actionButton = !buttonLabel
+    ? ""
+    : kind === "core"
+      ? `
+        <button
+          class="btn primary start-test-btn pupilMainActionButton"
+          type="button"
+          data-assignment="${escapeHtml(assignmentId)}"
+        >${escapeHtml(buttonLabel)}</button>
+      `
+      : `
+        <button
+          class="btn primary start-test-btn pupilMainActionButton"
+          type="button"
+          data-action="start-extra-challenge"
+          data-extra-challenge-source="dashboard"
+          data-extra-challenge-state="${kind === "extra_continue" ? "continue" : "start"}"
+          data-assignment-id="${escapeHtml(assignmentId)}"
+          ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+        >${escapeHtml(buttonLabel)}</button>
+      `;
+
+  return `
+    <section class="card pupilMainActionCard pupilMainActionCard--${escapeHtml(kind || "complete")}">
+      <div class="pupilMainActionContent">
+        <div class="pupilMainActionText">
+          <h3>${renderIconLabel(icon, model.title || "All done for now")}</h3>
+          <p>${escapeHtml(model.body || "")}</p>
+          ${message ? `<p class="pupilMainActionMessage" role="status">${escapeHtml(message)}</p>` : ""}
+        </div>
+        ${actionButton ? `<div class="pupilMainActionControls">${actionButton}</div>` : ""}
+      </div>
+    </section>
+  `;
+}
+
 function getPracticeEmptyText(practiceModel = null) {
   const status = String(practiceModel?.status || PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE).trim();
   if (status === PRACTICE_STATUS_NOT_ENOUGH_WORDS) return "Practice words are not ready yet.";
@@ -2090,6 +2138,30 @@ function renderCompletionRow(entry, index) {
   `;
 }
 
+function renderCompletionActions(item) {
+  const actionModel = buildCompletionExtraChallengeActionModel(item);
+  if (!actionModel) {
+    return `
+      <div class="pupilResultActions pupilResultActions--single">
+        <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pupilResultActions">
+      <button
+        class="btn primary start-test-btn pupilResultNextChallengeButton"
+        type="button"
+        data-action="completion-extra-challenge"
+        data-extra-challenge-state="${escapeHtml(actionModel.state || "start")}"
+      >${escapeHtml(actionModel.buttonLabel || "Next challenge")}</button>
+      <button class="btn secondary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </div>
+    <p class="pupilResultExtraChallengeMessage" role="status" aria-live="polite" hidden></p>
+  `;
+}
+
 function renderCompletionSummary(item, result) {
   const rows = Array.isArray(result?.results) ? result.results : [];
   const totalWords = Number(result?.totalWords || rows.length || 0);
@@ -2128,7 +2200,7 @@ function renderCompletionSummary(item, result) {
       <div class="resultsList">
         ${rows.map((entry, index) => renderCompletionRow(entry, index)).join("")}
       </div>
-      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+      ${renderCompletionActions(item)}
     </section>
   `;
 }
@@ -2222,6 +2294,53 @@ function renderSpellingBeeAlreadyStarted() {
   `;
 }
 
+function setExtraChallengeTriggerBusy(button, busy) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.starting = "true";
+    button.disabled = true;
+    button.setAttribute("aria-disabled", "true");
+    button.setAttribute("aria-busy", "true");
+    return;
+  }
+  delete button.dataset.starting;
+  button.disabled = false;
+  button.removeAttribute("aria-disabled");
+  button.removeAttribute("aria-busy");
+}
+
+function findExtraChallengeAssignmentForOpen(assignments = [], assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const isOpenableExtraChallenge = (item) =>
+    isExtraChallengeAssignmentSource(item)
+    && !item?.completed
+    && !item?.completed_at
+    && !item?.completedAt
+    && String(item?.assignmentStatus || item?.assignment_status || "").trim().toLowerCase() !== "completed";
+  return (Array.isArray(assignments) ? assignments : []).find((item) =>
+    safeAssignmentId
+    && String(item?.id || "") === safeAssignmentId
+    && isOpenableExtraChallenge(item)
+  ) || findActiveExtraChallengeAssignment(assignments);
+}
+
+function logExtraChallengeActionDiagnostics(outcome = {}) {
+  const payload = {
+    source: String(outcome?.source || ""),
+    status: String(outcome?.status || ""),
+    assignmentId: String(outcome?.assignmentId || ""),
+    error: String(outcome?.error || ""),
+    refreshedAssignmentCount: outcome?.refreshedAssignmentCount ?? null,
+    assignmentFound: outcome?.assignmentFound === true,
+    opened: outcome?.opened === true,
+  };
+  if (payload.opened) {
+    console.info("Extra challenge action:", payload);
+    return;
+  }
+  console.warn("Extra challenge action:", payload);
+}
+
 async function openExtraChallengeFromAssignments({
   containerEl,
   session,
@@ -2229,13 +2348,134 @@ async function openExtraChallengeFromAssignments({
   practicePacks = [],
   assignmentId = "",
 } = {}) {
-  const safeAssignmentId = String(assignmentId || "").trim();
-  const assignment = (Array.isArray(assignments) ? assignments : []).find((item) =>
-    safeAssignmentId && String(item?.id || "") === safeAssignmentId
-  ) || findActiveExtraChallengeAssignment(assignments);
-  if (!assignment) return false;
-  await openSession(containerEl, session, assignment, assignments, practicePacks);
-  return true;
+  const assignment = findExtraChallengeAssignmentForOpen(assignments, assignmentId);
+  if (!assignment) {
+    return {
+      assignmentFound: false,
+      opened: false,
+      assignmentId: String(assignmentId || "").trim(),
+      error: "",
+    };
+  }
+
+  try {
+    await openSession(containerEl, session, assignment, assignments, practicePacks);
+    return {
+      assignmentFound: true,
+      opened: true,
+      assignmentId: String(assignment?.id || assignmentId || "").trim(),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      assignmentFound: true,
+      opened: false,
+      assignmentId: String(assignment?.id || assignmentId || "").trim(),
+      error: String(error?.message || error || "Could not open extra challenge.").trim(),
+    };
+  }
+}
+
+async function startOrContinueExtraChallenge({
+  containerEl,
+  session,
+  assignments = [],
+  practicePacks = [],
+  assignmentId = "",
+  state = "start",
+  source = "dashboard",
+  triggerButton = null,
+} = {}) {
+  const pupilId = String(session?.pupil_id || "").trim();
+  const requestedState = String(state || "").trim() === "continue" ? "continue" : "start";
+  const outcome = {
+    source,
+    status: requestedState === "continue" ? "continue" : "",
+    assignmentId: String(assignmentId || "").trim(),
+    error: "",
+    refreshedAssignmentCount: null,
+    assignmentFound: false,
+    opened: false,
+    message: buildExtraChallengeUnavailableMessage(),
+  };
+
+  setExtraChallengeTriggerBusy(triggerButton, true);
+
+  try {
+    if (!pupilId) {
+      outcome.status = "not_eligible";
+      outcome.error = "Missing pupil id.";
+      return outcome;
+    }
+
+    if (requestedState === "continue") {
+      let openResult = await openExtraChallengeFromAssignments({
+        containerEl,
+        session,
+        assignments,
+        practicePacks,
+        assignmentId,
+      });
+
+      if (!openResult.assignmentFound) {
+        const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
+          outcome.error = String(error?.message || error || "Could not reload pupil assignments.").trim();
+          console.warn("load pupil assignments before extra challenge continue error:", error);
+          return [];
+        });
+        outcome.refreshedAssignmentCount = refreshedAssignments.length;
+        openResult = await openExtraChallengeFromAssignments({
+          containerEl,
+          session,
+          assignments: refreshedAssignments,
+          practicePacks,
+          assignmentId,
+        });
+      }
+
+      outcome.assignmentFound = openResult.assignmentFound;
+      outcome.opened = openResult.opened;
+      outcome.assignmentId = openResult.assignmentId || outcome.assignmentId;
+      outcome.error = openResult.error || outcome.error;
+      return outcome;
+    }
+
+    const result = await provisionExtraChallengeAssignment({ pupilId });
+    outcome.status = String(result?.status || "error").trim() || "error";
+    outcome.assignmentId = String(result?.assignmentId || "").trim();
+    outcome.error = String(result?.error || "").trim();
+
+    if (outcome.status === "provisioned" || outcome.status === "already_active") {
+      const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
+        outcome.error = String(error?.message || error || "Could not reload pupil assignments.").trim();
+        console.warn("load pupil assignments after extra challenge provision error:", error);
+        return [];
+      });
+      outcome.refreshedAssignmentCount = refreshedAssignments.length;
+      const openResult = await openExtraChallengeFromAssignments({
+        containerEl,
+        session,
+        assignments: refreshedAssignments,
+        practicePacks,
+        assignmentId: outcome.assignmentId,
+      });
+      outcome.assignmentFound = openResult.assignmentFound;
+      outcome.opened = openResult.opened;
+      outcome.assignmentId = openResult.assignmentId || outcome.assignmentId;
+      outcome.error = openResult.error || outcome.error;
+    }
+
+    return outcome;
+  } catch (error) {
+    outcome.status = outcome.status || "error";
+    outcome.error = String(error?.message || error || "Extra challenge request failed.").trim();
+    return outcome;
+  } finally {
+    if (!outcome.opened) {
+      setExtraChallengeTriggerBusy(triggerButton, false);
+    }
+    logExtraChallengeActionDiagnostics(outcome);
+  }
 }
 
 function renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
@@ -2271,9 +2511,6 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
   containerEl.querySelectorAll('[data-action="start-extra-challenge"]').forEach((button) => {
     button.addEventListener("click", async () => {
       if (button.dataset.starting === "true") return;
-      button.dataset.starting = "true";
-      button.disabled = true;
-      button.setAttribute("aria-disabled", "true");
       pupilDashboardState.extraChallenge = {
         busy: true,
         message: "",
@@ -2281,48 +2518,25 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
 
       const state = String(button.getAttribute("data-extra-challenge-state") || "");
       const assignmentId = String(button.getAttribute("data-assignment-id") || "");
-      const pupilId = String(session?.pupil_id || "").trim();
-
-      if (state === "continue") {
-        const opened = await openExtraChallengeFromAssignments({
-          containerEl,
-          session,
-          assignments: allAssignments,
-          practicePacks,
-          assignmentId,
-        });
-        pupilDashboardState.extraChallenge.busy = false;
-        if (!opened) {
-          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
-        }
-        return;
-      }
-
-      const result = await provisionExtraChallengeAssignment({ pupilId });
-      if (result?.status === "provisioned" || result?.status === "already_active") {
-        const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
-          console.warn("load pupil assignments after extra challenge provision error:", error);
-          return [];
-        });
-        const opened = await openExtraChallengeFromAssignments({
-          containerEl,
-          session,
-          assignments: refreshedAssignments,
-          practicePacks,
-          assignmentId: result.assignmentId,
-        });
-        pupilDashboardState.extraChallenge.busy = false;
-        if (!opened) {
-          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
-        }
-        return;
-      }
+      const source = String(button.getAttribute("data-extra-challenge-source") || "dashboard");
+      const outcome = await startOrContinueExtraChallenge({
+        containerEl,
+        session,
+        assignments: allAssignments,
+        practicePacks,
+        assignmentId,
+        state,
+        source,
+        triggerButton: button,
+      });
 
       pupilDashboardState.extraChallenge = {
         busy: false,
-        message: "No extra challenge is ready just yet. Check back after your next task.",
+        message: outcome.opened ? "" : outcome.message,
       };
-      renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+      if (!outcome.opened) {
+        renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+      }
     });
   });
 
@@ -2378,6 +2592,37 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
 
   bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
   bindAccessibilityControlEvents(containerEl);
+}
+
+function bindCompletionEvents(containerEl, session, assignments = [], practicePacks = []) {
+  containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+    await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+  });
+
+  containerEl.querySelector('[data-action="completion-extra-challenge"]')?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (!button || button.dataset.starting === "true") return;
+    const messageEl = containerEl.querySelector(".pupilResultExtraChallengeMessage");
+    if (messageEl) {
+      messageEl.textContent = "";
+      messageEl.hidden = true;
+    }
+
+    const outcome = await startOrContinueExtraChallenge({
+      containerEl,
+      session,
+      assignments,
+      practicePacks,
+      state: button.getAttribute("data-extra-challenge-state") || "start",
+      source: "completion",
+      triggerButton: button,
+    });
+
+    if (!outcome.opened && messageEl) {
+      messageEl.textContent = outcome.message;
+      messageEl.hidden = false;
+    }
+  });
 }
 
 function bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
@@ -2446,6 +2691,10 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       assignments: loadedAssignments,
       pupilId,
     });
+    const dashboardMainActionModel = buildPupilDashboardMainActionModel({
+      assignments: loadedAssignments,
+      pupilId,
+    });
     if (!extraChallengeModel) {
       pupilDashboardState.extraChallenge = {
         busy: false,
@@ -2458,6 +2707,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     ]);
     renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress, {
       allAssignments: loadedAssignments,
+      dashboardMainActionModel,
       extraChallengeModel,
     });
   };
@@ -2825,9 +3075,7 @@ async function openSession(containerEl, session, item, assignments, practicePack
         testId: String(item?.test_id || ""),
       });
       containerEl.innerHTML = renderCompletionSummary(item, result);
-      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
-        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
-      });
+      bindCompletionEvents(containerEl, session, assignments, practicePacks);
     },
   });
 }
@@ -2835,13 +3083,21 @@ async function openSession(containerEl, session, item, assignments, practicePack
 function renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
   const name = session?.first_name || session?.username || "Pupil";
   const extraChallengeModel = dashboardOptions?.extraChallengeModel || null;
+  const mainActionModel = dashboardOptions?.dashboardMainActionModel || buildPupilDashboardMainActionModel({
+    assignments: Array.isArray(dashboardOptions?.allAssignments) ? dashboardOptions.allAssignments : assignments,
+    pupilId: session?.pupil_id,
+  });
+  const showLegacyExtraChallengeCard = !!extraChallengeModel
+    && mainActionModel?.kind !== "extra_start"
+    && mainActionModel?.kind !== "extra_continue";
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
       ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
+      ${renderPupilDashboardMainAction(mainActionModel)}
       ${renderRecentTasksSection(assignments, practiceModel, progress)}
       ${renderPupilDashboardMiniCards(assignments)}
       ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
-      ${renderExtraChallengeCard(extraChallengeModel)}
+      ${showLegacyExtraChallengeCard ? renderExtraChallengeCard(extraChallengeModel) : ""}
       ${renderPracticeSection(practiceModel)}
       ${renderReadingHelpSection()}
     </div>
