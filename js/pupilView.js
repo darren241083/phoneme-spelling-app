@@ -55,6 +55,8 @@ import {
   buildExtraChallengeCardModel,
   buildPupilDashboardMainActionModel,
   findActiveExtraChallengeAssignment,
+  getRequiredCoreAssignments,
+  isCompletedAssignment,
 } from "./pupilExtraChallenge.js?v=1.1";
 
 const PUPIL_SECTION_LIMIT = 3;
@@ -1064,18 +1066,18 @@ function buildPupilHeroModel(assignments, practiceModel, progress) {
 
   if (pendingAssignments.length) {
     summary = pendingAssignments.length === 1
-      ? "You have 1 teacher task to do."
-      : `You have ${pendingAssignments.length} teacher tasks to do.`;
+      ? "1 task ready"
+      : `${pendingAssignments.length} tasks ready`;
   } else if (completedAssignments.length) {
-    summary = "Nice work. Here's what to focus on next.";
+    summary = "Daily challenge complete";
   } else if (practiceCount) {
-    summary = "Your teacher tasks are done. Extra practice is ready if you want it.";
+    summary = "Practice ready";
   } else if (!wordsChecked) {
-    summary = "Start when you feel ready.";
+    summary = "Ready";
   } else if (strongSounds.length >= 2 || Number(progress?.accuracy || 0) >= 0.85) {
-    summary = "You are doing really well.";
+    summary = "Strong progress";
   } else if (growingSounds.length || recentWins.length) {
-    summary = "You are getting stronger.";
+    summary = "Building";
   }
 
   const highlightGroups = [
@@ -1125,6 +1127,121 @@ function renderPupilHeroGroup(group, context = {}) {
         : renderProgressChipList(group.items, group.variant, group.formatter)}
     </article>
   `;
+}
+
+function renderPupilJourneyProgressNote(group, context = {}) {
+  const label = String(group?.label || "").trim();
+  if (!label) return "";
+  const isNextGroup = label.toLowerCase() === "next";
+  return `
+    <div class="pupilJourneyNote pupilJourneyNote--${escapeHtml(group?.variant || "neutral")}">
+      <span class="pupilJourneyNoteLabel">${escapeHtml(label)}:</span>
+      ${isNextGroup
+        ? renderNextTeachingChipList(group, context)
+        : renderProgressChipList(group.items, group.variant, group.formatter)}
+    </div>
+  `;
+}
+
+function renderPupilJourneyProgressNotes(groups = [], context = {}) {
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  if (!safeGroups.length) return "";
+  return `
+    <div class="pupilJourneyNotes" aria-label="Progress notes">
+      ${safeGroups.map((group) => renderPupilJourneyProgressNote(group, context)).join("")}
+    </div>
+  `;
+}
+
+function getPupilJourneyCompletedCoreAssignments(assignments = []) {
+  return getRequiredCoreAssignments(assignments).filter((assignment) => isCompletedAssignment(assignment));
+}
+
+function getLatestPupilJourneyCompletedCoreAssignment(assignments = []) {
+  return getPupilJourneyCompletedCoreAssignments(assignments)
+    .slice()
+    .sort((a, b) => {
+      const bTime = parseDateMs(b?.completedAt || b?.completed_at || b?.created_at);
+      const aTime = parseDateMs(a?.completedAt || a?.completed_at || a?.created_at);
+      return bTime - aTime;
+    })[0] || null;
+}
+
+function formatPupilAssignmentScoreSummary(assignment = null) {
+  const rawTotal = assignment?.totalWordCount ?? assignment?.total_words ?? assignment?.word_count;
+  const rawCorrect = assignment?.correctWordCount ?? assignment?.correct_words;
+  const total = Number(rawTotal);
+  const correct = Number(rawCorrect);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(correct)) {
+    const safeTotal = Math.round(total);
+    const safeCorrect = Math.max(0, Math.min(safeTotal, Math.round(correct)));
+    return `${safeCorrect}/${safeTotal}`;
+  }
+
+  const rawRate = assignment?.scoreRate ?? assignment?.score_rate;
+  const rate = Number(rawRate);
+  if (Number.isFinite(rate) && rate >= 0) {
+    const percent = rate <= 1 ? rate * 100 : rate;
+    return `${Math.round(percent)}% correct`;
+  }
+
+  return "";
+}
+
+function formatPupilDailyCompletionSummary(assignment = null) {
+  const title = assignment ? getDisplayedAssignmentTitle(assignment) : "";
+  const scoreText = formatPupilAssignmentScoreSummary(assignment);
+  if (title && scoreText) return `${title} · ${scoreText}`;
+  if (scoreText) return scoreText;
+  if (title) return title;
+  return "Required task";
+}
+
+function buildPupilJourneyOptionalExtraAction(mainActionModel = null, extraChallengeModel = null) {
+  const kind = String(mainActionModel?.kind || "").trim();
+  if (kind !== "extra_start" && kind !== "extra_continue") return null;
+
+  const source = extraChallengeModel || mainActionModel || {};
+  const isContinue = kind === "extra_continue" || String(source?.state || "").trim() === "continue";
+  return {
+    ...source,
+    kind: isContinue ? "extra_continue" : "extra_start",
+    title: "Extra challenge",
+    body: "",
+    buttonLabel: isContinue ? "Continue" : "Start",
+    assignmentId: String(source?.assignmentId || mainActionModel?.assignmentId || "").trim(),
+  };
+}
+
+function renderPupilJourneyOptionalChallenge(model = null) {
+  if (!model) return "";
+  const button = renderPupilMainActionButton(model, "pupilJourneyOptionalButton", { variant: "secondary" });
+  const message = String(pupilDashboardState.extraChallenge?.message || "").trim();
+  return `
+    <div class="pupilJourneyOptionalPanel">
+      <div class="pupilJourneyOptionalText">
+        <h3>${renderIconLabel("target", "Extra challenge")}</h3>
+        ${model.body ? `<p>${escapeHtml(model.body || "")}</p>` : ""}
+        ${message ? `<p class="pupilJourneyOptionalMessage" role="status">${escapeHtml(message)}</p>` : ""}
+      </div>
+      ${button ? `<div class="pupilJourneyOptionalControls">${button}</div>` : ""}
+    </div>
+  `;
+}
+
+function getPupilDashboardSupplementalAssignments(assignments = [], mainActionModel = null) {
+  const rows = Array.isArray(assignments) ? assignments : [];
+  const kind = String(mainActionModel?.kind || "").trim();
+  const representedAssignmentId = kind === "core"
+    ? String(mainActionModel?.assignmentId || mainActionModel?.assignment?.id || "").trim()
+    : "";
+
+  return rows.filter((item) => {
+    const assignmentId = String(item?.id || "").trim();
+    if (representedAssignmentId && assignmentId === representedAssignmentId) return false;
+    if (isCompletedAssignment(item)) return false;
+    return true;
+  });
 }
 
 const PUPIL_HERO_STAGE_INFO_TEXT = "Spelling stage shows the kind of spelling patterns you are currently practising in Wordloom. It is just a guide to the patterns shown here.";
@@ -1177,19 +1294,23 @@ function getPupilHeroStageHelpId(stageKey) {
 
 function renderPupilHeroStageBands(activeKey = "") {
   const safeActiveKey = String(activeKey || "").trim().toLowerCase();
+  const activeIndex = PUPIL_HERO_STAGE_STEPS.findIndex((item) => item.key === safeActiveKey);
   const openKey = PUPIL_HERO_STAGE_STEPS.some((item) => item.key === pupilDashboardState.openHeroStageHelp)
     ? pupilDashboardState.openHeroStageHelp
     : "";
   return `
     <div class="pupilHeroStageBands${openKey ? " pupilHeroStageBands--hasOpen" : ""}" aria-label="Wordloom spelling stage bands">
-      ${PUPIL_HERO_STAGE_STEPS.map((item) => {
+      ${PUPIL_HERO_STAGE_STEPS.map((item, index) => {
         const isActive = item.key === safeActiveKey;
+        const stageState = activeIndex < 0
+          ? "future"
+          : (index < activeIndex ? "complete" : (isActive ? "active" : "future"));
         const isOpen = item.key === openKey;
         const helpId = getPupilHeroStageHelpId(item.key);
         return `
-          <div class="pupilHeroStageBandTip${isOpen ? " pupilHeroStageBandTip--open" : ""}">
+          <div class="pupilHeroStageBandTip pupilHeroStageBandTip--${escapeHtml(stageState)}${isOpen ? " pupilHeroStageBandTip--open" : ""}">
             <button
-              class="pupilHeroStageBand${isActive ? " pupilHeroStageBand--active" : ""}"
+              class="pupilHeroStageBand pupilHeroStageBand--${escapeHtml(stageState)}"
               type="button"
               data-action="toggle-hero-stage-help"
               data-stage-key="${escapeHtml(item.key)}"
@@ -1201,7 +1322,7 @@ function renderPupilHeroStageBands(activeKey = "") {
               ${escapeHtml(item.label)}
             </button>
             <div class="pupilHeroStageBandBubble" id="${escapeHtml(helpId)}" role="note">
-              ${isActive ? `<p>${escapeHtml("This is where you are practising now.")}</p>` : ""}
+              ${isActive ? `<p>${escapeHtml("Current stage")}</p>` : ""}
               <p>${escapeHtml(item.helpText)}</p>
               <p class="pupilHeroStageBandExamples">${escapeHtml(item.examplesText)}</p>
             </div>
@@ -1265,6 +1386,110 @@ function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, se
   `;
 }
 
+function getPupilDashboardMainActionIcon(kind = "") {
+  const safeKind = String(kind || "").trim();
+  const isExtraAction = safeKind === "extra_start" || safeKind === "extra_continue";
+  if (safeKind === "daily_complete") return "checkCircle";
+  if (safeKind === "core") return "target";
+  if (isExtraAction) return "target";
+  return "checkCircle";
+}
+
+function renderPupilMainActionButton(model = null, extraClassName = "", options = {}) {
+  const kind = String(model?.kind || "").trim();
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const isBusy = isExtraAction && !!pupilDashboardState.extraChallenge?.busy;
+  const buttonLabel = String(model?.buttonLabel || "").trim();
+  const assignmentId = String(model?.assignmentId || "").trim();
+  const variant = String(options?.variant || "primary").trim() === "secondary" ? "secondary" : "primary";
+  const className = ["btn", variant, "start-test-btn", "pupilMainActionButton", extraClassName].filter(Boolean).join(" ");
+  if (!buttonLabel) return "";
+
+  return kind === "core"
+    ? `
+      <button
+        class="${escapeHtml(className)}"
+        type="button"
+        data-assignment="${escapeHtml(assignmentId)}"
+      >${escapeHtml(buttonLabel)}</button>
+    `
+    : `
+      <button
+        class="${escapeHtml(className)}"
+        type="button"
+        data-action="start-extra-challenge"
+        data-extra-challenge-source="dashboard"
+        data-extra-challenge-state="${kind === "extra_continue" ? "continue" : "start"}"
+        data-assignment-id="${escapeHtml(assignmentId)}"
+        ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+      >${escapeHtml(buttonLabel)}</button>
+    `;
+}
+
+function renderPupilLearningJourneyHome(name, assignments, practiceModel, progress, session = null, mainActionModel = null, options = {}) {
+  const hero = buildPupilHeroModel(assignments, practiceModel, progress);
+  const kind = String(mainActionModel?.kind || "complete").trim() || "complete";
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const journeyAssignments = Array.isArray(options?.allAssignments) ? options.allAssignments : assignments;
+  const completedDailyAssignment = getLatestPupilJourneyCompletedCoreAssignment(journeyAssignments);
+  const showCompletedDailyTask = isExtraAction && !!completedDailyAssignment;
+  const optionalExtraAction = showCompletedDailyTask
+    ? buildPupilJourneyOptionalExtraAction(mainActionModel, options?.extraChallengeModel)
+    : null;
+  const message = isExtraAction && !optionalExtraAction ? String(pupilDashboardState.extraChallenge?.message || "").trim() : "";
+  const coreAssignmentTitle = kind === "core" && mainActionModel?.assignment
+    ? getDisplayedAssignmentTitle(mainActionModel.assignment)
+    : "";
+  const panelKind = showCompletedDailyTask ? "daily_complete" : kind;
+  const actionTitle = showCompletedDailyTask
+    ? "Daily challenge"
+    : (kind === "core" ? "Daily challenge" : (isExtraAction ? "Extra challenge" : (mainActionModel?.title || "Daily challenge")));
+  const actionBody = showCompletedDailyTask
+    ? formatPupilDailyCompletionSummary(completedDailyAssignment)
+    : (kind === "core" ? (coreAssignmentTitle && coreAssignmentTitle !== "Daily challenge" ? coreAssignmentTitle : "") : (mainActionModel?.body || ""));
+  const actionButton = showCompletedDailyTask
+    ? ""
+    : renderPupilMainActionButton(mainActionModel, "pupilJourneyActionButton");
+  const actionStatus = showCompletedDailyTask
+    ? `<span class="pupilJourneyCompletedBadge">Completed</span>`
+    : "";
+
+  return `
+    <section class="pupilJourneyHome pupilJourneyHome--${escapeHtml(panelKind)}">
+      <div class="pupilJourneyHeader">
+        <div class="pupilJourneyIntro">
+          <p class="pupilJourneyEyebrow">Learning journey</p>
+          <h2>Hello ${escapeHtml(name)}</h2>
+        </div>
+      </div>
+
+      <div class="pupilJourneyStatusRow">
+        <div class="pupilJourneyActionPanel pupilJourneyActionPanel--${escapeHtml(panelKind)}">
+          <div class="pupilJourneyActionText">
+            <h3>${renderIconLabel(getPupilDashboardMainActionIcon(panelKind), actionTitle)}</h3>
+            ${actionBody ? `<p>${escapeHtml(actionBody)}</p>` : ""}
+            ${message ? `<p class="pupilJourneyActionMessage" role="status">${escapeHtml(message)}</p>` : ""}
+          </div>
+          ${actionButton || actionStatus ? `<div class="pupilJourneyActionControls">${actionButton || actionStatus}</div>` : ""}
+        </div>
+        ${renderPupilJourneyOptionalChallenge(optionalExtraAction)}
+      </div>
+
+      <div class="pupilJourneyPathPanel">
+        <div class="pupilJourneyPathHead">
+          <h3>Spelling stage</h3>
+        </div>
+
+        <div class="pupilJourneyPath">
+          ${renderPupilHeroStageStrip(progress)}
+        </div>
+
+        ${renderPupilJourneyProgressNotes(hero.highlightGroups, { assignments, practiceModel })}
+      </div>
+    </section>
+  `;
+}
+
 function getDisplayedAssignmentTitle(item) {
   if (isExtraChallengeAssignmentSource(item)) return "Extra challenge";
   return String(item?.pupilTitle || item?.title || "Test").trim() || "Test";
@@ -1296,7 +1521,7 @@ function renderSpellingBeeAssignmentCard(item) {
   const leaderboardOpen = !!pupilDashboardState.beeLeaderboardOpenByAssignment?.[String(item.id || "")];
   const untilWrong = String(item?.spellingBeeLengthMode || item?.spellingBeeResult?.bee_length_mode || "").trim().toLowerCase() === SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG;
   const rankLine = item?.spellingBeeRank
-    ? `<span class="pupilMetaPill pupilMetaPill--result" title="Competition rank">${renderIcon("award")}<span>${escapeHtml(`Your rank: ${item.spellingBeeRank}`)}</span></span>`
+    ? `<span class="pupilMetaPill pupilMetaPill--result" title="Competition rank">${renderIcon("list")}<span>${escapeHtml(`Your rank: ${item.spellingBeeRank}`)}</span></span>`
     : "";
   const yearRankLine = item?.spellingBeeYearRank
     ? `<span class="pupilMetaPill" title="Year rank">${renderIcon("list")}<span>${escapeHtml(`Year rank: ${item.spellingBeeYearRank}`)}</span></span>`
@@ -1309,7 +1534,6 @@ function renderSpellingBeeAssignmentCard(item) {
     <article class="card test-card pupilTestCard ${isComplete ? "pupilTestCard--complete" : ""}">
       <h3>Spelling Bee</h3>
       <p class="pupilTaskReason">Optional competition</p>
-      <p class="pupilTaskReason">Take part if you want to</p>
       <div class="pupilTestMeta">
         ${isComplete ? `
           <span class="pupilMetaPill pupilMetaPill--complete" title="Completed competition">
@@ -1337,7 +1561,7 @@ function renderSpellingBeeAssignmentCard(item) {
           </span>
         ` : `
           <span class="pupilMetaPill" title="Optional competition">
-            ${renderIcon("spark")}
+            ${renderIcon("list")}
             <span>Optional competition</span>
           </span>
           ${untilWrong ? `
@@ -1933,7 +2157,7 @@ function renderSpellingBeeSummaryCard(assignments) {
     <section class="card pupilBeeSummaryCard">
       <div class="pupilSectionHead pupilSectionHead--compact">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("award", model.title || "Spelling Bee")}</h3>
+          <h3>${renderIconLabel("book", model.title || "Spelling Bee")}</h3>
         </div>
       </div>
       <div class="pupilBeeSummaryLines">
@@ -1956,13 +2180,13 @@ function renderPupilDashboardMiniCards(assignments) {
   `;
 }
 
-function renderAssignments(assignments) {
+function renderAssignments(assignments, options = {}) {
   if (!assignments.length) return "";
 
-  const pendingCount = assignments.filter((item) => !item?.completed).length;
-  const completedCount = assignments.filter((item) => !!item?.completed).length;
-  const sectionTitle = "My tasks";
-  const sectionCount = pendingCount || completedCount;
+  const sectionTitle = String(options?.title || "My tasks").trim() || "My tasks";
+  const sectionIcon = String(options?.icon || "checkCircle").trim() || "checkCircle";
+  const sectionClassName = String(options?.className || "").trim();
+  const sectionCount = assignments.length;
   const isExpanded = !!pupilDashboardState.expandedSections.teacher_tasks;
   const shouldCollapse = assignments.length > PUPIL_SECTION_LIMIT;
   const visibleItems = shouldCollapse && !isExpanded ? assignments.slice(0, PUPIL_SECTION_LIMIT) : assignments;
@@ -1970,10 +2194,10 @@ function renderAssignments(assignments) {
   const toggleLabel = isExpanded ? "Show less" : `Show ${hiddenCount} more`;
 
   return `
-    <section class="card pupilSectionCard">
+    <section class="card pupilSectionCard pupilTasksSection ${escapeHtml(sectionClassName)}">
       <div class="pupilSectionHead">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("checkCircle", sectionTitle)}</h3>
+          <h3>${renderIconLabel(sectionIcon, sectionTitle)}</h3>
           <span class="pupilSectionCount">${escapeHtml(String(sectionCount))}</span>
         </div>
       </div>
@@ -1998,7 +2222,7 @@ function renderAssignments(assignments) {
 
 function renderAssignmentsEmptyState() {
   return `
-    <section class="card pupilSectionCard pupilEmptyCard">
+    <section class="card pupilSectionCard pupilTasksSection pupilEmptyCard">
       <div class="pupilSectionTitleRow">
         <h3>${renderIconLabel("checkCircle", "No tasks waiting")}</h3>
       </div>
@@ -2012,12 +2236,14 @@ function renderExtraChallengeCard(model = null) {
   const state = String(model?.state || "").trim();
   const isBusy = !!pupilDashboardState.extraChallenge?.busy;
   const message = String(pupilDashboardState.extraChallenge?.message || "").trim();
+  const rawTitle = String(model?.title || "").trim();
+  const title = /another challenge/i.test(rawTitle) ? "Extra challenge" : (rawTitle || "Extra challenge");
 
   return `
     <section class="card pupilSectionCard pupilExtraChallengeCard">
       <div class="pupilSectionHead pupilSectionHead--compact">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("spark", model.title || "Ready for another challenge?")}</h3>
+          <h3>${renderIconLabel("target", title)}</h3>
         </div>
       </div>
       <p class="pupilEmptyText">${escapeHtml(model.body || "")}</p>
@@ -2038,38 +2264,14 @@ function renderPupilDashboardMainAction(model = null) {
   if (!model) return "";
   const kind = String(model?.kind || "").trim();
   const isExtraAction = kind === "extra_start" || kind === "extra_continue";
-  const isBusy = isExtraAction && !!pupilDashboardState.extraChallenge?.busy;
   const message = isExtraAction ? String(pupilDashboardState.extraChallenge?.message || "").trim() : "";
-  const icon = kind === "core" ? "checkCircle" : (isExtraAction ? "spark" : "award");
-  const buttonLabel = String(model?.buttonLabel || "").trim();
-  const assignmentId = String(model?.assignmentId || "").trim();
-  const actionButton = !buttonLabel
-    ? ""
-    : kind === "core"
-      ? `
-        <button
-          class="btn primary start-test-btn pupilMainActionButton"
-          type="button"
-          data-assignment="${escapeHtml(assignmentId)}"
-        >${escapeHtml(buttonLabel)}</button>
-      `
-      : `
-        <button
-          class="btn primary start-test-btn pupilMainActionButton"
-          type="button"
-          data-action="start-extra-challenge"
-          data-extra-challenge-source="dashboard"
-          data-extra-challenge-state="${kind === "extra_continue" ? "continue" : "start"}"
-          data-assignment-id="${escapeHtml(assignmentId)}"
-          ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
-        >${escapeHtml(buttonLabel)}</button>
-      `;
+  const actionButton = renderPupilMainActionButton(model);
 
   return `
     <section class="card pupilMainActionCard pupilMainActionCard--${escapeHtml(kind || "complete")}">
       <div class="pupilMainActionContent">
         <div class="pupilMainActionText">
-          <h3>${renderIconLabel(icon, model.title || "All done for now")}</h3>
+          <h3>${renderIconLabel(getPupilDashboardMainActionIcon(kind), model.title || "All done for now")}</h3>
           <p>${escapeHtml(model.body || "")}</p>
           ${message ? `<p class="pupilMainActionMessage" role="status">${escapeHtml(message)}</p>` : ""}
         </div>
@@ -2093,7 +2295,7 @@ function renderPracticeSection(practiceModel) {
     <section class="card pupilSectionCard pupilPracticeSection">
       <div class="pupilSectionHead">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("spark", "Extra practice")}</h3>
+          <h3>${renderIconLabel("target", "Extra practice")}</h3>
         </div>
       </div>
       <div class="pupilPracticeOptions">
@@ -2106,7 +2308,7 @@ function renderPracticeSection(practiceModel) {
 function renderReadingHelpSection() {
   return `
     <details class="card pupilDetailsCard pupilReadingHelpCard">
-      <summary>${renderIconLabel("eye", "Reading help")}</summary>
+      <summary><span>Reading help</span></summary>
       <div class="pupilDetailsBody pupilReadingHelpShell">
         ${renderAccessibilityControls()}
       </div>
@@ -2659,8 +2861,13 @@ function bindAccessibilityControlEvents(containerEl) {
   });
 }
 
+function setPupilJourneyScreen(containerEl, enabled) {
+  containerEl?.classList?.toggle("pupilJourneyScreen", !!enabled);
+}
+
 async function renderPupilHome(containerEl, session, { autoOpenBaseline = true } = {}) {
   if (!containerEl) return;
+  setPupilJourneyScreen(containerEl, false);
 
   const pupilId = String(session?.pupil_id || "").trim();
   const name = session?.first_name || session?.username || "Pupil";
@@ -2824,6 +3031,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
+  setPupilJourneyScreen(containerEl, false);
   const isSpellingBee = !!item?.isSpellingBee;
   const isAssignedTask = !!item?.class_id && item?.attempt_source !== "practice" && !isSpellingBee;
   let latestStatus = null;
@@ -3081,24 +3289,31 @@ async function openSession(containerEl, session, item, assignments, practicePack
 }
 
 function renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  setPupilJourneyScreen(containerEl, true);
   const name = session?.first_name || session?.username || "Pupil";
   const extraChallengeModel = dashboardOptions?.extraChallengeModel || null;
   const mainActionModel = dashboardOptions?.dashboardMainActionModel || buildPupilDashboardMainActionModel({
     assignments: Array.isArray(dashboardOptions?.allAssignments) ? dashboardOptions.allAssignments : assignments,
     pupilId: session?.pupil_id,
   });
+  const supplementalAssignments = getPupilDashboardSupplementalAssignments(assignments, mainActionModel);
   const showLegacyExtraChallengeCard = !!extraChallengeModel
     && mainActionModel?.kind !== "extra_start"
     && mainActionModel?.kind !== "extra_continue";
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
-      ${renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session)}
-      ${renderPupilDashboardMainAction(mainActionModel)}
-      ${renderRecentTasksSection(assignments, practiceModel, progress)}
-      ${renderPupilDashboardMiniCards(assignments)}
-      ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
+      ${renderPupilLearningJourneyHome(name, assignments, practiceModel, progress, session, mainActionModel, {
+        allAssignments: Array.isArray(dashboardOptions?.allAssignments) ? dashboardOptions.allAssignments : assignments,
+        extraChallengeModel,
+      })}
+      ${supplementalAssignments.length ? renderAssignments(supplementalAssignments, {
+        title: "More to do",
+        icon: "target",
+        className: "pupilTasksSection--more",
+      }) : ""}
       ${showLegacyExtraChallengeCard ? renderExtraChallengeCard(extraChallengeModel) : ""}
       ${renderPracticeSection(practiceModel)}
+      ${renderPupilDashboardMiniCards(assignments)}
       ${renderReadingHelpSection()}
     </div>
   `;
@@ -3107,6 +3322,7 @@ function renderDashboard(containerEl, session, assignments, practiceModel, progr
 
 export async function renderPupilView(containerEl, session) {
   if (!containerEl) return;
+  setPupilJourneyScreen(containerEl, false);
   applyAccessibilitySettings();
   const name = session?.first_name || session?.username || "Pupil";
   containerEl.innerHTML = renderSummaryCardWithSchool(name, session);
