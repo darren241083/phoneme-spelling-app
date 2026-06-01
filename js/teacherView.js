@@ -154,6 +154,10 @@ import {
   getAutomationRunStatusLabel,
   normalizeCoverageWarnings,
 } from "./automationRunFeedback.js?v=1.4";
+import {
+  buildActiveAssignedCorePersonalisedAssignmentMap,
+  isAssignedCorePersonalisedAutomationAssignment,
+} from "./personalisedAssignmentBlocking.js?v=1.0";
 import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
@@ -4232,7 +4236,7 @@ function renderAutomationLatestRunOutcomePanel(run, {
           <strong>Latest run outcome</strong>
           <span>${escapeHtml(policySelected ? "No run recorded for this policy yet." : "No personalised run recorded yet.")}</span>
         </div>
-        <p>${escapeHtml(policySelected ? "Run this policy to see generated, waiting, skipped, and already assigned pupils here." : "Select and run a personalised policy to see the outcome here.")}</p>
+        <p>${escapeHtml(policySelected ? "Run this policy to see generated pupils, waiting pupils, skipped pupils, and pupils with unfinished daily challenges here." : "Select and run a personalised policy to see the outcome here.")}</p>
       </div>
     `;
   }
@@ -4284,7 +4288,7 @@ function renderAutomationRecentActivityCounts(counts = {}) {
     { key: "generated", label: "Generated/provisioned", count: counts.generated },
     { key: "waiting", label: "Waiting for baseline", count: counts.waiting },
     { key: "skipped", label: "Skipped", count: counts.skipped },
-    { key: "already_assigned", label: "Already assigned", count: counts.alreadyAssigned },
+    { key: "already_assigned", label: "Unfinished daily challenge", count: counts.alreadyAssigned },
   ]);
 }
 
@@ -12203,18 +12207,9 @@ function buildPupilWordCountByPupil(pupilPlans = []) {
 }
 
 function isAutomatedPersonalisedAssignment(assignment, testsById = new Map()) {
-  const automationKind = String(assignment?.automation_kind || "").trim().toLowerCase();
-  const automationSource = String(assignment?.automation_source || "").trim().toLowerCase();
-  if (
-    automationKind === ASSIGNMENT_AUTOMATION_KIND_PERSONALISED
-    && automationSource === ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW
-  ) {
-    return true;
-  }
-
-  const testId = String(assignment?.test_id || "").trim();
-  const test = testsById.get(testId) || null;
-  return isFullyGeneratedAssignmentWordRows(test?.test_words || []);
+  return isAssignedCorePersonalisedAutomationAssignment(assignment, testsById, {
+    isFullyGeneratedAssignmentWordRows,
+  });
 }
 
 async function buildActiveAutomatedAssignmentMap({ pupilIds = [] } = {}) {
@@ -12246,45 +12241,14 @@ async function buildActiveAutomatedAssignmentMap({ pupilIds = [] } = {}) {
   if (targetRes.error && !isMissingAssignmentTargetTableError(targetRes.error)) throw targetRes.error;
   if (statusRes.error && !isMissingAssignmentStatusTableError(statusRes.error)) throw statusRes.error;
 
-  const assignmentById = new Map(
-    automatedAssignments.map((assignment) => [String(assignment?.id || "").trim(), assignment])
-  );
-  const statusByKey = new Map(
-    (statusRes.data || []).map((row) => ([
-      `${String(row?.assignment_id || "").trim()}::${String(row?.pupil_id || "").trim()}`,
-      row,
-    ]))
-  );
-  const activeByPupil = new Map();
-
-  for (const row of targetRes.data || []) {
-    const assignmentId = String(row?.assignment_id || "").trim();
-    const pupilId = String(row?.pupil_id || "").trim();
-    if (!assignmentId || !pupilId || activeByPupil.has(pupilId)) continue;
-    const statusRow = statusByKey.get(`${assignmentId}::${pupilId}`) || null;
-    if (isCompletedAssignmentStatusRow(statusRow)) continue;
-    const assignment = assignmentById.get(assignmentId) || null;
-    activeByPupil.set(pupilId, {
-      assignmentId,
-      classId: String(assignment?.class_id || "").trim(),
-      title: String(assignment?.tests?.title || "").trim(),
-    });
-  }
-
-  for (const row of statusRes.data || []) {
-    const assignmentId = String(row?.assignment_id || "").trim();
-    const pupilId = String(row?.pupil_id || "").trim();
-    if (!assignmentId || !pupilId || activeByPupil.has(pupilId)) continue;
-    if (isCompletedAssignmentStatusRow(row)) continue;
-    const assignment = assignmentById.get(assignmentId) || null;
-    activeByPupil.set(pupilId, {
-      assignmentId,
-      classId: String(assignment?.class_id || "").trim(),
-      title: String(assignment?.tests?.title || "").trim(),
-    });
-  }
-
-  return activeByPupil;
+  return buildActiveAssignedCorePersonalisedAssignmentMap({
+    assignments: automatedAssignments,
+    testsById,
+    targetRows: targetRes.data || [],
+    statusRows: statusRes.data || [],
+    pupilIds: safePupilIds,
+    isFullyGeneratedAssignmentWordRows,
+  });
 }
 
 async function buildPersonalisedPlanForClass({

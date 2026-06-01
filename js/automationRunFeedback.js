@@ -28,7 +28,7 @@ const RUN_STATUS_LABELS = {
 const RUN_REASON_LABELS = {
   [BASELINE_INCOMPLETE_REASON]: "Baseline incomplete",
   [NO_BASELINE_ASSIGNMENT_REASON]: "Baseline not created yet",
-  [ACTIVE_AUTOMATED_ASSIGNMENT_REASON]: "Already assigned",
+  [ACTIVE_AUTOMATED_ASSIGNMENT_REASON]: "Unfinished daily challenge",
   [DUPLICATE_PUPIL_IN_RUN_REASON]: "Duplicate group membership",
 };
 
@@ -316,7 +316,7 @@ function buildSkipReasonSentences(skipReasonCounts = {}) {
   const duplicateCount = getSkipCount(skipReasonCounts, DUPLICATE_PUPIL_IN_RUN_REASON);
 
   if (activeAssignmentCount > 0) {
-    sentences.push(`${formatCountLabel(activeAssignmentCount, "pupil")} already ${activeAssignmentCount === 1 ? "has" : "have"} an active personalised assignment.`);
+    sentences.push(`${formatCountLabel(activeAssignmentCount, "pupil")} ${activeAssignmentCount === 1 ? "has an unfinished daily challenge" : "have unfinished daily challenges"}. They will receive the next one after completing it.`);
   }
   if (duplicateCount > 0) {
     sentences.push(`${formatCountLabel(duplicateCount, "pupil")} ${formatPupilVerb(duplicateCount)} skipped because they appeared through more than one selected group.`);
@@ -609,7 +609,7 @@ function buildRunOutcomeNextAction({ includedCount, waitingCount, skippedCount, 
   }
   if (toCount(waitingCount) > 0) return "Pupils waiting for baseline will be picked up once baseline is complete.";
   if (toCount(activeAssignmentCount) > 0 && toCount(includedCount) === 0) {
-    return "Already assigned pupils were left untouched.";
+    return "Pupils with unfinished daily challenges will be picked up after they complete them.";
   }
   if (toCount(skippedCount) > 0 && toCount(includedCount) === 0) return "Check the skipped reasons before rerunning.";
   if (toCount(includedCount) > 0) return "Assignments are ready for the generated pupils.";
@@ -655,7 +655,7 @@ export function buildAutomationRerunSafetyCopy({
 } = {}) {
   const parts = [];
   if (toCount(activeAssignmentCount) > 0) {
-    parts.push("Already assigned pupils were left untouched.");
+    parts.push("Pupils with unfinished daily challenges will receive the next one after completing them.");
   }
   if (toCount(waitingCount) > 0) {
     parts.push("Pupils waiting for baseline can be picked up after baseline completion.");
@@ -664,7 +664,7 @@ export function buildAutomationRerunSafetyCopy({
     parts.push("Duplicate group memberships were skipped so pupils do not receive duplicate assignments.");
   }
   if (!parts.length && toCount(includedCount) > 0 && toCount(skippedCount) === 0) {
-    parts.push("Rerunning will still check for active personalised assignments before creating more work.");
+    parts.push("Rerunning will still check for unfinished daily challenges before creating more work.");
   }
   return parts.join(" ");
 }
@@ -714,7 +714,7 @@ export function buildAutomationRunOutcomeViewModel({ run = null, pupilRows = nul
     { key: "generated", label: "Generated/provisioned", count: includedCount },
     { key: "waiting", label: "Waiting for baseline", count: effectiveWaitingCount },
     { key: "skipped", label: "Skipped", count: skippedCount },
-    { key: "already_assigned", label: "Already assigned", count: activeAssignmentCount },
+    { key: "already_assigned", label: "Unfinished daily challenge", count: activeAssignmentCount },
     { key: "provisioning", label: "Provisioning", count: provisioningCount },
     { key: "error", label: "Errors", count: errorCount },
   ].filter((item) => item.count > 0);

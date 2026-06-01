@@ -75,6 +75,35 @@ assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([teacherPracticeModeCore
 assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([autoPracticeModeCore]), true);
 assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([explicitPracticeRuntime]), false);
 
+const incompleteAssignedCoreRuntime = runtimeAssignment();
+const completedAssignedCoreRuntime = runtimeAssignment({ completed: true });
+const activeExtraChallengeRuntime = runtimeAssignment({
+  evidenceSource: "extra_challenge",
+  attemptSource: "extra_challenge",
+});
+const completedExtraChallengeRuntime = runtimeAssignment({
+  evidenceSource: "extra_challenge",
+  attemptSource: "extra_challenge",
+  completed: true,
+});
+const legacyMissingEvidenceSourceRuntime = {
+  assignment_source: "",
+  attempt_source: "teacher_assigned",
+  mode: "test",
+  completed: false,
+};
+
+assert.equal(isRequiredCoreRuntimeAssignment(incompleteAssignedCoreRuntime), true);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([incompleteAssignedCoreRuntime]), true);
+assert.equal(isRequiredCoreRuntimeAssignment(completedAssignedCoreRuntime), true);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([completedAssignedCoreRuntime]), false);
+assert.equal(isRequiredCoreRuntimeAssignment(activeExtraChallengeRuntime), false);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([activeExtraChallengeRuntime]), false);
+assert.equal(isRequiredCoreRuntimeAssignment(completedExtraChallengeRuntime), false);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([completedExtraChallengeRuntime]), false);
+assert.equal(isRequiredCoreRuntimeAssignment(legacyMissingEvidenceSourceRuntime), true);
+assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([legacyMissingEvidenceSourceRuntime]), true);
+
 function coreBankWord({ id, word, segments, focus, score = 42 }) {
   return {
     id,

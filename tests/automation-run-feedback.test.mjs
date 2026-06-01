@@ -248,7 +248,7 @@ test("included waiting and skipped pupils returns partial warning copy", () => {
   assert.match(notice.message, /Included 5 pupils\./);
   assert.match(notice.message, /2 pupils were waiting for baseline\./);
   assert.match(notice.message, /Skipped 1 pupil\./);
-  assert.match(notice.message, /1 pupil already has an active personalised assignment\./);
+  assert.match(notice.message, /1 pupil has an unfinished daily challenge\. They will receive the next one after completing it\./);
 });
 
 test("included without skipped pupils returns success", () => {
@@ -295,7 +295,7 @@ test("waiting reason counts are grouped separately from skipped reasons", () => 
   });
 });
 
-test("active personalised assignment remains a skipped blocked case", () => {
+test("unfinished daily challenge remains a skipped blocked case", () => {
   const notice = buildAutomationRunFeedbackNotice({
     classResults: [{
       status: "skipped",
@@ -311,7 +311,7 @@ test("active personalised assignment remains a skipped blocked case", () => {
   assert.equal(notice.type, "warning");
   assert.equal(
     notice.message,
-    "No personalised tests generated. 1 pupil already has an active personalised assignment."
+    "No personalised tests generated. 1 pupil has an unfinished daily challenge. They will receive the next one after completing it."
   );
 });
 
@@ -355,16 +355,16 @@ test("run outcome view model groups status and reason copy", () => {
   assert.equal(view.counts.alreadyAssigned, 1);
   assert.equal(view.counts.duplicate, 1);
   assert.equal(view.counts.errors, 1);
-  assert.match(view.rerunSafetyCopy, /Already assigned pupils were left untouched/);
+  assert.match(view.rerunSafetyCopy, /Pupils with unfinished daily challenges will receive the next one after completing them/);
   assert.match(view.rerunSafetyCopy, /baseline completion/);
   assert.match(view.rerunSafetyCopy, /Duplicate group memberships were skipped/);
   assert.deepEqual(
     plain(view.reasonChips.map((item) => `${item.label}:${item.count}`)),
     [
-      "Already assigned:1",
       "Baseline incomplete:1",
       "Baseline not created yet:1",
       "Duplicate group membership:1",
+      "Unfinished daily challenge:1",
     ]
   );
 });
@@ -391,7 +391,7 @@ test("stale running run returns teacher-facing incomplete run copy", () => {
   assert.match(view.nextAction, /has not recorded a finish time/);
 });
 
-test("rerun safety copy covers active assignments baseline waiting and duplicate groups", () => {
+test("rerun safety copy covers unfinished daily challenges baseline waiting and duplicate groups", () => {
   const copy = buildAutomationRerunSafetyCopy({
     includedCount: 2,
     waitingCount: 3,
@@ -400,7 +400,7 @@ test("rerun safety copy covers active assignments baseline waiting and duplicate
     duplicateCount: 2,
   });
 
-  assert.match(copy, /Already assigned pupils were left untouched/);
+  assert.match(copy, /Pupils with unfinished daily challenges will receive the next one after completing them/);
   assert.match(copy, /Pupils waiting for baseline can be picked up after baseline completion/);
   assert.match(copy, /Duplicate group memberships were skipped/);
 });
@@ -473,7 +473,7 @@ test("run status and reason labels use teacher-facing copy", () => {
   assert.equal(getAutomationRunStatusLabel("failed"), "Error");
   assert.equal(getAutomationRunReasonLabel("baseline_incomplete"), "Baseline incomplete");
   assert.equal(getAutomationRunReasonLabel("no_baseline_assignment"), "Baseline not created yet");
-  assert.equal(getAutomationRunReasonLabel("active_automated_assignment"), "Already assigned");
+  assert.equal(getAutomationRunReasonLabel("active_automated_assignment"), "Unfinished daily challenge");
   assert.equal(getAutomationRunReasonLabel("duplicate_pupil_in_run"), "Duplicate group membership");
 });
 
