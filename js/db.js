@@ -337,11 +337,36 @@ function isMissingPersonalisedAutomationPolicyTableError(error) {
     || code === "PGRST204"
     || code === "PGRST205"
     || (message.includes(PERSONALISED_AUTOMATION_POLICY_TABLE) && (
-      message.includes("does not exist")
+      (!message.includes("column") && message.includes("does not exist"))
       || message.includes("schema cache")
       || message.includes("could not find the table")
       || message.includes("relation")
     ));
+}
+
+function isPersonalisedAutomationPolicySchoolFilterError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes(`${PERSONALISED_AUTOMATION_POLICY_TABLE}.school_id`)
+    && (
+      code === "42703"
+      || code === "PGRST204"
+      || message.includes("column")
+      || message.includes("schema cache")
+    );
+}
+
+function getPersonalisedAutomationPolicyStorageErrorMessage(error, action = "save") {
+  if (isPersonalisedAutomationPolicySchoolFilterError(error)) {
+    return `Could not ${action} the automation policy because the school filter was rejected. Refresh the app and try again, or contact support.`;
+  }
+  if (
+    isMissingPersonalisedAutomationPolicyTableError(error)
+    || isMissingPersonalisedAutomationPolicyColumnError(error)
+  ) {
+    return "Automation policy storage is not available yet. Run the latest Supabase migration.";
+  }
+  return "";
 }
 
 function isMissingPersonalisedAutomationPolicyTargetTableError(error) {
@@ -4991,6 +5016,12 @@ export async function upsertPersonalisedAutomationPolicy({
   if (normalizedPolicy.end_date && normalizedPolicy.end_date < normalizedPolicy.start_date) {
     throw new Error("The automation policy end date must be on or after the start date.");
   }
+  if (safePolicyId) {
+    const existingPolicy = await readPersonalisedAutomationPolicy(safePolicyId);
+    if (!existingPolicy) {
+      throw new Error("Choose a saved automation policy first.");
+    }
+  }
 
   const nowIso = new Date().toISOString();
   const basePayload = {
@@ -5025,7 +5056,6 @@ export async function upsertPersonalisedAutomationPolicy({
       .update(basePayload)
       .eq("id", safePolicyId)
       .eq("teacher_id", context.teacherId);
-    resultQuery = applyActiveSchoolFilter(resultQuery, context.accessContext);
     const result = await resultQuery
       .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
@@ -5045,12 +5075,8 @@ export async function upsertPersonalisedAutomationPolicy({
   }
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "save");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
@@ -5169,16 +5195,11 @@ export async function setPersonalisedAutomationPolicyArchived({
     .update(payload)
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
-  updateQuery = applyActiveSchoolFilter(updateQuery, context.accessContext);
   const { error } = await updateQuery;
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "update");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
@@ -5219,16 +5240,11 @@ export async function deletePersonalisedAutomationPolicy(policyId = "") {
     .delete()
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
-  deleteQuery = applyActiveSchoolFilter(deleteQuery, context.accessContext);
   const { error } = await deleteQuery;
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "delete");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
