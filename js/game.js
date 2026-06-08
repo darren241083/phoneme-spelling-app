@@ -23,9 +23,11 @@ import { shouldBlockDuplicateIncorrectSubmission } from "./pupilAttemptGuard.js?
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
 import {
   getSpellingContextSupport,
+  getVisiblePupilMeaningSupport,
+  getVisiblePupilSentenceSupport,
   hasMeaningSupport,
   hasSentenceSupport,
-} from "./spellingContextSupport.js?v=1.2";
+} from "./spellingContextSupport.js?v=1.3";
 
 const LOOM_DECOY_COUNTS = {
   none: 0,
@@ -1972,48 +1974,12 @@ export function mountGame({
     clearContextMeaningLine();
   }
 
-  function buildContextTargetWordPattern(word) {
-    const normalizedWord = String(word ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\u2019\u2018`\u00B4]/g, "'")
-      .replace(/[^a-z']/g, "")
-      .replace(/^'+|'+$/g, "");
-    if (!normalizedWord) return null;
-    const wordPattern = normalizedWord
-      .split("")
-      .map((letter) => (letter === "'" ? "['\u2019\u2018`]" : escapeContextRegExpLiteral(letter)))
-      .join("");
-    return new RegExp(`(^|[^A-Za-z'\u2019\u2018])(${wordPattern})(?=$|[^A-Za-z'\u2019\u2018])`, "gi");
-  }
-
-  function escapeContextRegExpLiteral(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function maskContextTargetWord(text, word) {
-    const value = String(text || "").trim();
-    const pattern = buildContextTargetWordPattern(word);
-    if (!value || !pattern) return value;
-    return value.replace(pattern, "$1____");
-  }
-
-  function contextTargetWordAppears(text, word) {
-    const pattern = buildContextTargetWordPattern(word);
-    if (!pattern) return false;
-    return pattern.test(String(text || ""));
-  }
-
   function getVisibleContextSentence(context, item) {
-    const sentence = String(context?.sentence || "").trim();
-    if (!sentence) return "";
-    return maskContextTargetWord(sentence, context?.word || item?.word || "");
+    return getVisiblePupilSentenceSupport(context?.sentence, context?.word || item?.word || "");
   }
 
   function getVisibleContextMeaning(context, item) {
-    const meaning = String(context?.meaning || "").trim();
-    if (!meaning || contextTargetWordAppears(meaning, context?.word || item?.word || "")) return "";
-    return meaning;
+    return getVisiblePupilMeaningSupport(context?.meaning, context?.word || item?.word || "");
   }
 
   function isContextSentenceAllowed(context) {

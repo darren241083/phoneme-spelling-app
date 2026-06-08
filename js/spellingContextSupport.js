@@ -18,6 +18,17 @@ const APPROVED_CONTENT_STATUSES = new Set(["", "auto_approved", "teacher_entered
 const PUPIL_USABLE_CONTEXT_CACHE_STATUSES = new Set(["auto_approved", "teacher_entered", "teacher_edited"]);
 const MAX_MEANING_CHARACTERS = 180;
 const MAX_MEANING_WORDS = 32;
+const MIN_TARGET_LEAK_STEM_LENGTH = 5;
+const TARGET_LEAK_SUFFIXES = [
+  { suffix: "ies", replacement: "y" },
+  { suffix: "ing", replacement: "" },
+  { suffix: "est", replacement: "" },
+  { suffix: "ed", replacement: "" },
+  { suffix: "er", replacement: "" },
+  { suffix: "es", replacement: "" },
+  { suffix: "ly", replacement: "" },
+  { suffix: "s", replacement: "" },
+];
 
 const SPELLING_EXPLANATION_PATTERN = /\b(graphemes?|phonemes?|spelling\s+patterns?|letters?|digraphs?|vowels?|consonants?|sounds?)\b/i;
 const URL_LIKE_PATTERN = /\b(?:https?:\/\/|www\.|[a-z0-9-]+\.(?:com|org|net|co\.uk|edu|gov)\b)/i;
@@ -139,6 +150,46 @@ export function hasMeaningSupport(item = null) {
   return getSpellingContextSupport(item).hasMeaning;
 }
 
+export function supportTextLeaksTargetWord(text, word = "") {
+  const target = normalizeSupportLeakTerm(word);
+  if (!target) return false;
+
+  const targetTerms = buildSupportLeakTerms(target);
+  const tokens = tokenizeSupportText(text);
+  for (const token of tokens) {
+    const tokenTerm = normalizeSupportLeakTerm(token);
+    if (!tokenTerm) continue;
+    if (tokenTerm === target) return true;
+
+    const tokenTerms = buildSupportLeakTerms(tokenTerm);
+    for (const term of tokenTerms) {
+      if (term === target) return true;
+      if (term.length >= MIN_TARGET_LEAK_STEM_LENGTH && targetTerms.has(term)) return true;
+    }
+  }
+
+  return false;
+}
+
+export function maskPupilSupportTargetWord(text, word = "") {
+  const value = cleanSupportText(text);
+  const pattern = buildSupportTargetWordPattern(word);
+  if (!value || !pattern) return value;
+  return value.replace(pattern, "$1____");
+}
+
+export function getVisiblePupilSentenceSupport(sentence, word = "") {
+  const maskedSentence = maskPupilSupportTargetWord(sentence, word);
+  if (!maskedSentence) return "";
+  return supportTextLeaksTargetWord(maskedSentence, word) ? "" : maskedSentence;
+}
+
+export function getVisiblePupilMeaningSupport(meaning, word = "") {
+  const text = cleanSupportText(meaning);
+  if (!text) return "";
+  return supportTextLeaksTargetWord(text, word) ? "" : text;
+}
+
 export function validateMeaningSupportText(meaning, word = "") {
   const originalText = String(meaning ?? "");
   const text = collapseWhitespace(originalText);
@@ -162,6 +213,10 @@ export function validateMeaningSupportText(meaning, word = "") {
 
   if (SPELLING_EXPLANATION_PATTERN.test(text) || mentionsLetterByLetterSpelling(text, word)) {
     reasons.push("spelling_explanation");
+  }
+
+  if (supportTextLeaksTargetWord(text, word)) {
+    reasons.push("target_leak");
   }
 
   return {
@@ -353,6 +408,42 @@ function mentionsLetterByLetterSpelling(text, word) {
   const letters = normalizedWord.split("").map(escapeRegExp);
   const spacedOrHyphenated = new RegExp(`\\b${letters.join("[\\s-]+")}\\b`, "i");
   return spacedOrHyphenated.test(text);
+}
+
+function normalizeSupportLeakTerm(value) {
+  return normalizeContextWord(value).replace(/'/g, "");
+}
+
+function tokenizeSupportText(text) {
+  return String(text ?? "")
+    .toLowerCase()
+    .replace(/[’‘`´]/g, "'")
+    .match(/[a-z']+/g) || [];
+}
+
+function buildSupportLeakTerms(value) {
+  const normalized = normalizeSupportLeakTerm(value);
+  const terms = new Set();
+  if (!normalized) return terms;
+  terms.add(normalized);
+
+  for (const { suffix, replacement } of TARGET_LEAK_SUFFIXES) {
+    if (!normalized.endsWith(suffix) || normalized.length <= suffix.length) continue;
+    const stem = `${normalized.slice(0, -suffix.length)}${replacement}`;
+    if (stem.length >= MIN_TARGET_LEAK_STEM_LENGTH) terms.add(stem);
+  }
+
+  return terms;
+}
+
+function buildSupportTargetWordPattern(word) {
+  const normalizedWord = normalizeContextWord(word);
+  if (!normalizedWord) return null;
+  const wordPattern = normalizedWord
+    .split("")
+    .map((letter) => (letter === "'" ? "['\u2019\u2018`]" : escapeRegExp(letter)))
+    .join("");
+  return new RegExp(`(^|[^A-Za-z'\u2019\u2018])(${wordPattern})(?=$|[^A-Za-z'\u2019\u2018])`, "gi");
 }
 
 function escapeRegExp(value) {
