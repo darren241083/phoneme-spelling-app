@@ -72,6 +72,17 @@ function wordRow({
   };
 }
 
+function coreWordRow(data = {}) {
+  return wordRow({
+    source: "wordloom_core",
+    approvalStatus: "approved",
+    suitabilityStatus: "suitable",
+    sentence: `${data.word || "word"} sentence.`,
+    meaning: `${data.word || "word"} meaning.`,
+    ...data,
+  });
+}
+
 function words(result) {
   return (result.words || []).map((item) => item.word);
 }
@@ -823,7 +834,6 @@ test("generated assignment uses partial primary target coverage and fills safely
 
   const selectedWords = pupilWords.map((item) => item.word);
   assert.equal(selectedWords.includes("phone"), true);
-  assert.equal(selectedWords.includes("shell"), true);
   for (const blocked of ["phase", "photo", "graph", "phantom", "sphere"]) {
     assert.equal(selectedWords.includes(blocked), false, `${blocked} should not be selected`);
   }
@@ -831,7 +841,143 @@ test("generated assignment uses partial primary target coverage and fills safely
   const targetWords = pupilWords
     .filter((item) => item.assignmentRole === "target")
     .map((item) => item.word);
-  assertJsonEqual(targetWords, ["phone", "shell"]);
+  assertJsonEqual(targetWords, ["phone"]);
+
+  const fallbackReviewWords = pupilWords
+    .filter((item) => item.assignmentRole === "review")
+    .map((item) => `${item.word}:${item.focusGrapheme}`);
+  assert.equal(fallbackReviewWords.some((item) => !item.endsWith(":ph")), true);
+});
+
+test("generated assignment with zero exact primary coverage fills safely with review warnings", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-ai-2", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-ee-1", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-ee-2", word: "green", score: 26, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "review-oa-1", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-oa-2", word: "coat", score: 28, focus: ["oa"], segments: ["c", "oa", "t"] }),
+        wordRow({ id: "review-or-1", word: "storm", score: 34, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        wordRow({ id: "review-or-2", word: "short", score: 36, focus: ["or"], segments: ["sh", "or", "t"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 5,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assert.equal(plan.coverageWarnings.length, 1);
+  assertJsonEqual(plan.coverageWarnings[0], {
+    type: "target_coverage_low",
+    pupilId: "pupil-1",
+    focusGrapheme: "ph",
+    requestedTargetCount: 2,
+    selectedTargetCount: 0,
+    fallbackCount: 2,
+    message: "Only 0 of 2 requested target slots could use approved ph words; 2 slots will use safe fallback, review, or consolidation words.",
+  });
+
+  const pupilWords = plan.pupilPlans[0]?.words || [];
+  assert.equal(pupilWords.length, 5);
+  assert.equal(new Set(pupilWords.map((item) => item.word)).size, pupilWords.length);
+  assert.equal(pupilWords.some((item) => item.assignmentRole === "target"), false);
+  assert.equal(pupilWords.some((item) => item.assignmentRole === "review"), true);
+});
+
+test("low coverage protected review evidence still outranks neutral fallback", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        coreWordRow({ id: "core-rain", word: "rain", score: 26, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        coreWordRow({ id: "core-seed", word: "seed", score: 26, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "teacher-train", word: "train", score: 26, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        coreWordRow({ id: "core-boat", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        coreWordRow({ id: "core-storm", word: "storm", score: 34, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+      ],
+    }],
+    attempts: [
+      usageAttempt({ word: "train", correct: false, attemptNumber: 2, focus: "ai", segments: ["t", "r", "ai", "n"] }),
+    ],
+    totalWords: 5,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assert.equal(plan.coverageWarnings.length, 1);
+  const pupilWords = plan.pupilPlans[0]?.words || [];
+  assert.equal(new Set(pupilWords.map((item) => item.word)).size, pupilWords.length);
+  assert.equal(
+    pupilWords.some((item) => item.assignmentRole === "review" && item.word === "train"),
+    true,
+  );
+});
+
+test("neutral low coverage review fallback prefers wordloom core over teacher rows", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "teacher-rain", word: "rain", score: 30, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        coreWordRow({ id: "core-seed", word: "seed", score: 30, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "teacher-train", word: "train", score: 30, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        coreWordRow({ id: "core-green", word: "green", score: 30, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        coreWordRow({ id: "core-boat", word: "boat", score: 30, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        coreWordRow({ id: "core-storm", word: "storm", score: 34, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+      ],
+    }],
+    attempts: [],
+    totalWords: 5,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+  });
+
+  assert.equal(plan.error, "");
+  const reviewWords = plan.pupilPlans[0]?.words
+    .filter((item) => item.assignmentRole === "review") || [];
+  assert.equal(reviewWords.length >= 2, true);
+  assert.equal(reviewWords[0].originWordSource, "wordloom_core");
 });
 
 test("generated assignment can use wordloom core ar bank with no teacher test_words", () => {

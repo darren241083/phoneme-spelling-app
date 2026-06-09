@@ -60,8 +60,8 @@ const NEEDS_SUPPORT_THIN_REVIEW_BASIS_RANK = {
   [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
 };
 const REVIEW_SOURCE_PRIORITIES = {
-  [APPROVED_TARGET_TEACHER_SOURCE]: 0,
-  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 1,
+  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 0,
+  [APPROVED_TARGET_TEACHER_SOURCE]: 1,
 };
 const REVIEW_POLICY_BY_BAND = {
   needs_support: {
@@ -2456,39 +2456,8 @@ function buildPupilPlan({
     }
     : {};
 
-  const secondaryTargetList = needsSupportThinTargetCoverage
-    ? getSecondaryWeakTargetList(profile, null, primaryTarget)
-    : getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget);
-  const secondaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
-    count: Math.max(0, composition.target - primaryTargetCandidates.length),
-    graphemeOrder: secondaryTargetList,
-    candidates,
-    challengeLevel: targetChallengeLevel,
-    usageByWord: effectiveUsageByWord,
-    usedWords,
-  });
-  const consolidationTargetList = getTargetConsolidationFallbackList({
-    profile,
-    fallbackProfile,
-    primaryTarget,
-    candidates,
-    exclude: secondaryTargetList,
-  });
-  const consolidationTargetCandidates = needsSupportThinTargetCoverage
-    ? []
-    : pickApprovedTargetCandidatesByGraphemeOrder({
-      count: Math.max(0, composition.target - primaryTargetCandidates.length - secondaryTargetCandidates.length),
-      graphemeOrder: consolidationTargetList,
-      candidates,
-      challengeLevel: targetChallengeLevel,
-      usageByWord: effectiveUsageByWord,
-      usedWords,
-    });
-
   const targetCandidates = [
     ...primaryTargetCandidates,
-    ...secondaryTargetCandidates,
-    ...consolidationTargetCandidates,
   ].slice(0, composition.target);
   const primaryTargetSelectionCount = targetCandidates
     .filter((candidate) => getCandidateCoverage(candidate, primaryTarget) > 0)
