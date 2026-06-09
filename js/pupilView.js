@@ -1,30 +1,81 @@
 import { supabase } from "./supabaseClient.js";
 import {
-  getPupilAssignments,
+  ensureBaselineAssignmentsForGate,
   markAssignmentComplete,
   markAssignmentSessionOpened,
+  normalizeSchoolSummary,
+  provisionExtraChallengeAssignment,
+  provisionWaitingPersonalisedAssignmentAfterBaseline,
   readPupilBaselineGateState,
+  readPupilRuntimeAssignments,
   readAssignmentAttemptRows,
   reconcileAssignmentResultAttempts,
+  listApprovedPracticeWordBankRows,
+  listPupilPracticeEvidenceAttempts,
+  listSpellingBeeResultsForRun,
   readAssignmentPupilStatus,
   saveAssignmentProgress,
-} from "./db.js?v=1.21";
-import { mountGame } from "./game.js?v=1.30";
+  startSpellingBeeResult,
+  finalizeSpellingBeeResult,
+} from "./db.js?v=1.50";
+import { mountGame } from "./game.js?v=1.43";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
-import { chooseBestFocusGrapheme } from "./data/phonemeHelpers.js";
+import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
+import { buildPreviewModel, renderPhonicsPreviewModel } from "./phonicsRenderer.js?v=1.6";
 import { resolveItemAttemptsAllowed } from "./questionTypes.js?v=1.1";
 import { renderIcon, renderIconLabel, renderInfoTip } from "./uiIcons.js?v=1.3";
+import {
+  PRACTICE_EVIDENCE_FETCH_LIMIT,
+  PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE,
+  PRACTICE_STATUS_NOT_ENOUGH_WORDS,
+  PRACTICE_STATUS_READY,
+  PRACTICE_WORD_COUNT,
+  buildPupilPracticePlan,
+  selectTopPracticeGrapheme,
+} from "./pupilPractice.js?v=1.0";
 import {
   buildDifficultyMapFromWordRows,
   estimateSpellingAttainmentIndicator,
 } from "./spellingIndicator.js?v=1.5";
+import { shouldIncludeBaselineResponseInHeadlineAttainment } from "./baselinePlacement.js?v=1.5";
+import { SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG } from "./autoAssignPolicy.js?v=1.9";
+import {
+  buildPupilProgressCardModel,
+  buildPupilSpellingStagePlaceholderModel,
+  buildPupilSpellingStageModel,
+  buildPupilSpellingBeeSummaryModel,
+} from "./pupilFeedbackModel.js?v=1.7";
+import {
+  isExtraChallengeAssignmentSource,
+  isTrustedProgressAttemptSource,
+} from "./evidenceSources.js?v=1.0";
+import {
+  buildCompletionExtraChallengeActionModel,
+  buildExtraChallengeUnavailableMessage,
+  buildExtraChallengeCardModel,
+  buildPupilDashboardMainActionModel,
+  findActiveExtraChallengeAssignment,
+  getRequiredCoreAssignments,
+  isCompletedAssignment,
+} from "./pupilExtraChallenge.js?v=1.1";
 
 const PUPIL_SECTION_LIMIT = 3;
 const pupilDashboardState = {
   expandedSections: {
     teacher_tasks: false,
   },
+  beeLeaderboardOpenByAssignment: {},
+  openNextTeachingFocus: "",
+  openHeroStageHelp: "",
+  extraChallenge: {
+    busy: false,
+    message: "",
+  },
 };
+let pupilHeroStageOutsideClickHandler = null;
+let pupilHeroStageEscapeHandler = null;
+const baselineProvisionAttemptKeys = new Set();
+const personalisedProvisionAttemptKeys = new Set();
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -201,6 +252,7 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       return getAttemptTimestampMs(a) - getAttemptTimestampMs(b);
     });
     const latestAttempt = itemAttempts[itemAttempts.length - 1] || null;
+    const latestIncorrectAttempt = itemAttempts.filter((attempt) => !attempt?.correct).slice(-1)[0] || null;
     const derivedAttemptsUsed = itemAttempts.reduce((max, attempt) => Math.max(max, getAttemptOrderValue(attempt)), 0);
     const snapshotAttemptsUsed = Math.max(0, Number(snapshotEntry?.attemptsUsed || 0));
     const attemptsAllowed = resolveItemAttemptsAllowed(word, testMeta);
@@ -211,6 +263,13 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       ? !!latestAttempt.correct
       : !!snapshotEntry?.correct;
     const feedbackState = normalizeStoredFeedbackState(snapshotEntry?.feedbackState ?? snapshotEntry?.feedback_state);
+    const lastSubmittedIncorrectAnswer = completed
+      ? null
+      : (
+        String(latestIncorrectAttempt?.typed ?? "").trim()
+        || String(snapshotEntry?.lastSubmittedIncorrectAnswer ?? snapshotEntry?.last_submitted_incorrect_answer ?? "").trim()
+        || null
+      );
     const typed = latestAttempt
       ? String(latestAttempt?.typed ?? "").trim()
       : String(snapshotEntry?.typed ?? "").trim();
@@ -243,6 +302,7 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       targetGraphemes: Array.isArray(snapshotEntry?.targetGraphemes)
         ? snapshotEntry.targetGraphemes
         : (Array.isArray(word?.segments) ? word.segments : []),
+      lastSubmittedIncorrectAnswer,
       feedbackState,
       inputState: storedInputState,
     };
@@ -394,9 +454,11 @@ function buildPupilAttainmentCardBodyHtml(progress) {
   `;
 }
 
-function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map()) {
+function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map(), wordRowsById = new Map()) {
+  const trustedAttempts = (Array.isArray(attempts) ? attempts : [])
+    .filter((attempt) => isTrustedProgressAttemptSource(attempt?.attempt_source || attempt?.attemptSource));
   const latestByWord = new Map();
-  for (const attempt of attempts || []) {
+  for (const attempt of trustedAttempts) {
     const key = String(attempt?.assignment_target_id || attempt?.test_word_id || attempt?.word_text || "");
     if (!key) continue;
     latestByWord.set(key, attempt);
@@ -412,17 +474,32 @@ function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map()) {
   const averageAttempts = wordsChecked
     ? latestRows.reduce((sum, item) => sum + Math.max(1, Number(item?.attempt_number || 1)), 0) / wordsChecked
     : 0;
+  const headlineRows = latestRows.filter((item) =>
+    shouldIncludeBaselineResponseInHeadlineAttainment(
+      item,
+      wordRowsById.get(String(item?.test_word_id || ""))
+    )
+  );
+  const headlineChecked = headlineRows.length;
+  const headlineCorrect = headlineRows.filter((item) => item?.correct).length;
+  const headlineAccuracy = headlineChecked ? headlineCorrect / headlineChecked : 0;
+  const headlineFirstTrySuccessRate = headlineChecked
+    ? headlineRows.filter((item) => item?.correct && Math.max(1, Number(item?.attempt_number || 1)) === 1).length / headlineChecked
+    : 0;
+  const headlineAverageAttempts = headlineChecked
+    ? headlineRows.reduce((sum, item) => sum + Math.max(1, Number(item?.attempt_number || 1)), 0) / headlineChecked
+    : 0;
   const attainmentIndicator = estimateSpellingAttainmentIndicator({
-    responses: latestRows.map((item) => ({
+    responses: headlineRows.map((item) => ({
       correct: !!item?.correct,
       difficultyScore: difficultyByWordId.get(String(item?.test_word_id || ""))?.coreScore
         ?? difficultyByWordId.get(String(item?.test_word_id || ""))?.score
         ?? 50,
     })),
-    checkedAccuracy: accuracy,
-    firstTimeCorrectRate: firstTrySuccessRate,
+    checkedAccuracy: headlineChecked ? headlineAccuracy : null,
+    firstTimeCorrectRate: headlineChecked ? headlineFirstTrySuccessRate : null,
     completionRate: null,
-    averageAttempts,
+    averageAttempts: headlineChecked ? headlineAverageAttempts : null,
   });
 
   const graphemeStats = new Map();
@@ -481,6 +558,7 @@ function buildPupilProgressSnapshot(attempts, difficultyByWordId = new Map()) {
     accuracy,
     firstTrySuccessRate,
     averageAttempts,
+    attemptHistory: attempts,
     attainmentIndicator,
     secureNow,
     growing,
@@ -494,20 +572,22 @@ async function loadPupilProgress(pupilId) {
   const cutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("attempts")
-    .select("assignment_target_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, target_graphemes")
+    .select("assignment_target_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, target_graphemes, attempt_source")
     .eq("pupil_id", pupilId)
     .gte("created_at", cutoff)
+    .or("attempt_source.is.null,attempt_source.neq.practice")
     .order("created_at", { ascending: true })
     .limit(600);
   if (error) return null;
 
-  const attempts = data || [];
+  const attempts = (data || []).filter((item) => isTrustedProgressAttemptSource(item?.attempt_source));
   const testWordIds = [...new Set(
     attempts
       .map((item) => String(item?.test_word_id || "").trim())
       .filter(Boolean)
   )];
   let difficultyByWordId = new Map();
+  let wordRowsById = new Map();
 
   if (testWordIds.length) {
     const { data: wordRows } = await supabase
@@ -515,25 +595,37 @@ async function loadPupilProgress(pupilId) {
       .select("id,word,segments,choice")
       .in("id", testWordIds);
     difficultyByWordId = buildDifficultyMapFromWordRows(wordRows || []);
+    wordRowsById = new Map((wordRows || []).map((row) => [String(row?.id || ""), row]).filter(([id]) => !!id));
   }
 
-  return buildPupilProgressSnapshot(attempts, difficultyByWordId);
+  return buildPupilProgressSnapshot(attempts, difficultyByWordId, wordRowsById);
 }
 
 async function loadAssignments(pupilId) {
-  const { data: memberships, error: membershipError } = await supabase
-    .from("pupil_classes")
-    .select("class_id")
-    .eq("pupil_id", pupilId)
-    .eq("active", true);
-  if (membershipError) throw membershipError;
-
-  const classIds = (memberships || []).map((m) => m.class_id).filter(Boolean);
-  if (!classIds.length) return [];
-
-  const perClass = await Promise.all(classIds.map((classId) => getPupilAssignments({ classId, pupilId })));
-  const rows = perClass.flat();
-  const assignmentIds = rows.map((r) => r.id).filter(Boolean);
+  const perClass = await readPupilRuntimeAssignments({ pupilId });
+  const rows = [];
+  const beeRowIndexByRun = new Map();
+  for (const item of perClass) {
+    if (item?.isSpellingBee && item?.automation_run_id) {
+      const runKey = String(item.automation_run_id || "");
+      const existingIndex = beeRowIndexByRun.get(runKey);
+      if (existingIndex == null) {
+        beeRowIndexByRun.set(runKey, rows.length);
+        rows.push(item);
+        continue;
+      }
+      const existing = rows[existingIndex];
+      if (!existing?.spellingBeeResult && item?.spellingBeeResult) {
+        rows[existingIndex] = item;
+      }
+      continue;
+    }
+    rows.push(item);
+  }
+  const assignmentIds = rows
+    .filter((r) => !r?.isSpellingBee)
+    .map((r) => r.id)
+    .filter(Boolean);
   const latestAttemptByAssignmentWord = new Map();
   const nowMs = Date.now();
 
@@ -560,8 +652,33 @@ async function loadAssignments(pupilId) {
     }
   }
 
-  return rows
+  const mappedAssignments = rows
     .map((item) => {
+      if (item?.isSpellingBee) {
+        const result = item?.spellingBeeResult || null;
+        const totalWordCount = Math.max(0, Number(result?.max_rounds || item?.words?.length || 0));
+        const correctWordCount = Math.max(0, Number(result?.streak || 0));
+        const completedAtMs = parseDateMs(result?.completed_at || item?.completed_at || item?.completedAt);
+        const dueAtMs = parseDateMs(item?.end_at);
+        const isOverdue = !!dueAtMs && dueAtMs <= nowMs;
+        return {
+          ...item,
+          attemptedWordCount: Math.max(0, Number(result?.rounds_attempted || 0)),
+          totalWordCount,
+          correctWordCount,
+          scoreRate: totalWordCount ? correctWordCount / totalWordCount : 0,
+          completed: !!completedAtMs,
+          completedAt: completedAtMs ? new Date(completedAtMs).toISOString() : null,
+          isLocked: !!completedAtMs,
+          isOverdue,
+          keepVisible: true,
+          spellingBeeEventClosed: isOverdue,
+          spellingBeeRank: null,
+          spellingBeeYearRank: null,
+          spellingBeeFormRank: null,
+          spellingBeeLeaderboardRows: [],
+        };
+      }
       const summaryRows = Array.isArray(item?.result_json) ? item.result_json : [];
       const hasSummary = !!item?.completed_at && Math.max(0, Number(item?.total_words || 0)) > 0 && summaryRows.length > 0;
       const wordKeys = (Array.isArray(item?.words) ? item.words : [])
@@ -583,16 +700,6 @@ async function loadAssignments(pupilId) {
           : 0);
       const dueAtMs = parseDateMs(item?.end_at);
       const isOverdue = !!dueAtMs && dueAtMs < nowMs;
-
-      console.log("PUPIL DASHBOARD source:", {
-        assignmentId: String(item?.id || ""),
-        pupilId: String(pupilId || ""),
-        source: hasSummary ? "assignment_pupil_statuses.result_json" : "attempts",
-        totalWords: totalWordCount,
-        correctWords: correctWordCount,
-        summaryCount: summaryRows.length,
-        attemptCount: latestAttempts.length,
-      });
 
       return {
         ...item,
@@ -618,6 +725,34 @@ async function loadAssignments(pupilId) {
       const bTime = b.end_at ? new Date(b.end_at).getTime() : Number.POSITIVE_INFINITY;
       return aTime - bTime;
     });
+
+  const closedBeeRuns = [...new Set(
+    mappedAssignments
+      .filter((item) => item?.isSpellingBee && item?.completed && item?.spellingBeeEventClosed && item?.automation_run_id)
+      .map((item) => String(item.automation_run_id || ""))
+      .filter(Boolean)
+  )];
+  const leaderboardsByRun = new Map();
+  await Promise.all(closedBeeRuns.map(async (runId) => {
+    const leaderboardRows = await listSpellingBeeResultsForRun({ runId }).catch((error) => {
+      console.warn("read spelling bee leaderboard error:", error);
+      return [];
+    });
+    leaderboardsByRun.set(runId, leaderboardRows);
+  }));
+
+  return mappedAssignments.map((item) => {
+    if (!item?.isSpellingBee || !item?.completed || !item?.spellingBeeEventClosed) return item;
+    const leaderboardRows = leaderboardsByRun.get(String(item.automation_run_id || "")) || [];
+    const ownRow = leaderboardRows.find((row) => String(row?.pupil_id || "") === String(pupilId || "")) || null;
+    return {
+      ...item,
+      spellingBeeRank: ownRow?.rank || null,
+      spellingBeeYearRank: ownRow?.year_rank || null,
+      spellingBeeFormRank: ownRow?.form_rank || null,
+      spellingBeeLeaderboardRows: leaderboardRows,
+    };
+  });
 }
 
 function formatPracticeFocusLabel(focus) {
@@ -626,22 +761,54 @@ function formatPracticeFocusLabel(focus) {
   return clean;
 }
 
-function buildPracticePackFromWords({ focus, words, id }) {
-  if (!Array.isArray(words) || !words.length) return null;
-  const focusLabel = formatPracticeFocusLabel(focus);
+function createEmptyPracticeModel(status = PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE, overrides = {}) {
   return {
-    id,
+    status,
+    focusGrapheme: "",
+    evidenceCount: 0,
+    wordCount: 0,
+    packs: [],
+    ...overrides,
+  };
+}
+
+function getPracticePacks(practiceModel = null) {
+  if (Array.isArray(practiceModel)) return practiceModel;
+  return Array.isArray(practiceModel?.packs) ? practiceModel.packs : [];
+}
+
+function normalizePracticeWordRow(row = {}, focus = "", index = 0) {
+  const choice = row?.choice && typeof row.choice === "object" ? row.choice : {};
+  const focusGrapheme = String(focus || "").trim().toLowerCase();
+  return {
+    ...row,
+    id: String(row?.id || "").trim(),
+    base_test_word_id: String(row?.id || "").trim(),
+    test_id: String(row?.test_id || "").trim(),
+    position: index + 1,
+    word_source: "approved_word_bank",
+    choice: {
+      ...choice,
+      question_type: "focus_sound",
+      focus_graphemes: focusGrapheme ? [focusGrapheme] : [],
+    },
+  };
+}
+
+function buildPracticePackFromPlan(plan = null) {
+  if (!plan || plan.status !== PRACTICE_STATUS_READY || !Array.isArray(plan.words) || plan.words.length !== PRACTICE_WORD_COUNT) {
+    return null;
+  }
+  const focus = String(plan.focusGrapheme || "").trim().toLowerCase();
+  const focusLabel = formatPracticeFocusLabel(focus);
+  const words = plan.words.map((row, index) => normalizePracticeWordRow(row, focus, index));
+  return {
+    id: `practice:${focus}`,
     title: `${focusLabel} practice`,
-    shortLabel: focusLabel === "Mixed" ? "Mixed practice" : `Practise ${focusLabel}`,
+    shortLabel: focusLabel === "Mixed" ? "Practice" : `Practise ${focusLabel}`,
     focus: focusLabel,
-    words: words.map((row) => ({
-      ...row,
-      choice: {
-        ...(row.choice || {}),
-        question_type: "focus_sound",
-      },
-    })),
-    test_id: words[0].test_id,
+    words,
+    test_id: words[0]?.test_id || null,
     attempt_source: "practice",
     max_attempts: 3,
     mode: "practice",
@@ -650,69 +817,81 @@ function buildPracticePackFromWords({ focus, words, id }) {
   };
 }
 
-async function loadPracticePacks(pupilId) {
-  const { data: attempts, error } = await supabase
-    .from("attempts")
-    .select("test_word_id, test_id, correct, pattern_type, focus_grapheme, created_at")
-    .eq("pupil_id", pupilId)
-    .eq("correct", false)
-    .order("created_at", { ascending: false })
-    .limit(20);
-  if (error) return [];
-  const latestWrong = attempts || [];
-  if (!latestWrong.length) return [];
+async function loadPracticeModel(pupilId) {
+  if (!pupilId) return createEmptyPracticeModel();
 
-  const focusGroups = new Map();
-  for (const item of latestWrong) {
-    const key = String(item.focus_grapheme || item.pattern_type || "general").trim().toLowerCase() || "general";
-    const next = focusGroups.get(key) || [];
-    next.push(item);
-    focusGroups.set(key, next);
-  }
-  const rankedFocuses = [...focusGroups.entries()]
-    .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, 3);
+  try {
+    const attempts = await listPupilPracticeEvidenceAttempts({
+      pupilId,
+      limit: PRACTICE_EVIDENCE_FETCH_LIMIT,
+    });
+    const topGrapheme = selectTopPracticeGrapheme(attempts);
+    if (!topGrapheme?.target) {
+      return createEmptyPracticeModel(PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE);
+    }
 
-  const testWordIds = [...new Set(
-    rankedFocuses.flatMap(([, items]) => items.map((item) => item.test_word_id).filter(Boolean))
-  )];
-  if (!testWordIds.length) return [];
+    const approvedWordRows = await listApprovedPracticeWordBankRows({
+      focusGrapheme: topGrapheme.target,
+      limit: 50,
+    });
+    const plan = buildPupilPracticePlan({
+      attempts,
+      approvedWordRows,
+      wordCount: PRACTICE_WORD_COUNT,
+    });
 
-  const { data: wordRows } = await supabase.from("test_words").select("id,test_id,word,sentence,segments,choice").in("id", testWordIds);
-  const wordsById = new Map((wordRows || []).map((row) => [String(row.id), row]));
-  const packs = rankedFocuses
-    .map(([focus, items], index) => {
-      const words = [...new Set(items.map((item) => item.test_word_id).filter(Boolean))]
-        .map((id) => wordsById.get(String(id)))
-        .filter(Boolean)
-        .slice(0, 6);
-      return buildPracticePackFromWords({
-        id: `focus:${focus}:${index}`,
-        focus,
-        words,
+    if (plan.status !== PRACTICE_STATUS_READY) {
+      return createEmptyPracticeModel(plan.status, {
+        focusGrapheme: plan.focusGrapheme,
+        evidenceCount: plan.evidenceCount,
+        wordCount: plan.wordCount,
       });
-    })
-    .filter(Boolean);
+    }
 
-  if (packs.length) return packs;
-
-  const fallbackWords = [...new Set(latestWrong.map((item) => item.test_word_id).filter(Boolean))]
-    .map((id) => wordsById.get(String(id)))
-    .filter(Boolean)
-    .slice(0, 6);
-  const fallbackPack = buildPracticePackFromWords({
-    id: "focus:mixed:0",
-    focus: "general",
-    words: fallbackWords,
-  });
-  return fallbackPack ? [fallbackPack] : [];
+    const pack = buildPracticePackFromPlan(plan);
+    return createEmptyPracticeModel(PRACTICE_STATUS_READY, {
+      focusGrapheme: plan.focusGrapheme,
+      evidenceCount: plan.evidenceCount,
+      wordCount: plan.wordCount,
+      packs: pack ? [pack] : [],
+    });
+  } catch (error) {
+    console.warn("load practice model error:", error);
+    return createEmptyPracticeModel(PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE);
+  }
 }
 
 function renderSummaryCard(name) {
+  return renderSummaryCardWithSchool(name, null);
+}
+
+function getSessionSchoolSummary(session) {
+  return normalizeSchoolSummary(session?.school || session || null);
+}
+
+function getSessionSchoolName(session) {
+  const school = getSessionSchoolSummary(session);
+  return String(school?.name || session?.school_name || "").trim();
+}
+
+function renderSchoolLabelChip(schoolName) {
+  const safeSchoolName = String(schoolName || "").trim();
+  if (!safeSchoolName) return "";
+  return `
+    <span class="schoolContextLabel" title="${escapeHtml(safeSchoolName)}">
+      <span>School</span>
+      <strong>${escapeHtml(safeSchoolName)}</strong>
+    </span>
+  `;
+}
+
+function renderSummaryCardWithSchool(name, session = null) {
+  const schoolName = getSessionSchoolName(session);
   return `
     <div class="pupil-header">
       <h2>Hello ${escapeHtml(name)}</h2>
       <p class="muted">Loading your latest wins and next steps.</p>
+      ${schoolName ? `<div class="schoolContextRow">${renderSchoolLabelChip(schoolName)}</div>` : ""}
     </div>
   `;
 }
@@ -721,34 +900,42 @@ function renderBaselineGateState(name, {
   mode = "waiting",
   assignment = null,
   waitingReason = null,
+  session = null,
 } = {}) {
   const isResume = mode === "resume";
   const isStart = mode === "start";
   const isRuntimeInactive = mode === "waiting" && waitingReason === "runtime_inactive";
   const isMissingCurrentForm = mode === "waiting" && waitingReason === "no_active_form_membership";
+  const isProvisioning = mode === "waiting" && waitingReason === "baseline_setup";
   const title = isResume
     ? "Finish your baseline test first"
     : isStart
       ? "Start your baseline test first"
-      : isRuntimeInactive
-        ? "This pupil login is no longer active"
-        : isMissingCurrentForm
-          ? "You're not in a current form yet"
-          : "Baseline test not ready yet";
+      : isProvisioning
+        ? "Your baseline test is being set up"
+        : isRuntimeInactive
+          ? "This pupil login is no longer active"
+          : isMissingCurrentForm
+            ? "You're not in a current form yet"
+            : "Baseline test not ready yet";
   const text = isResume
     ? "Complete your baseline test before you move into your normal tasks."
     : isStart
       ? "Complete your baseline test before you move into your normal tasks."
-      : isRuntimeInactive
-        ? "Please ask a teacher for help."
-        : isMissingCurrentForm
-          ? "A teacher needs to place you in your current form before your baseline test can begin."
-          : "Your teacher will set your baseline test soon.";
+      : isProvisioning
+        ? "This usually takes a moment. Keep this page open."
+        : isRuntimeInactive
+          ? "Please ask a teacher for help."
+          : isMissingCurrentForm
+            ? "A teacher needs to place you in your current form before your baseline test can begin."
+            : "Your baseline test is not ready yet. Please ask your teacher.";
   const subtitle = isRuntimeInactive
     ? "Please ask a teacher for help."
     : isMissingCurrentForm
       ? "Your teacher is still setting things up."
-      : "Your baseline test comes first.";
+      : isProvisioning
+        ? "Your baseline test comes first."
+        : "Your baseline test comes first.";
   const buttonHtml = assignment
     ? `<button class="btn primary start-test-btn" type="button" data-action="open-gated-baseline" data-assignment-id="${escapeHtml(String(assignment?.id || ""))}">${isResume ? "Continue baseline test" : "Start baseline test"}</button>`
     : "";
@@ -757,6 +944,7 @@ function renderBaselineGateState(name, {
       <div class="pupil-header">
         <h2>Hello ${escapeHtml(name)}</h2>
         <p class="muted">${escapeHtml(subtitle)}</p>
+        ${getSessionSchoolName(session) ? `<div class="schoolContextRow">${renderSchoolLabelChip(getSessionSchoolName(session))}</div>` : ""}
       </div>
       <section class="card pupilSectionCard pupilEmptyCard">
         <div class="pupilSectionTitleRow">
@@ -768,6 +956,71 @@ function renderBaselineGateState(name, {
       ${renderReadingHelpSection()}
     </div>
   `;
+}
+
+function buildBaselineProvisionAttemptKey(pupilId = "", gateState = null) {
+  const formClassIds = Array.isArray(gateState?.formClassIds)
+    ? gateState.formClassIds
+    : (Array.isArray(gateState?.form_class_ids) ? gateState.form_class_ids : []);
+  const normalizedFormClassIds = [...new Set(
+    formClassIds
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort();
+  return `${String(pupilId || "").trim()}::${normalizedFormClassIds.join(",")}`;
+}
+
+function canTryBaselineProvisionForGate(pupilId = "", gateState = null) {
+  const key = buildBaselineProvisionAttemptKey(pupilId, gateState);
+  return !!String(pupilId || "").trim()
+    && key !== `${String(pupilId || "").trim()}::`
+    && !baselineProvisionAttemptKeys.has(key);
+}
+
+function markBaselineProvisionAttempted(pupilId = "", gateState = null) {
+  const key = buildBaselineProvisionAttemptKey(pupilId, gateState);
+  if (key) baselineProvisionAttemptKeys.add(key);
+}
+
+function buildPersonalisedProvisionAttemptKey(pupilId = "", gateState = null) {
+  const classIds = Array.isArray(gateState?.classIds)
+    ? gateState.classIds
+    : (Array.isArray(gateState?.class_ids) ? gateState.class_ids : []);
+  const normalizedClassIds = [...new Set(
+    classIds
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort();
+  const completedAssignmentId = String(gateState?.completedAssignmentId || gateState?.completed_assignment_id || "").trim();
+  const assignmentId = String(gateState?.assignmentId || gateState?.assignment_id || gateState?.assignment?.id || "").trim();
+  const standardKey = String(gateState?.requiredStandardKey || gateState?.required_standard_key || "").trim().toLowerCase();
+  return [
+    String(pupilId || "").trim(),
+    String(gateState?.status || "").trim().toLowerCase(),
+    completedAssignmentId || assignmentId || standardKey || "ready",
+    normalizedClassIds.join(","),
+  ].join("::");
+}
+
+function canTryPersonalisedProvisionForReadyGate(pupilId = "", gateState = null) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId || String(gateState?.status || "").trim().toLowerCase() !== "ready") return false;
+  return !personalisedProvisionAttemptKeys.has(buildPersonalisedProvisionAttemptKey(safePupilId, gateState));
+}
+
+function markPersonalisedProvisionAttempted(pupilId = "", gateState = null) {
+  const key = buildPersonalisedProvisionAttemptKey(pupilId, gateState);
+  if (key) personalisedProvisionAttemptKeys.add(key);
+}
+
+async function maybeProvisionPersonalisedAfterReadyBaseline({ pupilId = "", gateState = null } = {}) {
+  if (!canTryPersonalisedProvisionForReadyGate(pupilId, gateState)) return null;
+  markPersonalisedProvisionAttempted(pupilId, gateState);
+  const result = await provisionWaitingPersonalisedAssignmentAfterBaseline({ pupilId });
+  if (result && !result.ok) {
+    console.warn("post-baseline personalised provisioning did not complete:", result.error || result);
+  }
+  return result;
 }
 
 function hasVisibleBaselineProgress(assignment) {
@@ -800,7 +1053,7 @@ function buildVisibleBaselineGate(assignments, preferredAssignmentId = "") {
   };
 }
 
-function buildPupilHeroModel(assignments, practicePacks, progress) {
+function buildPupilHeroModel(assignments, practiceModel, progress) {
   const pendingAssignments = (assignments || []).filter((item) => !item?.completed);
   const completedAssignments = (assignments || []).filter((item) => !!item?.completed);
   const wordsChecked = Number(progress?.wordsChecked || 0);
@@ -808,23 +1061,23 @@ function buildPupilHeroModel(assignments, practicePacks, progress) {
   const growingSounds = progress?.growing || [];
   const nextStretch = progress?.practiseNext || [];
   const recentWins = progress?.recentWins || [];
-  const practiceCount = Array.isArray(practicePacks) ? practicePacks.length : 0;
+  const practiceCount = getPracticePacks(practiceModel).length;
   let summary = "You are all caught up.";
 
   if (pendingAssignments.length) {
     summary = pendingAssignments.length === 1
-      ? "You have 1 teacher task to do."
-      : `You have ${pendingAssignments.length} teacher tasks to do.`;
+      ? "1 task ready"
+      : `${pendingAssignments.length} tasks ready`;
   } else if (completedAssignments.length) {
-    summary = "Nice work. Your finished tasks stay here for a little while.";
+    summary = "Daily challenge complete";
   } else if (practiceCount) {
-    summary = "Your teacher tasks are done. Extra practice is ready if you want it.";
+    summary = "Practice ready";
   } else if (!wordsChecked) {
-    summary = "Start when you feel ready.";
+    summary = "Ready";
   } else if (strongSounds.length >= 2 || Number(progress?.accuracy || 0) >= 0.85) {
-    summary = "You are doing really well.";
+    summary = "Strong progress";
   } else if (growingSounds.length || recentWins.length) {
-    summary = "You are getting stronger.";
+    summary = "Building";
   }
 
   const highlightGroups = [
@@ -864,17 +1117,253 @@ function buildPupilHeroModel(assignments, practicePacks, progress) {
   };
 }
 
-function renderPupilHeroGroup(group) {
+function renderPupilHeroGroup(group, context = {}) {
+  const isNextGroup = String(group?.label || "").trim().toLowerCase() === "next";
   return `
     <article class="pupilHeroGroup">
       <div class="pupilHeroGroupLabel">${escapeHtml(group.label)}</div>
-      ${renderProgressChipList(group.items, group.variant, group.formatter)}
+      ${isNextGroup
+        ? renderNextTeachingChipList(group, context)
+        : renderProgressChipList(group.items, group.variant, group.formatter)}
     </article>
   `;
 }
 
-function renderPupilAnalyticsHero(name, assignments, practicePacks, progress) {
-  const hero = buildPupilHeroModel(assignments, practicePacks, progress);
+function renderPupilJourneyProgressNote(group, context = {}) {
+  const label = String(group?.label || "").trim();
+  if (!label) return "";
+  const isNextGroup = label.toLowerCase() === "next";
+  return `
+    <div class="pupilJourneyNote pupilJourneyNote--${escapeHtml(group?.variant || "neutral")}">
+      <span class="pupilJourneyNoteLabel">${escapeHtml(label)}:</span>
+      ${isNextGroup
+        ? renderNextTeachingChipList(group, context)
+        : renderProgressChipList(group.items, group.variant, group.formatter)}
+    </div>
+  `;
+}
+
+function renderPupilJourneyProgressNotes(groups = [], context = {}) {
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  if (!safeGroups.length) return "";
+  return `
+    <div class="pupilJourneyNotes" aria-label="Progress notes">
+      ${safeGroups.map((group) => renderPupilJourneyProgressNote(group, context)).join("")}
+    </div>
+  `;
+}
+
+function getPupilJourneyCompletedCoreAssignments(assignments = []) {
+  return getRequiredCoreAssignments(assignments).filter((assignment) => isCompletedAssignment(assignment));
+}
+
+function getLatestPupilJourneyCompletedCoreAssignment(assignments = []) {
+  return getPupilJourneyCompletedCoreAssignments(assignments)
+    .slice()
+    .sort((a, b) => {
+      const bTime = parseDateMs(b?.completedAt || b?.completed_at || b?.created_at);
+      const aTime = parseDateMs(a?.completedAt || a?.completed_at || a?.created_at);
+      return bTime - aTime;
+    })[0] || null;
+}
+
+function formatPupilAssignmentScoreSummary(assignment = null) {
+  const rawTotal = assignment?.totalWordCount ?? assignment?.total_words ?? assignment?.word_count;
+  const rawCorrect = assignment?.correctWordCount ?? assignment?.correct_words;
+  const total = Number(rawTotal);
+  const correct = Number(rawCorrect);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(correct)) {
+    const safeTotal = Math.round(total);
+    const safeCorrect = Math.max(0, Math.min(safeTotal, Math.round(correct)));
+    return `${safeCorrect}/${safeTotal}`;
+  }
+
+  const rawRate = assignment?.scoreRate ?? assignment?.score_rate;
+  const rate = Number(rawRate);
+  if (Number.isFinite(rate) && rate >= 0) {
+    const percent = rate <= 1 ? rate * 100 : rate;
+    return `${Math.round(percent)}% correct`;
+  }
+
+  return "";
+}
+
+function formatPupilDailyCompletionSummary(assignment = null) {
+  const title = assignment ? getDisplayedAssignmentTitle(assignment) : "";
+  const scoreText = formatPupilAssignmentScoreSummary(assignment);
+  if (title && scoreText) return `${title} · ${scoreText}`;
+  if (scoreText) return scoreText;
+  if (title) return title;
+  return "Required task";
+}
+
+function buildPupilJourneyOptionalExtraAction(mainActionModel = null, extraChallengeModel = null) {
+  const kind = String(mainActionModel?.kind || "").trim();
+  if (kind !== "extra_start" && kind !== "extra_continue") return null;
+
+  const source = extraChallengeModel || mainActionModel || {};
+  const isContinue = kind === "extra_continue" || String(source?.state || "").trim() === "continue";
+  return {
+    ...source,
+    kind: isContinue ? "extra_continue" : "extra_start",
+    title: "Extra challenge",
+    body: "",
+    buttonLabel: isContinue ? "Continue" : "Start",
+    assignmentId: String(source?.assignmentId || mainActionModel?.assignmentId || "").trim(),
+  };
+}
+
+function renderPupilJourneyOptionalChallenge(model = null) {
+  if (!model) return "";
+  const button = renderPupilMainActionButton(model, "pupilJourneyOptionalButton", { variant: "secondary" });
+  const message = String(pupilDashboardState.extraChallenge?.message || "").trim();
+  return `
+    <div class="pupilJourneyOptionalPanel">
+      <div class="pupilJourneyOptionalText">
+        <h3>${renderIconLabel("target", "Extra challenge")}</h3>
+        ${model.body ? `<p>${escapeHtml(model.body || "")}</p>` : ""}
+        ${message ? `<p class="pupilJourneyOptionalMessage" role="status">${escapeHtml(message)}</p>` : ""}
+      </div>
+      ${button ? `<div class="pupilJourneyOptionalControls">${button}</div>` : ""}
+    </div>
+  `;
+}
+
+function getPupilDashboardSupplementalAssignments(assignments = [], mainActionModel = null) {
+  const rows = Array.isArray(assignments) ? assignments : [];
+  const kind = String(mainActionModel?.kind || "").trim();
+  const representedAssignmentId = kind === "core"
+    ? String(mainActionModel?.assignmentId || mainActionModel?.assignment?.id || "").trim()
+    : "";
+
+  return rows.filter((item) => {
+    const assignmentId = String(item?.id || "").trim();
+    if (representedAssignmentId && assignmentId === representedAssignmentId) return false;
+    if (isCompletedAssignment(item)) return false;
+    return true;
+  });
+}
+
+const PUPIL_HERO_STAGE_INFO_TEXT = "Spelling stage shows the kind of spelling patterns you are currently practising in Wordloom. It is just a guide to the patterns shown here.";
+const PUPIL_HERO_STAGE_STEPS = [
+  {
+    key: "easier",
+    label: "Foundations",
+    helpText: "This stage includes simple sound-to-letter patterns.",
+    examplesText: "Words like: cat, shop, rain",
+  },
+  {
+    key: "core",
+    label: "Core",
+    helpText: "Common spelling patterns you use a lot.",
+    examplesText: "Words like: made, bird, light",
+  },
+  {
+    key: "stretch",
+    label: "Expanding",
+    helpText: "As you build confidence, you'll meet more ways to spell the same sound.",
+    examplesText: "Words like: play, eight, they",
+  },
+  {
+    key: "challenge",
+    label: "Advanced",
+    helpText: "As you move on, you'll meet longer words, word families, and tricky patterns.",
+    examplesText: "Words like: science, decision, information",
+  },
+];
+
+function getPupilHeroStageStep(stageKey) {
+  const safeKey = String(stageKey || "").trim().toLowerCase();
+  return PUPIL_HERO_STAGE_STEPS.find((item) => item.key === safeKey) || null;
+}
+
+function renderPupilHeroStageInfoTip() {
+  return renderInfoTip(PUPIL_HERO_STAGE_INFO_TEXT, {
+    label: "About spelling stage",
+    className: "pupilHeroStageInfo",
+    triggerClassName: "pupilHeroStageInfoTrigger",
+    bubbleClassName: "pupilHeroStageInfoBubble",
+    align: "start",
+  });
+}
+
+function getPupilHeroStageHelpId(stageKey) {
+  const safeKey = String(stageKey || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  return `pupil-hero-stage-help-${safeKey || "stage"}`;
+}
+
+function renderPupilHeroStageBands(activeKey = "") {
+  const safeActiveKey = String(activeKey || "").trim().toLowerCase();
+  const activeIndex = PUPIL_HERO_STAGE_STEPS.findIndex((item) => item.key === safeActiveKey);
+  const openKey = PUPIL_HERO_STAGE_STEPS.some((item) => item.key === pupilDashboardState.openHeroStageHelp)
+    ? pupilDashboardState.openHeroStageHelp
+    : "";
+  return `
+    <div class="pupilHeroStageBands${openKey ? " pupilHeroStageBands--hasOpen" : ""}" aria-label="Wordloom spelling stage bands">
+      ${PUPIL_HERO_STAGE_STEPS.map((item, index) => {
+        const isActive = item.key === safeActiveKey;
+        const stageState = activeIndex < 0
+          ? "future"
+          : (index < activeIndex ? "complete" : (isActive ? "active" : "future"));
+        const isOpen = item.key === openKey;
+        const helpId = getPupilHeroStageHelpId(item.key);
+        return `
+          <div class="pupilHeroStageBandTip pupilHeroStageBandTip--${escapeHtml(stageState)}${isOpen ? " pupilHeroStageBandTip--open" : ""}">
+            <button
+              class="pupilHeroStageBand pupilHeroStageBand--${escapeHtml(stageState)}"
+              type="button"
+              data-action="toggle-hero-stage-help"
+              data-stage-key="${escapeHtml(item.key)}"
+              aria-expanded="${isOpen ? "true" : "false"}"
+              aria-controls="${escapeHtml(helpId)}"
+              aria-label="${escapeHtml(`About ${item.label} spelling stage`)}"
+              ${isActive ? 'aria-current="step"' : ""}
+            >
+              ${escapeHtml(item.label)}
+            </button>
+            <div class="pupilHeroStageBandBubble" id="${escapeHtml(helpId)}" role="note">
+              ${isActive ? `<p>${escapeHtml("Current stage")}</p>` : ""}
+              <p>${escapeHtml(item.helpText)}</p>
+              <p class="pupilHeroStageBandExamples">${escapeHtml(item.examplesText)}</p>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderPupilHeroStageStrip(progress) {
+  const model = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
+  const isPlaceholder = model?.state === "placeholder";
+  const activeStage = getPupilHeroStageStep(model?.stageKey);
+
+  if (isPlaceholder || !activeStage) {
+    return `
+      <div class="pupilHeroStageStrip pupilHeroStageStrip--placeholder">
+        <div class="pupilHeroStageHead">
+          <span class="pupilHeroStageLabel">Spelling stage</span>
+          ${renderPupilHeroStageInfoTip()}
+        </div>
+        ${renderPupilHeroStageBands()}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pupilHeroStageStrip">
+      <div class="pupilHeroStageHead">
+        <span class="pupilHeroStageLabel">Spelling stage</span>
+        ${renderPupilHeroStageInfoTip()}
+      </div>
+      ${renderPupilHeroStageBands(activeStage.key)}
+    </div>
+  `;
+}
+
+function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, session = null) {
+  const hero = buildPupilHeroModel(assignments, practiceModel, progress);
+  const schoolName = getSessionSchoolName(session);
 
   return `
     <section class="card pupilHeroCard">
@@ -882,23 +1371,229 @@ function renderPupilAnalyticsHero(name, assignments, practicePacks, progress) {
         <div class="pupilHeroIntro">
           <h2>Hello ${escapeHtml(name)}</h2>
           <p class="pupilHeroCopy">${escapeHtml(hero.summary)}</p>
+          ${schoolName ? `<div class="schoolContextRow">${renderSchoolLabelChip(schoolName)}</div>` : ""}
         </div>
       </div>
 
+      ${renderPupilHeroStageStrip(progress)}
+
       ${hero.highlightGroups.length ? `
         <div class="pupilHeroHighlights">
-          ${hero.highlightGroups.map(renderPupilHeroGroup).join("")}
+          ${hero.highlightGroups.map((group) => renderPupilHeroGroup(group, { assignments, practiceModel })).join("")}
         </div>
       ` : ""}
     </section>
   `;
 }
 
+function getPupilDashboardMainActionIcon(kind = "") {
+  const safeKind = String(kind || "").trim();
+  const isExtraAction = safeKind === "extra_start" || safeKind === "extra_continue";
+  if (safeKind === "daily_complete") return "checkCircle";
+  if (safeKind === "core") return "target";
+  if (isExtraAction) return "target";
+  return "checkCircle";
+}
+
+function renderPupilMainActionButton(model = null, extraClassName = "", options = {}) {
+  const kind = String(model?.kind || "").trim();
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const isBusy = isExtraAction && !!pupilDashboardState.extraChallenge?.busy;
+  const buttonLabel = String(model?.buttonLabel || "").trim();
+  const assignmentId = String(model?.assignmentId || "").trim();
+  const variant = String(options?.variant || "primary").trim() === "secondary" ? "secondary" : "primary";
+  const className = ["btn", variant, "start-test-btn", "pupilMainActionButton", extraClassName].filter(Boolean).join(" ");
+  if (!buttonLabel) return "";
+
+  return kind === "core"
+    ? `
+      <button
+        class="${escapeHtml(className)}"
+        type="button"
+        data-assignment="${escapeHtml(assignmentId)}"
+      >${escapeHtml(buttonLabel)}</button>
+    `
+    : `
+      <button
+        class="${escapeHtml(className)}"
+        type="button"
+        data-action="start-extra-challenge"
+        data-extra-challenge-source="dashboard"
+        data-extra-challenge-state="${kind === "extra_continue" ? "continue" : "start"}"
+        data-assignment-id="${escapeHtml(assignmentId)}"
+        ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+      >${escapeHtml(buttonLabel)}</button>
+    `;
+}
+
+function renderPupilLearningJourneyHome(name, assignments, practiceModel, progress, session = null, mainActionModel = null, options = {}) {
+  const hero = buildPupilHeroModel(assignments, practiceModel, progress);
+  const kind = String(mainActionModel?.kind || "complete").trim() || "complete";
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const journeyAssignments = Array.isArray(options?.allAssignments) ? options.allAssignments : assignments;
+  const completedDailyAssignment = getLatestPupilJourneyCompletedCoreAssignment(journeyAssignments);
+  const showCompletedDailyTask = isExtraAction && !!completedDailyAssignment;
+  const optionalExtraAction = showCompletedDailyTask
+    ? buildPupilJourneyOptionalExtraAction(mainActionModel, options?.extraChallengeModel)
+    : null;
+  const message = isExtraAction && !optionalExtraAction ? String(pupilDashboardState.extraChallenge?.message || "").trim() : "";
+  const coreAssignmentTitle = kind === "core" && mainActionModel?.assignment
+    ? getDisplayedAssignmentTitle(mainActionModel.assignment)
+    : "";
+  const panelKind = showCompletedDailyTask ? "daily_complete" : kind;
+  const actionTitle = showCompletedDailyTask
+    ? "Daily challenge"
+    : (kind === "core" ? "Daily challenge" : (isExtraAction ? "Extra challenge" : (mainActionModel?.title || "Daily challenge")));
+  const actionBody = showCompletedDailyTask
+    ? formatPupilDailyCompletionSummary(completedDailyAssignment)
+    : (kind === "core" ? (coreAssignmentTitle && coreAssignmentTitle !== "Daily challenge" ? coreAssignmentTitle : "") : (mainActionModel?.body || ""));
+  const actionButton = showCompletedDailyTask
+    ? ""
+    : renderPupilMainActionButton(mainActionModel, "pupilJourneyActionButton");
+  const actionStatus = showCompletedDailyTask
+    ? `<span class="pupilJourneyCompletedBadge">Completed</span>`
+    : "";
+
+  return `
+    <section class="pupilJourneyHome pupilJourneyHome--${escapeHtml(panelKind)}">
+      <div class="pupilJourneyHeader">
+        <div class="pupilJourneyIntro">
+          <p class="pupilJourneyEyebrow">Learning journey</p>
+          <h2>Hello ${escapeHtml(name)}</h2>
+        </div>
+      </div>
+
+      <div class="pupilJourneyStatusRow">
+        <div class="pupilJourneyActionPanel pupilJourneyActionPanel--${escapeHtml(panelKind)}">
+          <div class="pupilJourneyActionText">
+            <h3>${renderIconLabel(getPupilDashboardMainActionIcon(panelKind), actionTitle)}</h3>
+            ${actionBody ? `<p>${escapeHtml(actionBody)}</p>` : ""}
+            ${message ? `<p class="pupilJourneyActionMessage" role="status">${escapeHtml(message)}</p>` : ""}
+          </div>
+          ${actionButton || actionStatus ? `<div class="pupilJourneyActionControls">${actionButton || actionStatus}</div>` : ""}
+        </div>
+        ${renderPupilJourneyOptionalChallenge(optionalExtraAction)}
+      </div>
+
+      <div class="pupilJourneyPathPanel">
+        <div class="pupilJourneyPathHead">
+          <h3>Spelling stage</h3>
+        </div>
+
+        <div class="pupilJourneyPath">
+          ${renderPupilHeroStageStrip(progress)}
+        </div>
+
+        ${renderPupilJourneyProgressNotes(hero.highlightGroups, { assignments, practiceModel })}
+      </div>
+    </section>
+  `;
+}
+
 function getDisplayedAssignmentTitle(item) {
+  if (isExtraChallengeAssignmentSource(item)) return "Extra challenge";
   return String(item?.pupilTitle || item?.title || "Test").trim() || "Test";
 }
 
+function renderSpellingBeeLeaderboardPreview(item) {
+  const rows = Array.isArray(item?.spellingBeeLeaderboardRows) ? item.spellingBeeLeaderboardRows : [];
+  const visibleRows = rows.slice(0, 8);
+  if (!visibleRows.length) return "";
+  return `
+    <div class="resultsList">
+      ${visibleRows.map((row) => `
+        <article class="resultRow ${String(row?.pupil_id || "") === String(item?.spellingBeeResult?.pupil_id || "") ? "resultOk" : ""}">
+          <div class="resultWordLine">
+            <span>${escapeHtml(`${row?.rank ? `#${row.rank}` : "Unranked"} ${row?.pupil_name || "Pupil"}`)}</span>
+            <span class="resultAttempts">${escapeHtml(`${Math.max(0, Number(row?.streak || 0))} streak`)}</span>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSpellingBeeAssignmentCard(item) {
+  const isComplete = !!item.completed;
+  const hasStarted = !!item?.spellingBeeResult?.started_at || !!item?.started_at;
+  const eventClosed = !!item.spellingBeeEventClosed;
+  const streak = Math.max(0, Number(item?.correctWordCount || item?.spellingBeeResult?.streak || 0));
+  const leaderboardOpen = !!pupilDashboardState.beeLeaderboardOpenByAssignment?.[String(item.id || "")];
+  const untilWrong = String(item?.spellingBeeLengthMode || item?.spellingBeeResult?.bee_length_mode || "").trim().toLowerCase() === SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG;
+  const rankLine = item?.spellingBeeRank
+    ? `<span class="pupilMetaPill pupilMetaPill--result" title="Competition rank">${renderIcon("list")}<span>${escapeHtml(`Your rank: ${item.spellingBeeRank}`)}</span></span>`
+    : "";
+  const yearRankLine = item?.spellingBeeYearRank
+    ? `<span class="pupilMetaPill" title="Year rank">${renderIcon("list")}<span>${escapeHtml(`Year rank: ${item.spellingBeeYearRank}`)}</span></span>`
+    : "";
+  const formRankLine = item?.spellingBeeFormRank
+    ? `<span class="pupilMetaPill" title="Form rank">${renderIcon("list")}<span>${escapeHtml(`Form rank: ${item.spellingBeeFormRank}`)}</span></span>`
+    : "";
+
+  return `
+    <article class="card test-card pupilTestCard ${isComplete ? "pupilTestCard--complete" : ""}">
+      <h3>Spelling Bee</h3>
+      <p class="pupilTaskReason">Optional competition</p>
+      <div class="pupilTestMeta">
+        ${isComplete ? `
+          <span class="pupilMetaPill pupilMetaPill--complete" title="Completed competition">
+            ${renderIcon("checkCircle")}
+            <span>Spelling Bee completed</span>
+          </span>
+          <span class="pupilMetaPill pupilMetaPill--result" title="Streak">
+            ${renderIcon("list")}
+            <span>${escapeHtml(`Your streak: ${streak}`)}</span>
+          </span>
+          ${eventClosed ? `${rankLine}${yearRankLine}${formRankLine}` : `
+            <span class="pupilMetaPill" title="Results timing">
+              ${renderIcon("calendar")}
+              <span>Ranking and results are released after the competition closes</span>
+            </span>
+          `}
+        ` : hasStarted ? `
+          <span class="pupilMetaPill pupilMetaPill--complete" title="Entered competition">
+            ${renderIcon("checkCircle")}
+            <span>Already entered</span>
+          </span>
+          <span class="pupilMetaPill" title="Competition entry">
+            ${renderIcon("calendar")}
+            <span>You cannot restart this event</span>
+          </span>
+        ` : `
+          <span class="pupilMetaPill" title="Optional competition">
+            ${renderIcon("list")}
+            <span>Optional competition</span>
+          </span>
+          ${untilWrong ? `
+            <span class="pupilMetaPill" title="Competition length">
+              ${renderIcon("list")}
+              <span>Ends when you get one wrong</span>
+            </span>
+          ` : ""}
+          <span class="pupilMetaPill pupilMetaPill--deadline ${deadlineClass(item.end_at)}" title="Competition closes">
+            ${renderIcon("calendar")}
+            <span>${escapeHtml(formatDeadline(item.end_at))}</span>
+          </span>
+        `}
+      </div>
+      ${
+        isComplete
+          ? (eventClosed
+            ? `<button class="btn secondary start-test-btn" data-action="toggle-bee-leaderboard" data-assignment-id="${escapeHtml(String(item.id || ""))}" type="button">${leaderboardOpen ? "Hide results" : "View results"}</button>`
+            : `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Completed</button>`)
+          : hasStarted
+            ? `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Already entered</button>`
+          : (eventClosed
+            ? `<button class="btn secondary start-test-btn start-test-btn--locked" type="button" disabled aria-disabled="true">Competition closed</button>`
+            : `<button class="btn primary start-test-btn" data-assignment="${escapeHtml(item.id)}" type="button">Start competition</button>`)
+      }
+      ${isComplete && eventClosed && leaderboardOpen ? renderSpellingBeeLeaderboardPreview(item) : ""}
+    </article>
+  `;
+}
+
 function renderAssignmentCard(item) {
+  if (item?.isSpellingBee) return renderSpellingBeeAssignmentCard(item);
   const defaultQuestionCount = Array.isArray(item.words) ? item.words.length : 0;
   const generatedQuestionCount = Number.isFinite(Number(item?.pupilWordCount))
     ? Math.max(0, Number(item.pupilWordCount))
@@ -993,6 +1688,193 @@ function renderProgressChipList(items, variant = "neutral", formatter = (item) =
         <span class="pupilProgressChip pupilProgressChip--${escapeHtml(variant)}">${escapeHtml(formatter(item))}</span>
       `).join("")}
     </div>
+  `;
+}
+
+function normalizeNextTeachingFocus(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z-]/g, "");
+}
+
+function getChoiceObject(row = null) {
+  const choice = row?.choice;
+  if (choice && typeof choice === "object" && !Array.isArray(choice)) return choice;
+  return {};
+}
+
+function normalizeFocusList(value) {
+  const list = Array.isArray(value) ? value : [value];
+  return list
+    .map((item) => normalizeNextTeachingFocus(item))
+    .filter(Boolean);
+}
+
+function getWordFocusGraphemes(row = null) {
+  const choice = getChoiceObject(row);
+  return [
+    ...normalizeFocusList(choice?.focus_graphemes),
+    normalizeNextTeachingFocus(choice?.focus_grapheme || choice?.engine_focus_grapheme || choice?.engineFocusGrapheme || ""),
+  ].filter(Boolean);
+}
+
+function getTeachingExampleWord(row = null) {
+  return String(row?.word || row?.word_text || row?.wordText || row?.correctSpelling || "").trim();
+}
+
+function collectNextTeachingExamples(focus, assignments = [], practiceModel = null) {
+  const safeFocus = normalizeNextTeachingFocus(focus);
+  if (!safeFocus) return [];
+
+  const examples = [];
+  const seen = new Set();
+  const addRows = (rows = []) => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (examples.length >= 5) return;
+      if (!getWordFocusGraphemes(row).includes(safeFocus)) continue;
+      const word = getTeachingExampleWord(row);
+      const key = word.toLowerCase();
+      if (!word || seen.has(key)) continue;
+      seen.add(key);
+      examples.push({
+        word,
+        segments: Array.isArray(row?.segments) ? row.segments : [],
+      });
+    }
+  };
+
+  for (const pack of getPracticePacks(practiceModel)) {
+    addRows(pack?.words || []);
+    if (examples.length >= 5) break;
+  }
+
+  for (const assignment of Array.isArray(assignments) ? assignments : []) {
+    addRows(assignment?.words || []);
+    if (examples.length >= 5) break;
+  }
+
+  return examples.slice(0, 5);
+}
+
+function buildNextTeachingSoundLine(focus) {
+  const phoneme = inferPhonemeFromGrapheme(normalizeNextTeachingFocus(focus), "all");
+  return phoneme
+    ? `This often sounds like ${phoneme}.`
+    : "Look carefully at this spelling pattern.";
+}
+
+function buildNextTeachingCue(focus) {
+  const clean = normalizeNextTeachingFocus(focus);
+  if (clean.includes("-")) return "Look for the letters working across the word.";
+  if (clean.replace(/-/g, "").length <= 1) return "Look for this letter in the word.";
+  return "Look for these letters working together.";
+}
+
+function getNextTeachingCardId(focus) {
+  const clean = normalizeNextTeachingFocus(focus);
+  return `pupil-next-teaching-${clean || "focus"}`;
+}
+
+function buildNextTeachingPreviewModel(focus, examples = []) {
+  const cleanFocus = normalizeNextTeachingFocus(focus);
+  if (!cleanFocus) return null;
+
+  for (const item of Array.isArray(examples) ? examples : []) {
+    const word = String(item?.word || "").trim();
+    const segments = Array.isArray(item?.segments) ? item.segments : [];
+    if (!word || !segments.length) continue;
+    if (!normalizeFocusList(segments).includes(cleanFocus)) continue;
+
+    const model = buildPreviewModel(word, segments);
+    if (!Array.isArray(model?.letters) || !model.letters.length) continue;
+    if (!Array.isArray(model?.marks) || !model.marks.length) continue;
+    return { word, model };
+  }
+
+  return null;
+}
+
+function renderNextTeachingPreview(focus, examples = []) {
+  const preview = buildNextTeachingPreviewModel(focus, examples);
+  if (!preview) return "";
+
+  const previewHtml = renderPhonicsPreviewModel(preview.model);
+  if (!previewHtml) return "";
+
+  return `
+    <div class="pupilNextTeachingPreview" aria-label="${escapeHtml(`Visual phonics preview for ${preview.word}`)}">
+      ${previewHtml}
+    </div>
+  `;
+}
+
+function renderNextTeachingCard(focus, { assignments = [], practiceModel = null } = {}) {
+  const clean = normalizeNextTeachingFocus(focus);
+  if (!clean) return "";
+
+  const examples = collectNextTeachingExamples(clean, assignments, practiceModel);
+  const examplesHtml = examples.length
+    ? `
+      <div class="pupilNextTeachingExamples" aria-label="Example words">
+        ${examples.slice(0, 5).map((item) => `<span class="pupilNextTeachingExample">${escapeHtml(item.word)}</span>`).join("")}
+      </div>
+    `
+    : "";
+
+  return `
+    <div class="pupilNextTeachingCard" id="${escapeHtml(getNextTeachingCardId(clean))}" role="region" aria-label="${escapeHtml(`${clean} spelling help`)}">
+      <div class="pupilNextTeachingHead">
+        <div class="pupilNextTeachingTitle">${escapeHtml(clean)}</div>
+        <button class="pupilNextTeachingClose" type="button" data-action="close-next-teaching">Got it</button>
+      </div>
+      <div class="pupilNextTeachingLine">${escapeHtml(buildNextTeachingSoundLine(clean))}</div>
+      <div class="pupilNextTeachingCue">${escapeHtml(buildNextTeachingCue(clean))}</div>
+      ${examplesHtml}
+      ${renderNextTeachingPreview(clean, examples)}
+    </div>
+  `;
+}
+
+function renderNextTeachingChipList(group, { assignments = [], practiceModel = null } = {}) {
+  const items = Array.isArray(group?.items) ? group.items : [];
+  if (!items.length) {
+    return `<div class="pupilProgressEmpty">Nothing here yet.</div>`;
+  }
+
+  const visibleFocuses = items
+    .map((item) => normalizeNextTeachingFocus(group?.formatter ? group.formatter(item) : item?.target || item))
+    .filter(Boolean);
+  const openFocus = visibleFocuses.includes(normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus))
+    ? normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus)
+    : "";
+
+  return `
+    <div class="pupilProgressChips pupilNextTeachingChips">
+      ${items.map((item) => {
+        const label = String(group?.formatter ? group.formatter(item) : item?.target || item || "").trim();
+        const focus = normalizeNextTeachingFocus(label);
+        if (!focus) {
+          return `<span class="pupilProgressChip pupilProgressChip--${escapeHtml(group?.variant || "practice")}">${escapeHtml(label)}</span>`;
+        }
+        const isOpen = openFocus === focus;
+        return `
+          <button
+            class="pupilProgressChip pupilProgressChip--${escapeHtml(group?.variant || "practice")} pupilNextTeachingChip"
+            type="button"
+            data-action="toggle-next-teaching"
+            data-focus="${escapeHtml(focus)}"
+            aria-expanded="${isOpen ? "true" : "false"}"
+            aria-controls="${escapeHtml(getNextTeachingCardId(focus))}"
+            aria-label="${escapeHtml(`${isOpen ? "Close" : "Open"} ${label || focus} spelling help`)}"
+          >
+            <span class="pupilNextTeachingChipText">${escapeHtml(label || focus)}</span>
+            <span class="pupilNextTeachingChipCue" aria-hidden="true"></span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+    ${openFocus ? renderNextTeachingCard(openFocus, { assignments, practiceModel }) : ""}
   `;
 }
 
@@ -1162,13 +2044,149 @@ function renderProgressSection(progress) {
   `;
 }
 
-function renderAssignments(assignments) {
+function renderYourProgressBlock(item) {
+  const chips = Array.isArray(item?.chips) ? item.chips : [];
+  const variant = String(item?.variant || "wins").trim() || "wins";
+  return `
+    <article class="pupilYourProgressBlock pupilYourProgressBlock--${escapeHtml(variant)}">
+      <div class="pupilYourProgressLabel">${escapeHtml(item?.label || "")}</div>
+      <div class="pupilYourProgressText">${escapeHtml(item?.text || "")}</div>
+      ${chips.length ? renderProgressChipList(chips, variant, (chip) => chip) : ""}
+    </article>
+  `;
+}
+
+function renderYourProgressStageBlock(model) {
+  const isPlaceholder = model?.state === "placeholder";
+  const tone = isPlaceholder ? "placeholder" : (model?.tone || "growing");
+  const labelText = isPlaceholder ? model?.labelText : model?.stageLabel;
+
+  return `
+    <article class="pupilYourProgressBlock pupilYourProgressBlock--stage">
+      <div class="pupilYourProgressLabel">${escapeHtml(model?.title || "Current spelling stage")}</div>
+      <div class="pupilYourProgressStagePill pupilYourProgressStagePill--${escapeHtml(tone)}">${escapeHtml(labelText || "")}</div>
+      <div class="pupilYourProgressText">${escapeHtml(model?.summaryText || "")}</div>
+    </article>
+  `;
+}
+
+function renderYourProgressResultRow(item) {
+  const title = item?.title || "Task";
+  return `
+    <article class="pupilYourProgressTimelineRow">
+      <div class="pupilYourProgressTimelineCopy">
+        <div class="pupilYourProgressTimelineTask" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+        <div class="pupilYourProgressTimelineDate">${escapeHtml(item?.dateLabel || "Recently")}</div>
+      </div>
+      <div class="pupilYourProgressTimelineScore">${escapeHtml(item?.scoreText || "Done")}</div>
+    </article>
+  `;
+}
+
+function renderYourProgressCard(assignments, practiceModel, progress) {
+  const model = buildPupilProgressCardModel({ assignments, practiceModel, progress });
+  if (!model) return "";
+  const progressBlocks = Array.isArray(model?.blocks) ? model.blocks.slice() : [];
+  const stageModel = buildPupilSpellingStageModel(progress) || buildPupilSpellingStagePlaceholderModel();
+  const latestResultIndex = progressBlocks.findIndex((item) => item?.key === "latest_result");
+  const nextFocusIndex = progressBlocks.findIndex((item) => item?.key === "next_focus");
+  const stageBlock = { key: "current_spelling_stage", type: "spelling_stage", model: stageModel };
+  const stageInsertIndex = latestResultIndex >= 0
+    ? latestResultIndex + 1
+    : (nextFocusIndex >= 0 ? nextFocusIndex : progressBlocks.length);
+  progressBlocks.splice(stageInsertIndex, 0, stageBlock);
+
+  return `
+    <section class="card pupilYourProgressCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("chart", model.title || "Your progress")}</h3>
+        </div>
+      </div>
+      ${model?.intro ? `<p class="pupilYourProgressIntro">${escapeHtml(model.intro)}</p>` : ""}
+      <div class="pupilYourProgressGrid">
+        ${progressBlocks.map((item) => (
+          item?.type === "spelling_stage"
+            ? renderYourProgressStageBlock(item.model)
+            : renderYourProgressBlock(item)
+        )).join("")}
+      </div>
+      ${Array.isArray(model?.recentResults) && model.recentResults.length ? `
+        <div class="pupilYourProgressTimeline">
+          <div class="pupilYourProgressTimelineTitle">Recent tasks</div>
+          <div class="pupilYourProgressTimelineList">
+            ${model.recentResults.map(renderYourProgressResultRow).join("")}
+          </div>
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderRecentTasksSection(assignments, practiceModel, progress) {
+  const model = buildPupilProgressCardModel({ assignments, practiceModel, progress });
+  const recentResults = Array.isArray(model?.recentResults) ? model.recentResults : [];
+
+  return `
+    <section class="card pupilSectionCard pupilRecentTasksCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("chart", "Recent tasks")}</h3>
+        </div>
+      </div>
+      ${
+        recentResults.length
+          ? `
+            <div class="pupilYourProgressTimeline pupilRecentTasksTimeline">
+              <div class="pupilYourProgressTimelineList">
+                ${recentResults.map(renderYourProgressResultRow).join("")}
+              </div>
+            </div>
+          `
+          : `<p class="pupilEmptyText">Finished tasks will show here.</p>`
+      }
+    </section>
+  `;
+}
+
+function renderSpellingBeeSummaryCard(assignments) {
+  const model = buildPupilSpellingBeeSummaryModel(assignments);
+  if (!model) return "";
+
+  return `
+    <section class="card pupilBeeSummaryCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("book", model.title || "Spelling Bee")}</h3>
+        </div>
+      </div>
+      <div class="pupilBeeSummaryLines">
+        <p class="pupilBeeSummaryLine">${escapeHtml(model.latestText || "")}</p>
+        <p class="pupilBeeSummaryLine">${escapeHtml(model.bestText || "")}</p>
+        ${model?.rankText ? `<p class="pupilBeeSummaryLine pupilBeeSummaryLine--rank">${escapeHtml(model.rankText)}</p>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderPupilDashboardMiniCards(assignments) {
+  const beeSummaryCard = renderSpellingBeeSummaryCard(assignments);
+  if (!beeSummaryCard) return "";
+
+  return `
+    <div class="pupilDashboardMiniCards">
+      ${beeSummaryCard}
+    </div>
+  `;
+}
+
+function renderAssignments(assignments, options = {}) {
   if (!assignments.length) return "";
 
-  const pendingCount = assignments.filter((item) => !item?.completed).length;
-  const completedCount = assignments.filter((item) => !!item?.completed).length;
-  const sectionTitle = "My tasks";
-  const sectionCount = pendingCount || completedCount;
+  const sectionTitle = String(options?.title || "My tasks").trim() || "My tasks";
+  const sectionIcon = String(options?.icon || "checkCircle").trim() || "checkCircle";
+  const sectionClassName = String(options?.className || "").trim();
+  const sectionCount = assignments.length;
   const isExpanded = !!pupilDashboardState.expandedSections.teacher_tasks;
   const shouldCollapse = assignments.length > PUPIL_SECTION_LIMIT;
   const visibleItems = shouldCollapse && !isExpanded ? assignments.slice(0, PUPIL_SECTION_LIMIT) : assignments;
@@ -1176,10 +2194,10 @@ function renderAssignments(assignments) {
   const toggleLabel = isExpanded ? "Show less" : `Show ${hiddenCount} more`;
 
   return `
-    <section class="card pupilSectionCard">
+    <section class="card pupilSectionCard pupilTasksSection ${escapeHtml(sectionClassName)}">
       <div class="pupilSectionHead">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("checkCircle", sectionTitle)}</h3>
+          <h3>${renderIconLabel(sectionIcon, sectionTitle)}</h3>
           <span class="pupilSectionCount">${escapeHtml(String(sectionCount))}</span>
         </div>
       </div>
@@ -1204,7 +2222,7 @@ function renderAssignments(assignments) {
 
 function renderAssignmentsEmptyState() {
   return `
-    <section class="card pupilSectionCard pupilEmptyCard">
+    <section class="card pupilSectionCard pupilTasksSection pupilEmptyCard">
       <div class="pupilSectionTitleRow">
         <h3>${renderIconLabel("checkCircle", "No tasks waiting")}</h3>
       </div>
@@ -1213,14 +2231,71 @@ function renderAssignmentsEmptyState() {
   `;
 }
 
-function renderPracticeSection(practicePacks) {
-  if (!practicePacks?.length) return "";
+function renderExtraChallengeCard(model = null) {
+  if (!model) return "";
+  const state = String(model?.state || "").trim();
+  const isBusy = !!pupilDashboardState.extraChallenge?.busy;
+  const message = String(pupilDashboardState.extraChallenge?.message || "").trim();
+  const rawTitle = String(model?.title || "").trim();
+  const title = /another challenge/i.test(rawTitle) ? "Extra challenge" : (rawTitle || "Extra challenge");
+
+  return `
+    <section class="card pupilSectionCard pupilExtraChallengeCard">
+      <div class="pupilSectionHead pupilSectionHead--compact">
+        <div class="pupilSectionTitleRow">
+          <h3>${renderIconLabel("target", title)}</h3>
+        </div>
+      </div>
+      <p class="pupilEmptyText">${escapeHtml(model.body || "")}</p>
+      ${message ? `<p class="pupilEmptyText pupilExtraChallengeMessage" role="status">${escapeHtml(message)}</p>` : ""}
+      <button
+        class="btn primary start-test-btn"
+        type="button"
+        data-action="start-extra-challenge"
+        data-extra-challenge-state="${escapeHtml(state)}"
+        data-assignment-id="${escapeHtml(String(model.assignmentId || ""))}"
+        ${isBusy ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+      >${escapeHtml(model.buttonLabel || "Start my challenge")}</button>
+    </section>
+  `;
+}
+
+function renderPupilDashboardMainAction(model = null) {
+  if (!model) return "";
+  const kind = String(model?.kind || "").trim();
+  const isExtraAction = kind === "extra_start" || kind === "extra_continue";
+  const message = isExtraAction ? String(pupilDashboardState.extraChallenge?.message || "").trim() : "";
+  const actionButton = renderPupilMainActionButton(model);
+
+  return `
+    <section class="card pupilMainActionCard pupilMainActionCard--${escapeHtml(kind || "complete")}">
+      <div class="pupilMainActionContent">
+        <div class="pupilMainActionText">
+          <h3>${renderIconLabel(getPupilDashboardMainActionIcon(kind), model.title || "All done for now")}</h3>
+          <p>${escapeHtml(model.body || "")}</p>
+          ${message ? `<p class="pupilMainActionMessage" role="status">${escapeHtml(message)}</p>` : ""}
+        </div>
+        ${actionButton ? `<div class="pupilMainActionControls">${actionButton}</div>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function getPracticeEmptyText(practiceModel = null) {
+  const status = String(practiceModel?.status || PRACTICE_STATUS_NOT_ENOUGH_EVIDENCE).trim();
+  if (status === PRACTICE_STATUS_NOT_ENOUGH_WORDS) return "Practice words are not ready yet.";
+  return "Finish a few more words first.";
+}
+
+function renderPracticeSection(practiceModel) {
+  const practicePacks = getPracticePacks(practiceModel);
+  if (!practicePacks.length) return "";
 
   return `
     <section class="card pupilSectionCard pupilPracticeSection">
       <div class="pupilSectionHead">
         <div class="pupilSectionTitleRow">
-          <h3>${renderIconLabel("spark", "Extra practice")}</h3>
+          <h3>${renderIconLabel("target", "Extra practice")}</h3>
         </div>
       </div>
       <div class="pupilPracticeOptions">
@@ -1233,7 +2308,7 @@ function renderPracticeSection(practicePacks) {
 function renderReadingHelpSection() {
   return `
     <details class="card pupilDetailsCard pupilReadingHelpCard">
-      <summary>${renderIconLabel("eye", "Reading help")}</summary>
+      <summary><span>Reading help</span></summary>
       <div class="pupilDetailsBody pupilReadingHelpShell">
         ${renderAccessibilityControls()}
       </div>
@@ -1265,17 +2340,44 @@ function renderCompletionRow(entry, index) {
   `;
 }
 
+function renderCompletionActions(item) {
+  const actionModel = buildCompletionExtraChallengeActionModel(item);
+  if (!actionModel) {
+    return `
+      <div class="pupilResultActions pupilResultActions--single">
+        <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pupilResultActions">
+      <button
+        class="btn primary start-test-btn pupilResultNextChallengeButton"
+        type="button"
+        data-action="completion-extra-challenge"
+        data-extra-challenge-state="${escapeHtml(actionModel.state || "start")}"
+      >${escapeHtml(actionModel.buttonLabel || "Next challenge")}</button>
+      <button class="btn secondary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </div>
+    <p class="pupilResultExtraChallengeMessage" role="status" aria-live="polite" hidden></p>
+  `;
+}
+
 function renderCompletionSummary(item, result) {
   const rows = Array.isArray(result?.results) ? result.results : [];
   const totalWords = Number(result?.totalWords || rows.length || 0);
   const totalCorrect = Number(result?.totalCorrect || 0);
   const incorrectCount = Math.max(0, totalWords - totalCorrect);
   const averageAttempts = Number(result?.averageAttempts || 0);
+  const completionLabel = item.attempt_source === "practice"
+    ? "practice"
+    : (isExtraChallengeAssignmentSource(item) ? "the challenge" : "the test");
 
   return `
     <div class="pupil-header">
       <h2>${escapeHtml(getDisplayedAssignmentTitle(item) || "Activity complete")}</h2>
-      <p class="muted">You finished ${item.attempt_source === "practice" ? "practice" : "the test"}.</p>
+      <p class="muted">You finished ${completionLabel}.</p>
     </div>
     <section class="card test-card resultCardInline">
       <div class="resultSummaryGrid">
@@ -1300,14 +2402,298 @@ function renderCompletionSummary(item, result) {
       <div class="resultsList">
         ${rows.map((entry, index) => renderCompletionRow(entry, index)).join("")}
       </div>
+      ${renderCompletionActions(item)}
+    </section>
+  `;
+}
+
+function renderSpellingBeeCompletionSummary(item, result, leaderboardRows = []) {
+  const streak = Math.max(0, Number(result?.streak ?? result?.totalCorrect ?? 0));
+  const eventClosed = item?.end_at ? new Date(item.end_at).getTime() <= Date.now() : false;
+  const audioFailed = result?.audioFailed === true || result?.audio_failed === true;
+  const ownRow = eventClosed
+    ? (leaderboardRows || []).find((row) => String(row?.pupil_id || "") === String(item?.spellingBeeResult?.pupil_id || result?.pupil_id || result?.pupilId || ""))
+    : null;
+  const rows = Array.isArray(leaderboardRows) ? leaderboardRows.slice(0, 8) : [];
+
+  return `
+    <div class="pupil-header">
+      <h2>${audioFailed ? "Spelling Bee stopped" : "Spelling Bee completed"}</h2>
+      <p class="muted">${audioFailed ? "Audio could not play clearly enough for a fair round." : (eventClosed ? "Results are available now." : "Ranking and results are released after the competition closes.")}</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <div class="resultSummaryGrid">
+        <div class="resultSummaryCard">
+          <div class="resultSummaryLabel">Your streak</div>
+          <div class="resultSummaryValue">${escapeHtml(String(streak))}</div>
+        </div>
+        ${eventClosed && ownRow?.rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Your rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.rank))}</div>
+          </div>
+        ` : ""}
+        ${eventClosed && ownRow?.year_rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Year rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.year_rank))}</div>
+          </div>
+        ` : ""}
+        ${eventClosed && ownRow?.form_rank ? `
+          <div class="resultSummaryCard">
+            <div class="resultSummaryLabel">Form rank</div>
+            <div class="resultSummaryValue">${escapeHtml(String(ownRow.form_rank))}</div>
+          </div>
+        ` : ""}
+      </div>
+      ${eventClosed && rows.length ? `
+        <div class="resultSummaryLabel">Leaderboard</div>
+        <div class="resultsList">
+          ${rows.map((row) => `
+            <article class="resultRow ${String(row?.pupil_id || "") === String(ownRow?.pupil_id || "") ? "resultOk" : ""}">
+              <div class="resultWordLine">
+                <span>${escapeHtml(`${row?.rank ? `#${row.rank}` : "Unranked"} ${row?.pupil_name || "Pupil"}`)}</span>
+                <span class="resultAttempts">${escapeHtml(`${Math.max(0, Number(row?.streak || 0))} streak`)}</span>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+      ` : ""}
       <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
     </section>
   `;
 }
 
-function attachDashboardEvents(containerEl, session, assignments, practicePacks, progress) {
+function canStartSpellingBeeAudio() {
+  return typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined";
+}
+
+function renderSpellingBeeAudioBlocked() {
+  return `
+    <div class="pupil-header">
+      <h2>Spelling Bee</h2>
+      <p class="muted">Audio is needed for this competition.</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <p class="pupilTaskReason">This browser cannot play the word audio right now.</p>
+      <p class="pupilTaskReason">Try again on a device with audio before the competition closes.</p>
+      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </section>
+  `;
+}
+
+function renderSpellingBeeAlreadyStarted() {
+  return `
+    <div class="pupil-header">
+      <h2>Spelling Bee</h2>
+      <p class="muted">You have already entered this competition.</p>
+    </div>
+    <section class="card test-card resultCardInline">
+      <p class="pupilTaskReason">Only one live run is allowed.</p>
+      <p class="pupilTaskReason">You cannot restart the same event.</p>
+      <button class="btn primary start-test-btn" id="btnBackToPupilDashboard" type="button">Back to dashboard</button>
+    </section>
+  `;
+}
+
+function setExtraChallengeTriggerBusy(button, busy) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.starting = "true";
+    button.disabled = true;
+    button.setAttribute("aria-disabled", "true");
+    button.setAttribute("aria-busy", "true");
+    return;
+  }
+  delete button.dataset.starting;
+  button.disabled = false;
+  button.removeAttribute("aria-disabled");
+  button.removeAttribute("aria-busy");
+}
+
+function findExtraChallengeAssignmentForOpen(assignments = [], assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const isOpenableExtraChallenge = (item) =>
+    isExtraChallengeAssignmentSource(item)
+    && !item?.completed
+    && !item?.completed_at
+    && !item?.completedAt
+    && String(item?.assignmentStatus || item?.assignment_status || "").trim().toLowerCase() !== "completed";
+  return (Array.isArray(assignments) ? assignments : []).find((item) =>
+    safeAssignmentId
+    && String(item?.id || "") === safeAssignmentId
+    && isOpenableExtraChallenge(item)
+  ) || findActiveExtraChallengeAssignment(assignments);
+}
+
+function logExtraChallengeActionDiagnostics(outcome = {}) {
+  const payload = {
+    source: String(outcome?.source || ""),
+    status: String(outcome?.status || ""),
+    assignmentId: String(outcome?.assignmentId || ""),
+    error: String(outcome?.error || ""),
+    refreshedAssignmentCount: outcome?.refreshedAssignmentCount ?? null,
+    assignmentFound: outcome?.assignmentFound === true,
+    opened: outcome?.opened === true,
+  };
+  if (payload.opened) {
+    console.info("Extra challenge action:", payload);
+    return;
+  }
+  console.warn("Extra challenge action:", payload);
+}
+
+async function openExtraChallengeFromAssignments({
+  containerEl,
+  session,
+  assignments = [],
+  practicePacks = [],
+  assignmentId = "",
+} = {}) {
+  const assignment = findExtraChallengeAssignmentForOpen(assignments, assignmentId);
+  if (!assignment) {
+    return {
+      assignmentFound: false,
+      opened: false,
+      assignmentId: String(assignmentId || "").trim(),
+      error: "",
+    };
+  }
+
+  try {
+    await openSession(containerEl, session, assignment, assignments, practicePacks);
+    return {
+      assignmentFound: true,
+      opened: true,
+      assignmentId: String(assignment?.id || assignmentId || "").trim(),
+      error: "",
+    };
+  } catch (error) {
+    return {
+      assignmentFound: true,
+      opened: false,
+      assignmentId: String(assignment?.id || assignmentId || "").trim(),
+      error: String(error?.message || error || "Could not open extra challenge.").trim(),
+    };
+  }
+}
+
+async function startOrContinueExtraChallenge({
+  containerEl,
+  session,
+  assignments = [],
+  practicePacks = [],
+  assignmentId = "",
+  state = "start",
+  source = "dashboard",
+  triggerButton = null,
+} = {}) {
+  const pupilId = String(session?.pupil_id || "").trim();
+  const requestedState = String(state || "").trim() === "continue" ? "continue" : "start";
+  const outcome = {
+    source,
+    status: requestedState === "continue" ? "continue" : "",
+    assignmentId: String(assignmentId || "").trim(),
+    error: "",
+    refreshedAssignmentCount: null,
+    assignmentFound: false,
+    opened: false,
+    message: buildExtraChallengeUnavailableMessage(),
+  };
+
+  setExtraChallengeTriggerBusy(triggerButton, true);
+
+  try {
+    if (!pupilId) {
+      outcome.status = "not_eligible";
+      outcome.error = "Missing pupil id.";
+      return outcome;
+    }
+
+    if (requestedState === "continue") {
+      let openResult = await openExtraChallengeFromAssignments({
+        containerEl,
+        session,
+        assignments,
+        practicePacks,
+        assignmentId,
+      });
+
+      if (!openResult.assignmentFound) {
+        const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
+          outcome.error = String(error?.message || error || "Could not reload pupil assignments.").trim();
+          console.warn("load pupil assignments before extra challenge continue error:", error);
+          return [];
+        });
+        outcome.refreshedAssignmentCount = refreshedAssignments.length;
+        openResult = await openExtraChallengeFromAssignments({
+          containerEl,
+          session,
+          assignments: refreshedAssignments,
+          practicePacks,
+          assignmentId,
+        });
+      }
+
+      outcome.assignmentFound = openResult.assignmentFound;
+      outcome.opened = openResult.opened;
+      outcome.assignmentId = openResult.assignmentId || outcome.assignmentId;
+      outcome.error = openResult.error || outcome.error;
+      return outcome;
+    }
+
+    const result = await provisionExtraChallengeAssignment({ pupilId });
+    outcome.status = String(result?.status || "error").trim() || "error";
+    outcome.assignmentId = String(result?.assignmentId || "").trim();
+    outcome.error = String(result?.error || "").trim();
+
+    if (outcome.status === "provisioned" || outcome.status === "already_active") {
+      const refreshedAssignments = await loadAssignments(pupilId).catch((error) => {
+        outcome.error = String(error?.message || error || "Could not reload pupil assignments.").trim();
+        console.warn("load pupil assignments after extra challenge provision error:", error);
+        return [];
+      });
+      outcome.refreshedAssignmentCount = refreshedAssignments.length;
+      const openResult = await openExtraChallengeFromAssignments({
+        containerEl,
+        session,
+        assignments: refreshedAssignments,
+        practicePacks,
+        assignmentId: outcome.assignmentId,
+      });
+      outcome.assignmentFound = openResult.assignmentFound;
+      outcome.opened = openResult.opened;
+      outcome.assignmentId = openResult.assignmentId || outcome.assignmentId;
+      outcome.error = openResult.error || outcome.error;
+    }
+
+    return outcome;
+  } catch (error) {
+    outcome.status = outcome.status || "error";
+    outcome.error = String(error?.message || error || "Extra challenge request failed.").trim();
+    return outcome;
+  } finally {
+    if (!outcome.opened) {
+      setExtraChallengeTriggerBusy(triggerButton, false);
+    }
+    logExtraChallengeActionDiagnostics(outcome);
+  }
+}
+
+function renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+}
+
+function attachDashboardEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  const practicePacks = getPracticePacks(practiceModel);
+  const allAssignments = Array.isArray(dashboardOptions?.allAssignments) && dashboardOptions.allAssignments.length
+    ? dashboardOptions.allAssignments
+    : assignments;
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.starting === "true") return;
+      button.dataset.starting = "true";
+      button.disabled = true;
       const assignmentId = button.getAttribute("data-assignment");
       const assignment = assignments.find((item) => String(item.id) === String(assignmentId));
       if (!assignment) return;
@@ -1324,16 +2710,147 @@ function attachDashboardEvents(containerEl, session, assignments, practicePacks,
     });
   });
 
+  containerEl.querySelectorAll('[data-action="start-extra-challenge"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (button.dataset.starting === "true") return;
+      pupilDashboardState.extraChallenge = {
+        busy: true,
+        message: "",
+      };
+
+      const state = String(button.getAttribute("data-extra-challenge-state") || "");
+      const assignmentId = String(button.getAttribute("data-assignment-id") || "");
+      const source = String(button.getAttribute("data-extra-challenge-source") || "dashboard");
+      const outcome = await startOrContinueExtraChallenge({
+        containerEl,
+        session,
+        assignments: allAssignments,
+        practicePacks,
+        assignmentId,
+        state,
+        source,
+        triggerButton: button,
+      });
+
+      pupilDashboardState.extraChallenge = {
+        busy: false,
+        message: outcome.opened ? "" : outcome.message,
+      };
+      if (!outcome.opened) {
+        renderDashboardWithExtraChallengeState(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+      }
+    });
+  });
+
   containerEl.querySelectorAll('[data-action="toggle-pupil-section"]').forEach((button) => {
     button.addEventListener("click", () => {
       const key = String(button.getAttribute("data-section") || "");
       if (!Object.prototype.hasOwnProperty.call(pupilDashboardState.expandedSections, key)) return;
       pupilDashboardState.expandedSections[key] = !pupilDashboardState.expandedSections[key];
-      renderDashboard(containerEl, session, assignments, practicePacks, progress);
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
     });
   });
 
+  containerEl.querySelectorAll('[data-action="toggle-next-teaching"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const focus = normalizeNextTeachingFocus(button.getAttribute("data-focus") || "");
+      if (!focus) return;
+      pupilDashboardState.openHeroStageHelp = "";
+      pupilDashboardState.openNextTeachingFocus = normalizeNextTeachingFocus(pupilDashboardState.openNextTeachingFocus) === focus
+        ? ""
+        : focus;
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="toggle-hero-stage-help"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const stageKey = String(button.getAttribute("data-stage-key") || "").trim().toLowerCase();
+      if (!PUPIL_HERO_STAGE_STEPS.some((item) => item.key === stageKey)) return;
+      pupilDashboardState.openHeroStageHelp = pupilDashboardState.openHeroStageHelp === stageKey ? "" : stageKey;
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="close-next-teaching"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      pupilDashboardState.openHeroStageHelp = "";
+      pupilDashboardState.openNextTeachingFocus = "";
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+    });
+  });
+
+  containerEl.querySelectorAll('[data-action="toggle-bee-leaderboard"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const assignmentId = String(button.getAttribute("data-assignment-id") || "");
+      if (!assignmentId) return;
+      pupilDashboardState.beeLeaderboardOpenByAssignment = {
+        ...(pupilDashboardState.beeLeaderboardOpenByAssignment || {}),
+        [assignmentId]: !pupilDashboardState.beeLeaderboardOpenByAssignment?.[assignmentId],
+      };
+      renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+    });
+  });
+
+  bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
   bindAccessibilityControlEvents(containerEl);
+}
+
+function bindCompletionEvents(containerEl, session, assignments = [], practicePacks = []) {
+  containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+    await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+  });
+
+  containerEl.querySelector('[data-action="completion-extra-challenge"]')?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (!button || button.dataset.starting === "true") return;
+    const messageEl = containerEl.querySelector(".pupilResultExtraChallengeMessage");
+    if (messageEl) {
+      messageEl.textContent = "";
+      messageEl.hidden = true;
+    }
+
+    const outcome = await startOrContinueExtraChallenge({
+      containerEl,
+      session,
+      assignments,
+      practicePacks,
+      state: button.getAttribute("data-extra-challenge-state") || "start",
+      source: "completion",
+      triggerButton: button,
+    });
+
+    if (!outcome.opened && messageEl) {
+      messageEl.textContent = outcome.message;
+      messageEl.hidden = false;
+    }
+  });
+}
+
+function bindHeroStageHelpDismissEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  if (pupilHeroStageOutsideClickHandler) {
+    document.removeEventListener("click", pupilHeroStageOutsideClickHandler);
+  }
+  if (pupilHeroStageEscapeHandler) {
+    document.removeEventListener("keydown", pupilHeroStageEscapeHandler);
+  }
+
+  pupilHeroStageOutsideClickHandler = (event) => {
+    if (!pupilDashboardState.openHeroStageHelp) return;
+    const target = event?.target;
+    if (target?.closest?.('[data-action="toggle-hero-stage-help"], .pupilHeroStageBandBubble')) return;
+    pupilDashboardState.openHeroStageHelp = "";
+    renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+  };
+
+  pupilHeroStageEscapeHandler = (event) => {
+    if (event?.key !== "Escape" || !pupilDashboardState.openHeroStageHelp) return;
+    pupilDashboardState.openHeroStageHelp = "";
+    renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
+  };
+
+  document.addEventListener("click", pupilHeroStageOutsideClickHandler);
+  document.addEventListener("keydown", pupilHeroStageEscapeHandler);
 }
 
 function bindAccessibilityControlEvents(containerEl) {
@@ -1344,18 +2861,62 @@ function bindAccessibilityControlEvents(containerEl) {
   });
 }
 
+function setPupilJourneyScreen(containerEl, enabled) {
+  containerEl?.classList?.toggle("pupilJourneyScreen", !!enabled);
+}
+
 async function renderPupilHome(containerEl, session, { autoOpenBaseline = true } = {}) {
   if (!containerEl) return;
+  setPupilJourneyScreen(containerEl, false);
 
   const pupilId = String(session?.pupil_id || "").trim();
   const name = session?.first_name || session?.username || "Pupil";
-  const gateState = await readPupilBaselineGateState({ pupilId });
-  const waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
+  let gateState = await readPupilBaselineGateState({ pupilId });
+  let waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
   let assignments = null;
   const ensureAssignments = async () => {
     if (assignments) return assignments;
     assignments = await loadAssignments(pupilId);
     return assignments;
+  };
+  const renderReadyDashboard = async ({
+    readyGateState = gateState,
+    assignmentLoadWarning = "load pupil assignments error:",
+  } = {}) => {
+    await maybeProvisionPersonalisedAfterReadyBaseline({ pupilId, gateState: readyGateState }).catch((error) => {
+      console.warn("post-baseline personalised provisioning error:", error);
+    });
+    const loadedAssignments = await ensureAssignments().catch((error) => {
+      console.warn(assignmentLoadWarning, error);
+      return [];
+    });
+    const dashboardAssignments = loadedAssignments.filter((item) =>
+      !item?.isBaseline
+      && !isExtraChallengeAssignmentSource(item)
+    );
+    const extraChallengeModel = buildExtraChallengeCardModel({
+      assignments: loadedAssignments,
+      pupilId,
+    });
+    const dashboardMainActionModel = buildPupilDashboardMainActionModel({
+      assignments: loadedAssignments,
+      pupilId,
+    });
+    if (!extraChallengeModel) {
+      pupilDashboardState.extraChallenge = {
+        busy: false,
+        message: "",
+      };
+    }
+    const [practiceModel, progress] = await Promise.all([
+      loadPracticeModel(pupilId),
+      loadPupilProgress(pupilId),
+    ]);
+    renderDashboard(containerEl, session, dashboardAssignments, practiceModel, progress, {
+      allAssignments: loadedAssignments,
+      dashboardMainActionModel,
+      extraChallengeModel,
+    });
   };
 
   let resolvedGate = null;
@@ -1365,15 +2926,14 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       assignment: gateState?.assignment || null,
     };
     if (!resolvedGate.assignment?.id) {
-      const loadedAssignments = await ensureAssignments();
-      const visibleGate = buildVisibleBaselineGate(loadedAssignments, gateState?.assignmentId || "");
-      if (visibleGate) {
-        resolvedGate = visibleGate;
-      }
+      containerEl.innerHTML = renderBaselineGateState(name, {
+        mode: "waiting",
+        waitingReason: "no_baseline_assignment",
+        session,
+      });
+      bindAccessibilityControlEvents(containerEl);
+      return;
     }
-  } else if (gateState?.status === "waiting" && waitingReason !== "no_active_form_membership" && waitingReason !== "runtime_inactive") {
-    const loadedAssignments = await ensureAssignments();
-    resolvedGate = buildVisibleBaselineGate(loadedAssignments);
   }
 
   if (resolvedGate?.assignment?.id) {
@@ -1387,6 +2947,7 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: resolvedGate.status,
       assignment: resolvedGate.assignment,
+      session,
     });
     containerEl.querySelector('[data-action="open-gated-baseline"]')?.addEventListener("click", async () => {
       await openSession(containerEl, session, resolvedGate.assignment, assignmentList, []);
@@ -1396,25 +2957,83 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
   }
 
   if (gateState?.status === "waiting") {
+    if (waitingReason === "no_baseline_assignment") {
+      if (canTryBaselineProvisionForGate(pupilId, gateState)) {
+        markBaselineProvisionAttempted(pupilId, gateState);
+        containerEl.innerHTML = renderBaselineGateState(name, {
+          mode: "waiting",
+          waitingReason: "baseline_setup",
+          session,
+        });
+        bindAccessibilityControlEvents(containerEl);
+        const provisionResult = await ensureBaselineAssignmentsForGate({ gateState });
+        if (!provisionResult?.ok) {
+          console.warn("automatic baseline provisioning did not complete:", provisionResult?.error || provisionResult);
+        }
+        gateState = await readPupilBaselineGateState({ pupilId });
+        waitingReason = String(gateState?.waitingReason || gateState?.waiting_reason || "").trim().toLowerCase() || null;
+
+        if (gateState?.status === "ready") {
+          await renderReadyDashboard({
+            readyGateState: gateState,
+            assignmentLoadWarning: "load pupil assignments after baseline provision error:",
+          });
+          return;
+        }
+
+        if ((gateState?.status === "resume" || gateState?.status === "start") && gateState?.assignment?.id) {
+          const assignmentList = [gateState.assignment];
+          if (autoOpenBaseline) {
+            await openSession(containerEl, session, gateState.assignment, assignmentList, []);
+            return;
+          }
+          containerEl.innerHTML = renderBaselineGateState(name, {
+            mode: gateState.status,
+            assignment: gateState.assignment,
+            session,
+          });
+          containerEl.querySelector('[data-action="open-gated-baseline"]')?.addEventListener("click", async () => {
+            await openSession(containerEl, session, gateState.assignment, assignmentList, []);
+          });
+          bindAccessibilityControlEvents(containerEl);
+          return;
+        }
+      }
+
+      containerEl.innerHTML = renderBaselineGateState(name, {
+        mode: "waiting",
+        waitingReason,
+        session,
+      });
+      bindAccessibilityControlEvents(containerEl);
+      return;
+    }
     containerEl.innerHTML = renderBaselineGateState(name, {
       mode: "waiting",
       waitingReason,
+      session,
     });
     bindAccessibilityControlEvents(containerEl);
     return;
   }
 
-  const loadedAssignments = await ensureAssignments();
+  if (gateState?.status !== "ready") {
+    containerEl.innerHTML = renderBaselineGateState(name, {
+      mode: "waiting",
+      waitingReason: waitingReason || "no_baseline_assignment",
+      session,
+    });
+    bindAccessibilityControlEvents(containerEl);
+    return;
+  }
 
-  const [practicePacks, progress] = await Promise.all([
-    loadPracticePacks(pupilId),
-    loadPupilProgress(pupilId),
-  ]);
-  renderDashboard(containerEl, session, loadedAssignments, practicePacks, progress);
+  await renderReadyDashboard({ readyGateState: gateState });
 }
 
 async function openSession(containerEl, session, item, assignments, practicePacks) {
-  const isAssignedTask = !!item?.class_id && item?.attempt_source !== "practice";
+  setPupilJourneyScreen(containerEl, false);
+  const isSpellingBee = !!item?.isSpellingBee;
+  const isAssignedTask = !!item?.class_id && item?.attempt_source !== "practice" && !isSpellingBee;
   let latestStatus = null;
   let resumeState = null;
   console.log("TEST LOAD ids:", {
@@ -1493,22 +3112,81 @@ async function openSession(containerEl, session, item, assignments, practicePack
     })),
   });
 
+  let spellingBeeStartRow = null;
+  if (isSpellingBee) {
+    if (item?.completed || item?.spellingBeeResult?.completed_at) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (item?.spellingBeeEventClosed) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (item?.spellingBeeResult?.started_at || item?.started_at) {
+      containerEl.innerHTML = renderSpellingBeeAlreadyStarted();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    if (!canStartSpellingBeeAudio()) {
+      containerEl.innerHTML = renderSpellingBeeAudioBlocked();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    spellingBeeStartRow = await startSpellingBeeResult({
+      teacherId: item?.teacher_id,
+      runId: item?.automation_run_id,
+      assignmentId: item?.id,
+      testId: item?.test_id,
+      classId: item?.class_id,
+      pupilId: session?.pupil_id,
+      maxRounds: Array.isArray(item?.words) ? item.words.length : item?.totalWordCount,
+      beeLengthMode: item?.spellingBeeLengthMode || item?.words?.[0]?.choice?.bee_length_mode || "",
+    });
+    if (spellingBeeStartRow?.completed_at) {
+      await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      return;
+    }
+    if (spellingBeeStartRow?.already_started && !spellingBeeStartRow?.completed_at) {
+      containerEl.innerHTML = renderSpellingBeeAlreadyStarted();
+      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+      });
+      return;
+    }
+    item = {
+      ...item,
+      spellingBeeResult: spellingBeeStartRow,
+      started_at: spellingBeeStartRow?.started_at || new Date().toISOString(),
+    };
+  }
+
   mountGame({
     host: containerEl,
     words: item.words || [],
     testMeta: {
       id: item.test_id,
       title: getDisplayedAssignmentTitle(item),
-      question_type: item.question_type || "focus_sound",
+      question_type: isSpellingBee ? "no_support_assessment" : (item.question_type || "focus_sound"),
       mode: item.mode || "test",
-      max_attempts: item.max_attempts == null ? null : item.max_attempts,
+      max_attempts: isSpellingBee ? 1 : (item.max_attempts == null ? null : item.max_attempts),
       attempt_source: item.attempt_source || "test",
       audio_enabled: item.audio_enabled !== false,
-      hints_enabled: item.hints_enabled !== false,
+      hints_enabled: isSpellingBee ? false : item.hints_enabled !== false,
+      competition_mode: isSpellingBee ? "spelling_bee" : null,
+      spelling_bee: isSpellingBee,
+      bee_length_mode: isSpellingBee
+        ? (item?.spellingBeeLengthMode || item?.words?.[0]?.choice?.bee_length_mode || "")
+        : null,
+      school_name: getSessionSchoolName(session),
     },
     pupilId: session?.pupil_id,
-    assignmentId: item.id || null,
+    assignmentId: isAssignedTask || isSpellingBee ? item.id : null,
     resumeState,
+    recordAttempts: !isSpellingBee,
     onProgress: isAssignedTask && item?.id && session?.pupil_id
       ? async (progress) => {
         await saveAssignmentProgress({
@@ -1518,6 +3196,16 @@ async function openSession(containerEl, session, item, assignments, practicePack
           testId: item?.test_id,
           pupilId: session?.pupil_id,
           progress,
+        });
+      }
+      : null,
+    onAbandon: isSpellingBee
+      ? async (result) => {
+        await finalizeSpellingBeeResult({
+          runId: item?.automation_run_id,
+          pupilId: session?.pupil_id,
+          endedReason: "abandoned",
+          result,
         });
       }
       : null,
@@ -1532,6 +3220,31 @@ async function openSession(containerEl, session, item, assignments, practicePack
         sessionAttemptId: null,
         resultCount: Array.isArray(result?.results) ? result.results.length : 0,
       });
+      if (isSpellingBee && item?.id && session?.pupil_id) {
+        const finalizedResult = await finalizeSpellingBeeResult({
+          runId: item?.automation_run_id,
+          pupilId: session?.pupil_id,
+          endedReason: result?.endedReason || "completed",
+          result,
+        });
+        const eventClosed = item?.end_at ? new Date(item.end_at).getTime() <= Date.now() : false;
+        const leaderboardRows = eventClosed
+          ? await listSpellingBeeResultsForRun({ runId: item?.automation_run_id }).catch((error) => {
+            console.warn("read spelling bee leaderboard error:", error);
+            return [];
+          })
+          : [];
+        const summaryItem = {
+          ...item,
+          spellingBeeResult: finalizedResult || spellingBeeStartRow || item?.spellingBeeResult || null,
+        };
+        containerEl.innerHTML = renderSpellingBeeCompletionSummary(summaryItem, finalizedResult || result, leaderboardRows);
+        containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+        });
+        return;
+      }
+
       if (isAssignedTask && item?.id && session?.pupil_id) {
         console.log("FINISH TEST writes:", {
           assignmentId: String(item?.id || ""),
@@ -1570,35 +3283,52 @@ async function openSession(containerEl, session, item, assignments, practicePack
         testId: String(item?.test_id || ""),
       });
       containerEl.innerHTML = renderCompletionSummary(item, result);
-      containerEl.querySelector("#btnBackToPupilDashboard")?.addEventListener("click", async () => {
-        await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
-      });
+      bindCompletionEvents(containerEl, session, assignments, practicePacks);
     },
   });
 }
 
-function renderDashboard(containerEl, session, assignments, practicePacks, progress) {
+function renderDashboard(containerEl, session, assignments, practiceModel, progress, dashboardOptions = {}) {
+  setPupilJourneyScreen(containerEl, true);
   const name = session?.first_name || session?.username || "Pupil";
+  const extraChallengeModel = dashboardOptions?.extraChallengeModel || null;
+  const mainActionModel = dashboardOptions?.dashboardMainActionModel || buildPupilDashboardMainActionModel({
+    assignments: Array.isArray(dashboardOptions?.allAssignments) ? dashboardOptions.allAssignments : assignments,
+    pupilId: session?.pupil_id,
+  });
+  const supplementalAssignments = getPupilDashboardSupplementalAssignments(assignments, mainActionModel);
+  const showLegacyExtraChallengeCard = !!extraChallengeModel
+    && mainActionModel?.kind !== "extra_start"
+    && mainActionModel?.kind !== "extra_continue";
   containerEl.innerHTML = `
     <div class="pupilDashboardShell">
-      ${renderPupilAnalyticsHero(name, assignments, practicePacks, progress)}
-      ${renderProgressSection(progress)}
-      ${assignments.length ? renderAssignments(assignments) : renderAssignmentsEmptyState()}
-      ${renderPracticeSection(practicePacks)}
+      ${renderPupilLearningJourneyHome(name, assignments, practiceModel, progress, session, mainActionModel, {
+        allAssignments: Array.isArray(dashboardOptions?.allAssignments) ? dashboardOptions.allAssignments : assignments,
+        extraChallengeModel,
+      })}
+      ${supplementalAssignments.length ? renderAssignments(supplementalAssignments, {
+        title: "More to do",
+        icon: "target",
+        className: "pupilTasksSection--more",
+      }) : ""}
+      ${showLegacyExtraChallengeCard ? renderExtraChallengeCard(extraChallengeModel) : ""}
+      ${renderPracticeSection(practiceModel)}
+      ${renderPupilDashboardMiniCards(assignments)}
       ${renderReadingHelpSection()}
     </div>
   `;
-  attachDashboardEvents(containerEl, session, assignments, practicePacks, progress);
+  attachDashboardEvents(containerEl, session, assignments, practiceModel, progress, dashboardOptions);
 }
 
 export async function renderPupilView(containerEl, session) {
   if (!containerEl) return;
+  setPupilJourneyScreen(containerEl, false);
   applyAccessibilitySettings();
   const name = session?.first_name || session?.username || "Pupil";
-  containerEl.innerHTML = renderSummaryCard(name);
+  containerEl.innerHTML = renderSummaryCardWithSchool(name, session);
   try {
     await renderPupilHome(containerEl, session);
   } catch (error) {
-    containerEl.innerHTML = `${renderSummaryCard(name)}<section class="card"><p class="muted">Could not load assigned tests.</p><pre style="white-space:pre-wrap;">${escapeHtml(error?.message || String(error))}</pre></section>`;
+    containerEl.innerHTML = `${renderSummaryCardWithSchool(name, session)}<section class="card"><p class="muted">Could not load assigned tests.</p><pre style="white-space:pre-wrap;">${escapeHtml(error?.message || String(error))}</pre></section>`;
   }
 }

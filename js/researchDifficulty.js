@@ -238,7 +238,6 @@ function buildSilentPatternSummary(word, graphemes) {
   }
 
   if (/^(kn|wr|gn|ps)/.test(cleanWord)) silentTags.push("silent_initial_letter");
-  if (/[aeiou]gh(?:t|$)/.test(cleanWord)) silentTags.push("silent_gh");
   if (/mb$/.test(cleanWord)) silentTags.push("silent_b");
 
   return {
@@ -260,7 +259,6 @@ function estimatePhonemeCount(graphemes, silentTags) {
       continue;
     }
 
-    if (clean === "gh" && silentTags.includes("silent_gh")) continue;
     if (clean === "b" && silentTags.includes("silent_b")) continue;
     if ((clean === "kn" || clean === "wr" || clean === "gn" || clean === "ps") && silentTags.includes("silent_initial_letter")) {
       phonemeCount += 1;

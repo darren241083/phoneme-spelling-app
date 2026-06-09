@@ -1,0 +1,2805 @@
+import {
+  chooseBestFocusGrapheme,
+  getPhonemeAlternativeOptions,
+  inferPhonemeFromGrapheme,
+} from "./data/phonemeHelpers.js";
+import {
+  buildPersistedDifficultyPayload,
+  getStoredDifficultyModelForWord,
+} from "./researchDifficulty.js";
+import { normalizeLookupWord } from "./phonicsResolution.js";
+import { splitWordToGraphemes } from "./wordParser.js";
+import {
+  AUTO_ASSIGN_POLICY_DEFAULTS,
+  buildAutoAssignEngineOptions,
+  normalizeAutoAssignPolicy,
+} from "./autoAssignPolicy.js";
+
+export const ASSIGNMENT_ENGINE_WORD_SOURCE = "assignment_engine_pool";
+export const ASSIGNMENT_ENGINE_TARGET_SOURCE = "assignment_engine_v1";
+export const ASSIGNMENT_ENGINE_DEFAULT_LENGTH = AUTO_ASSIGN_POLICY_DEFAULTS.assignment_length;
+export const APPROVED_TARGET_SELECTOR_STATUS_READY = "ready";
+export const APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS = "not_enough_approved_words";
+export const APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL = "secure_expected";
+
+const APPROVED_TARGET_TEACHER_SOURCE = "teacher";
+const APPROVED_TARGET_WORDLOOM_CORE_SOURCE = "wordloom_core";
+const APPROVED_TARGET_SOURCE_PRIORITIES = {
+  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 0,
+  [APPROVED_TARGET_TEACHER_SOURCE]: 1,
+};
+const APPROVED_TARGET_WIDENING_DELTA = 10;
+const APPROVED_TARGET_CHALLENGE_WINDOWS = {
+  needs_support: { min: 15, max: 45, center: 30, hardMax: 50 },
+  core_developing: { min: 25, max: 55, center: 40, hardMax: 60 },
+  secure_expected: { min: 35, max: 60, center: 48, hardMax: 65 },
+  early_stretch: { min: 55, max: 75, center: 65, hardMax: 80 },
+};
+const STRETCH_BASIS_CURRENT_TARGET = "current_target";
+const STRETCH_BASIS_DIAGNOSTIC_MISS = "diagnostic_miss";
+const STRETCH_BASIS_RELATED_FAMILY = "related_family";
+const STRETCH_BASIS_SOFT_CONSOLIDATION = "soft_consolidation";
+const STRETCH_BASIS_UNLINKED_FALLBACK = "unlinked_fallback";
+const REVIEW_BASIS_PROTECTED_REVIEW = "protected_review";
+const REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION = "nearly_secure_consolidation";
+const REVIEW_BASIS_SECURE_REVIEW = "secure_review";
+const REVIEW_BASIS_RELATED_FAMILY_REVIEW = "related_family_review";
+const REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW = "last_resort_safe_review";
+const REVIEW_BASIS_RANK = {
+  [REVIEW_BASIS_PROTECTED_REVIEW]: 0,
+  [REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION]: 1,
+  [REVIEW_BASIS_SECURE_REVIEW]: 2,
+  [REVIEW_BASIS_RELATED_FAMILY_REVIEW]: 3,
+  [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
+};
+const NEEDS_SUPPORT_THIN_REVIEW_BASIS_RANK = {
+  [REVIEW_BASIS_PROTECTED_REVIEW]: 0,
+  [REVIEW_BASIS_SECURE_REVIEW]: 1,
+  [REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION]: 2,
+  [REVIEW_BASIS_RELATED_FAMILY_REVIEW]: 3,
+  [REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW]: 4,
+};
+const REVIEW_SOURCE_PRIORITIES = {
+  [APPROVED_TARGET_WORDLOOM_CORE_SOURCE]: 0,
+  [APPROVED_TARGET_TEACHER_SOURCE]: 1,
+};
+const REVIEW_POLICY_BY_BAND = {
+  needs_support: {
+    center: 34,
+    maxScore: 45,
+    hardMax: 50,
+    lastResortMaxScore: 40,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+  },
+  core_developing: {
+    center: 42,
+    maxScore: 55,
+    hardMax: 60,
+    lastResortMaxScore: 50,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+  },
+  secure_expected: {
+    center: 50,
+    maxScore: 60,
+    hardMax: 65,
+    lastResortMaxScore: 55,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+  },
+  early_stretch: {
+    center: 58,
+    maxScore: 70,
+    hardMax: 75,
+    lastResortMaxScore: 60,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+  },
+};
+const STRETCH_POLICY_BY_BAND = {
+  needs_support: {
+    maxScore: 50,
+    maxLift: null,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+    requirePositiveLift: false,
+    basisOrder: [
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  core_developing: {
+    maxScore: 55,
+    maxLift: 14,
+    allowStretchBand: false,
+    allowChallengeBand: false,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  secure_expected: {
+    maxScore: 65,
+    maxLift: null,
+    allowStretchBand: true,
+    allowChallengeBand: false,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_CURRENT_TARGET,
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_RELATED_FAMILY,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+  early_stretch: {
+    maxScore: 80,
+    maxLift: null,
+    allowStretchBand: true,
+    allowChallengeBand: true,
+    requirePositiveLift: true,
+    basisOrder: [
+      STRETCH_BASIS_CURRENT_TARGET,
+      STRETCH_BASIS_DIAGNOSTIC_MISS,
+      STRETCH_BASIS_RELATED_FAMILY,
+      STRETCH_BASIS_SOFT_CONSOLIDATION,
+      STRETCH_BASIS_UNLINKED_FALLBACK,
+    ],
+  },
+};
+
+const SECTION_RATIOS = {
+  review: 0.4,
+  target: 0.4,
+  stretch: 0.2,
+};
+
+const TARGET_REASON_BY_SUPPORT = {
+  independent: "target_independent",
+  focus: "target_confusion",
+  supported: "target_supported",
+};
+
+const SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX = {
+  needs_support: 35,
+  core_developing: 55,
+  secure_expected: 65,
+  early_stretch: 80,
+};
+
+const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
+  needs_support: 2,
+  core_developing: 1,
+  secure_expected: 1,
+  early_stretch: 1,
+};
+const USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function normalizeToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z-]/g, "");
+}
+
+function normalizeMetadataKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function normalizeWord(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[^a-z]+|[^a-z]+$/g, "")
+    .replace(/[^a-z'-]/g, "");
+}
+
+function getResolvedWordEntry(resolvedWordMap, rawWord) {
+  if (!(resolvedWordMap instanceof Map)) return null;
+  return resolvedWordMap.get(normalizeLookupWord(rawWord)) || null;
+}
+
+function normalizeSegments(word, segments, resolvedWordMap = null) {
+  const explicit = Array.isArray(segments)
+    ? segments.map((item) => normalizeToken(item)).filter(Boolean)
+    : [];
+  if (explicit.length) return explicit;
+  const resolved = getResolvedWordEntry(resolvedWordMap, word);
+  if (Array.isArray(resolved?.segments) && resolved.segments.length) {
+    return resolved.segments.map((item) => normalizeToken(item)).filter(Boolean);
+  }
+  return splitWordToGraphemes(word)
+    .map((item) => normalizeToken(item))
+    .filter(Boolean);
+}
+
+function normalizeFocusList(items) {
+  return [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => normalizeToken(item))
+      .filter(Boolean)
+  )];
+}
+
+function roundToNearestInt(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+}
+
+function formatDateLabel(date = new Date()) {
+  const value = date instanceof Date ? date : new Date(date);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildLargestRemainderCounts(totalWords) {
+  const total = Math.max(1, roundToNearestInt(totalWords) || ASSIGNMENT_ENGINE_DEFAULT_LENGTH);
+  const base = Object.fromEntries(
+    Object.entries(SECTION_RATIOS).map(([key, ratio]) => [key, Math.floor(total * ratio)])
+  );
+  let remaining = total - Object.values(base).reduce((sum, value) => sum + value, 0);
+  const order = Object.entries(SECTION_RATIOS)
+    .map(([key, ratio]) => ({
+      key,
+      remainder: total * ratio - Math.floor(total * ratio),
+    }))
+    .sort((a, b) => b.remainder - a.remainder || a.key.localeCompare(b.key));
+
+  let index = 0;
+  while (remaining > 0) {
+    const next = order[index % order.length];
+    base[next.key] += 1;
+    remaining -= 1;
+    index += 1;
+  }
+
+  return base;
+}
+
+function getSecurityBand(stats) {
+  const accuracy = Number(stats?.accuracy || 0);
+  const firstTrySuccessRate = Number(stats?.firstTrySuccessRate || 0);
+  const total = Number(stats?.total || 0);
+
+  if (total >= 3 && accuracy >= 0.85 && firstTrySuccessRate >= 0.7) return "secure";
+  if (accuracy >= 0.6) return "nearly_secure";
+  return "insecure";
+}
+
+function getAttemptIdentity(attempt) {
+  const targetId = String(attempt?.assignment_target_id || "").trim();
+  if (targetId) return `target:${targetId}`;
+  const testWordId = String(attempt?.test_word_id || "").trim();
+  if (testWordId) return `word:${testWordId}`;
+  const word = normalizeWord(attempt?.word_text || "");
+  return word ? `text:${word}` : "";
+}
+
+export function analyticsTargetForAttempt(attempt, resolvedWordMap = null) {
+  const focus = normalizeToken(attempt?.focus_grapheme);
+  if (focus) return focus;
+
+  const targetGraphemes = Array.isArray(attempt?.target_graphemes)
+    ? attempt.target_graphemes.map((item) => normalizeToken(item)).filter(Boolean)
+    : [];
+  const best = normalizeToken(chooseBestFocusGrapheme(targetGraphemes));
+  if (best) return best;
+
+  const resolved = getResolvedWordEntry(resolvedWordMap, attempt?.word_text || "");
+  const resolvedFocus = normalizeToken(resolved?.focusGrapheme);
+  if (resolvedFocus) return resolvedFocus;
+
+  return normalizeToken(attempt?.pattern_type) || "general";
+}
+
+function normalizeConfusionToken(value) {
+  return normalizeToken(value);
+}
+
+function getAttemptTargetGraphemes(attempt, resolvedWordMap = null) {
+  const direct = Array.isArray(attempt?.target_graphemes)
+    ? attempt.target_graphemes.map((item) => normalizeConfusionToken(item)).filter(Boolean)
+    : [];
+  if (direct.length) return direct;
+  return normalizeSegments(String(attempt?.word_text || ""), [], resolvedWordMap)
+    .map((item) => normalizeConfusionToken(item))
+    .filter(Boolean);
+}
+
+function getAttemptTypedGraphemes(attempt, resolvedWordMap = null) {
+  const typed = String(attempt?.typed || "").trim();
+  if (!typed) return [];
+  return normalizeSegments(typed, [], resolvedWordMap)
+    .map((item) => normalizeConfusionToken(item))
+    .filter(Boolean);
+}
+
+function alignGraphemeSequences(targetParts, typedParts) {
+  const expected = Array.isArray(targetParts) ? targetParts : [];
+  const actual = Array.isArray(typedParts) ? typedParts : [];
+  const rows = expected.length;
+  const cols = actual.length;
+  const costs = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0));
+  const moves = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill("match"));
+
+  for (let i = 1; i <= rows; i += 1) {
+    costs[i][0] = i;
+    moves[i][0] = "delete";
+  }
+  for (let j = 1; j <= cols; j += 1) {
+    costs[0][j] = j;
+    moves[0][j] = "insert";
+  }
+
+  for (let i = 1; i <= rows; i += 1) {
+    for (let j = 1; j <= cols; j += 1) {
+      const isMatch = expected[i - 1] === actual[j - 1];
+      let bestCost = costs[i - 1][j - 1] + (isMatch ? 0 : 1);
+      let bestMove = isMatch ? "match" : "substitute";
+
+      const deleteCost = costs[i - 1][j] + 1;
+      if (deleteCost < bestCost) {
+        bestCost = deleteCost;
+        bestMove = "delete";
+      }
+
+      const insertCost = costs[i][j - 1] + 1;
+      if (insertCost < bestCost) {
+        bestCost = insertCost;
+        bestMove = "insert";
+      }
+
+      costs[i][j] = bestCost;
+      moves[i][j] = bestMove;
+    }
+  }
+
+  const alignment = [];
+  let i = rows;
+  let j = cols;
+  while (i > 0 || j > 0) {
+    const move = moves[i][j];
+    if ((move === "match" || move === "substitute") && i > 0 && j > 0) {
+      alignment.push({
+        type: move,
+        expected: expected[i - 1],
+        actual: actual[j - 1],
+      });
+      i -= 1;
+      j -= 1;
+      continue;
+    }
+    if (move === "delete" && i > 0) {
+      alignment.push({
+        type: "delete",
+        expected: expected[i - 1],
+        actual: "",
+      });
+      i -= 1;
+      continue;
+    }
+    alignment.push({
+      type: "insert",
+      expected: "",
+      actual: actual[j - 1],
+    });
+    j -= 1;
+  }
+
+  return alignment.reverse();
+}
+
+function isSubmittedConfusionPair(expected, actual) {
+  const expectedToken = normalizeConfusionToken(expected);
+  const actualToken = normalizeConfusionToken(actual);
+  if (!expectedToken || !actualToken || expectedToken === actualToken) return false;
+
+  const expectedPhoneme = inferPhonemeFromGrapheme(expectedToken, "all");
+  const actualPhoneme = inferPhonemeFromGrapheme(actualToken, "all");
+  const expectedAlternatives = expectedPhoneme
+    ? getPhonemeAlternativeOptions(expectedToken, expectedPhoneme, ["core", "all"])
+    : [];
+  const actualAlternatives = actualPhoneme
+    ? getPhonemeAlternativeOptions(actualToken, actualPhoneme, ["core", "all"])
+    : [];
+
+  return expectedAlternatives.includes(actualToken) || actualAlternatives.includes(expectedToken);
+}
+
+function buildConfusionByExpected(attempts, resolvedWordMap = null) {
+  const pairByKey = new Map();
+
+  for (const attempt of attempts || []) {
+    const targetParts = getAttemptTargetGraphemes(attempt, resolvedWordMap);
+    const typedParts = getAttemptTypedGraphemes(attempt, resolvedWordMap);
+    if (!targetParts.length || !typedParts.length) continue;
+
+    const alignment = alignGraphemeSequences(targetParts, typedParts);
+    const seenPairs = new Set();
+
+    for (const item of alignment) {
+      if (item?.type !== "substitute") continue;
+      const expected = normalizeConfusionToken(item?.expected);
+      const actual = normalizeConfusionToken(item?.actual);
+      if (!expected || !actual || expected === actual) continue;
+      if (!isSubmittedConfusionPair(expected, actual)) continue;
+
+      const key = `${expected}::${actual}`;
+      const next = pairByKey.get(key) || {
+        expected,
+        actual,
+        attemptCount: 0,
+        substitutionCount: 0,
+      };
+      next.substitutionCount += 1;
+      if (!seenPairs.has(key)) {
+        next.attemptCount += 1;
+        seenPairs.add(key);
+      }
+      pairByKey.set(key, next);
+    }
+  }
+
+  const bestByExpected = new Map();
+  for (const entry of pairByKey.values()) {
+    const current = bestByExpected.get(entry.expected);
+    if (!current
+      || entry.attemptCount > current.attemptCount
+      || (entry.attemptCount === current.attemptCount && entry.substitutionCount > current.substitutionCount)
+      || (
+        entry.attemptCount === current.attemptCount
+        && entry.substitutionCount === current.substitutionCount
+        && entry.actual.localeCompare(current.actual) < 0
+      )) {
+      bestByExpected.set(entry.expected, entry);
+    }
+  }
+
+  return bestByExpected;
+}
+
+function getAttemptWordText(attempt) {
+  return normalizeWord(attempt?.word_text || attempt?.word || "");
+}
+
+function getAttemptCorrectValue(attempt) {
+  const value = attempt?.correct ?? attempt?.is_correct;
+  if (typeof value === "boolean") return value;
+  const clean = String(value ?? "").trim().toLowerCase();
+  if (clean === "true" || clean === "1" || clean === "yes") return true;
+  return false;
+}
+
+function getAttemptNumberValue(attempt) {
+  const value = Number(attempt?.attempt_number ?? attempt?.attempt_no ?? 1);
+  return Number.isFinite(value) ? Math.max(1, value) : 1;
+}
+
+function getAttemptSeenAt(attempt) {
+  const seenAt = new Date(attempt?.created_at || 0).getTime();
+  return Number.isFinite(seenAt) ? seenAt : 0;
+}
+
+function getAssignmentTargetRowPupilId(row) {
+  return String(row?.pupil_id || row?.pupilId || "").trim();
+}
+
+function getJoinedAssignmentTargetWordRow(row) {
+  const joined = row?.test_words
+    || row?.testWords
+    || row?.test_word
+    || row?.testWord
+    || null;
+  if (Array.isArray(joined)) return joined[0] || null;
+  return joined && typeof joined === "object" ? joined : null;
+}
+
+function getAssignmentTargetRowWordText(row) {
+  const direct = normalizeWord(row?.word_text || row?.word || "");
+  if (direct) return direct;
+  const wordRow = getJoinedAssignmentTargetWordRow(row);
+  return normalizeWord(wordRow?.word || wordRow?.word_text || "");
+}
+
+function getAssignmentTargetAssignedAt(row) {
+  const assignedAt = new Date(
+    row?.created_at
+    || row?.createdAt
+    || row?.assignment_created_at
+    || row?.assignmentCreatedAt
+    || 0
+  ).getTime();
+  return Number.isFinite(assignedAt) ? assignedAt : 0;
+}
+
+function buildDefaultUsageMeta(word = "") {
+  return {
+    word,
+    count: 0,
+    assignedCount: 0,
+    correctCount: 0,
+    incorrectCount: 0,
+    lastSeenAt: 0,
+    lastAttemptAt: 0,
+    lastAssignedAt: 0,
+    lastCorrectAt: 0,
+    lastIncorrectAt: 0,
+    latestCorrect: null,
+    latestAttemptNumber: 0,
+    recentlySeen: false,
+    recentlyAssigned: false,
+    recentlySecure: false,
+    reviewDue: false,
+  };
+}
+
+function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
+  const usage = new Map();
+  const events = [];
+
+  for (const attempt of attempts || []) {
+    const word = getAttemptWordText(attempt);
+    if (!word) continue;
+    const current = usage.get(word) || buildDefaultUsageMeta(word);
+    const correct = getAttemptCorrectValue(attempt);
+    const attemptNumber = getAttemptNumberValue(attempt);
+    const seenAt = getAttemptSeenAt(attempt);
+
+    current.count += 1;
+    current.lastAttemptAt = Math.max(current.lastAttemptAt, seenAt);
+    if (correct) {
+      current.correctCount += 1;
+      current.lastCorrectAt = Math.max(current.lastCorrectAt, seenAt);
+    } else {
+      current.incorrectCount += 1;
+      current.lastIncorrectAt = Math.max(current.lastIncorrectAt, seenAt);
+    }
+    if (seenAt >= current.lastSeenAt) {
+      current.lastSeenAt = seenAt;
+      current.latestCorrect = correct;
+      current.latestAttemptNumber = attemptNumber;
+    }
+    usage.set(word, current);
+    events.push({ word, seenAt });
+  }
+
+  for (const row of assignmentTargetRows || []) {
+    const word = getAssignmentTargetRowWordText(row);
+    if (!word) continue;
+    const assignedAt = getAssignmentTargetAssignedAt(row);
+    if (!assignedAt) continue;
+    const current = usage.get(word) || buildDefaultUsageMeta(word);
+    current.assignedCount += 1;
+    current.lastAssignedAt = Math.max(current.lastAssignedAt, assignedAt);
+    if (assignedAt > current.lastSeenAt) {
+      current.lastSeenAt = assignedAt;
+    }
+    usage.set(word, current);
+    events.push({ word, seenAt: assignedAt });
+  }
+
+  const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
+  const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - USAGE_RECENT_WINDOW_MS : 0;
+
+  for (const current of usage.values()) {
+    const assignmentIsLatest = current.assignedCount > 0 && current.lastAssignedAt >= current.lastSeenAt;
+    current.recentlyAssigned = current.lastAssignedAt > 0 && current.lastAssignedAt >= recentCutoff;
+    current.recentlySeen = current.lastSeenAt > 0 && current.lastSeenAt >= recentCutoff;
+    current.recentlySecure = current.recentlySeen
+      && !assignmentIsLatest
+      && current.latestCorrect === true
+      && current.latestAttemptNumber <= 1
+      && current.incorrectCount === 0;
+    current.reviewDue = current.assignedCount > 0
+      ? current.count > 0 && current.lastAttemptAt > 0 && current.lastAttemptAt < recentCutoff
+      : current.count > 0 && current.lastSeenAt > 0 && !current.recentlySeen;
+  }
+
+  return usage;
+}
+
+export function buildAutoAssignmentComposition(totalWords = ASSIGNMENT_ENGINE_DEFAULT_LENGTH) {
+  const counts = buildLargestRemainderCounts(totalWords);
+  return {
+    totalWords: counts.review + counts.target + counts.stretch,
+    review: counts.review,
+    target: counts.target,
+    stretch: counts.stretch,
+  };
+}
+
+export function isAssignmentEngineWordRow(wordRow) {
+  return normalizeMetadataKey(wordRow?.choice?.source) === ASSIGNMENT_ENGINE_WORD_SOURCE;
+}
+
+export function isFullyGeneratedAssignmentWordRows(wordRows) {
+  const rows = Array.isArray(wordRows) ? wordRows.filter(Boolean) : [];
+  return rows.length > 0 && rows.every(isAssignmentEngineWordRow);
+}
+
+function resolveStoredFocusGrapheme(wordRow) {
+  const explicit = normalizeFocusList(wordRow?.choice?.focus_graphemes);
+  if (explicit[0]) return explicit[0];
+  const segments = normalizeSegments(wordRow?.word || "", wordRow?.segments);
+  return normalizeToken(chooseBestFocusGrapheme(segments));
+}
+
+function getLibraryCandidateOriginSource(wordRow, choice) {
+  const source = normalizeMetadataKey(choice?.source || "");
+  if (source === APPROVED_TARGET_WORDLOOM_CORE_SOURCE) return APPROVED_TARGET_WORDLOOM_CORE_SOURCE;
+  return "library";
+}
+
+function getOriginBankWordId(wordRow, choice) {
+  return String(
+    choice?.origin_bank_word_id
+    || choice?.originBankWordId
+    || choice?.bank_word_id
+    || choice?.bankWordId
+    || wordRow?.origin_bank_word_id
+    || wordRow?.originBankWordId
+    || ""
+  ).trim() || null;
+}
+
+function getCandidateContextSupport(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const context = choice?.context_support || choice?.contextSupport || candidate?.contextSupport || candidate?.context_support || {};
+  return context && typeof context === "object" && !Array.isArray(context) ? context : {};
+}
+
+function getCandidateMeaning(candidate = {}) {
+  const context = getCandidateContextSupport(candidate);
+  return String(
+    candidate?.meaning
+    || candidate?.definition
+    || context?.meaning
+    || context?.definition
+    || ""
+  ).trim() || null;
+}
+
+function buildLibraryCandidate(wordRow) {
+  const word = normalizeWord(wordRow?.word || "");
+  if (!word) return null;
+  const segments = normalizeSegments(word, wordRow?.segments);
+  if (!segments.length) return null;
+  const rawChoice = wordRow?.choice && typeof wordRow.choice === "object" ? wordRow.choice : {};
+  const originWordSource = getLibraryCandidateOriginSource(wordRow, rawChoice);
+  const originBankWordId = originWordSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? (getOriginBankWordId(wordRow, rawChoice) || String(wordRow?.id || "").trim() || null)
+    : getOriginBankWordId(wordRow, rawChoice);
+
+  return {
+    word,
+    sentence: String(wordRow?.sentence || "").trim() || null,
+    meaning: getCandidateMeaning({ ...wordRow, rawChoice }),
+    contextSupport: getCandidateContextSupport({ ...wordRow, rawChoice }),
+    segments,
+    focusGraphemes: normalizeFocusList([
+      ...(Array.isArray(rawChoice?.focus_graphemes) ? rawChoice.focus_graphemes : []),
+      resolveStoredFocusGrapheme(wordRow),
+    ]),
+    focusTargetLinks: getWordloomCoreTargetLinks({ rawChoice }),
+    originTestWordId: originWordSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+      ? null
+      : (String(wordRow?.id || "") || null),
+    originBankWordId,
+    originWordSource,
+    difficulty: getSelectorDifficulty({
+      word,
+      segments,
+      rawChoice,
+      difficulty: getStoredDifficultyModelForWord(wordRow),
+    }),
+    rawChoice,
+  };
+}
+
+function buildAttemptHistoryCandidate(attempt, resolvedWordMap = null) {
+  const word = normalizeWord(attempt?.word_text || "");
+  if (!word) return null;
+  const segments = normalizeSegments(word, attempt?.target_graphemes, resolvedWordMap);
+  if (!segments.length) return null;
+  const focus = analyticsTargetForAttempt(attempt, resolvedWordMap);
+
+  return {
+    word,
+    sentence: null,
+    segments,
+    focusGraphemes: normalizeFocusList([focus, chooseBestFocusGrapheme(segments)]),
+    originTestWordId: null,
+    originWordSource: "attempt_history",
+    difficulty: buildPersistedDifficultyPayload({
+      word,
+      graphemes: segments,
+      trickyWord: false,
+    }),
+    rawChoice: {},
+  };
+}
+
+function mergeCandidates(existing, candidate) {
+  if (!existing) return candidate;
+  const existingPriority = getSelectorSourcePriority(getCandidateSelectionSource(existing));
+  const candidatePriority = getSelectorSourcePriority(getCandidateSelectionSource(candidate));
+  const preferred = candidatePriority < existingPriority ? candidate : existing;
+  const secondary = preferred === existing ? candidate : existing;
+
+  return {
+    ...preferred,
+    sentence: preferred.sentence || secondary.sentence || null,
+    meaning: preferred.meaning || secondary.meaning || null,
+    contextSupport: {
+      ...(secondary.contextSupport || {}),
+      ...(preferred.contextSupport || {}),
+    },
+    segments: preferred.segments?.length ? preferred.segments : secondary.segments,
+    focusGraphemes: normalizeFocusList([
+      ...(preferred.focusGraphemes || []),
+      ...(secondary.focusGraphemes || []),
+    ]),
+    focusTargetLinks: [
+      ...(preferred.focusTargetLinks || []),
+      ...(secondary.focusTargetLinks || []),
+    ],
+    originTestWordId: preferred.originTestWordId || secondary.originTestWordId || null,
+    originBankWordId: preferred.originBankWordId || secondary.originBankWordId || null,
+    difficulty: preferred.difficulty || secondary.difficulty || null,
+    rawChoice: {
+      ...(secondary.rawChoice || {}),
+      ...(preferred.rawChoice || {}),
+    },
+  };
+}
+
+function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null, assignmentTargetRows = [] }) {
+  const pool = new Map();
+
+  for (const test of teacherTests || []) {
+    for (const wordRow of Array.isArray(test?.test_words) ? test.test_words : []) {
+      if (isAssignmentEngineWordRow(wordRow)) continue;
+      const candidate = buildLibraryCandidate(wordRow);
+      if (!candidate) continue;
+      pool.set(candidate.word, mergeCandidates(pool.get(candidate.word), candidate));
+    }
+  }
+
+  for (const attempt of attempts || []) {
+    const candidate = buildAttemptHistoryCandidate(attempt, resolvedWordMap);
+    if (!candidate) continue;
+    pool.set(candidate.word, mergeCandidates(pool.get(candidate.word), candidate));
+  }
+
+  return {
+    candidates: Array.from(pool.values()),
+    usageByWord: buildWordUsageStats(attempts, { assignmentTargetRows }),
+  };
+}
+
+function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null) {
+  const statsByTarget = new Map();
+  const attemptsByTarget = new Map();
+
+  for (const attempt of allAttempts || []) {
+    const target = analyticsTargetForAttempt(attempt, resolvedWordMap);
+    if (!target || target === "general") continue;
+    const next = attemptsByTarget.get(target) || [];
+    next.push(attempt);
+    attemptsByTarget.set(target, next);
+  }
+
+  for (const attempt of latestAttempts || []) {
+    const target = analyticsTargetForAttempt(attempt, resolvedWordMap);
+    if (!target || target === "general") continue;
+
+    const current = statsByTarget.get(target) || {
+      target,
+      total: 0,
+      correct: 0,
+      incorrect: 0,
+      attemptTotal: 0,
+      firstTrySuccessCount: 0,
+      lastSeenAt: 0,
+    };
+
+    current.total += 1;
+    if (attempt?.correct) current.correct += 1;
+    else current.incorrect += 1;
+    current.attemptTotal += Math.max(1, Number(attempt?.attempt_number || 1));
+    if (attempt?.correct && Math.max(1, Number(attempt?.attempt_number || 1)) === 1) {
+      current.firstTrySuccessCount += 1;
+    }
+    const seenAt = new Date(attempt?.created_at || 0).getTime();
+    if (Number.isFinite(seenAt)) current.lastSeenAt = Math.max(current.lastSeenAt, seenAt);
+    statsByTarget.set(target, current);
+  }
+
+  return Array.from(statsByTarget.values())
+    .map((item) => {
+      const history = attemptsByTarget.get(item.target) || [];
+      const recentHistory = [...history]
+        .sort((a, b) => new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime())
+        .slice(0, 4);
+      const accuracy = item.total ? item.correct / item.total : 0;
+      const averageAttempts = item.total ? item.attemptTotal / item.total : 0;
+      const firstTrySuccessRate = item.total ? item.firstTrySuccessCount / item.total : 0;
+      const securityBand = getSecurityBand({
+        total: item.total,
+        accuracy,
+        firstTrySuccessRate,
+      });
+      const recentIncorrectCount = recentHistory.filter((attempt) => !attempt?.correct).length;
+      const repeatedFailure = item.total >= 2
+        && firstTrySuccessRate < 0.5
+        && (averageAttempts > 2 || recentIncorrectCount >= 2);
+
+      return {
+        ...item,
+        accuracy,
+        averageAttempts,
+        firstTrySuccessRate,
+        securityBand,
+        recentIncorrectCount,
+        repeatedFailure,
+      };
+    })
+    .sort((a, b) => {
+      const bandRank = (band) => (band === "insecure" ? 0 : band === "nearly_secure" ? 1 : 2);
+      if (bandRank(a.securityBand) !== bandRank(b.securityBand)) {
+        return bandRank(a.securityBand) - bandRank(b.securityBand);
+      }
+      if (a.accuracy !== b.accuracy) return a.accuracy - b.accuracy;
+      if (b.averageAttempts !== a.averageAttempts) return b.averageAttempts - a.averageAttempts;
+      if (b.total !== a.total) return b.total - a.total;
+      return a.target.localeCompare(b.target);
+    });
+}
+
+export function buildProfileFromAttempts(attempts, resolvedWordMap = null) {
+  const ordered = [...(Array.isArray(attempts) ? attempts : [])]
+    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+  const latestByIdentity = new Map();
+
+  for (const attempt of ordered) {
+    const key = getAttemptIdentity(attempt);
+    if (!key) continue;
+    latestByIdentity.set(key, attempt);
+  }
+
+  const latestAttempts = Array.from(latestByIdentity.values());
+  const graphemeRows = buildGraphemeStats(latestAttempts, ordered, resolvedWordMap);
+  const confusionByTarget = buildConfusionByExpected(ordered, resolvedWordMap);
+
+  return {
+    totalEvidence: latestAttempts.length,
+    graphemeRows,
+    concernRows: graphemeRows.filter((item) => item.securityBand !== "secure"),
+    secureRows: graphemeRows.filter((item) => item.securityBand === "secure"),
+    developingRows: graphemeRows.filter((item) => item.securityBand === "nearly_secure"),
+    confusionByTarget,
+  };
+}
+
+function getPrimaryTarget(profile, fallbackProfile) {
+  const topPupilConcern = profile?.concernRows?.[0] || null;
+  if (topPupilConcern && Number(topPupilConcern.total || 0) >= 2) return topPupilConcern;
+  return fallbackProfile?.concernRows?.[0] || topPupilConcern || null;
+}
+
+function getUniqueTargetList(rows, exclude = []) {
+  const blocked = new Set((Array.isArray(exclude) ? exclude : []).map((item) => normalizeToken(item)).filter(Boolean));
+  return (Array.isArray(rows) ? rows : [])
+    .map((item) => normalizeToken(item?.target))
+    .filter((item) => item && !blocked.has(item))
+    .filter((item, index, list) => list.indexOf(item) === index);
+}
+
+function getCandidateCoverage(candidate, grapheme) {
+  const target = normalizeToken(grapheme);
+  if (!target) return 0;
+  if ((candidate?.focusGraphemes || []).includes(target)) return 2;
+  if ((candidate?.segments || []).includes(target)) return 1;
+  return 0;
+}
+
+function getCandidateChoice(candidate = {}) {
+  const choice = candidate?.rawChoice || candidate?.choice || {};
+  return choice && typeof choice === "object" && !Array.isArray(choice) ? choice : {};
+}
+
+function getCandidateSelectionSource(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  return normalizeMetadataKey(
+    candidate?.selectionSource
+    || candidate?.selection_source
+    || choice?.selection_source
+    || choice?.source
+    || ""
+  );
+}
+
+function isApprovedTargetSelectionSource(source = "") {
+  return source === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    || source === APPROVED_TARGET_TEACHER_SOURCE;
+}
+
+function getSelectorSourcePriority(source = "") {
+  const cleanSource = normalizeMetadataKey(source);
+  return Object.prototype.hasOwnProperty.call(APPROVED_TARGET_SOURCE_PRIORITIES, cleanSource)
+    ? APPROVED_TARGET_SOURCE_PRIORITIES[cleanSource]
+    : 99;
+}
+
+function getCandidateDifficultyScore(candidate) {
+  const score = Number(candidate?.difficulty?.coreScore ?? candidate?.difficulty?.score ?? 0);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function getSelectorDifficulty(candidate) {
+  const choiceDifficulty = getCandidateChoice(candidate)?.difficulty;
+  const choiceCoreScore = Number(choiceDifficulty?.coreScore ?? choiceDifficulty?.score);
+  if (Number.isFinite(choiceCoreScore)) {
+    const cachedDifficulty = candidate?.difficulty && typeof candidate.difficulty === "object"
+      ? candidate.difficulty
+      : {};
+    return {
+      ...cachedDifficulty,
+      ...(choiceDifficulty || {}),
+      coreScore: choiceCoreScore,
+      score: Number.isFinite(Number(choiceDifficulty?.score)) ? Number(choiceDifficulty.score) : choiceCoreScore,
+    };
+  }
+  if (candidate?.difficulty && typeof candidate.difficulty === "object") return candidate.difficulty;
+  return getStoredDifficultyModelForWord({
+    word: candidate?.word || "",
+    segments: Array.isArray(candidate?.segments) ? candidate.segments : [],
+    choice: getCandidateChoice(candidate),
+  });
+}
+
+function getCandidateSuitability(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const source = getCandidateSelectionSource(candidate);
+
+  const explicitActive = choice?.is_active ?? choice?.isActive ?? candidate?.is_active ?? candidate?.isActive;
+  if (explicitActive === false) return "exclude";
+
+  const approval = normalizeMetadataKey(
+    choice?.approval_status
+    || choice?.approvalStatus
+    || candidate?.approval_status
+    || candidate?.approvalStatus
+    || ""
+  );
+  if (approval && approval !== "approved") return "exclude";
+
+  const value = normalizeMetadataKey(
+    choice?.selection_suitability
+    || choice?.selectionSuitability
+    || choice?.suitability_status
+    || choice?.suitabilityStatus
+    || choice?.suitability
+    || candidate?.selection_suitability
+    || candidate?.selectionSuitability
+    || candidate?.suitability_status
+    || candidate?.suitabilityStatus
+    || ""
+  );
+  if (value === "exclude" || value === "caution" || value === "blocked" || value === "unsuitable") return value;
+  if (value === "standard" || value === "suitable") return "standard";
+  return source === APPROVED_TARGET_TEACHER_SOURCE ? "standard" : "";
+}
+
+function isGeneratedAssignmentCandidateUsable(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const source = getCandidateSelectionSource(candidate);
+  if (source === ASSIGNMENT_ENGINE_WORD_SOURCE) return false;
+
+  const explicitActive = choice?.is_active ?? choice?.isActive ?? candidate?.is_active ?? candidate?.isActive;
+  if (explicitActive === false) return false;
+
+  const approval = normalizeMetadataKey(
+    choice?.approval_status
+    || choice?.approvalStatus
+    || candidate?.approval_status
+    || candidate?.approvalStatus
+    || ""
+  );
+  if (approval && approval !== "approved") return false;
+
+  const suitability = normalizeMetadataKey(
+    choice?.selection_suitability
+    || choice?.selectionSuitability
+    || choice?.suitability_status
+    || choice?.suitabilityStatus
+    || choice?.suitability
+    || candidate?.selection_suitability
+    || candidate?.selectionSuitability
+    || candidate?.suitability_status
+    || candidate?.suitabilityStatus
+    || ""
+  );
+  return suitability !== "exclude"
+    && suitability !== "caution"
+    && suitability !== "blocked"
+    && suitability !== "unsuitable";
+}
+
+function getSelectorDifficultyBandKey(difficulty = {}) {
+  return normalizeMetadataKey(
+    difficulty?.band?.key
+    || difficulty?.band
+    || difficulty?.coreBand?.key
+    || difficulty?.coreBand
+    || ""
+  );
+}
+
+function difficultyBandKeyForScore(score) {
+  const value = Number(score);
+  if (!Number.isFinite(value)) return "unknown";
+  if (value <= 35) return "easier";
+  if (value <= 55) return "core";
+  if (value <= 70) return "stretch";
+  return "challenge";
+}
+
+function getCandidateDifficultyBandKey(candidate = {}) {
+  return getSelectorDifficultyBandKey(candidate?.difficulty || {})
+    || difficultyBandKeyForScore(getCandidateDifficultyScore(candidate));
+}
+
+function resolveSelectorChallengeWindow(challengeLevel = "") {
+  const key = normalizeMetadataKey(challengeLevel);
+  return {
+    key: APPROVED_TARGET_CHALLENGE_WINDOWS[key] ? key : APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+    ...(APPROVED_TARGET_CHALLENGE_WINDOWS[key] || APPROVED_TARGET_CHALLENGE_WINDOWS[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL]),
+  };
+}
+
+function resolveProfileChallengeLevel(profile = null) {
+  const meta = profile?.placementMeta || {};
+  const explicit = normalizeMetadataKey(
+    profile?.selectorChallengeLevel
+    || profile?.challengeLevel
+    || meta.selectorChallengeLevel
+    || meta.targetChallengeLevel
+    || meta.baselinePlacement
+    || meta.headlinePlacement
+    || ""
+  );
+  if (APPROVED_TARGET_CHALLENGE_WINDOWS[explicit]) return explicit;
+
+  const provisional = normalizeMetadataKey(meta.provisionalPlacementBand || "");
+  if (provisional === "foundation") return "needs_support";
+  if (provisional === "extension") return "early_stretch";
+  if (provisional === "core") return "secure_expected";
+
+  return APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL;
+}
+
+function normalizeSelectorCandidate(candidate = {}, focusGrapheme = "") {
+  const word = normalizeWord(candidate?.word || "");
+  if (!word) return null;
+  const choice = getCandidateChoice(candidate);
+  const selectionSource = getCandidateSelectionSource(candidate);
+  if (!isApprovedTargetSelectionSource(selectionSource)) return null;
+
+  const segments = normalizeSegments(word, candidate?.segments);
+  const focus = normalizeToken(focusGrapheme);
+  if (!focus) return null;
+
+  const focusGraphemes = normalizeFocusList([
+    ...(Array.isArray(candidate?.focusGraphemes) ? candidate.focusGraphemes : []),
+    ...(Array.isArray(choice?.focus_graphemes) ? choice.focus_graphemes : []),
+    choice?.engine_focus_grapheme || choice?.engineFocusGrapheme || "",
+  ]);
+  const coreTargetLink = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? findWordloomCoreTargetLink(candidate, focus)
+    : null;
+  const focusMatch = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? !!coreTargetLink
+    : focusGraphemes.includes(focus);
+  const segmentMatch = selectionSource === APPROVED_TARGET_WORDLOOM_CORE_SOURCE
+    ? false
+    : segments.includes(focus);
+  if (!focusMatch && !segmentMatch) return null;
+
+  const suitability = getCandidateSuitability(candidate);
+  if (suitability !== "standard") return null;
+
+  const difficulty = getSelectorDifficulty({
+    ...candidate,
+    word,
+    segments,
+  });
+  const difficultyScore = Number(difficulty?.coreScore ?? difficulty?.score);
+  if (!Number.isFinite(difficultyScore)) return null;
+
+  return {
+    source: candidate,
+    word,
+    id: String(candidate?.id || candidate?.originTestWordId || "").trim(),
+    segments,
+    sentence: String(candidate?.sentence || "").trim(),
+    coverage: focusMatch ? 2 : 1,
+    selectionSource,
+    sourcePriority: getSelectorSourcePriority(selectionSource),
+    difficulty,
+    bandKey: getSelectorDifficultyBandKey(difficulty),
+    difficultyScore,
+  };
+}
+
+function getWordloomCoreTargetLinks(candidate = {}) {
+  const choice = getCandidateChoice(candidate);
+  const links = candidate?.focusTargetLinks
+    || candidate?.focus_target_links
+    || candidate?.wordTargetLinks
+    || candidate?.word_target_links
+    || choice?.focus_target_links
+    || choice?.word_target_links
+    || [];
+  return (Array.isArray(links) ? links : [])
+    .map((item) => ({
+      focusGrapheme: normalizeToken(item?.focusGrapheme || item?.focus_grapheme || item?.target || ""),
+      targetRole: normalizeMetadataKey(item?.targetRole || item?.target_role || item?.role || ""),
+    }))
+    .filter((item) => item.focusGrapheme && (item.targetRole === "primary" || item.targetRole === "secondary"));
+}
+
+function findWordloomCoreTargetLink(candidate = {}, focus = "") {
+  const cleanFocus = normalizeToken(focus);
+  if (!cleanFocus) return null;
+  return getWordloomCoreTargetLinks(candidate)
+    .find((item) => item.focusGrapheme === cleanFocus) || null;
+}
+
+function buildSelectorWindow(window, { widened = false } = {}) {
+  if (!widened) {
+    return {
+      min: window.min,
+      max: Math.min(window.max, window.hardMax),
+      center: window.center,
+      hardMax: window.hardMax,
+      widened: false,
+    };
+  }
+  return {
+    min: Math.max(0, window.min - APPROVED_TARGET_WIDENING_DELTA),
+    max: Math.min(window.hardMax, window.max + APPROVED_TARGET_WIDENING_DELTA),
+    center: window.center,
+    hardMax: window.hardMax,
+    widened: true,
+  };
+}
+
+function isWithinSelectorWindow(candidate, window) {
+  const score = Number(candidate?.difficultyScore);
+  return Number.isFinite(score)
+    && score >= window.min
+    && score <= window.max
+    && score <= window.hardMax;
+}
+
+function rankApprovedTargetCandidates(items, {
+  center = 50,
+  idealWords = new Set(),
+  usageByWord = new Map(),
+} = {}) {
+  return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
+    if (b.coverage !== a.coverage) return b.coverage - a.coverage;
+
+    const usageA = getUsageMeta(a, usageByWord);
+    const usageB = getUsageMeta(b, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "target");
+    if (usageDiff) return usageDiff;
+
+    const sourcePriorityA = Number(a.sourcePriority ?? getSelectorSourcePriority(a.selectionSource));
+    const sourcePriorityB = Number(b.sourcePriority ?? getSelectorSourcePriority(b.selectionSource));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    const distanceA = Math.abs(Number(a.difficultyScore || 0) - center);
+    const distanceB = Math.abs(Number(b.difficultyScore || 0) - center);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+
+    const aIdeal = idealWords.has(a.word);
+    const bIdeal = idealWords.has(b.word);
+    if (Number(bIdeal) !== Number(aIdeal)) return Number(bIdeal) - Number(aIdeal);
+
+    const sentenceDiff = Number(!!b.sentence) - Number(!!a.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = a.word.localeCompare(b.word);
+    if (wordDiff) return wordDiff;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+}
+
+function uniqueSelectorSources(rankedItems, count) {
+  const selected = [];
+  const seenWords = new Set();
+  for (const item of rankedItems || []) {
+    if (!item?.source || seenWords.has(item.word)) continue;
+    selected.push(item.source);
+    seenWords.add(item.word);
+    if (selected.length >= count) break;
+  }
+  return selected;
+}
+
+export function selectApprovedTargetWords({
+  focusGrapheme = "",
+  candidates = [],
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  count = 1,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+} = {}) {
+  const focus = normalizeToken(focusGrapheme);
+  const safeCount = Math.max(1, Number(count) || 1);
+  const blockedWords = new Set(
+    usedWords instanceof Set
+      ? Array.from(usedWords).map((item) => normalizeWord(item)).filter(Boolean)
+      : (Array.isArray(usedWords) ? usedWords.map((item) => normalizeWord(item)).filter(Boolean) : [])
+  );
+  const challengeWindow = resolveSelectorChallengeWindow(challengeLevel);
+  const idealWindow = buildSelectorWindow(challengeWindow);
+  const widenedWindow = buildSelectorWindow(challengeWindow, { widened: true });
+
+  const eligible = (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => normalizeSelectorCandidate(candidate, focus))
+    .filter(Boolean)
+    .filter((candidate) => !blockedWords.has(candidate.word))
+    .filter((candidate) => challengeWindow.key === "early_stretch" || candidate.bandKey !== "challenge")
+    .filter((candidate) => candidate.difficultyScore <= challengeWindow.hardMax);
+
+  const idealItems = eligible.filter((candidate) => isWithinSelectorWindow(candidate, idealWindow));
+  const idealWords = new Set(idealItems.map((candidate) => candidate.word));
+  const idealRanked = rankApprovedTargetCandidates(idealItems, {
+    center: challengeWindow.center,
+    idealWords,
+    usageByWord,
+  });
+  const idealSelected = uniqueSelectorSources(idealRanked, safeCount);
+  if (idealSelected.length >= safeCount) {
+    return {
+      status: APPROVED_TARGET_SELECTOR_STATUS_READY,
+      focusGrapheme: focus,
+      challengeLevel: challengeWindow.key,
+      words: idealSelected,
+      window: idealWindow,
+      widened: false,
+    };
+  }
+
+  const widenedItems = eligible.filter((candidate) => isWithinSelectorWindow(candidate, widenedWindow));
+  const widenedRanked = rankApprovedTargetCandidates(widenedItems, {
+    center: challengeWindow.center,
+    idealWords,
+    usageByWord,
+  });
+  const widenedSelected = uniqueSelectorSources(widenedRanked, safeCount);
+  if (widenedSelected.length >= safeCount) {
+    return {
+      status: APPROVED_TARGET_SELECTOR_STATUS_READY,
+      focusGrapheme: focus,
+      challengeLevel: challengeWindow.key,
+      words: widenedSelected,
+      window: widenedWindow,
+      widened: true,
+    };
+  }
+
+  return {
+    status: APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS,
+    focusGrapheme: focus,
+    challengeLevel: challengeWindow.key,
+    words: [],
+    availableCount: widenedSelected.length,
+    window: widenedWindow,
+    widened: true,
+  };
+}
+
+function getUsageMeta(candidate, usageByWord) {
+  return usageByWord.get(normalizeWord(candidate?.word || "")) || buildDefaultUsageMeta(normalizeWord(candidate?.word || ""));
+}
+
+function getUsageSpacingTier(usage = {}) {
+  if (Number(usage?.incorrectCount || 0) > 0 || !!usage?.reviewDue) return 0;
+  if (!Number(usage?.count || 0) && !Number(usage?.assignedCount || 0)) return 1;
+  if (usage?.recentlySecure) return 3;
+  if (usage?.recentlySeen) return 2;
+  return 1;
+}
+
+function getUsageComparatorForRole(role = "target") {
+  if (role === "review") return compareUsageForReview;
+  if (role === "stretch") return compareUsageForStretch;
+  return compareUsageForTarget;
+}
+
+function compareUsageSpacingForRole(usageA, usageB, role = "target") {
+  const tierA = getUsageSpacingTier(usageA);
+  const tierB = getUsageSpacingTier(usageB);
+  if (tierA !== tierB) return tierA - tierB;
+  return getUsageComparatorForRole(role)(usageA, usageB);
+}
+
+function compareBooleanDesc(a, b) {
+  return Number(!!b) - Number(!!a);
+}
+
+function compareBooleanAsc(a, b) {
+  return Number(!!a) - Number(!!b);
+}
+
+function compareUsageAgeAndCount(usageA, usageB) {
+  if (usageA.count !== usageB.count) return usageA.count - usageB.count;
+  if (usageA.lastSeenAt !== usageB.lastSeenAt) return usageA.lastSeenAt - usageB.lastSeenAt;
+  return 0;
+}
+
+function compareUsageForTarget(usageA, usageB) {
+  if (usageA.incorrectCount !== usageB.incorrectCount) return usageB.incorrectCount - usageA.incorrectCount;
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  return compareUsageAgeAndCount(usageA, usageB);
+}
+
+function compareUsageForReview(usageA, usageB) {
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  if (usageA.incorrectCount !== usageB.incorrectCount) return usageB.incorrectCount - usageA.incorrectCount;
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  return compareUsageAgeAndCount(usageA, usageB);
+}
+
+function compareUsageForStretch(usageA, usageB) {
+  if (usageA.recentlySecure !== usageB.recentlySecure) return compareBooleanAsc(usageA.recentlySecure, usageB.recentlySecure);
+  if (usageA.recentlySeen !== usageB.recentlySeen) return compareBooleanAsc(usageA.recentlySeen, usageB.recentlySeen);
+  if (usageA.reviewDue !== usageB.reviewDue) return compareBooleanDesc(usageA.reviewDue, usageB.reviewDue);
+  return compareUsageAgeAndCount(usageA, usageB);
+}
+
+function sortCandidatesForRole(candidates, {
+  grapheme = "",
+  role = "target",
+  usageByWord = new Map(),
+} = {}) {
+  const cleanGrapheme = normalizeToken(grapheme);
+  return [...(Array.isArray(candidates) ? candidates : [])].sort((a, b) => {
+    const coverageDiff = getCandidateCoverage(b, cleanGrapheme) - getCandidateCoverage(a, cleanGrapheme);
+    if (coverageDiff) return coverageDiff;
+
+    const usageA = getUsageMeta(a, usageByWord);
+    const usageB = getUsageMeta(b, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, role);
+    if (usageDiff) return usageDiff;
+
+    const sourcePriorityA = getSelectorSourcePriority(getCandidateSelectionSource(a));
+    const sourcePriorityB = getSelectorSourcePriority(getCandidateSelectionSource(b));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    if (role === "review") {
+      if (getCandidateDifficultyScore(a) !== getCandidateDifficultyScore(b)) {
+        return getCandidateDifficultyScore(a) - getCandidateDifficultyScore(b);
+      }
+    } else if (role === "stretch") {
+      if (getCandidateDifficultyScore(b) !== getCandidateDifficultyScore(a)) {
+        return getCandidateDifficultyScore(b) - getCandidateDifficultyScore(a);
+      }
+    } else {
+      const distanceA = Math.abs(getCandidateDifficultyScore(a) - 50);
+      const distanceB = Math.abs(getCandidateDifficultyScore(b) - 50);
+      if (distanceA !== distanceB) return distanceA - distanceB;
+    }
+
+    const sentenceDiff = Number(!!b?.sentence) - Number(!!a?.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    return String(a?.word || "").localeCompare(String(b?.word || ""));
+  });
+}
+
+function filterCandidatesForGrapheme(candidates, grapheme, usedWords) {
+  const cleanGrapheme = normalizeToken(grapheme);
+  return (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => !usedWords.has(candidate.word))
+    .filter((candidate) => getCandidateCoverage(candidate, cleanGrapheme) > 0);
+}
+
+function pickCandidatesByGraphemeOrder({
+  count,
+  graphemeOrder,
+  role,
+  candidates,
+  usageByWord,
+  usedWords,
+  fallbackFilter = null,
+}) {
+  const selected = [];
+  const order = Array.isArray(graphemeOrder) ? graphemeOrder.filter(Boolean) : [];
+
+  for (let pass = 0; pass < Math.max(1, count * 2) && selected.length < count; pass += 1) {
+    let addedOnPass = false;
+    for (const grapheme of order) {
+      const next = sortCandidatesForRole(
+        filterCandidatesForGrapheme(candidates, grapheme, usedWords),
+        { grapheme, role, usageByWord }
+      )[0];
+      if (!next) continue;
+      usedWords.add(next.word);
+      selected.push(next);
+      addedOnPass = true;
+      if (selected.length >= count) break;
+    }
+    if (!addedOnPass) break;
+  }
+
+  if (selected.length >= count) return selected;
+
+  const fallback = sortCandidatesForRole(
+    (Array.isArray(candidates) ? candidates : [])
+      .filter((candidate) => !usedWords.has(candidate.word))
+      .filter((candidate) => (typeof fallbackFilter === "function" ? fallbackFilter(candidate) : true)),
+    { grapheme: order[0] || "", role, usageByWord }
+  );
+
+  for (const candidate of fallback) {
+    usedWords.add(candidate.word);
+    selected.push(candidate);
+    if (selected.length >= count) break;
+  }
+
+  return selected;
+}
+
+function pickApprovedTargetCandidatesByGraphemeOrder({
+  count,
+  graphemeOrder,
+  candidates,
+  challengeLevel,
+  usageByWord,
+  usedWords,
+}) {
+  const selected = [];
+  const order = Array.isArray(graphemeOrder) ? graphemeOrder.map((item) => normalizeToken(item)).filter(Boolean) : [];
+  if (!order.length || count <= 0) return selected;
+
+  for (let pass = 0; pass < Math.max(1, count * 2) && selected.length < count; pass += 1) {
+    let addedOnPass = false;
+    for (const grapheme of order) {
+      const result = selectApprovedTargetWords({
+        focusGrapheme: grapheme,
+        candidates,
+        challengeLevel,
+        count: 1,
+        usageByWord,
+        usedWords,
+      });
+      const next = result.status === APPROVED_TARGET_SELECTOR_STATUS_READY ? result.words[0] : null;
+      if (!next) continue;
+      usedWords.add(normalizeWord(next.word || ""));
+      selected.push(next);
+      addedOnPass = true;
+      if (selected.length >= count) break;
+    }
+    if (!addedOnPass) break;
+  }
+
+  return selected;
+}
+
+function averageCandidateDifficultyScore(candidates = []) {
+  const scores = (Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => getCandidateDifficultyScore(candidate))
+    .filter((score) => Number.isFinite(score) && score > 0);
+  return scores.length
+    ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+    : null;
+}
+
+function resolveStretchPolicy(band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const key = APPROVED_TARGET_CHALLENGE_WINDOWS[band] ? band : APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL;
+  return STRETCH_POLICY_BY_BAND[key] || STRETCH_POLICY_BY_BAND[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL];
+}
+
+function getCandidateSelectionCoverage(candidate, grapheme) {
+  const focus = normalizeToken(grapheme);
+  if (!focus) return 0;
+  if ((candidate?.focusTargetLinks || []).some((item) => item?.focusGrapheme === focus)) return 2;
+  return getCandidateCoverage(candidate, focus);
+}
+
+function getCandidateSelectionFocuses(candidate = {}) {
+  return normalizeFocusList([
+    ...(candidate?.focusTargetLinks || []).map((item) => item?.focusGrapheme || ""),
+    ...(Array.isArray(candidate?.focusGraphemes) ? candidate.focusGraphemes : []),
+    ...(Array.isArray(candidate?.segments) ? candidate.segments : []),
+  ]);
+}
+
+function getEvidenceTargetList(profile, fallbackProfile, keys = [], exclude = []) {
+  return getUniqueTargetList(
+    keys.flatMap((key) => getProfileRows(profile, fallbackProfile, key)),
+    exclude,
+  );
+}
+
+function getDiagnosticStretchTargets(profile, fallbackProfile, primaryTarget = "") {
+  return getEvidenceTargetList(profile, fallbackProfile, ["concernRows", "developingRows"], [primaryTarget]);
+}
+
+function getSoftConsolidationTargets(profile, fallbackProfile, primaryTarget = "") {
+  return getEvidenceTargetList(profile, fallbackProfile, ["secureRows", "developingRows", "concernRows"], [primaryTarget]);
+}
+
+function areRelatedGraphemes(source = "", target = "") {
+  const cleanSource = normalizeToken(source);
+  const cleanTarget = normalizeToken(target);
+  if (!cleanSource || !cleanTarget || cleanSource === cleanTarget) return false;
+  const sourcePhoneme = inferPhonemeFromGrapheme(cleanSource, "all");
+  const targetPhoneme = inferPhonemeFromGrapheme(cleanTarget, "all");
+  if (sourcePhoneme && targetPhoneme && sourcePhoneme === targetPhoneme) return true;
+  return getPhonemeAlternativeOptions(cleanSource, sourcePhoneme, ["core", "all"]).includes(cleanTarget)
+    || getPhonemeAlternativeOptions(cleanTarget, targetPhoneme, ["core", "all"]).includes(cleanSource);
+}
+
+function resolveReviewPolicy(band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const key = resolveSelectorChallengeWindow(band).key;
+  return REVIEW_POLICY_BY_BAND[key] || REVIEW_POLICY_BY_BAND[APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL];
+}
+
+function getReviewSourcePriority(source = "") {
+  const cleanSource = normalizeMetadataKey(source);
+  return Object.prototype.hasOwnProperty.call(REVIEW_SOURCE_PRIORITIES, cleanSource)
+    ? REVIEW_SOURCE_PRIORITIES[cleanSource]
+    : getSelectorSourcePriority(cleanSource);
+}
+
+function getRowsForTargetSet(profile, fallbackProfile, key, exclude = []) {
+  return new Set(getUniqueTargetList(getProfileRows(profile, fallbackProfile, key), exclude));
+}
+
+function getNearlySecureReviewTargets(profile, fallbackProfile, primaryTarget = "") {
+  const primary = normalizeToken(primaryTarget);
+  const rows = [
+    ...getProfileRows(profile, fallbackProfile, "developingRows"),
+    ...getProfileRows(profile, fallbackProfile, "concernRows")
+      .filter((row) => normalizeMetadataKey(row?.securityBand || row?.security_band || "") === "nearly_secure"),
+  ];
+  return new Set(getUniqueTargetList(rows, [primary]));
+}
+
+function getSecondaryWeakTargetList(profile, fallbackProfile, primaryTarget = "") {
+  const primary = normalizeToken(primaryTarget);
+  return getUniqueTargetList([
+    ...(profile?.concernRows || []),
+    ...((fallbackProfile?.concernRows || [])
+      .filter((item) => !profile?.concernRows?.some((own) => normalizeToken(own?.target) === normalizeToken(item?.target)))),
+  ], [primary]);
+}
+
+function getRelatedFamilyTargetsFromCandidates(candidates = [], primaryTarget = "", exclude = []) {
+  const primary = normalizeToken(primaryTarget);
+  const blocked = new Set((Array.isArray(exclude) ? exclude : []).map((item) => normalizeToken(item)).filter(Boolean));
+  const targets = [];
+  if (!primary) return targets;
+
+  for (const candidate of candidates || []) {
+    for (const focus of getCandidateSelectionFocuses(candidate)) {
+      if (!focus || blocked.has(focus) || !areRelatedGraphemes(primary, focus)) continue;
+      if (!targets.includes(focus)) targets.push(focus);
+    }
+  }
+
+  return targets;
+}
+
+function getTargetConsolidationFallbackList({
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  candidates = [],
+  exclude = [],
+} = {}) {
+  const primary = normalizeToken(primaryTarget);
+  const blocked = [primary, ...(Array.isArray(exclude) ? exclude : [])];
+  const developingTargets = getUniqueTargetList([
+    ...(profile?.developingRows || []),
+    ...((fallbackProfile?.developingRows || [])
+      .filter((item) => !profile?.developingRows?.some((own) => normalizeToken(own?.target) === normalizeToken(item?.target)))),
+  ], blocked);
+  const relatedTargets = getRelatedFamilyTargetsFromCandidates(candidates, primary, [...blocked, ...developingTargets]);
+  return [...developingTargets, ...relatedTargets];
+}
+
+function classifyReviewBasisForFocus(focus, {
+  usage = null,
+  nearlySecureTargets = new Set(),
+  secureTargets = new Set(),
+  primaryTarget = "",
+} = {}) {
+  if (Number(usage?.incorrectCount || 0) > 0 || usage?.reviewDue) return REVIEW_BASIS_PROTECTED_REVIEW;
+  if (nearlySecureTargets.has(focus)) return REVIEW_BASIS_NEARLY_SECURE_CONSOLIDATION;
+  if (secureTargets.has(focus)) return REVIEW_BASIS_SECURE_REVIEW;
+  if (areRelatedGraphemes(primaryTarget, focus)) return REVIEW_BASIS_RELATED_FAMILY_REVIEW;
+  return REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW;
+}
+
+function buildReviewCandidateRecords({
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  usageByWord = new Map(),
+} = {}) {
+  const primary = normalizeToken(primaryTarget);
+  const nearlySecureTargets = getNearlySecureReviewTargets(profile, fallbackProfile, primary);
+  const secureTargets = getRowsForTargetSet(profile, fallbackProfile, "secureRows", [primary]);
+  const records = [];
+  const seen = new Set();
+
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word || getCandidateCoverage(candidate, primary) > 0) continue;
+    const usage = getUsageMeta(candidate, usageByWord);
+    const focuses = getCandidateSelectionFocuses(candidate)
+      .filter((focus) => focus && focus !== primary);
+    const focusList = focuses.length
+      ? focuses
+      : [normalizeToken(chooseBestFocusGrapheme(candidate?.segments || []))].filter(Boolean);
+
+    for (const focus of focusList) {
+      const basis = classifyReviewBasisForFocus(focus, {
+        usage,
+        nearlySecureTargets,
+        secureTargets,
+        primaryTarget: primary,
+      });
+      const key = `${word}::${focus}::${basis}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage: getCandidateSelectionCoverage(candidate, focus) || getCandidateCoverage(candidate, focus),
+      });
+    }
+  }
+
+  return records;
+}
+
+function isReviewRecordAllowed(record = {}, {
+  policy = null,
+} = {}) {
+  if (!record?.candidate || !record.word) return false;
+  const score = getCandidateDifficultyScore(record.candidate);
+  if (!Number.isFinite(score) || score <= 0) return false;
+  const bandKey = getCandidateDifficultyBandKey(record.candidate);
+  const maxScore = record.basis === REVIEW_BASIS_LAST_RESORT_SAFE_REVIEW
+    ? Number(policy?.lastResortMaxScore ?? policy?.maxScore ?? 55)
+    : Number(policy?.maxScore ?? 70);
+  if (score > Math.min(Number(policy?.hardMax ?? maxScore), maxScore)) return false;
+  if (!policy?.allowChallengeBand && bandKey === "challenge") return false;
+  if (!policy?.allowStretchBand && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  return true;
+}
+
+function rankReviewCandidateRecords(records = [], {
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  usageByWord = new Map(),
+  basisRank = REVIEW_BASIS_RANK,
+  rankBasisBeforeUsage = false,
+} = {}) {
+  const policy = resolveReviewPolicy(challengeLevel);
+  return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
+    const aProtected = a.basis === REVIEW_BASIS_PROTECTED_REVIEW;
+    const bProtected = b.basis === REVIEW_BASIS_PROTECTED_REVIEW;
+    if (aProtected !== bProtected) return Number(bProtected) - Number(aProtected);
+
+    const basisDiff = (basisRank[a.basis] ?? 99) - (basisRank[b.basis] ?? 99);
+    if (rankBasisBeforeUsage && basisDiff) return basisDiff;
+
+    const usageA = getUsageMeta(a.candidate, usageByWord);
+    const usageB = getUsageMeta(b.candidate, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "review");
+    if (usageDiff) return usageDiff;
+
+    if (!rankBasisBeforeUsage && basisDiff) return basisDiff;
+
+    const coverageDiff = Number(b.coverage || 0) - Number(a.coverage || 0);
+    if (coverageDiff) return coverageDiff;
+
+    const sourcePriorityA = getReviewSourcePriority(getCandidateSelectionSource(a.candidate));
+    const sourcePriorityB = getReviewSourcePriority(getCandidateSelectionSource(b.candidate));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    const distanceA = Math.abs(getCandidateDifficultyScore(a.candidate) - policy.center);
+    const distanceB = Math.abs(getCandidateDifficultyScore(b.candidate) - policy.center);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+
+    const sentenceDiff = Number(!!b.candidate?.sentence) - Number(!!a.candidate?.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = String(a.word || "").localeCompare(String(b.word || ""));
+    if (wordDiff) return wordDiff;
+    return String(a.selectionFocusGrapheme || "").localeCompare(String(b.selectionFocusGrapheme || ""));
+  });
+}
+
+function pickReviewCandidateRecords({
+  count = 0,
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+  allowedBases = null,
+  basisRank = REVIEW_BASIS_RANK,
+  rankBasisBeforeUsage = false,
+} = {}) {
+  const safeCount = Math.max(0, Number(count || 0));
+  if (!safeCount) return [];
+  const policy = resolveReviewPolicy(challengeLevel);
+  const basisFilter = Array.isArray(allowedBases) && allowedBases.length
+    ? new Set(allowedBases)
+    : null;
+  const records = buildReviewCandidateRecords({
+    candidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    usageByWord,
+  })
+    .filter((record) => !basisFilter || basisFilter.has(record.basis))
+    .filter((record) => isReviewRecordAllowed(record, { policy }));
+  const ranked = rankReviewCandidateRecords(records, {
+    challengeLevel,
+    usageByWord,
+    basisRank,
+    rankBasisBeforeUsage,
+  });
+  const selected = [];
+  const selectedWords = new Set();
+
+  for (const record of ranked) {
+    if (selected.length >= safeCount) break;
+    if (usedWords.has(record.word) || selectedWords.has(record.word)) continue;
+    usedWords.add(record.word);
+    selectedWords.add(record.word);
+    selected.push(record);
+  }
+
+  return selected;
+}
+
+function buildExactFocusStretchRecords({ candidates = [], focusTargets = [], basis = "" } = {}) {
+  const records = [];
+  const seen = new Set();
+  for (const focusTarget of focusTargets || []) {
+    const focus = normalizeToken(focusTarget);
+    if (!focus) continue;
+    for (const candidate of candidates || []) {
+      const word = normalizeWord(candidate?.word || "");
+      const coverage = getCandidateSelectionCoverage(candidate, focus);
+      if (!word || coverage <= 0) continue;
+      const key = `${basis}::${word}::${focus}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage,
+      });
+    }
+  }
+  return records;
+}
+
+function buildRelatedFamilyStretchRecords({ candidates = [], primaryTarget = "" } = {}) {
+  const records = [];
+  const seen = new Set();
+  const primary = normalizeToken(primaryTarget);
+  if (!primary) return records;
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word) continue;
+    for (const focus of getCandidateSelectionFocuses(candidate)) {
+      if (!areRelatedGraphemes(primary, focus)) continue;
+      const key = `${word}::${focus}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push({
+        basis: STRETCH_BASIS_RELATED_FAMILY,
+        candidate,
+        word,
+        selectionFocusGrapheme: focus,
+        coverage: getCandidateSelectionCoverage(candidate, focus) || 1,
+      });
+    }
+  }
+  return records;
+}
+
+function buildUnlinkedFallbackStretchRecords({ candidates = [], linkedTargets = new Set() } = {}) {
+  const records = [];
+  for (const candidate of candidates || []) {
+    const word = normalizeWord(candidate?.word || "");
+    if (!word) continue;
+    const selectionFocusGrapheme = getCandidateSelectionFocuses(candidate)
+      .find((focus) => !linkedTargets.has(focus))
+      || getCandidateSelectionFocuses(candidate)[0]
+      || normalizeToken(chooseBestFocusGrapheme(candidate?.segments || []));
+    if (!selectionFocusGrapheme) continue;
+    records.push({
+      basis: STRETCH_BASIS_UNLINKED_FALLBACK,
+      candidate,
+      word,
+      selectionFocusGrapheme,
+      coverage: getCandidateSelectionCoverage(candidate, selectionFocusGrapheme) || 0,
+    });
+  }
+  return records;
+}
+
+function isStretchRecordAllowed(record = {}, {
+  policy = null,
+  targetAverageScore = null,
+} = {}) {
+  if (!record?.candidate || !record.word) return false;
+  const score = getCandidateDifficultyScore(record.candidate);
+  if (!Number.isFinite(score) || score <= 0) return false;
+
+  const bandKey = getCandidateDifficultyBandKey(record.candidate);
+  const basis = record.basis || "";
+  const isSoftFallback = basis === STRETCH_BASIS_SOFT_CONSOLIDATION
+    || basis === STRETCH_BASIS_UNLINKED_FALLBACK;
+  const maxScore = isSoftFallback
+    ? Math.min(Number(policy?.maxScore ?? 55), 55)
+    : Number(policy?.maxScore ?? 80);
+  if (score > maxScore) return false;
+  const hasTargetAverage = targetAverageScore !== null
+    && targetAverageScore !== undefined
+    && Number.isFinite(Number(targetAverageScore));
+  const hasMaxLift = policy?.maxLift !== null
+    && policy?.maxLift !== undefined
+    && Number.isFinite(Number(policy.maxLift));
+  if (!isSoftFallback && hasMaxLift && hasTargetAverage) {
+    if (score - Number(targetAverageScore) > Number(policy.maxLift)) return false;
+  }
+  if (!policy?.allowChallengeBand && bandKey === "challenge") return false;
+  if (!policy?.allowStretchBand && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  if (isSoftFallback && (bandKey === "stretch" || bandKey === "challenge")) return false;
+  if (!isSoftFallback && policy?.requirePositiveLift && hasTargetAverage) {
+    return score > Number(targetAverageScore);
+  }
+  return true;
+}
+
+function rankStretchCandidateRecords(records = [], { usageByWord = new Map() } = {}) {
+  return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
+    const coverageDiff = Number(b.coverage || 0) - Number(a.coverage || 0);
+    if (coverageDiff) return coverageDiff;
+
+    const usageA = getUsageMeta(a.candidate, usageByWord);
+    const usageB = getUsageMeta(b.candidate, usageByWord);
+    const usageDiff = compareUsageSpacingForRole(usageA, usageB, "stretch");
+    if (usageDiff) return usageDiff;
+
+    const sourcePriorityA = getSelectorSourcePriority(getCandidateSelectionSource(a.candidate));
+    const sourcePriorityB = getSelectorSourcePriority(getCandidateSelectionSource(b.candidate));
+    if (sourcePriorityA !== sourcePriorityB) return sourcePriorityA - sourcePriorityB;
+
+    const scoreDiff = getCandidateDifficultyScore(b.candidate) - getCandidateDifficultyScore(a.candidate);
+    if (scoreDiff) return scoreDiff;
+
+    const sentenceDiff = Number(!!b.candidate?.sentence) - Number(!!a.candidate?.sentence);
+    if (sentenceDiff) return sentenceDiff;
+
+    const wordDiff = String(a.word || "").localeCompare(String(b.word || ""));
+    if (wordDiff) return wordDiff;
+    return String(a.selectionFocusGrapheme || "").localeCompare(String(b.selectionFocusGrapheme || ""));
+  });
+}
+
+function pickStretchCandidateRecords({
+  count = 0,
+  candidates = [],
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  challengeLevel = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  targetAverageScore = null,
+  usageByWord = new Map(),
+  usedWords = new Set(),
+  allowUnlinkedFallback = true,
+} = {}) {
+  const safeCount = Math.max(0, Number(count || 0));
+  if (!safeCount) return [];
+  const policy = resolveStretchPolicy(challengeLevel);
+  const primary = normalizeToken(primaryTarget);
+  const diagnosticTargets = getDiagnosticStretchTargets(profile, fallbackProfile, primary);
+  const softTargets = getSoftConsolidationTargets(profile, fallbackProfile, primary);
+  const linkedTargets = new Set([primary, ...diagnosticTargets, ...softTargets].filter(Boolean));
+  const groups = {
+    [STRETCH_BASIS_CURRENT_TARGET]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: [primary],
+      basis: STRETCH_BASIS_CURRENT_TARGET,
+    }),
+    [STRETCH_BASIS_DIAGNOSTIC_MISS]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: diagnosticTargets,
+      basis: STRETCH_BASIS_DIAGNOSTIC_MISS,
+    }),
+    [STRETCH_BASIS_RELATED_FAMILY]: buildRelatedFamilyStretchRecords({
+      candidates,
+      primaryTarget: primary,
+    }),
+    [STRETCH_BASIS_SOFT_CONSOLIDATION]: buildExactFocusStretchRecords({
+      candidates,
+      focusTargets: softTargets.length ? softTargets : [primary],
+      basis: STRETCH_BASIS_SOFT_CONSOLIDATION,
+    }),
+    [STRETCH_BASIS_UNLINKED_FALLBACK]: buildUnlinkedFallbackStretchRecords({
+      candidates,
+      linkedTargets,
+    }),
+  };
+
+  const selected = [];
+  const selectedWords = new Set();
+  const basisOrder = (policy.basisOrder || [])
+    .filter((basis) => allowUnlinkedFallback || basis !== STRETCH_BASIS_UNLINKED_FALLBACK);
+  for (const basis of basisOrder) {
+    const ranked = rankStretchCandidateRecords(
+      (groups[basis] || []).filter((record) => isStretchRecordAllowed(record, {
+        policy,
+        targetAverageScore,
+      })),
+      { usageByWord },
+    );
+    for (const record of ranked) {
+      if (selected.length >= safeCount) break;
+      if (usedWords.has(record.word) || selectedWords.has(record.word)) continue;
+      usedWords.add(record.word);
+      selectedWords.add(record.word);
+      selected.push(record);
+    }
+    if (selected.length >= safeCount) break;
+  }
+  return selected;
+}
+
+function resolveQuestionTypeForSupport(support) {
+  if (support === "focus") return "focus_sound";
+  if (support === "supported") return "segmented_spelling";
+  return "no_support_assessment";
+}
+
+function getProfileRows(profile, fallbackProfile, key) {
+  const rows = [];
+  if (Array.isArray(profile?.[key])) rows.push(...profile[key]);
+  if (Array.isArray(fallbackProfile?.[key])) rows.push(...fallbackProfile[key]);
+  return rows;
+}
+
+function findEvidenceRow(profile, fallbackProfile, key, targets) {
+  const cleanTargets = (Array.isArray(targets) ? targets : [])
+    .map((item) => normalizeToken(item))
+    .filter(Boolean);
+  if (!cleanTargets.length) return null;
+
+  const rows = getProfileRows(profile, fallbackProfile, key);
+  for (const target of cleanTargets) {
+    const row = rows.find((item) => normalizeToken(item?.target) === target);
+    if (row) return row;
+  }
+  return null;
+}
+
+function getConfusionEntry(profile, target) {
+  const focus = normalizeToken(target);
+  if (!focus) return null;
+  const source = profile?.confusionByTarget;
+  if (source && typeof source.get === "function") return source.get(focus) || null;
+  if (source && typeof source === "object") return source[focus] || null;
+  return null;
+}
+
+function findConfusionEvidence(profile, fallbackProfile, targets) {
+  const cleanTargets = (Array.isArray(targets) ? targets : [])
+    .map((item) => normalizeToken(item))
+    .filter(Boolean);
+  for (const target of cleanTargets) {
+    const entry = getConfusionEntry(profile, target) || getConfusionEntry(fallbackProfile, target);
+    if (entry && (Number(entry.attemptCount || 0) >= 2 || Number(entry.substitutionCount || 0) >= 2)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function getSpecEvidenceTargets(spec = {}, primaryTarget = "") {
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  const targets = [
+    spec.focusGrapheme || spec.engine_focus_grapheme || "",
+    ...(role === "target" ? [primaryTarget] : []),
+    ...(Array.isArray(spec.segments) ? spec.segments : []),
+  ];
+  return [...new Set(targets.map((item) => normalizeToken(item)).filter(Boolean))];
+}
+
+function isSecureEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  return !band || band === "secure";
+}
+
+function isDevelopingEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  return !band || band === "nearly_secure" || band === "developing";
+}
+
+function isRepeatedFailureEvidence(row) {
+  return !!row?.repeatedFailure || !!row?.repeated_failure;
+}
+
+function isStrongWeakEvidence(row) {
+  if (!row) return false;
+  const band = normalizeMetadataKey(row.securityBand || row.security_band || "");
+  const total = Number(row.total || 0);
+  const accuracy = Number(row.accuracy);
+  const firstTrySuccessRate = Number(row.firstTrySuccessRate ?? row.first_try_success_rate);
+  const recentIncorrectCount = Number(row.recentIncorrectCount ?? row.recent_incorrect_count ?? 0);
+  const incorrect = Number(row.incorrect || 0);
+
+  if (isRepeatedFailureEvidence(row)) return true;
+  if (total < 3 && recentIncorrectCount < 2 && incorrect < 2) return false;
+  if (band === "insecure") return true;
+  if (Number.isFinite(accuracy) && accuracy <= 0.5) return true;
+  if (Number.isFinite(firstTrySuccessRate) && firstTrySuccessRate <= 0.25) return true;
+  return recentIncorrectCount >= 2 || incorrect >= 2;
+}
+
+function getSpecDifficultyScore(spec = {}) {
+  const score = Number(spec?.difficulty?.coreScore ?? spec?.difficulty?.score);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function isSimpleReviewItem(spec = {}, band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const score = getSpecDifficultyScore(spec);
+  const maxScore = SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX[band] ?? SUPPORT_LADDER_SIMPLE_REVIEW_SCORE_MAX.secure_expected;
+  return score > 0 && score <= maxScore;
+}
+
+function getSupportEvidenceForSpec(spec = {}, {
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+} = {}) {
+  const targets = getSpecEvidenceTargets(spec, primaryTarget);
+  const secureRow = findEvidenceRow(profile, fallbackProfile, "secureRows", targets);
+  const developingRow = findEvidenceRow(profile, fallbackProfile, "developingRows", targets);
+  const concernRow = findEvidenceRow(profile, fallbackProfile, "concernRows", targets);
+  const confusion = findConfusionEvidence(profile, fallbackProfile, targets);
+  const repeatedFailure = isRepeatedFailureEvidence(concernRow);
+  const strongWeak = isStrongWeakEvidence(concernRow);
+
+  return {
+    targets,
+    secureRow,
+    developingRow,
+    concernRow,
+    confusion,
+    secure: isSecureEvidence(secureRow),
+    developing: isDevelopingEvidence(developingRow),
+    concern: !!concernRow,
+    repeatedFailure,
+    strongWeak,
+    focusEvidence: !!confusion || repeatedFailure || strongWeak,
+  };
+}
+
+function getSupportLadderFocusLimit({
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  targetCount = 0,
+  engineOptions = null,
+} = {}) {
+  if (engineOptions?.allowConfusionSubstitution === false) return 0;
+  const baseLimit = SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND[band] ?? 1;
+  const extra = engineOptions?.supportPreset === "more_support_when_needed" ? 1 : 0;
+  return Math.max(0, Math.min(Number(targetCount || 0), baseLimit + extra));
+}
+
+function getTargetNonIndependentLimit({
+  targetCount = 0,
+  engineOptions = null,
+} = {}) {
+  const safeTargetCount = Math.max(0, Number(targetCount || 0));
+  if (!safeTargetCount) return 0;
+  if (
+    engineOptions?.allowConfusionSubstitution === false
+    && engineOptions?.allowSupportedSubstitution === false
+  ) {
+    return 0;
+  }
+
+  const baseLimit = safeTargetCount >= 4 ? 2 : 1;
+  const extraSlots = Math.max(0, Number(engineOptions?.extraTargetSupportSlots || 0));
+  const minimumIndependentTargetItems = Math.max(
+    0,
+    Math.min(
+      safeTargetCount,
+      Number(engineOptions?.minimumIndependentTargetItems || 0),
+    ),
+  );
+
+  return Math.max(
+    0,
+    Math.min(
+      safeTargetCount - minimumIndependentTargetItems,
+      baseLimit + extraSlots,
+    ),
+  );
+}
+
+function resolveSupportLadderDecision(spec = {}, {
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  canUseFocus = false,
+} = {}) {
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  const evidence = getSupportEvidenceForSpec(spec, {
+    profile,
+    fallbackProfile,
+    primaryTarget,
+  });
+
+  if (canUseFocus && role === "target" && evidence.focusEvidence) {
+    return {
+      support: "focus",
+      reason: evidence.confusion
+        ? "clear_confusion"
+        : evidence.repeatedFailure
+          ? "repeated_failure"
+          : "strong_weak_target",
+    };
+  }
+
+  if (band === "needs_support") {
+    if (role === "review" && evidence.secure && isSimpleReviewItem(spec, band)) {
+      return { support: "independent", reason: "secure_simple_review" };
+    }
+    return { support: "supported", reason: "needs_support_default_structure" };
+  }
+
+  if (band === "core_developing") {
+    if (role === "review" && evidence.secure) {
+      return { support: "independent", reason: "secure_review" };
+    }
+    return { support: "supported", reason: "core_default_structure" };
+  }
+
+  if (band === "early_stretch") {
+    if ((role === "target" || role === "stretch") && (evidence.concern || evidence.developing || evidence.strongWeak)) {
+      return { support: "supported", reason: "early_stretch_structure_needed" };
+    }
+    return { support: "independent", reason: "early_stretch_independent" };
+  }
+
+  if (role === "review" && evidence.secure) {
+    return { support: "independent", reason: "secure_review" };
+  }
+  if (role === "stretch" && !evidence.strongWeak && !evidence.repeatedFailure) {
+    return { support: "independent", reason: "stretch_probe" };
+  }
+  return { support: "supported", reason: "less_secure_or_new_target" };
+}
+
+function applySupportLadderDecision(spec = {}, decision = {}, band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL) {
+  const support = decision.support === "focus" || decision.support === "supported"
+    ? decision.support
+    : "independent";
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  return {
+    ...spec,
+    assignmentSupport: support,
+    questionType: resolveQuestionTypeForSupport(support),
+    targetReason: role === "target"
+      ? TARGET_REASON_BY_SUPPORT[support] || "target_independent"
+      : spec.targetReason,
+    supportLadderBand: band,
+    supportLadderReason: decision.reason || "",
+  };
+}
+
+function applySupportLadderToSpecs(specs = [], {
+  band = APPROVED_TARGET_DEFAULT_CHALLENGE_LEVEL,
+  profile = null,
+  fallbackProfile = null,
+  primaryTarget = "",
+  engineOptions = null,
+} = {}) {
+  const targetCount = (Array.isArray(specs) ? specs : [])
+    .filter((item) => normalizeToken(item?.assignmentRole || item?.assignment_role || "") === "target")
+    .length;
+  const focusLimit = getSupportLadderFocusLimit({
+    band,
+    targetCount,
+    engineOptions,
+  });
+  const targetNonIndependentLimit = getTargetNonIndependentLimit({
+    targetCount,
+    engineOptions,
+  });
+  let focusUsed = 0;
+  let targetNonIndependentUsed = 0;
+
+  return (Array.isArray(specs) ? specs : []).map((spec) => {
+    const role = normalizeToken(spec?.assignmentRole || spec?.assignment_role || "");
+    const isTarget = role === "target";
+    const hasTargetBudget = !isTarget || targetNonIndependentUsed < targetNonIndependentLimit;
+    const decision = resolveSupportLadderDecision(spec, {
+      band,
+      profile,
+      fallbackProfile,
+      primaryTarget,
+      canUseFocus: engineOptions?.allowConfusionSubstitution !== false
+        && focusUsed < focusLimit
+        && hasTargetBudget,
+    });
+
+    let gatedDecision = decision;
+    if (decision.support === "focus") {
+      const allowFocus = engineOptions?.allowConfusionSubstitution !== false
+        && focusUsed < focusLimit
+        && hasTargetBudget;
+      if (!allowFocus) {
+        gatedDecision = engineOptions?.allowSupportedSubstitution !== false && hasTargetBudget
+          ? { support: "supported", reason: `${decision.reason || "focus"}_downgraded_to_supported` }
+          : { support: "independent", reason: `${decision.reason || "focus"}_downgraded_to_independent` };
+      }
+    }
+    if (gatedDecision.support === "supported") {
+      const allowSupported = engineOptions?.allowSupportedSubstitution !== false
+        && hasTargetBudget;
+      if (!allowSupported) {
+        gatedDecision = {
+          support: "independent",
+          reason: `${gatedDecision.reason || "supported"}_downgraded_to_independent`,
+        };
+      }
+    }
+
+    const next = applySupportLadderDecision(spec, gatedDecision, band);
+    if (next.assignmentSupport === "focus") focusUsed += 1;
+    if (isTarget && next.assignmentSupport !== "independent") {
+      targetNonIndependentUsed += 1;
+    }
+    return next;
+  });
+}
+
+export function buildAssignmentEngineWordSignature(spec = {}) {
+  const word = normalizeWord(spec.word || "");
+  const sentence = String(spec.sentence || "").trim().toLowerCase();
+  const segments = normalizeSegments(word, spec.segments).join("|");
+  const role = normalizeToken(spec.assignmentRole || spec.assignment_role || "");
+  const support = normalizeToken(spec.assignmentSupport || spec.assignment_support || "");
+  const focus = normalizeToken(spec.focusGrapheme || spec.engine_focus_grapheme || "");
+  const questionType = normalizeToken(spec.questionType || spec.question_type || "");
+  return [word, sentence, segments, role, support, focus, questionType].join("::");
+}
+
+function buildWordSpec(candidate, {
+  role,
+  support = "independent",
+  focusGrapheme = "",
+  selectionFocusGrapheme = "",
+  targetReason = "",
+  supportLadderBand = "",
+  supportLadderReason = "",
+}) {
+  const focus = normalizeToken(selectionFocusGrapheme)
+    || normalizeToken(focusGrapheme)
+    || normalizeToken(chooseBestFocusGrapheme(candidate?.focusGraphemes || candidate?.segments || []))
+    || normalizeToken(candidate?.focusGraphemes?.[0] || "");
+  const questionType = resolveQuestionTypeForSupport(support);
+  return {
+    word: candidate.word,
+    sentence: candidate.sentence || null,
+    segments: normalizeSegments(candidate.word, candidate.segments),
+    questionType,
+    assignmentRole: role,
+    assignmentSupport: support,
+    focusGrapheme: focus,
+    supportLadderBand,
+    supportLadderReason,
+    targetReason: targetReason || (role === "review"
+      ? "review_retention"
+      : role === "stretch"
+        ? "stretch_probe"
+        : TARGET_REASON_BY_SUPPORT[support] || "target_independent"),
+    originTestWordId: candidate.originTestWordId || null,
+    originBankWordId: candidate.originBankWordId || null,
+    originWordSource: candidate.originWordSource || "library",
+    meaning: candidate.meaning || null,
+    contextSupport: candidate.contextSupport || null,
+    difficulty: candidate.difficulty || buildPersistedDifficultyPayload({
+      word: candidate.word,
+      graphemes: candidate.segments,
+    }),
+  };
+}
+
+function normalizeContextSupportPayload(spec = {}, sentence = "") {
+  const source = spec?.contextSupport || spec?.context_support || {};
+  const context = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const cleanSentence = String(
+    context?.sentence
+    || context?.sentence_text
+    || context?.sentenceText
+    || sentence
+    || ""
+  ).trim();
+  const cleanMeaning = String(
+    spec?.meaning
+    || context?.meaning
+    || context?.definition
+    || context?.meaning_text
+    || context?.meaningText
+    || ""
+  ).trim();
+  const payload = {};
+
+  if (cleanSentence) {
+    payload.sentence = cleanSentence;
+    payload.sentence_status = String(context?.sentence_status || context?.sentenceStatus || "approved").trim() || "approved";
+    payload.sentence_required = context?.sentence_required === true || context?.sentenceRequired === true;
+  }
+  if (cleanMeaning) {
+    payload.meaning = cleanMeaning;
+    payload.meaning_status = String(context?.meaning_status || context?.meaningStatus || "approved").trim() || "approved";
+    payload.meaning_enabled = context?.meaning_enabled === false || context?.meaningEnabled === false ? false : true;
+    payload.meaning_enabled_by_default = context?.meaning_enabled_by_default === false || context?.meaningEnabledByDefault === false ? false : true;
+  }
+
+  return Object.keys(payload).length ? payload : null;
+}
+
+export function buildAssignmentEngineWordPayload(spec = {}, position = 1) {
+  const word = normalizeWord(spec.word || "");
+  const segments = normalizeSegments(word, spec.segments);
+  const focus = normalizeToken(spec.focusGrapheme || spec.engine_focus_grapheme || chooseBestFocusGrapheme(segments));
+  const difficulty = spec.difficulty || buildPersistedDifficultyPayload({
+    word,
+    graphemes: segments,
+  });
+  const sentence = String(spec.sentence || "").trim() || null;
+  const contextSupport = normalizeContextSupportPayload(spec, sentence || "");
+  const originBankWordId = String(spec.originBankWordId || spec.origin_bank_word_id || "").trim();
+  const choice = {
+    focus_graphemes: focus ? [focus] : [],
+    difficulty,
+    source: ASSIGNMENT_ENGINE_WORD_SOURCE,
+    question_type: spec.questionType || spec.question_type || "no_support_assessment",
+    assignment_role: spec.assignmentRole || spec.assignment_role || "target",
+    assignment_support: spec.assignmentSupport || spec.assignment_support || "independent",
+    support_ladder_band: spec.supportLadderBand || spec.support_ladder_band || "",
+    support_ladder_reason: spec.supportLadderReason || spec.support_ladder_reason || "",
+    engine_focus_grapheme: focus || "",
+    origin_test_word_id: spec.originTestWordId || spec.origin_test_word_id || null,
+    origin_word_source: spec.originWordSource || spec.origin_word_source || "library",
+  };
+  if (originBankWordId) choice.origin_bank_word_id = originBankWordId;
+  if (contextSupport) choice.context_support = contextSupport;
+
+  return {
+    position,
+    word,
+    sentence,
+    segments,
+    choice,
+  };
+}
+
+function buildTargetCoverageWarning({
+  pupilId = "",
+  focusGrapheme = "",
+  requestedTargetCount = 0,
+  selectedTargetCount = 0,
+} = {}) {
+  const requested = Math.max(0, Number(requestedTargetCount || 0));
+  const selected = Math.max(0, Number(selectedTargetCount || 0));
+  const fallbackCount = Math.max(0, requested - selected);
+  const focus = normalizeToken(focusGrapheme);
+  return {
+    type: "target_coverage_low",
+    pupilId: String(pupilId || ""),
+    focusGrapheme: focus,
+    requestedTargetCount: requested,
+    selectedTargetCount: selected,
+    fallbackCount,
+    message: fallbackCount
+      ? `Only ${selected} of ${requested} requested target slots could use approved ${focus} words; ${fallbackCount} slot${fallbackCount === 1 ? "" : "s"} will use safe fallback, review, or consolidation words.`
+      : "",
+  };
+}
+
+function isNeedsSupportThinTargetCoverage({
+  challengeLevel = "",
+  requestedTargetCount = 0,
+  primaryTargetCandidates = [],
+} = {}) {
+  return normalizeMetadataKey(challengeLevel) === "needs_support"
+    && Math.max(0, Number(requestedTargetCount || 0)) > 0
+    && (Array.isArray(primaryTargetCandidates) ? primaryTargetCandidates.length : 0) < Math.max(0, Number(requestedTargetCount || 0));
+}
+
+function buildPupilPlan({
+  pupilId,
+  profile,
+  fallbackProfile,
+  composition,
+  pool,
+  engineOptions,
+  usageByWord,
+}) {
+  const candidates = Array.isArray(pool?.candidates) ? pool.candidates : [];
+  const usableCandidates = candidates.filter(isGeneratedAssignmentCandidateUsable);
+  const effectiveUsageByWord = usageByWord instanceof Map
+    ? usageByWord
+    : (pool?.usageByWord instanceof Map ? pool.usageByWord : new Map());
+  const usedWords = new Set();
+  const effectiveEngineOptions = engineOptions && typeof engineOptions === "object"
+    ? engineOptions
+    : buildAutoAssignEngineOptions();
+  const coverageWarnings = [];
+
+  const primaryTargetRow = getPrimaryTarget(profile, fallbackProfile);
+  const primaryTarget = normalizeToken(primaryTargetRow?.target);
+  if (!primaryTarget) {
+    return {
+      pupilId,
+      missingGraphemes: [],
+      words: [],
+      error: "No grapheme focus could be identified from current evidence.",
+    };
+  }
+
+  const targetChallengeLevel = resolveProfileChallengeLevel(profile || fallbackProfile);
+
+  const primaryTargetCandidates = pickApprovedTargetCandidatesByGraphemeOrder({
+    count: composition.target,
+    graphemeOrder: [primaryTarget],
+    candidates,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+  });
+  const needsSupportThinTargetCoverage = isNeedsSupportThinTargetCoverage({
+    challengeLevel: targetChallengeLevel,
+    requestedTargetCount: composition.target,
+    primaryTargetCandidates,
+  });
+  const thinCoverageReviewRankOptions = needsSupportThinTargetCoverage
+    ? {
+      basisRank: NEEDS_SUPPORT_THIN_REVIEW_BASIS_RANK,
+      rankBasisBeforeUsage: true,
+    }
+    : {};
+
+  const targetCandidates = [
+    ...primaryTargetCandidates,
+  ].slice(0, composition.target);
+  const primaryTargetSelectionCount = targetCandidates
+    .filter((candidate) => getCandidateCoverage(candidate, primaryTarget) > 0)
+    .length;
+  if (primaryTargetSelectionCount < composition.target) {
+    coverageWarnings.push(buildTargetCoverageWarning({
+      pupilId,
+      focusGrapheme: primaryTarget,
+      requestedTargetCount: composition.target,
+      selectedTargetCount: primaryTargetSelectionCount,
+    }));
+  }
+
+  const targetSpecs = targetCandidates.map((candidate) => buildWordSpec(candidate, {
+    role: "target",
+    support: "independent",
+    focusGrapheme: (candidate.segments || []).includes(primaryTarget) || (candidate.focusGraphemes || []).includes(primaryTarget)
+      ? primaryTarget
+      : chooseBestFocusGrapheme(candidate.segments) || candidate.focusGraphemes?.[0] || primaryTarget,
+    targetReason: "target_independent",
+  }));
+
+  const protectedReviewRecords = pickReviewCandidateRecords({
+    count: composition.review,
+    candidates: usableCandidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+    allowedBases: [REVIEW_BASIS_PROTECTED_REVIEW],
+    ...thinCoverageReviewRankOptions,
+  });
+
+  const stretchRecords = pickStretchCandidateRecords({
+    count: composition.stretch,
+    candidates: usableCandidates,
+    profile,
+    fallbackProfile: needsSupportThinTargetCoverage ? null : fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    targetAverageScore: averageCandidateDifficultyScore(targetCandidates),
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+    allowUnlinkedFallback: !needsSupportThinTargetCoverage,
+  });
+
+  const stretchSpecs = stretchRecords.map((record) => buildWordSpec(record.candidate, {
+    role: "stretch",
+    support: "independent",
+    focusGrapheme: record.selectionFocusGrapheme || primaryTarget,
+    selectionFocusGrapheme: record.selectionFocusGrapheme || primaryTarget,
+    targetReason: "stretch_probe",
+  }));
+
+  const reviewRecords = pickReviewCandidateRecords({
+    count: Math.max(0, composition.review - protectedReviewRecords.length),
+    candidates: usableCandidates,
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+    ...thinCoverageReviewRankOptions,
+  });
+  const reviewCandidates = [...protectedReviewRecords, ...reviewRecords].map((record) => buildWordSpec(record.candidate, {
+    role: "review",
+    support: "independent",
+    focusGrapheme: record.selectionFocusGrapheme || chooseBestFocusGrapheme(record.candidate.segments) || record.candidate.focusGraphemes?.[0] || "",
+    targetReason: "review_retention",
+  }));
+
+  const specs = [...reviewCandidates, ...targetSpecs, ...stretchSpecs];
+  const fallbackRecords = pickReviewCandidateRecords({
+    count: Math.max(0, composition.totalWords - specs.length),
+    candidates: usableCandidates.filter((candidate) => getCandidateCoverage(candidate, primaryTarget) === 0),
+    profile,
+    fallbackProfile,
+    primaryTarget,
+    challengeLevel: targetChallengeLevel,
+    usageByWord: effectiveUsageByWord,
+    usedWords,
+    ...thinCoverageReviewRankOptions,
+  });
+  const fallbackCandidates = fallbackRecords.map((record) => buildWordSpec(record.candidate, {
+    role: "review",
+    support: "independent",
+    focusGrapheme: record.selectionFocusGrapheme || chooseBestFocusGrapheme(record.candidate.segments) || record.candidate.focusGraphemes?.[0] || "",
+    targetReason: "review_retention",
+  }));
+  specs.push(...fallbackCandidates);
+
+  if (specs.length < composition.totalWords) {
+    return {
+      pupilId,
+      missingGraphemes: [],
+      words: [],
+      coverageWarnings,
+      error: "Not enough safe candidate words are available to build the assignment.",
+    };
+  }
+
+  const words = applySupportLadderToSpecs(
+    specs.slice(0, composition.totalWords),
+    {
+      band: targetChallengeLevel,
+      profile,
+      fallbackProfile,
+      primaryTarget,
+      engineOptions: effectiveEngineOptions,
+    },
+  );
+
+  return {
+    pupilId,
+    primaryTargetGrapheme: primaryTarget,
+    words,
+    missingGraphemes: [],
+    coverageWarnings,
+  };
+}
+
+function extractAttemptsForPupil(attempts, pupilId) {
+  const key = String(pupilId || "");
+  return (Array.isArray(attempts) ? attempts : []).filter((attempt) => String(attempt?.pupil_id || "") === key);
+}
+
+function extractAssignmentTargetRowsForPupil(rows, pupilId) {
+  const key = String(pupilId || "");
+  return (Array.isArray(rows) ? rows : []).filter((row) => getAssignmentTargetRowPupilId(row) === key);
+}
+
+function normalizePupilList(pupilIds) {
+  return [...new Set(
+    (Array.isArray(pupilIds) ? pupilIds : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+export function resolveAssignmentEngineFocus(words) {
+  const targetWords = (Array.isArray(words) ? words : [])
+    .filter((item) => normalizeToken(item?.choice?.assignment_role || item?.assignmentRole || item?.assignment_role) === "target");
+  if (!targetWords.length) return "";
+
+  const counts = new Map();
+  for (const item of targetWords) {
+    const focus = normalizeToken(
+      item?.choice?.engine_focus_grapheme
+      || item?.focusGrapheme
+      || item?.engine_focus_grapheme
+      || (Array.isArray(item?.choice?.focus_graphemes) ? item.choice.focus_graphemes[0] : "")
+    );
+    if (!focus) continue;
+    counts.set(focus, (counts.get(focus) || 0) + 1);
+  }
+
+  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const top = ranked[0];
+  if (!top) return "";
+  const next = ranked[1];
+  const minimumNeeded = Math.ceil(targetWords.length / 2);
+  if (top[1] < minimumNeeded) return "";
+  if (next && top[1] === next[1]) return "";
+  return top[0];
+}
+
+export function buildAssignmentEnginePupilReason(words) {
+  const focus = resolveAssignmentEngineFocus(words);
+  if (focus) return `Today's practice focuses on ${focus}.`;
+  return "A mix of review and new challenge based on your recent progress.";
+}
+
+export function buildAssignmentEngineTitle({
+  className = "",
+  focusGrapheme = "",
+  date = new Date(),
+} = {}) {
+  const parts = [
+    "Auto practice",
+    String(className || "").trim() || "Class",
+    formatDateLabel(date),
+  ];
+  const focus = normalizeToken(focusGrapheme);
+  if (focus) parts.push(focus);
+  return parts.join(" | ");
+}
+
+export function buildGeneratedAssignmentPlan({
+  pupilIds = [],
+  teacherTests = [],
+  attempts = [],
+  assignmentTargetRows = [],
+  priorAssignmentTargetRows = [],
+  totalWords = ASSIGNMENT_ENGINE_DEFAULT_LENGTH,
+  currentProfiles = null,
+  resolvedWordMap = null,
+  policy = null,
+} = {}) {
+  const normalizedPolicy = normalizeAutoAssignPolicy({
+    ...(policy && typeof policy === "object" ? policy : {}),
+    assignment_length: policy?.assignment_length ?? totalWords,
+  });
+  const engineOptions = buildAutoAssignEngineOptions(normalizedPolicy);
+  const pupils = normalizePupilList(pupilIds);
+  const composition = buildAutoAssignmentComposition(normalizedPolicy.assignment_length);
+  const sortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
+    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+  const sortedAssignmentTargetRows = [
+    ...(Array.isArray(assignmentTargetRows) ? assignmentTargetRows : []),
+    ...(Array.isArray(priorAssignmentTargetRows) ? priorAssignmentTargetRows : []),
+  ].sort((a, b) => getAssignmentTargetAssignedAt(a) - getAssignmentTargetAssignedAt(b));
+  const pool = buildCandidatePool({
+    teacherTests,
+    attempts: sortedAttempts,
+    resolvedWordMap,
+    assignmentTargetRows: sortedAssignmentTargetRows,
+  });
+
+  // Future baseline placement can inject a richer profile object here without changing the planner shape.
+  const fallbackProfile = buildProfileFromAttempts(sortedAttempts, resolvedWordMap);
+  const pupilPlans = [];
+  const missingGraphemes = new Set();
+  const errors = [];
+  const coverageWarnings = [];
+
+  for (const pupilId of pupils) {
+    const pupilAttempts = extractAttemptsForPupil(sortedAttempts, pupilId);
+    const pupilAssignmentTargetRows = extractAssignmentTargetRowsForPupil(sortedAssignmentTargetRows, pupilId);
+    const providedProfile = currentProfiles && typeof currentProfiles === "object"
+      ? currentProfiles[pupilId] || currentProfiles[String(pupilId)] || null
+      : null;
+    const profile = providedProfile || buildProfileFromAttempts(
+      pupilAttempts,
+      resolvedWordMap,
+    );
+    const plan = buildPupilPlan({
+      pupilId,
+      profile,
+      fallbackProfile,
+      composition,
+      pool,
+      engineOptions,
+      usageByWord: buildWordUsageStats(pupilAttempts, { assignmentTargetRows: pupilAssignmentTargetRows }),
+    });
+
+    if (plan?.error) errors.push(plan.error);
+    for (const warning of plan?.coverageWarnings || []) {
+      coverageWarnings.push(warning);
+    }
+    for (const missing of plan?.missingGraphemes || []) {
+      missingGraphemes.add(missing);
+    }
+    if (Array.isArray(plan?.words) && plan.words.length) {
+      pupilPlans.push({
+        pupilId,
+        primaryTargetGrapheme: plan.primaryTargetGrapheme || "",
+        words: plan.words.slice(0, composition.totalWords),
+        coverageWarnings: Array.isArray(plan.coverageWarnings) ? plan.coverageWarnings : [],
+      });
+    }
+  }
+
+  const allTargetWords = pupilPlans.flatMap((plan) =>
+    (plan.words || []).map((item) => ({
+      ...item,
+      choice: {
+        assignment_role: item.assignmentRole,
+        engine_focus_grapheme: item.focusGrapheme,
+        focus_graphemes: item.focusGrapheme ? [item.focusGrapheme] : [],
+      },
+    }))
+  );
+
+  return {
+    totalWords: composition.totalWords,
+    composition,
+    clearFocusGrapheme: resolveAssignmentEngineFocus(allTargetWords),
+    pupilPlans,
+    missingGraphemes: [...missingGraphemes],
+    coverageWarnings,
+    error: missingGraphemes.size
+      ? `Not enough saved words are available for ${[...missingGraphemes].join(", ")}.`
+      : (errors[0] || ""),
+  };
+}

@@ -419,7 +419,7 @@ function buildFileIssueGroups({
   previewRows = [],
 } = {}) {
   const duplicateRowItems = [...duplicateRows.entries()]
-    .map(([, rowNumbers]) => `Rows ${formatRowNumberList(rowNumbers)} are duplicates after normalization. Keep one copy.`)
+    .map(([, rowNumbers]) => `Rows ${formatRowNumberList(rowNumbers)} are duplicates after normalisation. Keep one copy.`)
     .sort((a, b) => a.localeCompare(b));
   const duplicateMisIdItems = [...duplicateMisIds.entries()]
     .map(([value, rowNumbers]) => `MIS ID "${value}" appears in rows ${formatRowNumberList(rowNumbers)}.`)
@@ -493,7 +493,7 @@ export function parsePupilImportCsv(text = "") {
     errors.push(`Missing required column${missingRequiredColumns.length === 1 ? "" : "s"}: ${missingRequiredColumns.join(", ")}`);
   }
   if (duplicateHeaders.length) {
-    errors.push(`Duplicate column header${duplicateHeaders.length === 1 ? "" : "s"} after normalization: ${duplicateHeaders.join(", ")}`);
+    errors.push(`Duplicate column header${duplicateHeaders.length === 1 ? "" : "s"} after normalisation: ${duplicateHeaders.join(", ")}`);
   }
 
   return {

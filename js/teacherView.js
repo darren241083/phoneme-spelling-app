@@ -1,5 +1,5 @@
 // /js/teacherView.js
-import { fetchTeacherGroupComparison, manageDemoSchoolData, teacherAnalyticsChat } from "../ai.js?v=3.1";
+import { fetchTeacherGroupComparison, manageDemoSchoolData, teacherAnalyticsChat } from "../ai.js?v=3.2";
 import { supabase } from "./supabaseClient.js";
 import {
   persistAssignmentTargetRows,
@@ -43,24 +43,37 @@ import {
   buildAssignmentEngineWordSignature,
   buildGeneratedAssignmentPlan,
   isFullyGeneratedAssignmentWordRows,
-} from "./assignmentEngine.js?v=1.5";
+} from "./assignmentEngine.js?v=1.6";
 import {
-  buildBaselineAssignmentDefinition,
+  buildExportFilename,
+  buildScopedAnalyticsExportModel,
+  EXCEL_UNAVAILABLE_MESSAGE,
+  exportModelHasRows,
+  serializeExportCsv,
+  writeExportWorkbook,
+} from "./analyticsExport.js?v=1.0";
+import {
   buildPlacementSeedProfiles,
   buildStarterCatalogVirtualTests,
   isBaselineAssignmentWordRows,
   mergePlacementWithLiveProfiles,
   resolveBaselinePresetFromWordRows,
-} from "./baselinePlacement.js?v=1.3";
+  shouldIncludeBaselineResponseInHeadlineAttainment,
+} from "./baselinePlacement.js?v=1.5";
 import { buildResolvedWordMap } from "./phonicsResolution.js?v=1.0";
 import {
   cancelStaffPendingAccessApproval,
   consumeLatestStaffProfileSyncNotice,
+  ensureFormClassBaselineAssignments,
   ASSIGNMENT_AUTOMATION_KIND_PERSONALISED,
+  ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE,
   ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
   CLASS_TYPE_FORM,
   CLASS_TYPE_INTERVENTION,
   CLASS_TYPE_SUBJECT,
+  applyActiveSchoolFilter,
+  archivePupilDirectoryRecord,
+  archiveStaffDirectoryRecord,
   createClass,
   createInterventionGroup,
   createPersonalisedGenerationRun,
@@ -70,15 +83,20 @@ import {
   grantStaffScope,
   importPupilRosterCsv,
   importStaffDirectoryCsv,
+  getActiveSchoolIdFromAccessContext,
+  isDeveloperSchoolSwitchEnabled,
+  listWordloomCoreSpellingBankWordRows,
   listTeacherPupilDirectoryForInterventionGroups,
   listActiveAdminUserIds,
   listActiveStaffRoleAssignments,
   listStaffAccessAuditEntries,
+  listStaffDirectoryAuditEntries,
   listStaffPendingAccessSummaries,
   listStaffProfiles,
   listStaffRoleAssignments,
   listStaffScopeAssignments,
   listPersonalisedAutomationPolicies,
+  listRecentPersonalisedGenerationRuns,
   listClassAutoAssignPolicies,
   movePupilFormMembership,
   normalizeClassType,
@@ -89,16 +107,24 @@ import {
   readStaffPendingAccessDetail,
   readStaffPendingAccessDuplicatePreflight,
   readTeacherAppRole,
+  readWordloomCoreBankMonitor,
+  resetPupilLoginPin,
+  resolveActiveSchoolDetails,
+  revokeAllStaffLiveAccess,
   revokeStaffRole,
   revokeStaffScope,
+  restorePupilDirectoryRecord,
+  restoreStaffDirectoryRecord,
   saveStaffPendingAccessApproval,
   seedAutomatedAssignmentPupilStatuses,
   setPersonalisedAutomationPolicyArchived,
+  storeActiveSchoolId,
   updatePersonalisedGenerationRun,
   upsertPersonalisedAutomationPolicy,
   upsertPersonalisedGenerationRunPupilRows,
   upsertClassAutoAssignPolicy,
-} from "./db.js?v=1.34";
+  withActiveSchoolId,
+} from "./db.js?v=1.51";
 import {
   buildStaffImportCommitPayload,
   buildStaffImportPreview,
@@ -113,30 +139,75 @@ import {
   getPupilImportRequiredColumns,
   parsePupilImportCsv,
 } from "./pupilCsvImport.js?v=1.4";
+import { getAutomationPolicyOverlapMatches } from "./automationPolicyValidation.js?v=1.0";
+import {
+  buildAssignmentSourceFilterCounts,
+  buildAssignmentResultsFraming,
+  buildAssignmentSourceViewModel,
+  buildAutomationRunFeedbackNotice,
+  buildAutomationRunOutcomeViewModel,
+  buildCoverageWarningDisplay,
+  buildGeneratedAssignmentExplainabilitySummary,
+  buildRecentPersonalisedRunActivityRows,
+  doesAssignmentSourceMatchFilter,
+  getAssignmentSourceFilterOptions,
+  getAutomationRunStatusLabel,
+  normalizeCoverageWarnings,
+} from "./automationRunFeedback.js?v=1.4";
+import {
+  buildActiveAssignedCorePersonalisedAssignmentMap,
+  isAssignedCorePersonalisedAutomationAssignment,
+} from "./personalisedAssignmentBlocking.js?v=1.0";
+import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
+import {
+  ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
+  ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+  buildAssignmentLifecycleFilterCounts,
+  buildAssignmentLifecycleModel,
+  buildDuplicateManualAssignmentWarningModel,
+  doesAssignmentMatchLifecycleFilter,
+  groupAssignmentLifecycleInputs,
+} from "./assignmentLifecycleView.js?v=1.0";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
   AUTO_ASSIGN_POLICY_LENGTH_MIN,
+  AUTOMATION_POLICY_TYPE_OPTIONS,
+  AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+  AUTOMATION_POLICY_TYPE_SPELLING_BEE,
   AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS,
+  SPELLING_BEE_LENGTH_MODE_OPTIONS,
   buildAutoAssignPolicySummary,
   buildDefaultPersonalisedAutomationPolicy,
-  doPersonalisedAutomationPolicyWindowsOverlap,
+  buildSpellingBeeLengthModeSummary,
   derivePersonalisedAutomationDeadline,
   formatPersonalisedAutomationWeekdayList,
-  getAutoAssignSupportPresetLabel,
+  getAutomationPolicyTypeLabel,
   getPersonalisedAutomationPolicyLifecycle,
   normalizeAutoAssignPolicy,
+  normalizeAutomationPolicyType,
   normalizePersonalisedAutomationPolicy,
+  normalizeSpellingBeeLengthMode,
+  isSpellingBeeAutomationPolicy,
+  isSpellingBeeUntilWrongPolicy,
   PERSONALISED_AUTOMATION_EXPIRY_WARNING_DAYS,
   PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS,
   PERSONALISED_AUTOMATION_WEEKDAY_OPTIONS,
-} from "./autoAssignPolicy.js?v=1.8";
+} from "./autoAssignPolicy.js?v=1.9";
+import {
+  SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+  buildSpellingBeeExposurePlan,
+  buildSpellingBeeLadder,
+} from "./spellingBeePolicy.js?v=1.0";
 
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
-const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "analytics", "upcoming", "classes", "tests"];
+const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
+const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
+const ALL_CLASSES_EXPORT_SCOPE_VALUE = "__all_classes__";
+const ALL_YEARS_EXPORT_SCOPE_VALUE = "__all_years__";
 const VISUAL_COMPARE_LIMIT = 3;
 const ASSIGNMENT_PUPIL_ROWS_STEP = 5;
 const CLASS_RESULTS_RECENT_LIMIT = 5;
@@ -144,8 +215,15 @@ const CLASS_RESULTS_RANGE_DEFAULT = "last_week";
 const STAFF_ACCESS_AUDIT_LIMIT = 10;
 const STAFF_ACCESS_MANAGED_ROLES = ["teacher", "admin", "hoy", "hod", "senco", "literacy_lead"];
 const STAFF_ACCESS_RECENT_IMPORT_WINDOW_DAYS = 14;
+const STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER = "needs_attention";
+const STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS = 25;
+const STAFF_LIFECYCLE_VISIBLE_ROWS_STEP = 25;
 const STAFF_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
 const PUPIL_IMPORT_PREVIEW_DEFAULT_VISIBLE_ROWS = 15;
+const PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS = 25;
+const PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP = 25;
+const PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER = "needs_attention";
+const PUPIL_LIFECYCLE_NO_FORM_FILTER = "__no_live_form__";
 const CSV_IMPORT_PREVIEW_ISSUE_SAMPLE_LIMIT = 6;
 const CLASS_RESULTS_RANGE_OPTIONS = [
   { key: "this_week", label: "This week" },
@@ -154,7 +232,11 @@ const CLASS_RESULTS_RANGE_OPTIONS = [
   { key: "all", label: "All" },
 ];
 const VISUAL_TREND_FLAT_DELTA = 0.06;
-const VISUAL_EXPECTED_MIN_ATTEMPTS = 4;
+const VISUAL_TREND_DIFFICULTY_DELTA = 5;
+const VISUAL_TREND_AVERAGE_TRIES_DELTA = 0.25;
+const VISUAL_TREND_DIFFICULTY_COVERAGE_MIN = 0.6;
+const VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL = 8;
+const VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT = 4;
 const VISUAL_STATUS_FILTER_OPTIONS = [
   { key: "needs_review", label: "Needs review", tone: "red" },
   { key: "developing", label: "Developing", tone: "amber" },
@@ -178,15 +260,32 @@ const VISUAL_PUPIL_RANK_OPTIONS = [
   { value: "review", label: "Most review needed" },
   { value: "checked_words", label: "Most checked words" },
 ];
+const ANALYTICS_EXPORT_VIEW_OPTIONS = [
+  { value: "pupil", label: "Pupil" },
+  { value: "class", label: "Class" },
+  { value: "year", label: "Year" },
+];
+const ANALYTICS_EXPORT_DATASET_OPTIONS = [
+  { value: "attempts", label: "Attempts" },
+  { value: "summary", label: "Summary" },
+];
+const ANALYTICS_EXPORT_FORMAT_OPTIONS = [
+  { value: "csv", label: "CSV" },
+  { value: "xlsx", label: "Excel" },
+];
 const VISUAL_RANK_ROWS_STEP = 6;
 const COMMON_CONFUSION_TEST_WORD_LIMIT = 8;
 const BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS = 4;
 const ANALYTICS_ASSISTANT_THREAD_LIMIT = 10;
 const AUTOMATION_POLICY_DRAFT_STORAGE_PREFIX = "ps_personalised_automation_policy_draft_v2";
 const AUTOMATION_NEW_POLICY_KEY = "__new__";
+const AUTOMATION_VALIDATION_POLICY_OVERLAP = "policy_overlap";
 const ANALYTICS_ASSISTANT_INTRO =
   "Ask about intervention priorities, weak graphemes, class or year comparisons, or what an individual pupil may need next.";
 const GROUP_COMPARISON_MIN_COHORT_SIZE = 5;
+const INTERVENTION_PUPIL_SEARCH_MIN_CHARS = 2;
+const INTERVENTION_PUPIL_DISPLAY_LIMIT = 100;
+const INTERVENTION_FILTER_DEBOUNCE_MS = 250;
 const GROUP_COMPARISON_GROUP_OPTIONS = [
   { value: "pp", label: "PP" },
   { value: "sen", label: "SEN" },
@@ -254,7 +353,11 @@ const GROUP_COMPARISON_PAIR_FALLBACKS = {
     { value: "other", label: "Other" },
   ],
 };
-const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION]);
+const AUTOMATION_TARGET_YEAR_ALL = "__all_year_groups__";
+const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM]);
+const AUTOMATION_CLASS_TYPE_FALLBACK = CLASS_TYPE_SUBJECT;
+let interventionFilterApplyTimer = null;
+let interventionFilterRequestToken = 0;
 
 function createDefaultGroupComparisonState() {
   return {
@@ -282,19 +385,48 @@ function createDefaultAnalyticsAssistantMessages() {
   ];
 }
 
+function createDefaultAnalyticsExportState() {
+  return {
+    initialized: false,
+    view: "class",
+    focusId: ALL_CLASSES_EXPORT_SCOPE_VALUE,
+    grapheme: "",
+    dataset: "summary",
+    format: "csv",
+    message: "",
+    messageType: "info",
+  };
+}
+
 function createDefaultInterventionGroupState() {
   return {
     status: "idle",
-    message: "Choose a filter to find pupils.",
+    message: "Choose a year, group, status, or search to find pupils.",
     pupils: [],
+    statusOptions: [],
+    statusOptionsStatus: "idle",
+    statusOptionsMessage: "",
+    groupName: "",
+    displayLimit: INTERVENTION_PUPIL_DISPLAY_LIMIT,
+    isLimited: false,
     selectedPupilIds: [],
     selectedPupilsById: {},
     resultCount: 0,
     filters: {
       yearGroup: "",
       sourceClassId: "",
+      status: "",
       search: "",
     },
+  };
+}
+
+function createDefaultClassRemovalState() {
+  return {
+    preflightByClassId: {},
+    loadingByClassId: {},
+    errorByClassId: {},
+    busyByClassId: {},
   };
 }
 
@@ -350,6 +482,13 @@ function createDefaultStaffAccessState() {
     selectedRoles: [],
     selectedScopes: [],
     selectedAuditEntries: [],
+    selectedDirectoryAuditEntries: [],
+    lifecycleStatusFilter: STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER,
+    lifecycleSearch: "",
+    lifecycleVisibleRows: STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS,
+    lifecycleSavingProfileIds: {},
+    lifecycleSavingActions: {},
+    lifecycleRowErrors: {},
     importFileName: "",
     importPreview: null,
     importPreviewError: "",
@@ -395,6 +534,17 @@ function createDefaultPupilOnboardingState() {
     placementSavingPupilIds: {},
     placementRowErrors: {},
     placementError: "",
+    lifecycleStatusFilter: PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER,
+    lifecycleYearGroupFilter: "",
+    lifecycleFormFilter: "",
+    lifecycleSearch: "",
+    lifecycleVisibleRows: PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS,
+    lifecycleSelectedFormIds: {},
+    lifecycleSavingPupilIds: {},
+    lifecycleSavingActions: {},
+    lifecycleRowErrors: {},
+    lifecycleResetCredential: null,
+    lifecycleResetPinUnavailable: false,
     importFileName: "",
     importPreview: null,
     importPreviewError: "",
@@ -407,9 +557,19 @@ function createDefaultPupilOnboardingState() {
   };
 }
 
+function createDefaultBankMonitorState() {
+  return {
+    status: "idle",
+    message: "",
+    data: null,
+  };
+}
+
 function createDefaultAutomationTargetFilters() {
   return {
     yearGroup: "",
+    yearGroups: [],
+    allYearGroups: false,
     classType: "all",
   };
 }
@@ -419,9 +579,8 @@ function deriveAutomationTargetFiltersFromPolicy(rawPolicy = null) {
   const selectedIds = normalizeIdList(policy.target_class_ids);
   if (!selectedIds.length) return createDefaultAutomationTargetFilters();
 
-  const eligibleById = new Map(
-    getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item])
-  );
+  const targetableClasses = getAutomationTargetableClasses();
+  const eligibleById = new Map(targetableClasses.map((item) => [String(item?.id || "").trim(), item]));
   const selectedClasses = selectedIds
     .map((classId) => eligibleById.get(classId) || null)
     .filter(Boolean);
@@ -432,15 +591,18 @@ function deriveAutomationTargetFiltersFromPolicy(rawPolicy = null) {
       .map((item) => String(item?.year_group || "").trim())
       .filter(Boolean)
   )];
-  const classTypes = [...new Set(
-    selectedClasses
-      .map((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }))
-      .filter((item) => [CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION].includes(item))
-  )];
+  if (!yearGroups.length) return createDefaultAutomationTargetFilters();
+  const allTargetableIds = new Set(targetableClasses.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectedEligibleIds = new Set(selectedClasses.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectsAllEligibleForms = allTargetableIds.size > 0
+    && selectedEligibleIds.size === allTargetableIds.size
+    && [...allTargetableIds].every((classId) => selectedEligibleIds.has(classId));
 
   return {
-    yearGroup: yearGroups.length === 1 ? yearGroups[0] : "",
-    classType: classTypes.length === 1 ? classTypes[0] : "all",
+    yearGroup: selectsAllEligibleForms ? AUTOMATION_TARGET_YEAR_ALL : yearGroups[0],
+    yearGroups: selectsAllEligibleForms ? getAutomationTargetYearGroupOptions() : yearGroups,
+    allYearGroups: selectsAllEligibleForms,
+    classType: "all",
   };
 }
 
@@ -494,6 +656,9 @@ function createDefaultAccessContext(userId = "") {
     data_health: {
       unmapped_subject_class_count: 0,
     },
+    active_school_id: null,
+    default_school_id: null,
+    schools: [],
   };
 }
 
@@ -506,6 +671,7 @@ const state = {
   sections: {
     staffAccess: false,
     pupilOnboarding: false,
+    bankMonitor: false,
     upcoming: false,
     classes: false,
     tests: false,
@@ -517,6 +683,7 @@ const state = {
   notice: "",
   noticeType: "info",
   testSearch: "",
+  selectedTestIds: [],
   analyticsByAssignment: {},
   testGroupExpanded: {
     live: false,
@@ -551,6 +718,7 @@ const state = {
     pupilStatusFilter: "all",
     compareSelections: [],
   },
+  analyticsExport: createDefaultAnalyticsExportState(),
   groupComparison: createDefaultGroupComparisonState(),
   analyticsAssistant: {
     open: false,
@@ -568,6 +736,14 @@ const state = {
     visiblePupilRows: {},
     expandedPupilRows: {},
   },
+  assignmentLifecycle: {
+    filter: "all",
+    sourceFilter: "all",
+    summariesByAssignmentId: {},
+    status: "idle",
+    message: "",
+    manualAssignClassByTestId: {},
+  },
   classResultsUi: {
     rangeByClass: {},
     selectedAssignmentByClass: {},
@@ -579,13 +755,19 @@ const state = {
   createBaselineOpen: false,
   createAutoAssignOpen: false,
   createAutoAssignClassId: "",
+  classRemoval: createDefaultClassRemovalState(),
   automationPolicies: [],
   automationSelectedPolicyKey: "",
+  automationSelectionExplicit: false,
+  automationSelectionOpenedThisSession: false,
   automationDraftsByKey: {},
+  automationRecentRuns: [],
   automationAction: createDefaultAutomationActionState(),
+  automationDismissedPolicyAlertKeys: [],
   interventionGroup: createDefaultInterventionGroupState(),
   staffAccess: createDefaultStaffAccessState(),
   pupilOnboarding: createDefaultPupilOnboardingState(),
+  bankMonitor: createDefaultBankMonitorState(),
   demoData: {
     loading: false,
     action: "",
@@ -598,6 +780,7 @@ let visualCompareSeed = 0;
 let groupComparisonRequestId = 0;
 let staffAccessDirectoryRequestId = 0;
 let staffAccessDetailsRequestId = 0;
+let bankMonitorRequestId = 0;
 let visualAnalyticsDerivedCache = {
   sourceData: null,
   grapheme: "",
@@ -635,8 +818,27 @@ function getAccessCapabilities() {
     : createDefaultAccessContext(state.user?.id || "").capabilities;
 }
 
+function hasTeacherAuthoringAccess() {
+  const accessContext = getAccessContext();
+  const legacyRole = String(accessContext?.legacy?.teacher_app_role || "").trim().toLowerCase();
+  return !!accessContext?.roles?.teacher || legacyRole === "teacher";
+}
+
 function canManageAutomation() {
   return !!getAccessCapabilities()?.can_manage_automation;
+}
+
+function canViewWordloomCoreBankMonitor() {
+  const accessContext = getAccessContext();
+  const roles = accessContext?.roles || {};
+  return !!roles.admin
+    || !!roles.literacy_lead
+    || !!accessContext?.capabilities?.can_manage_automation;
+}
+
+function canManageSpellingBeePolicies() {
+  const roles = getAccessContext()?.roles || {};
+  return !!roles.admin || canManageAutomation();
 }
 
 function canImportCsv() {
@@ -652,19 +854,19 @@ function canManageRoles() {
 }
 
 function canCreateClasses() {
-  return !!getAccessCapabilities()?.can_create_classes;
+  return !!getAccessCapabilities()?.can_create_classes || hasTeacherAuthoringAccess();
 }
 
 function canCreateTests() {
-  return !!getAccessCapabilities()?.can_create_tests;
+  return !!getAccessCapabilities()?.can_create_tests || hasTeacherAuthoringAccess();
 }
 
 function canAssignTests() {
-  return !!getAccessCapabilities()?.can_assign_tests;
+  return !!getAccessCapabilities()?.can_assign_tests || hasTeacherAuthoringAccess();
 }
 
 function canManageOwnContent() {
-  return !!getAccessCapabilities()?.can_manage_own_content;
+  return !!getAccessCapabilities()?.can_manage_own_content || hasTeacherAuthoringAccess();
 }
 
 function getCurrentTeacherId() {
@@ -705,6 +907,57 @@ function getTeacherAppRole() {
     : "teacher";
 }
 
+function getCurrentSchoolDetails() {
+  return resolveActiveSchoolDetails(getAccessContext());
+}
+
+function canUseDeveloperSchoolSwitch() {
+  const schools = Array.isArray(getAccessContext()?.schools) ? getAccessContext().schools : [];
+  return isDeveloperSchoolSwitchEnabled() && schools.length > 1;
+}
+
+function renderCurrentSchoolContextRow() {
+  const accessContext = getAccessContext();
+  const schools = Array.isArray(accessContext?.schools) ? accessContext.schools : [];
+  const { activeSchoolId, activeSchoolName } = getCurrentSchoolDetails();
+  const schoolLabel = `
+    <span class="schoolContextLabel" title="${escapeAttr(activeSchoolName)}">
+      <span>School</span>
+      <strong>${escapeHtml(activeSchoolName)}</strong>
+    </span>
+  `;
+
+  if (!canUseDeveloperSchoolSwitch()) {
+    return `<div class="schoolContextRow">${schoolLabel}</div>`;
+  }
+
+  return `
+    <div class="schoolContextRow">
+      ${schoolLabel}
+      <label class="schoolContextControl" aria-label="Developer school switch">
+        <span class="schoolContextControlText">Developer school</span>
+        <select class="select schoolContextSelect" data-field="active-school-dev-select">
+          ${schools.map((school) => {
+            const optionId = String(school?.id || "").trim();
+            return `<option value="${escapeAttr(optionId)}" ${optionId === String(activeSchoolId || "").trim() ? "selected" : ""}>${escapeHtml(String(school?.name || "School"))}</option>`;
+          }).join("")}
+        </select>
+      </label>
+    </div>
+  `;
+}
+
+function handleDeveloperSchoolSwitch(nextSchoolId = "") {
+  if (!canUseDeveloperSchoolSwitch()) return;
+  const schools = Array.isArray(getAccessContext()?.schools) ? getAccessContext().schools : [];
+  const safeNextSchoolId = String(nextSchoolId || "").trim();
+  if (!safeNextSchoolId) return;
+  if (!schools.some((school) => String(school?.id || "").trim() === safeNextSchoolId)) return;
+  if (safeNextSchoolId === String(getCurrentSchoolDetails().activeSchoolId || "").trim()) return;
+  storeActiveSchoolId(safeNextSchoolId);
+  window.location.reload();
+}
+
 function isCentralOwnerAppRole() {
   return getTeacherAppRole() === "central_owner";
 }
@@ -713,9 +966,7 @@ function getDashboardTitle() {
   const roles = getAccessContext()?.roles || {};
 
   if (canManageAutomation() || roles.admin) return "Admin dashboard";
-  if (!roles.teacher && roles.hoy) return "Head of Year dashboard";
-  if (!roles.teacher && !roles.hoy && roles.hod) return "Head of Department dashboard";
-  if (roles.teacher || canCreateClasses() || canCreateTests() || canAssignTests() || canManageOwnContent()) {
+  if (hasTeacherAuthoringAccess() || canCreateClasses() || canCreateTests() || canAssignTests() || canManageOwnContent()) {
     return "Teacher dashboard";
   }
   if (roles.hoy) return "Head of Year dashboard";
@@ -725,13 +976,13 @@ function getDashboardTitle() {
 
 function getBaselineActionTooltipText() {
   return isCentralOwnerAppRole()
-    ? "Set the standard baseline test for this class. Future exceptional overrides will stay under central control."
-    : "Set the standard baseline test for this class before pupils move into the normal personalised flow.";
+    ? "Check or repair the standard baseline. Pupils start or continue baseline automatically when they log in."
+    : "Wordloom starts the standard baseline automatically for pupils. Personalised tests unlock after baseline is complete.";
 }
 
 function getGeneratePersonalisedActionTooltipText() {
   return isCentralOwnerAppRole()
-    ? "Manage named automation policies for selected form and intervention groups, then run one saved policy now. Pupils without the required baseline or with an active automated personalised test will be skipped."
+    ? "Manage named automation policies for year and form groups, then run one saved policy now. Pupils without the required baseline or with an active automated personalised test will be skipped."
     : "Personalised automation is now run from the central-owner control.";
 }
 
@@ -759,6 +1010,61 @@ function canAssignFromTestRecord(record) {
   return canEditTestRecord(record) && canAssignTests();
 }
 
+function getSelectedTestIds() {
+  return normalizeIdList(state.selectedTestIds);
+}
+
+function setSelectedTestIds(testIds) {
+  const editableIds = new Set(
+    (state.tests || [])
+      .filter((test) => canEditTestRecord(test))
+      .map((test) => String(test?.id || "").trim())
+      .filter(Boolean)
+  );
+  state.selectedTestIds = normalizeIdList(testIds).filter((testId) => editableIds.has(testId));
+}
+
+function toggleSelectedTestId(testId, selected) {
+  const safeTestId = String(testId || "").trim();
+  if (!safeTestId) return;
+  const current = new Set(getSelectedTestIds());
+  const test = findTestRecord(safeTestId);
+
+  if (selected && canEditTestRecord(test)) {
+    current.add(safeTestId);
+  } else {
+    current.delete(safeTestId);
+  }
+
+  setSelectedTestIds([...current]);
+}
+
+function clearSelectedTestIds() {
+  state.selectedTestIds = [];
+}
+
+function syncSelectedTestIdsWithLoadedTests() {
+  setSelectedTestIds(getSelectedTestIds());
+}
+
+function getSelectedEditableTests() {
+  const selectedIds = new Set(getSelectedTestIds());
+  return (state.tests || []).filter((test) => selectedIds.has(String(test?.id || "")) && canEditTestRecord(test));
+}
+
+function getFilteredEditableTestIds() {
+  const term = state.testSearch.trim().toLowerCase();
+  const groups = getGroupedTests(term);
+  return [...groups.live, ...groups.draft, ...groups.ready]
+    .filter((test) => canEditTestRecord(test))
+    .map((test) => String(test?.id || "").trim())
+    .filter(Boolean);
+}
+
+function isLiveTestRecord(test) {
+  return Number(test?.assignment_count || 0) > 0;
+}
+
 function canManageAssignmentRecord(record) {
   return !!record && canManageOwnContent() && ownsTeacherRecord(record);
 }
@@ -782,9 +1088,76 @@ function getClassTypeDisplayLabel(value) {
   return "Subject class";
 }
 
+function getClassRemovalTypeLabel(record = null) {
+  return getClassTypeDisplayLabel(record?.class_type).toLowerCase();
+}
+
+function getClassRemovalStateForClass(classId = "") {
+  const safeClassId = String(classId || "").trim();
+  const removal = state.classRemoval || createDefaultClassRemovalState();
+  return {
+    preflight: removal.preflightByClassId?.[safeClassId] || null,
+    loading: !!removal.loadingByClassId?.[safeClassId],
+    error: String(removal.errorByClassId?.[safeClassId] || "").trim(),
+    busy: !!removal.busyByClassId?.[safeClassId],
+  };
+}
+
+function setClassRemovalLoading(classId = "", loading = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.loadingByClassId = {
+    ...(state.classRemoval.loadingByClassId || {}),
+    [safeClassId]: !!loading,
+  };
+}
+
+function setClassRemovalBusy(classId = "", busy = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.busyByClassId = {
+    ...(state.classRemoval.busyByClassId || {}),
+    [safeClassId]: !!busy,
+  };
+}
+
+function setClassRemovalError(classId = "", message = "") {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.errorByClassId = {
+    ...(state.classRemoval.errorByClassId || {}),
+    [safeClassId]: String(message || "").trim(),
+  };
+}
+
+function setClassRemovalPreflight(classId = "", preflight = null) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  state.classRemoval.preflightByClassId = {
+    ...(state.classRemoval.preflightByClassId || {}),
+    [safeClassId]: preflight,
+  };
+}
+
+function getClassRemovalTargetClasses(sourceClass = null) {
+  const sourceId = String(sourceClass?.id || "").trim();
+  const sourceType = getNormalizedClassType(sourceClass?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+  return getOwnedClasses()
+    .filter((item) => {
+      const classId = String(item?.id || "").trim();
+      if (!classId || classId === sourceId) return false;
+      return getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === sourceType;
+    })
+    .sort((a, b) => {
+      const yearDelta = String(a?.year_group || "").localeCompare(String(b?.year_group || ""));
+      if (yearDelta !== 0) return yearDelta;
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+}
+
 function isAutomationEligibleClass(item) {
   return AUTOMATION_ELIGIBLE_CLASS_TYPES.has(
-    getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM })
+    getNormalizedClassType(item?.class_type, { legacyFallback: AUTOMATION_CLASS_TYPE_FALLBACK })
   );
 }
 
@@ -792,10 +1165,8 @@ function getAutomationEligibleClasses() {
   return (state.classes || [])
     .filter((item) => canEditClassRecord(item) && isAutomationEligibleClass(item))
     .sort((a, b) => {
-      const typeDelta =
-        (getNormalizedClassType(a?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1)
-        - (getNormalizedClassType(b?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1);
-      if (typeDelta !== 0) return typeDelta;
+      const yearDelta = String(a?.year_group || "").localeCompare(String(b?.year_group || ""));
+      if (yearDelta !== 0) return yearDelta;
       return String(a?.name || "").localeCompare(String(b?.name || ""));
     });
 }
@@ -836,6 +1207,89 @@ function syncInterventionBuilderSourceClassFilter({ yearGroup = state.interventi
 
   state.interventionGroup.filters.sourceClassId = "";
   return true;
+}
+
+function normalizeInterventionStatusOptionValue(value = "") {
+  const [rawType = "", rawValue = ""] = String(value || "").trim().toLowerCase().split(":");
+  const type = rawType.replace(/[-_]+/g, "_");
+  const statusValue = rawValue.replace(/[-_]+/g, "_").replace(/\s+/g, "_");
+  if (type === "pp") return "pp:positive";
+  if (type === "sen") return "sen:positive";
+  if (type === "eal") return "eal:positive";
+  if (type === "gender" && statusValue) return `gender:${statusValue}`;
+  return "";
+}
+
+function normalizeInterventionStatusOptions(options = []) {
+  const byValue = new Map();
+  for (const option of Array.isArray(options) ? options : []) {
+    const value = normalizeInterventionStatusOptionValue(option?.value);
+    if (!value) continue;
+    byValue.set(value, {
+      value,
+      group_type: String(option?.group_type || value.split(":")[0] || "").trim().toLowerCase(),
+      group_value: String(option?.group_value || value.split(":")[1] || "").trim().toLowerCase(),
+      count: Math.max(0, Number(option?.count || 0)),
+    });
+  }
+  return [...byValue.values()].sort((a, b) => {
+    const order = { pp: 1, sen: 2, eal: 3, gender: 4 };
+    const aType = String(a?.group_type || "").trim().toLowerCase();
+    const bType = String(b?.group_type || "").trim().toLowerCase();
+    const typeDelta = (order[aType] || 99) - (order[bType] || 99);
+    if (typeDelta !== 0) return typeDelta;
+    return getInterventionStatusOptionLabel(a).localeCompare(getInterventionStatusOptionLabel(b));
+  });
+}
+
+function getInterventionBuilderStatusOptions() {
+  return normalizeInterventionStatusOptions(state.interventionGroup?.statusOptions || []);
+}
+
+function getInterventionGenderStatusLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-_]+/g, " ");
+  if (["f", "female", "girl", "girls"].includes(normalized)) return "Girls";
+  if (["m", "male", "boy", "boys"].includes(normalized)) return "Boys";
+  if (normalized === "non binary") return "Non-binary";
+  if (normalized === "other" || normalized === "mixed") return "Mixed/Other";
+  return normalized
+    ? normalized.replace(/\b\w/g, (char) => char.toUpperCase())
+    : "Gender group";
+}
+
+function getInterventionStatusOptionLabel(optionOrValue = "") {
+  const option = typeof optionOrValue === "string"
+    ? { value: normalizeInterventionStatusOptionValue(optionOrValue) }
+    : (optionOrValue || {});
+  const value = normalizeInterventionStatusOptionValue(option?.value);
+  const [type = "", statusValue = ""] = value.split(":");
+  if (type === "pp") return "Pupil Premium";
+  if (type === "sen") return "SEN";
+  if (type === "eal") return "EAL";
+  if (type === "gender") return getInterventionGenderStatusLabel(option?.group_value || statusValue);
+  return "Status";
+}
+
+function getInterventionSelectedStatusLabel(value = "") {
+  const normalizedValue = normalizeInterventionStatusOptionValue(value);
+  if (!normalizedValue) return "";
+  const option = getInterventionBuilderStatusOptions().find((item) => item.value === normalizedValue);
+  return getInterventionStatusOptionLabel(option || normalizedValue);
+}
+
+function setInterventionBuilderStatusOptions(options = []) {
+  state.interventionGroup.statusOptions = normalizeInterventionStatusOptions(options);
+  const currentStatus = normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "");
+  if (currentStatus && !state.interventionGroup.statusOptions.some((option) => option.value === currentStatus)) {
+    state.interventionGroup.filters.status = "";
+    scheduleInterventionFilterApply();
+  }
+}
+
+function resetInterventionBuilderStatusFilter() {
+  if (!normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "")) return;
+  state.interventionGroup.filters.status = "";
+  scheduleInterventionFilterApply();
 }
 
 function getStaffAccessState() {
@@ -1001,6 +1455,314 @@ function getPupilPlacementReferenceCandidates() {
     });
 }
 
+function getPupilPlacementRowIds() {
+  return new Set(
+    (getPupilOnboardingState()?.placementRows || [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function getPupilLifecycleFormContext() {
+  const formClasses = getPupilPlacementFormClasses();
+  const formById = new Map(
+    formClasses
+      .map((item) => [String(item?.id || "").trim(), item])
+      .filter(([classId]) => !!classId)
+  );
+  const activeFormIdsByPupil = new Map();
+
+  for (const membership of getPupilOnboardingState()?.formMemberships || []) {
+    const pupilId = String(membership?.pupil_id || "").trim();
+    const classId = String(membership?.class_id || "").trim();
+    if (!pupilId || !classId || membership?.active === false || !formById.has(classId)) continue;
+    const next = activeFormIdsByPupil.get(pupilId) || [];
+    if (!next.includes(classId)) next.push(classId);
+    activeFormIdsByPupil.set(pupilId, next);
+  }
+
+  return {
+    formClasses,
+    placementRowIds: getPupilPlacementRowIds(),
+    activeFormIdsByPupil,
+  };
+}
+
+function getPupilLifecycleStatus(pupil = null, lifecycleContext = null) {
+  const context = lifecycleContext || getPupilLifecycleFormContext();
+  const pupilId = String(pupil?.id || "").trim();
+  const currentFormIds = context.activeFormIdsByPupil?.get(pupilId) || [];
+
+  if (String(pupil?.archived_at || "").trim()) {
+    return {
+      key: "archived",
+      label: "Archived",
+      rank: 3,
+    };
+  }
+  if (pupil?.is_active === false) {
+    return {
+      key: "inactive",
+      label: "Inactive",
+      rank: 2,
+    };
+  }
+  if (context.placementRowIds?.has(pupilId) || currentFormIds.length === 0) {
+    return {
+      key: "needs_form_placement",
+      label: "Needs form placement",
+      rank: 0,
+    };
+  }
+  if (currentFormIds.length > 1) {
+    return {
+      key: "multiple_live_forms",
+      label: "Multiple live forms",
+      rank: 1,
+    };
+  }
+  return {
+    key: "active",
+    label: "Active",
+    rank: 4,
+  };
+}
+
+function getPupilLifecycleRows() {
+  const lifecycleContext = getPupilLifecycleFormContext();
+  return (getPupilOnboardingState()?.existingPupils || [])
+    .filter((pupil) => String(pupil?.id || "").trim())
+    .map((pupil) => {
+      const pupilId = String(pupil?.id || "").trim();
+      const currentFormIds = lifecycleContext.activeFormIdsByPupil.get(pupilId) || [];
+      const currentFormRecords = lifecycleContext.formClasses
+        .filter((formClass) => currentFormIds.includes(String(formClass?.id || "").trim()));
+      const currentFormLabels = currentFormRecords.map((formClass) => formatPupilPlacementFormLabel(formClass));
+      const currentFormYearGroups = [...new Set(
+        currentFormRecords
+          .map((formClass) => String(formClass?.year_group || "").trim())
+          .filter(Boolean)
+      )];
+      return {
+        ...pupil,
+        display_name: getPupilPlacementDisplayName(pupil),
+        currentFormIds,
+        currentFormLabels,
+        currentFormYearGroups,
+        lifecycleStatus: getPupilLifecycleStatus(pupil, lifecycleContext),
+      };
+    })
+    .sort((a, b) => {
+      const statusDelta = Number(a?.lifecycleStatus?.rank ?? 9) - Number(b?.lifecycleStatus?.rank ?? 9);
+      if (statusDelta !== 0) return statusDelta;
+      const nameDelta = String(a?.display_name || "").localeCompare(String(b?.display_name || ""));
+      if (nameDelta !== 0) return nameDelta;
+      return String(a?.username || "").localeCompare(String(b?.username || ""));
+    });
+}
+
+function getPupilLifecycleCurrentFormLabel(row = null) {
+  const labels = Array.isArray(row?.currentFormLabels) ? row.currentFormLabels.filter(Boolean) : [];
+  return labels.length ? labels.join(", ") : "No live form";
+}
+
+function getPupilLifecycleStatusFilterOptions() {
+  return [
+    { value: "needs_attention", label: "Needs attention" },
+    { value: "active", label: "Active" },
+    { value: "archived", label: "Archived" },
+    { value: "all", label: "All" },
+  ];
+}
+
+function getPupilLifecycleStatusFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleStatusFilter || "").trim();
+  return getPupilLifecycleStatusFilterOptions().some((option) => option.value === saved)
+    ? saved
+    : PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER;
+}
+
+function getPupilLifecycleYearGroupFilterOptions() {
+  const yearGroups = [...new Set(
+    getPupilPlacementFormClasses()
+      .map((formClass) => String(formClass?.year_group || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+  return [
+    { value: "", label: "All year groups" },
+    ...yearGroups.map((yearGroup) => ({ value: yearGroup, label: yearGroup })),
+  ];
+}
+
+function getPupilLifecycleYearGroupFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleYearGroupFilter || "").trim();
+  return getPupilLifecycleYearGroupFilterOptions().some((option) => option.value === saved) ? saved : "";
+}
+
+function getPupilLifecycleClassFilterOptions(yearGroupFilter = getPupilLifecycleYearGroupFilter()) {
+  const safeYearGroup = String(yearGroupFilter || "").trim();
+  const formClasses = getPupilPlacementFormClasses()
+    .filter((formClass) => !safeYearGroup || String(formClass?.year_group || "").trim() === safeYearGroup);
+  return [
+    { value: "", label: "All classes" },
+    ...formClasses.map((formClass) => ({
+      value: String(formClass?.id || "").trim(),
+      label: formatPupilPlacementFormLabel(formClass),
+    })).filter((option) => option.value),
+    { value: PUPIL_LIFECYCLE_NO_FORM_FILTER, label: "No current class" },
+  ];
+}
+
+function getPupilLifecycleClassFilter() {
+  const saved = String(getPupilOnboardingState()?.lifecycleFormFilter || "").trim();
+  return getPupilLifecycleClassFilterOptions().some((option) => option.value === saved) ? saved : "";
+}
+
+function getPupilLifecycleSearch() {
+  return String(getPupilOnboardingState()?.lifecycleSearch || "");
+}
+
+function resetPupilLifecycleVisibleRows() {
+  state.pupilOnboarding.lifecycleVisibleRows = PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS;
+}
+
+function getPupilLifecycleVisibleRowCount(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  if (!safeTotal) return 0;
+  const saved = Number(getPupilOnboardingState()?.lifecycleVisibleRows || PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS);
+  return Math.min(safeTotal, Math.max(PUPIL_LIFECYCLE_DEFAULT_VISIBLE_ROWS, saved));
+}
+
+function showMorePupilLifecycleRows(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  const current = getPupilLifecycleVisibleRowCount(safeTotal);
+  state.pupilOnboarding.lifecycleVisibleRows = Math.min(safeTotal, current + PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP);
+}
+
+function doesPupilLifecycleRowMatchStatusFilter(row = null, statusFilter = getPupilLifecycleStatusFilter()) {
+  const statusKey = String(row?.lifecycleStatus?.key || "").trim();
+  if (statusFilter === "needs_attention") {
+    return ["needs_form_placement", "multiple_live_forms", "inactive", "archived"].includes(statusKey);
+  }
+  if (statusFilter === "active") {
+    return statusKey !== "archived" && row?.is_active !== false;
+  }
+  if (statusFilter === "archived") {
+    return statusKey === "archived";
+  }
+  return true;
+}
+
+function doesPupilLifecycleRowMatchYearGroupFilter(row = null, yearGroupFilter = getPupilLifecycleYearGroupFilter()) {
+  const safeYearGroup = String(yearGroupFilter || "").trim();
+  if (!safeYearGroup) return true;
+  return (Array.isArray(row?.currentFormYearGroups) ? row.currentFormYearGroups : []).includes(safeYearGroup);
+}
+
+function doesPupilLifecycleRowMatchClassFilter(row = null, formFilter = getPupilLifecycleClassFilter()) {
+  const currentFormIds = Array.isArray(row?.currentFormIds) ? row.currentFormIds : [];
+  if (!formFilter) return true;
+  if (formFilter === PUPIL_LIFECYCLE_NO_FORM_FILTER) return currentFormIds.length === 0;
+  return currentFormIds.includes(formFilter);
+}
+
+function doesPupilLifecycleRowMatchSearch(row = null, search = getPupilLifecycleSearch()) {
+  const query = String(search || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    row?.display_name,
+    row?.first_name,
+    row?.surname,
+    row?.username,
+    row?.mis_id,
+    getPupilLifecycleCurrentFormLabel(row),
+  ].map((value) => String(value || "").toLowerCase());
+  return haystack.some((value) => value.includes(query));
+}
+
+function getFilteredPupilLifecycleRows(rows = getPupilLifecycleRows()) {
+  const statusFilter = getPupilLifecycleStatusFilter();
+  const yearGroupFilter = getPupilLifecycleYearGroupFilter();
+  const formFilter = getPupilLifecycleClassFilter();
+  const search = getPupilLifecycleSearch();
+  if (String(search || "").trim()) {
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => doesPupilLifecycleRowMatchSearch(row, search));
+  }
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => doesPupilLifecycleRowMatchStatusFilter(row, statusFilter))
+    .filter((row) => doesPupilLifecycleRowMatchYearGroupFilter(row, yearGroupFilter))
+    .filter((row) => doesPupilLifecycleRowMatchClassFilter(row, formFilter))
+    .filter((row) => doesPupilLifecycleRowMatchSearch(row, search));
+}
+
+function setPupilLifecycleSelectedFormId(pupilId = "", formClassId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.lifecycleSelectedFormIds = {
+    ...(getPupilOnboardingState()?.lifecycleSelectedFormIds || {}),
+    [safePupilId]: String(formClassId || "").trim(),
+  };
+  clearPupilLifecycleRowError(safePupilId);
+}
+
+function getPupilLifecycleSelectedFormId(pupilId = "", allowedFormIds = []) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return "";
+  const selectedFormId = String(getPupilOnboardingState()?.lifecycleSelectedFormIds?.[safePupilId] || "").trim();
+  const validFormIds = new Set(
+    (Array.isArray(allowedFormIds) && allowedFormIds.length
+      ? allowedFormIds
+      : getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim())
+    ).filter(Boolean)
+  );
+  return validFormIds.has(selectedFormId) ? selectedFormId : "";
+}
+
+function getPupilLifecycleMoveMeta(row = null) {
+  const statusKey = String(row?.lifecycleStatus?.key || "").trim();
+  const currentFormIds = Array.isArray(row?.currentFormIds) ? row.currentFormIds.filter(Boolean) : [];
+  const formClasses = getPupilPlacementFormClasses();
+
+  if (statusKey === "archived" || statusKey === "inactive" || row?.is_active === false) {
+    return {
+      canMove: false,
+      targetFormClasses: [],
+      actionLabel: "Move form",
+      busyLabel: "Moving...",
+      emptyTargetLabel: "Choose form",
+      disabledReason: "Move form is available for active pupils only.",
+    };
+  }
+
+  if (statusKey === "multiple_live_forms" || currentFormIds.length > 1) {
+    return {
+      canMove: false,
+      targetFormClasses: [],
+      actionLabel: "Move form",
+      busyLabel: "Moving...",
+      emptyTargetLabel: "Choose form",
+      disabledReason: "Multiple live forms need admin review before moving.",
+    };
+  }
+
+  const currentFormId = currentFormIds.length === 1 ? currentFormIds[0] : "";
+  const isPlacement = !currentFormId || statusKey === "needs_form_placement";
+  const targetFormClasses = formClasses.filter((formClass) => {
+    const formClassId = String(formClass?.id || "").trim();
+    return formClassId && formClassId !== currentFormId;
+  });
+
+  return {
+    canMove: targetFormClasses.length > 0,
+    targetFormClasses,
+    actionLabel: isPlacement ? "Place in form" : "Move form",
+    busyLabel: isPlacement ? "Placing..." : "Moving...",
+    emptyTargetLabel: isPlacement ? "Choose form" : "Choose new form",
+    disabledReason: targetFormClasses.length ? "" : (isPlacement ? "No live form groups are available." : "No other live form is available."),
+  };
+}
+
 function syncPupilPlacementDraftsWithRows(rows = []) {
   const rowIds = new Set(
     (Array.isArray(rows) ? rows : [])
@@ -1075,6 +1837,103 @@ function getPupilPlacementSelectedFormId(pupilId = "") {
   return validFormIds.has(selectedFormId) ? selectedFormId : "";
 }
 
+function setPupilLifecycleRowError(pupilId = "", message = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  state.pupilOnboarding.lifecycleRowErrors = {
+    ...(getPupilOnboardingState()?.lifecycleRowErrors || {}),
+    [safePupilId]: String(message || "").trim(),
+  };
+}
+
+function clearPupilLifecycleRowError(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextErrors = {
+    ...(getPupilOnboardingState()?.lifecycleRowErrors || {}),
+  };
+  delete nextErrors[safePupilId];
+  state.pupilOnboarding.lifecycleRowErrors = nextErrors;
+}
+
+function setPupilLifecycleSaving(pupilId = "", saving = false, action = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+  const nextSaving = {
+    ...(getPupilOnboardingState()?.lifecycleSavingPupilIds || {}),
+  };
+  const nextSavingActions = {
+    ...(getPupilOnboardingState()?.lifecycleSavingActions || {}),
+  };
+  if (saving) {
+    nextSaving[safePupilId] = true;
+    nextSavingActions[safePupilId] = String(action || "").trim();
+  } else {
+    delete nextSaving[safePupilId];
+    delete nextSavingActions[safePupilId];
+  }
+  state.pupilOnboarding.lifecycleSavingPupilIds = nextSaving;
+  state.pupilOnboarding.lifecycleSavingActions = nextSavingActions;
+}
+
+function clearPupilLifecycleResetCredential() {
+  state.pupilOnboarding.lifecycleResetCredential = null;
+}
+
+function setPupilLifecycleResetCredential(result = null) {
+  const row = result && typeof result === "object" ? result : null;
+  if (!row) {
+    clearPupilLifecycleResetCredential();
+    return;
+  }
+  const credential = {
+    pupil_id: String(row?.pupil_id || row?.id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    pin: String(row?.pin || "").trim(),
+  };
+  state.pupilOnboarding.lifecycleResetCredential = credential.pupil_id && credential.username && credential.pin
+    ? credential
+    : null;
+}
+
+function isPupilResetPinUnavailableMessage(message = "") {
+  return String(message || "").toLowerCase().includes("pupil pin reset is not available yet");
+}
+
+function syncPupilLifecycleDraftsWithRows(rows = []) {
+  const rowIds = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const validFormIds = new Set(getPupilPlacementFormClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const selectedFormIds = {};
+  for (const [pupilId, formId] of Object.entries(getPupilOnboardingState()?.lifecycleSelectedFormIds || {})) {
+    const safeFormId = String(formId || "").trim();
+    if (rowIds.has(pupilId) && validFormIds.has(safeFormId)) selectedFormIds[pupilId] = safeFormId;
+  }
+  const savingPupilIds = {};
+  const savingActions = {};
+  for (const [pupilId, saving] of Object.entries(getPupilOnboardingState()?.lifecycleSavingPupilIds || {})) {
+    if (rowIds.has(pupilId) && saving) {
+      savingPupilIds[pupilId] = true;
+      const action = String(getPupilOnboardingState()?.lifecycleSavingActions?.[pupilId] || "").trim();
+      if (action) savingActions[pupilId] = action;
+    }
+  }
+  const rowErrors = {};
+  for (const [pupilId, message] of Object.entries(getPupilOnboardingState()?.lifecycleRowErrors || {})) {
+    if (rowIds.has(pupilId) && message) rowErrors[pupilId] = message;
+  }
+  state.pupilOnboarding.lifecycleSelectedFormIds = selectedFormIds;
+  state.pupilOnboarding.lifecycleSavingPupilIds = savingPupilIds;
+  state.pupilOnboarding.lifecycleSavingActions = savingActions;
+  state.pupilOnboarding.lifecycleRowErrors = rowErrors;
+}
+
 function getStaffAccessSelectedProfileId() {
   return String(getStaffAccessState()?.selectedProfileId || "").trim();
 }
@@ -1113,6 +1972,10 @@ function isStaffAccessProfileLinked(profile = null) {
   return !!String(profile?.user_id || "").trim();
 }
 
+function isStaffAccessProfileArchived(profile = null) {
+  return !!String(profile?.archived_at || "").trim();
+}
+
 function getStaffAccessSelectedProfile() {
   const selectedProfileId = getStaffAccessSelectedProfileId();
   if (!selectedProfileId) return null;
@@ -1126,7 +1989,7 @@ function getSelectedStaffPendingApproval() {
 
 function canManageSelectedStaffPendingApproval() {
   const selectedProfile = getStaffAccessSelectedProfile();
-  if (!selectedProfile || isStaffAccessProfileLinked(selectedProfile)) return false;
+  if (!selectedProfile || isStaffAccessProfileArchived(selectedProfile) || isStaffAccessProfileLinked(selectedProfile)) return false;
   return !!getSelectedStaffPendingApproval()?.can_approve;
 }
 
@@ -1162,14 +2025,51 @@ function doesStaffAccessProfileHaveActiveAccess(profile = null) {
   return getStaffAccessProfileActiveRoles(profile).length > 0;
 }
 
+function doesSelectedStaffAccessHaveLiveAccess() {
+  return (Array.isArray(getStaffAccessState()?.selectedRoles) && getStaffAccessState().selectedRoles.length > 0)
+    || (Array.isArray(getStaffAccessState()?.selectedScopes) && getStaffAccessState().selectedScopes.length > 0);
+}
+
 function doesStaffAccessProfileHaveNoRoleAssigned(profile = null) {
   return !doesStaffAccessProfileHaveActiveAccess(profile);
 }
 
 function doesStaffAccessProfileHavePendingAccess(profile = null) {
+  if (isStaffAccessProfileArchived(profile)) return false;
   return !isStaffAccessProfileLinked(profile)
     && doesStaffAccessProfileHaveNoRoleAssigned(profile)
     && (!!String(profile?.last_imported_at || "").trim() || String(profile?.profile_source || "") === "csv_import");
+}
+
+function doesStaffPendingApprovalNeedReview(profile = null) {
+  if (isStaffAccessProfileArchived(profile) || doesStaffAccessProfileHaveActiveAccess(profile)) return false;
+  const pendingSummary = getStaffPendingApprovalSummary(profile);
+  if (!pendingSummary) return false;
+  return !!pendingSummary?.has_duplicate_conflicts
+    || !!pendingSummary?.is_stale
+    || !!String(pendingSummary?.last_failure_reason || "").trim()
+    || !!String(pendingSummary?.invalidated_reason || "").trim();
+}
+
+function doesStaffAccessProfileHavePendingApproval(profile = null) {
+  if (isStaffAccessProfileArchived(profile) || doesStaffAccessProfileHaveActiveAccess(profile)) return false;
+  const pendingSummary = getStaffPendingApprovalSummary(profile);
+  return (!isStaffAccessProfileLinked(profile) && pendingSummary?.status === "approved")
+    || doesStaffPendingApprovalNeedReview(profile)
+    || doesStaffAccessProfileHavePendingAccess(profile);
+}
+
+function getStaffAccessProfileAttentionRank(profile = null) {
+  if (isStaffAccessProfileArchived(profile)) return 0;
+  if (doesStaffPendingApprovalNeedReview(profile)) return 1;
+  if (doesStaffAccessProfileHavePendingAccess(profile)) return 2;
+  if (isStaffAccessProfileLinked(profile) && !doesStaffAccessProfileHaveActiveAccess(profile)) return 3;
+  if (doesStaffAccessProfileHaveActiveAccess(profile)) return 4;
+  return 5;
+}
+
+function doesStaffAccessProfileNeedAttention(profile = null) {
+  return getStaffAccessProfileAttentionRank(profile) < 4;
 }
 
 function isStaffAccessProfileRecentlyImported(profile = null) {
@@ -1186,6 +2086,9 @@ function isStaffAccessProfileRecentlyImported(profile = null) {
 function getStaffAccessProfileStatusPills(profile = null) {
   const pills = [];
   if (!profile) return pills;
+  if (isStaffAccessProfileArchived(profile)) {
+    pills.push({ label: "Archived record", muted: false });
+  }
   const pendingSummary = getStaffPendingApprovalSummary(profile);
   if (pendingSummary?.status === "approved") {
     pills.push({ label: "Approved pending sign-in", muted: false });
@@ -1203,23 +2106,142 @@ function getStaffAccessProfileStatusPills(profile = null) {
   return pills;
 }
 
+function getStaffLifecycleStatusFilter() {
+  const saved = String(getStaffAccessState()?.lifecycleStatusFilter || "").trim().toLowerCase();
+  return getStaffAccessFilterOptions().some((option) => option.value === saved)
+    ? saved
+    : STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER;
+}
+
+function getStaffLifecycleSearch() {
+  return String(getStaffAccessState()?.lifecycleSearch || "");
+}
+
+function resetStaffLifecycleVisibleRows() {
+  state.staffAccess.lifecycleVisibleRows = STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS;
+}
+
+function getStaffLifecycleVisibleRowCount(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  if (!safeTotal) return 0;
+  const saved = Number(getStaffAccessState()?.lifecycleVisibleRows || STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS);
+  return Math.min(safeTotal, Math.max(STAFF_LIFECYCLE_DEFAULT_VISIBLE_ROWS, saved));
+}
+
+function showMoreStaffLifecycleRows(total) {
+  const safeTotal = Math.max(0, Number(total || 0));
+  const current = getStaffLifecycleVisibleRowCount(safeTotal);
+  state.staffAccess.lifecycleVisibleRows = Math.min(safeTotal, current + STAFF_LIFECYCLE_VISIBLE_ROWS_STEP);
+}
+
+function setStaffLifecycleRowError(profileId = "", message = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  state.staffAccess.lifecycleRowErrors = {
+    ...(getStaffAccessState()?.lifecycleRowErrors || {}),
+    [safeProfileId]: String(message || "").trim(),
+  };
+}
+
+function clearStaffLifecycleRowError(profileId = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  const nextErrors = {
+    ...(getStaffAccessState()?.lifecycleRowErrors || {}),
+  };
+  delete nextErrors[safeProfileId];
+  state.staffAccess.lifecycleRowErrors = nextErrors;
+}
+
+function setStaffLifecycleSaving(profileId = "", saving = false, action = "") {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) return;
+  const nextSaving = {
+    ...(getStaffAccessState()?.lifecycleSavingProfileIds || {}),
+  };
+  const nextActions = {
+    ...(getStaffAccessState()?.lifecycleSavingActions || {}),
+  };
+  if (saving) {
+    nextSaving[safeProfileId] = true;
+    nextActions[safeProfileId] = String(action || "").trim();
+  } else {
+    delete nextSaving[safeProfileId];
+    delete nextActions[safeProfileId];
+  }
+  state.staffAccess.lifecycleSavingProfileIds = nextSaving;
+  state.staffAccess.lifecycleSavingActions = nextActions;
+}
+
+function syncStaffLifecycleStateWithProfiles(profiles = []) {
+  const profileIds = new Set(
+    (Array.isArray(profiles) ? profiles : [])
+      .map((profile) => String(profile?.id || "").trim())
+      .filter(Boolean)
+  );
+  const rowErrors = {};
+  for (const [profileId, message] of Object.entries(getStaffAccessState()?.lifecycleRowErrors || {})) {
+    if (profileIds.has(profileId) && message) rowErrors[profileId] = message;
+  }
+  const savingProfileIds = {};
+  const savingActions = {};
+  for (const [profileId, saving] of Object.entries(getStaffAccessState()?.lifecycleSavingProfileIds || {})) {
+    if (profileIds.has(profileId) && saving) {
+      savingProfileIds[profileId] = true;
+      const action = String(getStaffAccessState()?.lifecycleSavingActions?.[profileId] || "").trim();
+      if (action) savingActions[profileId] = action;
+    }
+  }
+  state.staffAccess.lifecycleRowErrors = rowErrors;
+  state.staffAccess.lifecycleSavingProfileIds = savingProfileIds;
+  state.staffAccess.lifecycleSavingActions = savingActions;
+}
+
+function doesStaffAccessProfileMatchLifecycleFilter(profile = null, statusFilter = getStaffLifecycleStatusFilter()) {
+  if (statusFilter === "needs_attention") return doesStaffAccessProfileNeedAttention(profile);
+  if (statusFilter === "live_access") return !isStaffAccessProfileArchived(profile) && doesStaffAccessProfileHaveActiveAccess(profile);
+  if (statusFilter === "pending_approval") return doesStaffAccessProfileHavePendingApproval(profile);
+  if (statusFilter === "no_live_access") {
+    return !isStaffAccessProfileArchived(profile)
+      && !doesStaffAccessProfileHaveActiveAccess(profile)
+      && !doesStaffAccessProfileHavePendingApproval(profile);
+  }
+  if (statusFilter === "archived") return isStaffAccessProfileArchived(profile);
+  return true;
+}
+
+function doesStaffAccessProfileMatchSearch(profile = null, search = getStaffLifecycleSearch()) {
+  const query = String(search || "").trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    String(profile?.display_name || ""),
+    String(profile?.email || ""),
+    String(profile?.external_staff_id || ""),
+    isStaffAccessProfileArchived(profile) ? "archived active record" : "active record",
+    isStaffAccessProfileLinked(profile) ? "linked account" : "not linked",
+    getStaffAccessProfileAccessStatus(profile).label,
+  ].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function sortStaffAccessProfilesByLifecycle(a = null, b = null) {
+  const rankDelta = getStaffAccessProfileAttentionRank(a) - getStaffAccessProfileAttentionRank(b);
+  if (rankDelta !== 0) return rankDelta;
+  const nameDelta = String(a?.display_name || "").localeCompare(String(b?.display_name || ""));
+  if (nameDelta !== 0) return nameDelta;
+  const emailDelta = String(a?.email || "").localeCompare(String(b?.email || ""));
+  if (emailDelta !== 0) return emailDelta;
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
 function getStaffAccessFilteredProfiles() {
-  const safeSearch = String(getStaffAccessState()?.search || "").trim().toLowerCase();
-  const safeFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
+  const safeSearch = getStaffLifecycleSearch();
+  const safeFilter = getStaffLifecycleStatusFilter();
   const profiles = Array.isArray(getStaffAccessState()?.profiles) ? getStaffAccessState().profiles : [];
-  return profiles.filter((profile) => {
-    if (safeFilter === "pending_access" && !doesStaffAccessProfileHavePendingAccess(profile)) return false;
-    if (safeFilter === "active_access" && !doesStaffAccessProfileHaveActiveAccess(profile)) return false;
-    if (safeFilter === "no_role_assigned" && !doesStaffAccessProfileHaveNoRoleAssigned(profile)) return false;
-    if (safeFilter === "recently_imported" && !isStaffAccessProfileRecentlyImported(profile)) return false;
-    if (!safeSearch) return true;
-    const haystack = [
-      String(profile?.display_name || ""),
-      String(profile?.email || ""),
-      String(profile?.external_staff_id || ""),
-    ].join(" ").toLowerCase();
-    return haystack.includes(safeSearch);
-  });
+  const sourceRows = String(safeSearch || "").trim()
+    ? profiles.filter((profile) => doesStaffAccessProfileMatchSearch(profile, safeSearch))
+    : profiles.filter((profile) => doesStaffAccessProfileMatchLifecycleFilter(profile, safeFilter));
+  return [...sourceRows].sort(sortStaffAccessProfilesByLifecycle);
 }
 
 function getStaffAccessSelectedRoleSet() {
@@ -1695,7 +2717,6 @@ function syncStaffAccessSelectedProfileId() {
   const visibleProfiles = getStaffAccessFilteredProfiles();
   const selectedProfileId = getStaffAccessSelectedProfileId();
   const currentUserId = getCurrentTeacherId();
-  const currentFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
 
   if (selectedProfileId && visibleProfiles.some((profile) => String(profile?.id || "").trim() === selectedProfileId)) {
     return selectedProfileId;
@@ -1707,7 +2728,7 @@ function syncStaffAccessSelectedProfileId() {
     return state.staffAccess.selectedProfileId;
   }
 
-  if (currentFilter === "recently_imported" && visibleProfiles.length) {
+  if (visibleProfiles.length) {
     state.staffAccess.selectedProfileId = String(visibleProfiles[0]?.id || "").trim();
     return state.staffAccess.selectedProfileId;
   }
@@ -1731,6 +2752,10 @@ function getStaffAccessSetupWarnings() {
 
   if (roleSet.has("hod") && Number(getAccessContext()?.data_health?.unmapped_subject_class_count || 0) > 0) {
     warnings.push("Some subject classes still need department mapping before HOD coverage will be complete.");
+  }
+
+  if (selectedProfile && isStaffAccessProfileArchived(selectedProfile)) {
+    warnings.push("This staff directory record is archived. Restore it before changing live access.");
   }
 
   if (selectedProfile && !getSelectedStaffAccessTargetUserId()) {
@@ -1769,17 +2794,78 @@ function getStaffAccessDisplayName(identityValue = "") {
 }
 
 function canManageSelectedStaffAccessLiveAccess() {
-  return !!getSelectedStaffAccessTargetUserId();
+  const selectedProfile = getStaffAccessSelectedProfile();
+  return !!getSelectedStaffAccessTargetUserId() && !isStaffAccessProfileArchived(selectedProfile);
 }
 
 function getStaffAccessFilterOptions() {
   return [
-    { value: "all", label: "All staff" },
-    { value: "pending_access", label: "Pending access" },
-    { value: "active_access", label: "Active access" },
-    { value: "no_role_assigned", label: "No role assigned" },
-    { value: "recently_imported", label: "Recently imported" },
+    { value: "needs_attention", label: "Needs attention" },
+    { value: "live_access", label: "Live access" },
+    { value: "pending_approval", label: "Pending approval" },
+    { value: "no_live_access", label: "No live access" },
+    { value: "archived", label: "Archived" },
+    { value: "all", label: "All" },
   ];
+}
+
+function getStaffAccessProfileDirectoryStatus(profile = null) {
+  return isStaffAccessProfileArchived(profile)
+    ? { label: "Archived record", muted: false }
+    : { label: "Active record", muted: true };
+}
+
+function getStaffAccessProfileLinkStatus(profile = null) {
+  return isStaffAccessProfileLinked(profile)
+    ? { label: "Linked account", muted: true }
+    : { label: "Not linked", muted: false };
+}
+
+function getStaffAccessProfileAccessStatus(profile = null) {
+  if (doesStaffAccessProfileHaveActiveAccess(profile)) {
+    return { label: "Live access", muted: false };
+  }
+  if (doesStaffAccessProfileHavePendingApproval(profile)) {
+    return { label: "Pending approval", muted: false };
+  }
+  return { label: "No live access", muted: true };
+}
+
+function renderStaffAccessStatusTriplet(profile = null, { compact = false } = {}) {
+  const statuses = [
+    { name: "Directory", ...getStaffAccessProfileDirectoryStatus(profile) },
+    { name: "Link", ...getStaffAccessProfileLinkStatus(profile) },
+    { name: "Access", ...getStaffAccessProfileAccessStatus(profile) },
+  ];
+
+  return `
+    <div class="td-staff-lifecycle-status ${compact ? "td-staff-lifecycle-status--compact" : ""}">
+      ${statuses.map((status) => `
+        <span class="td-staff-lifecycle-status-item">
+          <strong>${escapeHtml(status.name)}</strong>
+          <span class="td-pill ${status.muted ? "td-pill--muted" : ""}">${escapeHtml(status.label)}</span>
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStaffAccessStatusRows(profile = null) {
+  const statuses = [
+    { name: "Directory", ...getStaffAccessProfileDirectoryStatus(profile) },
+    { name: "Link", ...getStaffAccessProfileLinkStatus(profile) },
+    { name: "Access", ...getStaffAccessProfileAccessStatus(profile) },
+  ];
+  return `
+    <div class="td-staff-lifecycle-status-grid">
+      ${statuses.map((status) => `
+        <div class="td-staff-lifecycle-status-card">
+          <span>${escapeHtml(status.name)}</span>
+          <strong>${escapeHtml(status.label)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function getStaffAccessImportSuggestionRows(profile = null) {
@@ -1914,8 +3000,9 @@ async function handleCommitStaffAccessImport() {
     });
     state.staffAccess.importResult = result || null;
     state.staffAccess.recentImportBatchId = String(result?.batch_id || "").trim();
-    state.staffAccess.filter = "recently_imported";
-    state.staffAccess.search = "";
+    state.staffAccess.lifecycleStatusFilter = "pending_approval";
+    state.staffAccess.lifecycleSearch = "";
+    resetStaffLifecycleVisibleRows();
     clearStaffAccessImportPreview();
     await loadStaffAccessDirectory({ preserveSelection: false });
     await syncStaffAccessSelectionForVisibleDirectory();
@@ -2022,6 +3109,7 @@ async function loadPupilPlacementRows({ force = false } = {}) {
     state.pupilOnboarding.placementLoaded = true;
     state.pupilOnboarding.placementSignature = getPupilOnboardingReferenceSignature();
     syncPupilPlacementDraftsWithRows(rows);
+    syncPupilLifecycleDraftsWithRows(getPupilLifecycleRows());
   } catch (error) {
     console.error("pupil placement load error:", error);
     state.pupilOnboarding.placementRows = [];
@@ -2066,6 +3154,157 @@ async function handleMovePupilToForm(pupilId = "") {
     setPupilPlacementRowError(safePupilId, error?.message || "Could not move this pupil to that form.");
   } finally {
     setPupilPlacementSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function handleMovePupilLifecycleForm(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+
+  const row = getPupilLifecycleRows().find((item) => String(item?.id || "").trim() === safePupilId);
+  const moveMeta = getPupilLifecycleMoveMeta(row);
+  const allowedFormIds = moveMeta.targetFormClasses.map((item) => String(item?.id || "").trim()).filter(Boolean);
+  const targetFormClassId = getPupilLifecycleSelectedFormId(safePupilId, allowedFormIds);
+  const isPlacement = moveMeta.actionLabel === "Place in form";
+
+  if (!row) {
+    setPupilLifecycleRowError(safePupilId, "Could not find this pupil in the current lifecycle list.");
+    paint();
+    return;
+  }
+  if (!moveMeta.canMove) {
+    setPupilLifecycleRowError(safePupilId, moveMeta.disabledReason || "This pupil cannot be moved from the lifecycle panel.");
+    paint();
+    return;
+  }
+  if (!targetFormClassId) {
+    setPupilLifecycleRowError(
+      safePupilId,
+      isPlacement ? "Choose a current form before placing this pupil." : "Choose a different current form before moving this pupil."
+    );
+    paint();
+    return;
+  }
+  if ((row?.currentFormIds || []).includes(targetFormClassId)) {
+    setPupilLifecycleRowError(safePupilId, "Choose a different current form before moving this pupil.");
+    paint();
+    return;
+  }
+
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, isPlacement ? "place" : "move");
+  paint();
+
+  try {
+    await movePupilFormMembership({
+      pupilId: safePupilId,
+      formClassId: targetFormClassId,
+    });
+
+    await refreshPupilLifecyclePanelsAfterAction();
+    showNotice(isPlacement ? "Pupil placed in form." : "Pupil moved to form.", "success");
+  } catch (error) {
+    console.error("pupil lifecycle form move error:", error);
+    setPupilLifecycleRowError(safePupilId, error?.message || "Could not move this pupil to that form.");
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function refreshPupilLifecyclePanelsAfterAction() {
+  await loadPupilPlacementRows({ force: true });
+  syncPupilLifecycleDraftsWithRows(getPupilLifecycleRows());
+}
+
+async function handlePupilLifecycleAction(pupilId = "", action = "") {
+  const safePupilId = String(pupilId || "").trim();
+  const safeAction = String(action || "").trim().toLowerCase();
+  if (!safePupilId || !["archive", "restore"].includes(safeAction)) return;
+
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, safeAction);
+  paint();
+
+  try {
+    if (safeAction === "archive") {
+      await archivePupilDirectoryRecord({ pupilId: safePupilId });
+    } else {
+      await restorePupilDirectoryRecord({ pupilId: safePupilId });
+    }
+
+    await refreshPupilLifecyclePanelsAfterAction();
+    showNotice(safeAction === "archive" ? "Pupil archived." : "Pupil restored.", "success");
+  } catch (error) {
+    console.error("pupil lifecycle action error:", error);
+    setPupilLifecycleRowError(
+      safePupilId,
+      error?.message || (safeAction === "archive" ? "Could not archive this pupil." : "Could not restore this pupil.")
+    );
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
+    paint();
+  }
+}
+
+async function handleResetPupilLoginPin(pupilId = "") {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return;
+
+  const row = getPupilLifecycleRows().find((item) => String(item?.id || "").trim() === safePupilId);
+  const displayName = String(row?.display_name || getPupilPlacementDisplayName(row) || "this pupil").trim();
+  const isArchived = String(row?.archived_at || "").trim() || String(row?.lifecycleStatus?.key || "") === "archived";
+  const isInactive = row?.is_active === false;
+
+  if (getPupilOnboardingState()?.lifecycleResetPinUnavailable) {
+    setPupilLifecycleRowError(safePupilId, "Pupil PIN reset is not available yet. Run the latest Supabase migration.");
+    paint();
+    return;
+  }
+
+  if (!row) {
+    setPupilLifecycleRowError(safePupilId, "Could not find this pupil in the current lifecycle list.");
+    paint();
+    return;
+  }
+  if (isArchived) {
+    setPupilLifecycleRowError(safePupilId, "Restore this pupil before resetting their PIN.");
+    paint();
+    return;
+  }
+  if (isInactive) {
+    setPupilLifecycleRowError(safePupilId, "Only active pupils can have a PIN reset in this phase.");
+    paint();
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Reset PIN for ${displayName}? The username will stay the same and the new PIN will be shown once.`
+  );
+  if (!confirmed) return;
+
+  clearPupilLifecycleResetCredential();
+  clearPupilLifecycleRowError(safePupilId);
+  setPupilLifecycleSaving(safePupilId, true, "reset_pin");
+  paint();
+
+  try {
+    const result = await resetPupilLoginPin({
+      pupilId: safePupilId,
+      reason: "Forgotten PIN / access reissued by admin",
+    });
+    setPupilLifecycleResetCredential(result);
+    showNotice("Pupil PIN reset. Save the new PIN now.", "success");
+  } catch (error) {
+    console.error("pupil PIN reset error:", error);
+    const errorMessage = error?.message || "Could not reset this pupil PIN.";
+    if (isPupilResetPinUnavailableMessage(errorMessage)) {
+      state.pupilOnboarding.lifecycleResetPinUnavailable = true;
+    }
+    setPupilLifecycleRowError(safePupilId, errorMessage);
+  } finally {
+    setPupilLifecycleSaving(safePupilId, false);
     paint();
   }
 }
@@ -2248,6 +3487,94 @@ function getInterventionBuilderVisiblePupils() {
   return getInterventionBuilderPupils();
 }
 
+function getInterventionPupilYearLabels(pupil = null) {
+  return [...new Set(
+    (Array.isArray(pupil?.year_groups) ? pupil.year_groups : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function getInterventionPupilGroupLabels(pupil = null) {
+  return [...new Set(
+    (Array.isArray(pupil?.classes) ? pupil.classes : [])
+      .filter((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_INTERVENTION)
+      .map((item) => String(item?.class_name || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function buildInterventionVisiblePupilContext({
+  pupils = [],
+  yearGroup = "",
+  sourceClassId = "",
+  sourceClasses = [],
+  statusLabel = "",
+} = {}) {
+  const visiblePupils = Array.isArray(pupils) ? pupils : [];
+  const visibleCount = visiblePupils.length;
+  const safeYearGroup = String(yearGroup || "").trim();
+  const safeSourceClassId = String(sourceClassId || "").trim();
+  const safeStatusLabel = String(statusLabel || "").trim();
+  const selectedSourceClass = safeSourceClassId
+    ? (Array.isArray(sourceClasses) ? sourceClasses : []).find((item) => String(item?.id || "").trim() === safeSourceClassId)
+    : null;
+  const selectedSourceClassName = String(selectedSourceClass?.name || "").trim();
+
+  const yearSets = visiblePupils.map((pupil) => getInterventionPupilYearLabels(pupil));
+  const groupSets = visiblePupils.map((pupil) => getInterventionPupilGroupLabels(pupil));
+  const uniqueYears = [...new Set(yearSets.flat())].sort((a, b) => a.localeCompare(b));
+  const uniqueGroups = [...new Set(groupSets.flat())].sort((a, b) => a.localeCompare(b));
+  const firstYear = uniqueYears[0] || "";
+  const firstGroup = uniqueGroups[0] || "";
+  const allShareSingleYear = !!visibleCount
+    && firstYear
+    && yearSets.every((items) => items.length === 1 && items[0] === firstYear);
+  const allShareSingleGroup = !!visibleCount
+    && firstGroup
+    && groupSets.every((items) => items.length === 1 && items[0] === firstGroup);
+
+  const parts = [];
+  if (visibleCount) {
+    if (safeYearGroup) {
+      parts.push(safeYearGroup);
+    } else if (allShareSingleYear) {
+      parts.push(firstYear);
+    } else if (uniqueYears.length > 1) {
+      parts.push(`${uniqueYears.length} year groups`);
+    } else if (!uniqueYears.length) {
+      parts.push("No year group");
+    } else {
+      parts.push(`${uniqueYears.length} year group`);
+    }
+
+    if (selectedSourceClassName) {
+      parts.push(selectedSourceClassName);
+    } else if (allShareSingleGroup) {
+      parts.push(firstGroup);
+    } else if (uniqueGroups.length > 1) {
+      parts.push(`${uniqueGroups.length} current groups`);
+    } else if (uniqueGroups.length === 1) {
+      parts.push(`${uniqueGroups.length} current group`);
+    }
+  }
+
+  if (safeStatusLabel) parts.push(safeStatusLabel);
+  parts.push(`${visibleCount} pupil${visibleCount === 1 ? "" : "s"} shown`);
+
+  return {
+    summary: parts.join(" | "),
+    showYearMeta: !!visibleCount && !safeYearGroup && !allShareSingleYear,
+    showGroupMeta: !!visibleCount && !safeSourceClassId && !allShareSingleGroup,
+  };
+}
+
+function shouldShowInterventionPupilMeta(context = null, metaKind = "") {
+  if (metaKind === "year") return context?.showYearMeta === true;
+  if (metaKind === "group") return context?.showGroupMeta === true;
+  return false;
+}
+
 function getInterventionBuilderSelectedSummary() {
   const selectedIds = getInterventionBuilderSelectedPupilIds();
   if (!selectedIds.length) return "No pupils selected yet.";
@@ -2259,11 +3586,31 @@ function getInterventionBuilderSelectedSummary() {
   return `${selectedPupils.length} pupils selected: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
 }
 
-function hasMeaningfulInterventionFilters(filters = state.interventionGroup?.filters || {}) {
+function getInterventionPupilSearchText(filters = state.interventionGroup?.filters || {}) {
+  return String(filters?.search || "").trim();
+}
+
+function isInterventionPupilSearchTooShort(filters = state.interventionGroup?.filters || {}) {
+  const search = getInterventionPupilSearchText(filters);
+  return search.length > 0 && search.length < INTERVENTION_PUPIL_SEARCH_MIN_CHARS;
+}
+
+function hasAnyInterventionFilterInput(filters = state.interventionGroup?.filters || {}) {
   return !!(
     String(filters?.yearGroup || "").trim()
     || String(filters?.sourceClassId || "").trim()
-    || String(filters?.search || "").trim()
+    || normalizeInterventionStatusOptionValue(filters?.status || "")
+    || getInterventionPupilSearchText(filters)
+  );
+}
+
+function hasMeaningfulInterventionFilters(filters = state.interventionGroup?.filters || {}) {
+  if (isInterventionPupilSearchTooShort(filters)) return false;
+  return !!(
+    String(filters?.yearGroup || "").trim()
+    || String(filters?.sourceClassId || "").trim()
+    || normalizeInterventionStatusOptionValue(filters?.status || "")
+    || getInterventionPupilSearchText(filters).length >= INTERVENTION_PUPIL_SEARCH_MIN_CHARS
   );
 }
 
@@ -2271,9 +3618,12 @@ function markInterventionFiltersPending() {
   state.interventionGroup.status = "idle";
   state.interventionGroup.resultCount = 0;
   state.interventionGroup.pupils = [];
+  state.interventionGroup.isLimited = false;
   state.interventionGroup.message = hasMeaningfulInterventionFilters()
-    ? "Apply filters to load matching pupils."
-    : "Choose a filter to find pupils.";
+    ? "Loading matching pupils..."
+    : (isInterventionPupilSearchTooShort()
+      ? `Enter at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters to search pupils.`
+      : "Choose a year, group, status, or search to find pupils.");
 }
 
 function sortAutomationRunClassIds(classIds = []) {
@@ -2281,9 +3631,8 @@ function sortAutomationRunClassIds(classIds = []) {
   return normalizeIdList(classIds).sort((a, b) => {
     const aClass = classesById.get(a) || null;
     const bClass = classesById.get(b) || null;
-    const aRank = getNormalizedClassType(aClass?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1;
-    const bRank = getNormalizedClassType(bClass?.class_type) === CLASS_TYPE_INTERVENTION ? 0 : 1;
-    if (aRank !== bRank) return aRank - bRank;
+    const yearDelta = String(aClass?.year_group || "").localeCompare(String(bClass?.year_group || ""));
+    if (yearDelta !== 0) return yearDelta;
     return String(aClass?.name || "").localeCompare(String(bClass?.name || ""));
   });
 }
@@ -2296,12 +3645,57 @@ function normalizeIdList(items = []) {
   )];
 }
 
+function getAutomationTargetableClasses() {
+  return getAutomationEligibleClasses().filter((item) => String(item?.year_group || "").trim());
+}
+
+function getAutomationFormGroupsMissingYearGroup() {
+  return getAutomationEligibleClasses().filter((item) => !String(item?.year_group || "").trim());
+}
+
+function getAutomationTargetYearGroupOptions() {
+  return [...new Set(
+    getAutomationTargetableClasses()
+      .map((item) => String(item?.year_group || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeAutomationTargetYearGroups(items = [], { availableYearGroups = null } = {}) {
+  const available = Array.isArray(availableYearGroups)
+    ? availableYearGroups.map((item) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const availableSet = available ? new Set(available) : null;
+  const values = [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").trim())
+      .filter((item) =>
+        item
+        && item !== AUTOMATION_TARGET_YEAR_ALL
+        && item !== "all"
+        && (!availableSet || availableSet.has(item))
+      )
+  )];
+  if (!available) return values.sort((a, b) => a.localeCompare(b));
+  return values.sort((a, b) => available.indexOf(a) - available.indexOf(b));
+}
+
 function normalizeAutomationTargetFilters(rawFilters = null) {
   const source = rawFilters && typeof rawFilters === "object" ? rawFilters : {};
-  const classType = String(source.classType || "all").trim().toLowerCase();
+  const yearGroup = String(source.yearGroup || "").trim();
+  const rawYearGroups = Array.isArray(source.yearGroups) ? source.yearGroups : [];
+  const selectedYearGroups = normalizeAutomationTargetYearGroups([
+    ...rawYearGroups,
+    ...(yearGroup && yearGroup !== AUTOMATION_TARGET_YEAR_ALL && yearGroup !== "all" ? [yearGroup] : []),
+  ]);
+  const allYearGroups = source.allYearGroups === true
+    || yearGroup === AUTOMATION_TARGET_YEAR_ALL
+    || yearGroup === "all";
   return {
-    yearGroup: String(source.yearGroup || "").trim(),
-    classType: [CLASS_TYPE_FORM, CLASS_TYPE_INTERVENTION, "all"].includes(classType) ? classType : "all",
+    yearGroup: allYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (selectedYearGroups[0] || ""),
+    yearGroups: allYearGroups ? getAutomationTargetYearGroupOptions() : selectedYearGroups,
+    allYearGroups,
+    classType: "all",
   };
 }
 
@@ -2403,6 +3797,44 @@ function getAutomationPolicyLifecycleNote(policy) {
   return "This policy stays usable until you archive it or add an end date.";
 }
 
+function buildAutomationPolicyAlertDismissKey(policy, lifecycle = null) {
+  const policyId = String(policy?.id || "").trim();
+  if (!policyId) return "";
+  const effectiveLifecycle = lifecycle || getPersonalisedAutomationPolicyLifecycle(policy);
+  return [
+    policyId,
+    String(effectiveLifecycle?.state || "").trim(),
+    String(policy?.end_date || "").trim(),
+  ].join(":");
+}
+
+function getDismissedAutomationPolicyAlertKeys() {
+  return new Set(
+    (Array.isArray(state.automationDismissedPolicyAlertKeys) ? state.automationDismissedPolicyAlertKeys : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function isAutomationPolicyAlertDismissed(alertKey = "") {
+  const safeAlertKey = String(alertKey || "").trim();
+  if (!safeAlertKey) return false;
+  return getDismissedAutomationPolicyAlertKeys().has(safeAlertKey);
+}
+
+function dismissAutomationPolicyAlert(policyId = "", alertKey = "") {
+  const policy = getSavedAutomationPolicyById(policyId);
+  if (!policy) return false;
+  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+  const currentAlertKey = buildAutomationPolicyAlertDismissKey(policy, lifecycle);
+  const safeAlertKey = String(alertKey || currentAlertKey || "").trim();
+  if (!safeAlertKey || safeAlertKey !== currentAlertKey) return false;
+  const nextKeys = getDismissedAutomationPolicyAlertKeys();
+  nextKeys.add(safeAlertKey);
+  state.automationDismissedPolicyAlertKeys = [...nextKeys];
+  return true;
+}
+
 function buildAutomationPolicyAlertEntries() {
   return getAutomationPolicies()
     .map((policy) => {
@@ -2411,10 +3843,15 @@ function buildAutomationPolicyAlertEntries() {
       if (!policyId || lifecycle.archived || (!lifecycle.expired && !lifecycle.expiringSoon)) {
         return null;
       }
+      const alertKey = buildAutomationPolicyAlertDismissKey(policy, lifecycle);
+      if (isAutomationPolicyAlertDismissed(alertKey)) {
+        return null;
+      }
       return {
         policy,
         lifecycle,
         policyId,
+        alertKey,
         title: lifecycle.expired
           ? `${getAutomationPolicyDisplayName(policy)} expired`
           : `${getAutomationPolicyDisplayName(policy)} expires soon`,
@@ -2577,6 +4014,7 @@ function persistAutomationPolicyDraft() {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify({
       selectedPolicyKey: state.automationSelectedPolicyKey || "",
+      selectedPolicyExplicit: state.automationSelectionExplicit === true,
       draftsByKey: buildPersistableAutomationDrafts(),
     }));
   } catch (error) {
@@ -2589,6 +4027,8 @@ function restoreAutomationPolicyDraft() {
   const storageKey = buildAutomationPolicyDraftStorageKey();
   if (!storageKey) return;
   try {
+    const hadActiveSelection = state.automationSelectionOpenedThisSession === true
+      && state.automationSelectionExplicit === true;
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return;
     const parsed = JSON.parse(raw);
@@ -2600,7 +4040,11 @@ function restoreAutomationPolicyDraft() {
       Object.entries(draftsByKey)
         .map(([key, value]) => [key, buildAutomationDraftEntry(value)])
     );
-    state.automationSelectedPolicyKey = String(parsed.selectedPolicyKey || "").trim();
+    const restoredSelectedPolicyKey = String(parsed.selectedPolicyKey || "").trim();
+    state.automationSelectedPolicyKey = hadActiveSelection ? restoredSelectedPolicyKey : "";
+    state.automationSelectionExplicit = hadActiveSelection
+      && parsed.selectedPolicyExplicit === true
+      && state.automationSelectedPolicyKey !== "";
   } catch (error) {
     console.warn("Could not restore automation policy draft:", error);
   }
@@ -2616,6 +4060,18 @@ function getAutomationSelectedPolicyKey() {
   if (savedIds.has(requestedKey)) return requestedKey;
   if (state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]?.dirty) return AUTOMATION_NEW_POLICY_KEY;
   return String(savedPolicies[0]?.id || "").trim();
+}
+
+function getExplicitAutomationSelectedPolicyKey() {
+  const savedPolicies = getAutomationPolicies();
+  const savedIds = new Set(savedPolicies.map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const requestedKey = String(state.automationSelectedPolicyKey || "").trim();
+  if (state.automationSelectionExplicit !== true) return "";
+  if (requestedKey === AUTOMATION_NEW_POLICY_KEY && state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]) {
+    return AUTOMATION_NEW_POLICY_KEY;
+  }
+  if (savedIds.has(requestedKey)) return requestedKey;
+  return "";
 }
 
 function getAutomationRunPolicy() {
@@ -2676,7 +4132,210 @@ function setAutomationPolicies(policies = []) {
   }
 
   state.automationDraftsByKey = nextDrafts;
-  state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+  state.automationSelectedPolicyKey = getExplicitAutomationSelectedPolicyKey();
+  state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
+}
+
+async function refreshAutomationPolicies() {
+  if (!canManageAutomation()) {
+    setAutomationPolicies([]);
+    return [];
+  }
+  const policies = await listPersonalisedAutomationPolicies({ includeArchived: true });
+  setAutomationPolicies(policies);
+  return getAutomationPolicies();
+}
+
+async function refreshAutomationPoliciesForValidation(actionLabel = "continue") {
+  try {
+    await refreshAutomationPolicies();
+    return true;
+  } catch (error) {
+    console.error("refresh automation policies before validation error:", error);
+    showNotice(
+      `Could not refresh automation policies. Try again before you ${actionLabel} so Wordloom can check current policy overlaps.`,
+      "error"
+    );
+    paint();
+    return false;
+  }
+}
+
+async function refreshAutomationPoliciesAfterMutation(actionLabel = "update") {
+  try {
+    await refreshAutomationPolicies();
+  } catch (error) {
+    console.warn(`Could not refresh automation policies after ${actionLabel}:`, error);
+  }
+}
+
+function getAutomationRecentRuns() {
+  return Array.isArray(state.automationRecentRuns) ? state.automationRecentRuns : [];
+}
+
+function getLatestAutomationRunForPolicy(policyId = "") {
+  const safePolicyId = String(policyId || "").trim();
+  const runs = getAutomationRecentRuns()
+    .filter((run) => !isSpellingBeeAutomationPolicy(run));
+  if (safePolicyId) {
+    return runs.find((run) => String(run?.automation_policy_id || "").trim() === safePolicyId) || null;
+  }
+  return runs[0] || null;
+}
+
+function getAutomationRunById(runId = "") {
+  const safeRunId = String(runId || "").trim();
+  if (!safeRunId) return null;
+  return getAutomationRecentRuns().find((run) => String(run?.id || "").trim() === safeRunId) || null;
+}
+
+function renderAutomationOutcomeChips(chips = []) {
+  const visible = (Array.isArray(chips) ? chips : []).filter((item) => Number(item?.count || 0) > 0);
+  if (!visible.length) return "";
+  return `
+    <div class="td-automation-outcome-chips">
+      ${visible.map((item) => `
+        <span class="td-automation-outcome-chip td-automation-outcome-chip--${escapeAttr(String(item?.key || item?.reason || "other").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase())}">
+          ${escapeHtml(`${item.label}: ${item.count}`)}
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAutomationCoverageDisplay(display, { compact = false } = {}) {
+  const coverage = display || buildCoverageWarningDisplay(null);
+  const warningItems = Array.isArray(coverage?.warnings) ? coverage.warnings : [];
+  const className = [
+    "td-automation-coverage",
+    `td-automation-coverage--${String(coverage?.state || "not_recorded").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase()}`,
+    compact ? "td-automation-coverage--compact" : "",
+  ].filter(Boolean).join(" ");
+  return `
+    <div class="${className}">
+      <span>${escapeHtml(coverage?.message || "Coverage warnings not recorded for this run.")}</span>
+      ${warningItems.length ? `
+        <ul>
+          ${warningItems.slice(0, compact ? 2 : 4).map((warning) => `<li>${escapeHtml(warning?.displayCopy || warning?.message || "Coverage warning recorded.")}</li>`).join("")}
+        </ul>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderAutomationLatestRunOutcomePanel(run, {
+  policySelected = false,
+  isSpellingBeePolicy = false,
+} = {}) {
+  if (!canManageAutomation()) return "";
+  if (isSpellingBeePolicy) return "";
+  if (!run) {
+    return `
+      <div class="td-automation-run-outcome td-automation-run-outcome--empty">
+        <div class="td-automation-run-outcome-head">
+          <strong>Latest run outcome</strong>
+          <span>${escapeHtml(policySelected ? "No run recorded for this policy yet." : "No personalised run recorded yet.")}</span>
+        </div>
+        <p>${escapeHtml(policySelected ? "Run this policy to see generated pupils, waiting pupils, skipped pupils, and pupils with unfinished daily challenges here." : "Select and run a personalised policy to see the outcome here.")}</p>
+      </div>
+    `;
+  }
+
+  const view = buildAutomationRunOutcomeViewModel({ run });
+  const completedAt = run?.finished_at || run?.updated_at || run?.created_at || "";
+  const completedLabel = view?.staleState?.stale
+    ? `Updated ${formatDate(view.staleState.lastUpdate || completedAt)}`
+    : (completedAt ? formatDate(completedAt) : "Date not recorded");
+  const classRows = Array.isArray(view?.classRows) ? view.classRows : [];
+  return `
+    <div class="td-automation-run-outcome td-automation-run-outcome--${escapeAttr(view.type || "info")}">
+      <div class="td-automation-run-outcome-head">
+        <strong>Latest run outcome</strong>
+        <span>${escapeHtml(`${view?.staleState?.stale ? "Run still marked in progress" : getAutomationRunStatusLabel(run?.status || "completed")} - ${completedLabel}`)}</span>
+      </div>
+      <div class="td-automation-run-outcome-summary">
+        <div>
+          <strong>${escapeHtml(view.headline)}</strong>
+          <p>${escapeHtml(view.nextAction)}</p>
+          ${view.rerunSafetyCopy ? `<p>${escapeHtml(view.rerunSafetyCopy)}</p>` : ""}
+        </div>
+        ${renderAutomationOutcomeChips(view.statusCounts)}
+      </div>
+      ${renderAutomationOutcomeChips(view.reasonChips)}
+      ${renderAutomationCoverageDisplay(view.coverageDisplay, { compact: true })}
+      ${classRows.length ? `
+        <div class="td-automation-run-outcome-classes">
+          ${classRows.slice(0, 4).map((row) => `
+            <div class="td-automation-run-outcome-class">
+              <div>
+                <strong>${escapeHtml(row.className)}</strong>
+                <span>${escapeHtml(row.statusLabel)}</span>
+              </div>
+              <span>${escapeHtml(`${row.includedCount} generated, ${row.waitingCount} waiting, ${row.skippedCount} skipped`)}</span>
+            </div>
+            ${renderAutomationOutcomeChips(row.reasonChips)}
+            ${row.error ? `<div class="td-automation-run-outcome-more">${escapeHtml(row.error)}</div>` : ""}
+          `).join("")}
+          ${classRows.length > 4 ? `<div class="td-automation-run-outcome-more">${escapeHtml(`+${classRows.length - 4} more group${classRows.length - 4 === 1 ? "" : "s"}`)}</div>` : ""}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderAutomationRecentActivityCounts(counts = {}) {
+  return renderAutomationOutcomeChips([
+    { key: "generated", label: "Generated/provisioned", count: counts.generated },
+    { key: "waiting", label: "Waiting for baseline", count: counts.waiting },
+    { key: "skipped", label: "Skipped", count: counts.skipped },
+    { key: "already_assigned", label: "Unfinished daily challenge", count: counts.alreadyAssigned },
+  ]);
+}
+
+function renderRecentPersonalisedActivityPanel() {
+  if (!canManageAutomation()) return "";
+  const rows = buildRecentPersonalisedRunActivityRows({
+    runs: getAutomationRecentRuns(),
+    limit: 5,
+    now: new Date(),
+  });
+
+  return `
+    <div class="td-automation-run-outcome td-automation-run-outcome--activity">
+      <div class="td-automation-run-outcome-head">
+        <strong>Recent personalised activity</strong>
+        <span>${escapeHtml(rows.length ? "Latest 5 runs" : "No runs yet")}</span>
+      </div>
+      ${rows.length ? `
+        <div class="td-automation-activity-list">
+          ${rows.map((row) => {
+            const timestampLabel = row.timestamp
+              ? `${row.timestampKind === "finished" ? "Finished" : row.timestampKind === "started" ? "Started" : "Updated"} ${formatDate(row.timestamp)}`
+              : "Time not recorded";
+            return `
+              <article class="td-automation-activity-row td-automation-activity-row--${escapeAttr(row.tone || "info")}">
+                <div class="td-automation-activity-head">
+                  <div>
+                    <strong>${escapeHtml(row.policyName || "Policy snapshot")}</strong>
+                    <span>${escapeHtml(timestampLabel)}</span>
+                  </div>
+                  <span class="td-automation-policy-status-badge is-${escapeAttr(row.tone || "info")}">${escapeHtml(row.statusLabel || "Run")}</span>
+                </div>
+                <div class="td-automation-activity-summary">
+                  <span>${escapeHtml(row.headline || "Run outcome")}</span>
+                  ${renderAutomationRecentActivityCounts(row.counts)}
+                </div>
+                ${row.rerunSafetyCopy ? `<p>${escapeHtml(row.rerunSafetyCopy)}</p>` : ""}
+                ${renderAutomationCoverageDisplay(row.coverageHealth, { compact: true })}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      ` : `
+        <p>No personalised automation runs have been recorded yet.</p>
+      `}
+    </div>
+  `;
 }
 
 function markCurrentAutomationPolicySaved(
@@ -2705,16 +4364,26 @@ function markCurrentAutomationPolicySaved(
       targetFiltersTouched: previousEntry?.targetFiltersTouched === true,
     }, { basePolicy: normalized });
     state.automationSelectedPolicyKey = normalized.id;
+    state.automationSelectionExplicit = true;
   } else {
     state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+    state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
   }
   persistAutomationPolicyDraft();
 }
 
 function selectAutomationPolicy(policyId = "") {
   const safePolicyId = String(policyId || "").trim();
-  if (!safePolicyId) return;
+  if (!safePolicyId) {
+    state.automationSelectedPolicyKey = "";
+    state.automationSelectionExplicit = false;
+    state.automationSelectionOpenedThisSession = false;
+    persistAutomationPolicyDraft();
+    return;
+  }
   state.automationSelectedPolicyKey = safePolicyId;
+  state.automationSelectionExplicit = true;
+  state.automationSelectionOpenedThisSession = true;
   getCurrentAutomationDraftEntry();
   persistAutomationPolicyDraft();
 }
@@ -2747,7 +4416,17 @@ function startNewAutomationPolicyDraft({ policy = null, duplicateSourcePolicyId 
     }),
   };
   state.automationSelectedPolicyKey = AUTOMATION_NEW_POLICY_KEY;
+  state.automationSelectionExplicit = true;
+  state.automationSelectionOpenedThisSession = true;
   persistAutomationPolicyDraft();
+}
+
+function ensureDefaultAutomationPolicyDraftSelected() {
+  if (getExplicitAutomationSelectedPolicyKey()) return;
+  startNewAutomationPolicyDraft({
+    policy: createBlankAutomationPolicyDraft(),
+    duplicateSourcePolicyId: "",
+  });
 }
 
 function discardNewAutomationPolicyDraft() {
@@ -2813,40 +4492,84 @@ function scrollAutomationPolicyViewToTop({ behavior = "auto" } = {}) {
   });
 }
 
+function scrollDashboardNoticeIntoView({ behavior = "smooth" } = {}) {
+  requestAnimationFrame(() => {
+    const notice = rootEl?.querySelector('[data-role="dashboard-notice"]');
+    const target = notice || rootEl?.querySelector(".td-shell");
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView?.({ block: "start", behavior });
+    if (notice instanceof HTMLElement) {
+      try {
+        notice.focus({ preventScroll: true });
+      } catch {
+        notice.focus?.();
+      }
+    }
+  });
+}
+
 function getAutomationRunSelectedClassIds() {
-  const availableIds = new Set(getAutomationEligibleClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  const availableIds = new Set(getAutomationTargetableClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
   return normalizeIdList(getAutomationRunPolicy()?.target_class_ids || []).filter((classId) => availableIds.has(classId));
+}
+
+function getAutomationRunUnavailableTargetClassIds(policy = getAutomationRunPolicy()) {
+  const availableIds = new Set(getAutomationTargetableClasses().map((item) => String(item?.id || "").trim()).filter(Boolean));
+  return normalizeIdList(policy?.target_class_ids || []).filter((classId) => !availableIds.has(classId));
 }
 
 function setAutomationRunSelectedClassIds(nextClassIds = []) {
   const filteredIds = sortAutomationRunClassIds(
     normalizeIdList(nextClassIds)
-      .filter((classId) => getAutomationEligibleClasses().some((item) => String(item?.id || "").trim() === classId))
+      .filter((classId) => getAutomationTargetableClasses().some((item) => String(item?.id || "").trim() === classId))
   );
   setAutomationRunPolicy({ target_class_ids: filteredIds });
 }
 
-function toggleAutomationRunSelectedClassId(classId, checked) {
-  const safeClassId = String(classId || "").trim();
-  if (!safeClassId) return;
-  const current = new Set(getAutomationRunSelectedClassIds());
-  if (checked) current.add(safeClassId);
-  else current.delete(safeClassId);
-  setAutomationRunSelectedClassIds([...current]);
+function getAutomationClassesForTargetYearGroups(yearGroups = getAutomationTargetFilters().yearGroups, { allYearGroups = getAutomationTargetFilters().allYearGroups } = {}) {
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const selectedYearGroups = allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(yearGroups, { availableYearGroups });
+  if (!selectedYearGroups.length) return [];
+  const selectedYearGroupSet = new Set(selectedYearGroups);
+  return getAutomationTargetableClasses().filter((item) => {
+    return selectedYearGroupSet.has(String(item?.year_group || "").trim());
+  });
 }
 
-function setAutomationTargetFilters(nextFilters = null) {
+function setAutomationTargetYearGroups(yearGroups = [], { allYearGroups = false } = {}) {
   const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
   const currentEntry = getCurrentAutomationDraftEntry();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const selectedYearGroups = allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(yearGroups, { availableYearGroups });
+  const selectsAllYearGroups = !!allYearGroups
+    || (availableYearGroups.length > 0
+      && selectedYearGroups.length === availableYearGroups.length
+      && availableYearGroups.every((yearGroup) => selectedYearGroups.includes(yearGroup)));
+  const nextTargetClassIds = sortAutomationRunClassIds(
+    getAutomationClassesForTargetYearGroups(selectedYearGroups, { allYearGroups: selectsAllYearGroups })
+      .map((item) => String(item?.id || "").trim())
+  );
   state.automationDraftsByKey = {
     ...state.automationDraftsByKey,
     [selectedKey]: buildAutomationDraftEntry({
       ...currentEntry,
+      policy: {
+        ...currentEntry.policy,
+        target_class_ids: nextTargetClassIds,
+      },
       targetFilters: {
         ...currentEntry.targetFilters,
-        ...(nextFilters && typeof nextFilters === "object" ? nextFilters : {}),
+        yearGroup: selectsAllYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (selectedYearGroups[0] || ""),
+        yearGroups: selectsAllYearGroups ? availableYearGroups : selectedYearGroups,
+        allYearGroups: selectsAllYearGroups,
+        classType: "all",
       },
       targetFiltersTouched: true,
+      dirty: true,
     }, {
       basePolicy: selectedKey === AUTOMATION_NEW_POLICY_KEY
         ? buildDefaultPersonalisedAutomationPolicy()
@@ -2856,27 +4579,118 @@ function setAutomationTargetFilters(nextFilters = null) {
   persistAutomationPolicyDraft();
 }
 
-function getFilteredAutomationEligibleClasses() {
-  const filters = getAutomationTargetFilters();
-  return getAutomationEligibleClasses().filter((item) => {
-    const yearGroup = String(item?.year_group || "").trim();
-    const classType = getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM });
-    if (filters.yearGroup && filters.yearGroup !== yearGroup) return false;
-    if (filters.classType !== "all" && filters.classType !== classType) return false;
-    return true;
+function setAutomationTargetClassIdsForCurrentFilters(nextClassIds = [], nextFilters = null) {
+  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  const currentEntry = getCurrentAutomationDraftEntry();
+  const safeFilters = nextFilters && typeof nextFilters === "object"
+    ? normalizeAutomationTargetFilters(nextFilters)
+    : currentEntry.targetFilters;
+  const nextTargetClassIds = sortAutomationRunClassIds(
+    normalizeIdList(nextClassIds)
+      .filter((classId) => getAutomationTargetableClasses().some((item) => String(item?.id || "").trim() === classId))
+  );
+  state.automationDraftsByKey = {
+    ...state.automationDraftsByKey,
+    [selectedKey]: buildAutomationDraftEntry({
+      ...currentEntry,
+      policy: {
+        ...currentEntry.policy,
+        target_class_ids: nextTargetClassIds,
+      },
+      targetFilters: safeFilters,
+      targetFiltersTouched: true,
+      dirty: true,
+    }, {
+      basePolicy: selectedKey === AUTOMATION_NEW_POLICY_KEY
+        ? buildDefaultPersonalisedAutomationPolicy()
+        : (getSavedAutomationPolicyById(selectedKey) || buildDefaultPersonalisedAutomationPolicy()),
+    }),
+  };
+  persistAutomationPolicyDraft();
+}
+
+function toggleAutomationTargetYearGroup(yearGroup = "", checked = false) {
+  const safeYearGroup = String(yearGroup || "").trim();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  if (!safeYearGroup) return;
+  if (safeYearGroup === AUTOMATION_TARGET_YEAR_ALL) {
+    setAutomationTargetYearGroups(checked ? availableYearGroups : [], { allYearGroups: checked });
+    return;
+  }
+
+  const currentFilters = getAutomationTargetFilters();
+  const currentYearGroups = currentFilters.allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(currentFilters.yearGroups, { availableYearGroups });
+  const nextYearGroups = checked
+    ? normalizeAutomationTargetYearGroups([...currentYearGroups, safeYearGroup], { availableYearGroups })
+    : currentYearGroups.filter((item) => item !== safeYearGroup);
+  const nextAllYearGroups = availableYearGroups.length > 0
+    && nextYearGroups.length === availableYearGroups.length
+    && availableYearGroups.every((item) => nextYearGroups.includes(item));
+  const currentSelectedIds = new Set(getAutomationRunSelectedClassIds());
+  const toggledYearClassIds = getAutomationClassesForTargetYearGroups([safeYearGroup])
+    .map((item) => String(item?.id || "").trim())
+    .filter(Boolean);
+  if (checked) {
+    toggledYearClassIds.forEach((classId) => currentSelectedIds.add(classId));
+  } else {
+    toggledYearClassIds.forEach((classId) => currentSelectedIds.delete(classId));
+  }
+  setAutomationTargetClassIdsForCurrentFilters([...currentSelectedIds], {
+    ...currentFilters,
+    yearGroup: nextAllYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (nextYearGroups[0] || ""),
+    yearGroups: nextAllYearGroups ? availableYearGroups : nextYearGroups,
+    allYearGroups: nextAllYearGroups,
+    classType: "all",
+  });
+}
+
+function toggleAutomationTargetFormGroup(classId = "", checked = false) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  const targetableClass = getAutomationTargetableClasses()
+    .find((item) => String(item?.id || "").trim() === safeClassId);
+  if (!targetableClass) return;
+  const current = new Set(getAutomationRunSelectedClassIds());
+  if (checked) current.add(safeClassId);
+  else current.delete(safeClassId);
+
+  const currentFilters = getAutomationTargetFilters();
+  const availableYearGroups = getAutomationTargetYearGroupOptions();
+  const classYearGroup = String(targetableClass?.year_group || "").trim();
+  const currentYearGroups = currentFilters.allYearGroups
+    ? availableYearGroups
+    : normalizeAutomationTargetYearGroups(currentFilters.yearGroups, { availableYearGroups });
+  const nextYearGroups = normalizeAutomationTargetYearGroups([...currentYearGroups, classYearGroup], {
+    availableYearGroups,
+  });
+  setAutomationTargetClassIdsForCurrentFilters([...current], {
+    ...currentFilters,
+    yearGroup: currentFilters.allYearGroups ? AUTOMATION_TARGET_YEAR_ALL : (nextYearGroups[0] || ""),
+    yearGroups: currentFilters.allYearGroups ? availableYearGroups : nextYearGroups,
+    allYearGroups: availableYearGroups.length > 0
+      && currentFilters.allYearGroups === true,
+    classType: "all",
   });
 }
 
 function getAutomationRunPolicyValidation() {
+  const rawPolicy = getAutomationRunPolicy();
+  const unavailableTargetClassIds = getAutomationRunUnavailableTargetClassIds(rawPolicy);
   const policy = normalizePersonalisedAutomationPolicy({
-    ...getAutomationRunPolicy(),
+    ...rawPolicy,
     target_class_ids: getAutomationRunSelectedClassIds(),
   });
   const errors = [];
+  const notices = [];
   const selectedClassIds = getAutomationRunSelectedClassIds();
 
   if (!String(policy.name || "").trim()) {
     errors.push("Give this automation policy a name.");
+  }
+  if (isSpellingBeeAutomationPolicy(policy) && !canManageSpellingBeePolicies()) {
+    errors.push("Admin access is required to create or manage Spelling Bee policies.");
   }
   if (!policy.selected_weekdays.length) {
     errors.push("Choose at least one weekday.");
@@ -2894,41 +4708,40 @@ function getAutomationRunPolicyValidation() {
   if (policy.end_date && policy.end_date < policy.start_date) {
     errors.push("End date must be on or after the start date.");
   }
+  if (unavailableTargetClassIds.length) {
+    errors.push("This policy includes older non-form or incomplete targets. Choose year groups again before saving or running.");
+  }
   if (!String(policy.archived_at || "").trim() && selectedClassIds.length) {
-    const overlappingPolicies = getAutomationPolicies()
-      .filter((item) => {
-        const itemId = String(item?.id || "").trim();
-        const policyId = String(policy?.id || "").trim();
-        return itemId
-          && itemId !== policyId
-          && doPersonalisedAutomationPolicyWindowsOverlap(policy, item);
-      })
-      .map((item) => ({
-        policy: item,
-        classIds: normalizeIdList(item?.target_class_ids || []),
-      }))
-      .filter((item) => item.classIds.some((classId) => selectedClassIds.includes(classId)));
+    const overlappingPolicies = getAutomationPolicyOverlapMatches({
+      policy,
+      policies: getAutomationPolicies(),
+      selectedClassIds,
+    });
     if (overlappingPolicies.length) {
       const classesById = new Map(getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item]));
       const overlapLabels = [...new Set(
         overlappingPolicies.flatMap((item) =>
-          item.classIds
-            .filter((classId) => selectedClassIds.includes(classId))
+          item.overlappingClassIds
             .map((classId) => String(classesById.get(classId)?.name || "Untitled group").trim() || "Untitled group")
         )
       )];
       const policyLabels = [...new Set(
         overlappingPolicies.map((item) => getAutomationPolicyDisplayName(item.policy))
       )];
-      errors.push(
-        `These target groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`
-      );
+      const message = `These form groups are already used by ${policyLabels.length === 1 ? `policy "${policyLabels[0]}"` : "other policies"} during overlapping date windows: ${overlapLabels.join(", ")}. Adjust the dates or targets before saving.`;
+      errors.push(message);
+      notices.push({
+        code: AUTOMATION_VALIDATION_POLICY_OVERLAP,
+        title: "Policy overlap",
+        message,
+      });
     }
   }
 
   return {
     policy,
     errors,
+    notices,
   };
 }
 
@@ -2947,7 +4760,7 @@ function getSavedAutomationRunReadyState() {
     return {
       ready: false,
       actionLabel: "Run now",
-      message: "Choose at least one form or intervention group before you run this policy.",
+      message: "Choose at least one year group before you run this policy.",
     };
   }
   if (lifecycle.archived) {
@@ -2984,7 +4797,7 @@ function getSavedAutomationRunReadyState() {
 
 function getAutomationPolicyTargetLabels(targetIds = []) {
   const eligibleById = new Map(
-    getAutomationEligibleClasses().map((item) => [String(item?.id || "").trim(), item])
+    getAutomationTargetableClasses().map((item) => [String(item?.id || "").trim(), item])
   );
   return normalizeIdList(targetIds)
     .map((classId) => eligibleById.get(classId) || null)
@@ -2994,11 +4807,11 @@ function getAutomationPolicyTargetLabels(targetIds = []) {
 
 function getAutomationPolicyTargetSummary(targetIds = []) {
   const labels = getAutomationPolicyTargetLabels(targetIds);
-  if (!labels.length) return "No target groups selected yet.";
-  if (labels.length === 1) return `1 target group: ${labels[0]}.`;
+  if (!labels.length) return "No form groups selected yet.";
+  if (labels.length === 1) return `1 form group: ${labels[0]}.`;
   const preview = labels.slice(0, 3).join(", ");
   const extraCount = Math.max(0, labels.length - 3);
-  return `${labels.length} target groups: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
+  return `${labels.length} form groups: ${preview}${extraCount ? ` and ${extraCount} more` : ""}.`;
 }
 
 function getAutomationPolicyDueDatePreview(policy) {
@@ -3025,6 +4838,15 @@ function joinAutomationSummaryParts(parts = []) {
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join(" · ");
+}
+
+function formatAutomationYearGroupList(yearGroups = [], { allYearGroups = false } = {}) {
+  if (allYearGroups) return "all year groups";
+  const values = normalizeAutomationTargetYearGroups(yearGroups);
+  if (!values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`;
 }
 
 function formatAutomationCompactDate(value) {
@@ -3086,12 +4908,19 @@ function getAutomationPolicyCompactDateRange(policy) {
 function getAutomationSupportPresetShortDescription(value = "") {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "independent_first") {
-    return "Keeps tests as independent as possible.";
+    return "Uses independent typing wherever possible.";
   }
   if (normalized === "more_support_when_needed") {
-    return "Adds support sooner when evidence is limited.";
+    return "Uses segmented spelling support sooner when evidence is limited or weaker.";
   }
-  return "Normal mix of independent and supported items.";
+  return "Mixes independent typing with segmented spelling support when useful.";
+}
+
+function getAutomationQuestionSupportLabel(value = "") {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "independent_first") return "Mostly independent";
+  if (normalized === "more_support_when_needed") return "More support";
+  return "Balanced";
 }
 
 function openDashboardSection(sectionKey) {
@@ -3381,40 +5210,116 @@ async function initialiseUser() {
   state.accessContext = createDefaultAccessContext(data.user.id || "");
 }
 
-async function applyInterventionGroupFilters({ force = false } = {}) {
+async function ensureInterventionGroupStatusOptionsLoaded({ force = false } = {}) {
   if (!canManageInterventionGroups()) return;
-  if (!force && state.interventionGroup.status === "loading") return;
+  const currentStatus = String(state.interventionGroup?.statusOptionsStatus || "idle");
+  if (!force && currentStatus === "ready") return;
+  if (currentStatus === "loading") return;
 
+  state.interventionGroup.statusOptionsStatus = "loading";
+  state.interventionGroup.statusOptionsMessage = "";
+  state.interventionGroup.statusOptions = [];
+  if (rootEl?.isConnected) paint();
+
+  try {
+    const directory = await listTeacherPupilDirectoryForInterventionGroups({
+      include_status_options: true,
+      metadata_only: true,
+    });
+    setInterventionBuilderStatusOptions(directory?.statusOptions || []);
+    state.interventionGroup.statusOptionsStatus = "ready";
+    state.interventionGroup.statusOptionsMessage = state.interventionGroup.statusOptions.length
+      ? ""
+      : "No status filters are available for the loaded pupil data.";
+  } catch (error) {
+    console.error("load intervention status filters error:", error);
+    state.interventionGroup.statusOptionsStatus = "error";
+    state.interventionGroup.statusOptionsMessage = "Status filters unavailable.";
+  }
+
+  if (rootEl?.isConnected) paint();
+}
+
+function clearScheduledInterventionFilterApply() {
+  if (!interventionFilterApplyTimer) return;
+  clearTimeout(interventionFilterApplyTimer);
+  interventionFilterApplyTimer = null;
+}
+
+function scheduleInterventionFilterApply({ debounce = false } = {}) {
+  clearScheduledInterventionFilterApply();
   if (!hasMeaningfulInterventionFilters()) {
+    interventionFilterRequestToken += 1;
     markInterventionFiltersPending();
     if (rootEl?.isConnected) paint();
     return;
   }
 
+  const run = () => {
+    interventionFilterApplyTimer = null;
+    void applyInterventionGroupFilters({ force: true });
+  };
+
+  if (debounce) {
+    interventionFilterApplyTimer = setTimeout(run, INTERVENTION_FILTER_DEBOUNCE_MS);
+  } else {
+    run();
+  }
+}
+
+async function applyInterventionGroupFilters({ force = false, allowBroad = false } = {}) {
+  if (!canManageInterventionGroups()) return;
+  if (!force && state.interventionGroup.status === "loading") return;
+
+  const hasMeaningfulFilters = hasMeaningfulInterventionFilters();
+  if (!hasMeaningfulFilters && !allowBroad) {
+    markInterventionFiltersPending();
+    if (rootEl?.isConnected) paint();
+    return;
+  }
+
+  clearScheduledInterventionFilterApply();
+  const requestToken = ++interventionFilterRequestToken;
   state.interventionGroup.status = "loading";
   state.interventionGroup.message = "";
   state.interventionGroup.resultCount = 0;
+  state.interventionGroup.isLimited = false;
   if (rootEl?.isConnected) paint();
 
   try {
     const directory = await listTeacherPupilDirectoryForInterventionGroups({
       year_group: state.interventionGroup.filters?.yearGroup,
       source_class_id: state.interventionGroup.filters?.sourceClassId,
-      search: state.interventionGroup.filters?.search,
+      status: state.interventionGroup.filters?.status,
+      search: getInterventionPupilSearchText().length >= INTERVENTION_PUPIL_SEARCH_MIN_CHARS
+        ? state.interventionGroup.filters?.search
+        : "",
+      allow_broad: allowBroad,
+      limit: INTERVENTION_PUPIL_DISPLAY_LIMIT,
     });
+    if (requestToken !== interventionFilterRequestToken) return;
+    if (Array.isArray(directory?.statusOptions) && directory.statusOptions.length) {
+      setInterventionBuilderStatusOptions(directory.statusOptions);
+      state.interventionGroup.statusOptionsStatus = "ready";
+      state.interventionGroup.statusOptionsMessage = "";
+    }
     state.interventionGroup.status = "ready";
     state.interventionGroup.message = (Number(directory?.resultCount || 0) || 0) > 0
       ? `${Number(directory?.resultCount || 0)} pupil${Number(directory?.resultCount || 0) === 1 ? "" : "s"} found.`
       : "No pupils match the current filters.";
     state.interventionGroup.resultCount = Math.max(0, Number(directory?.resultCount || 0));
     state.interventionGroup.pupils = Array.isArray(directory?.pupils) ? directory.pupils : [];
+    state.interventionGroup.displayLimit = Math.max(1, Number(directory?.displayLimit || INTERVENTION_PUPIL_DISPLAY_LIMIT));
+    state.interventionGroup.isLimited = directory?.isLimited === true;
     setInterventionBuilderSelectedPupilIds(state.interventionGroup.selectedPupilIds);
   } catch (error) {
+    if (requestToken !== interventionFilterRequestToken) return;
     console.error("load intervention group directory error:", error);
     state.interventionGroup.status = "error";
     state.interventionGroup.message = error?.message || "Could not load pupils for intervention groups.";
     state.interventionGroup.resultCount = 0;
     state.interventionGroup.pupils = [];
+    state.interventionGroup.isLimited = false;
   }
 
   if (rootEl?.isConnected) paint();
@@ -3422,28 +5327,36 @@ async function applyInterventionGroupFilters({ force = false } = {}) {
 
 async function loadDashboardData() {
   const teacherId = state.user.id;
+  const accessContext = await readStaffAccessContext();
+  state.accessContext = accessContext || createDefaultAccessContext(teacherId);
+  const canLoadAutomationRuns = canManageAutomation();
 
-  const [classes, tests, assignments, _analyticsThreads, classPolicies, accessContext, appRole, automationPolicies] = await Promise.all([
+  const [classes, tests, assignments, _analyticsThreads, classPolicies, appRole, automationPolicies, automationRecentRuns] = await Promise.all([
     loadClasses(),
     loadTests(),
     loadAssignments(),
     loadAnalyticsAssistantThreads(teacherId),
     listClassAutoAssignPolicies(),
-    readStaffAccessContext(),
     readTeacherAppRole(),
     listPersonalisedAutomationPolicies({ includeArchived: true }),
+    canLoadAutomationRuns
+      ? listRecentPersonalisedGenerationRuns({ limit: 20, includePupilRows: true })
+      : Promise.resolve([]),
   ]);
 
   state.classes = classes;
   state.tests = tests;
+  syncSelectedTestIdsWithLoadedTests();
   state.assignments = sortAssignmentsForAttention(assignments);
-  state.accessContext = accessContext || createDefaultAccessContext(teacherId);
+  await refreshAssignmentLifecycleSummaries();
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
+  state.automationRecentRuns = Array.isArray(automationRecentRuns) ? automationRecentRuns : [];
   const profileSyncNotice = consumeLatestStaffProfileSyncNotice();
   restoreAutomationPolicyDraft();
-  state.automationSelectedPolicyKey = getAutomationSelectedPolicyKey();
+  state.automationSelectedPolicyKey = getExplicitAutomationSelectedPolicyKey();
+  state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
   if (!canCreateClasses()) {
     state.createClassOpen = false;
   }
@@ -3456,6 +5369,7 @@ async function loadDashboardData() {
   if (!canManageAutomation()) {
     state.createAutoAssignOpen = false;
     state.automationPolicies = [];
+    state.automationRecentRuns = [];
     state.automationDraftsByKey = {};
     state.automationSelectedPolicyKey = "";
   }
@@ -3493,6 +5407,37 @@ async function loadDashboardData() {
     state.pupilOnboarding = createDefaultPupilOnboardingState();
     state.sections.pupilOnboarding = false;
   }
+  if (!canViewWordloomCoreBankMonitor()) {
+    state.bankMonitor = createDefaultBankMonitorState();
+    state.sections.bankMonitor = false;
+  }
+}
+
+async function ensureWordloomCoreBankMonitorLoaded({ force = false } = {}) {
+  if (!canViewWordloomCoreBankMonitor()) return;
+  const currentStatus = String(state.bankMonitor?.status || "idle");
+  if (!force && (currentStatus === "ready" || currentStatus === "unavailable" || currentStatus === "loading")) return;
+
+  const requestId = ++bankMonitorRequestId;
+  state.bankMonitor.status = "loading";
+  state.bankMonitor.message = "";
+  if (rootEl?.isConnected) paint();
+
+  try {
+    const data = await readWordloomCoreBankMonitor();
+    if (requestId !== bankMonitorRequestId) return;
+    state.bankMonitor.data = data;
+    state.bankMonitor.status = data?.available === false ? "unavailable" : "ready";
+    state.bankMonitor.message = data?.message || "";
+  } catch (error) {
+    if (requestId !== bankMonitorRequestId) return;
+    console.error("load Wordloom core bank monitor error:", error);
+    state.bankMonitor.data = null;
+    state.bankMonitor.status = "error";
+    state.bankMonitor.message = error?.message || "Could not load the core bank monitor.";
+  } finally {
+    if (requestId === bankMonitorRequestId && rootEl?.isConnected) paint();
+  }
 }
 
 async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
@@ -3518,6 +5463,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
       if (nameDelta !== 0) return nameDelta;
       return String(a?.email || "").localeCompare(String(b?.email || ""));
     });
+    syncStaffLifecycleStateWithProfiles(state.staffAccess.profiles);
     state.staffAccess.directoryRoleAssignments = directoryRoleAssignments;
     state.staffAccess.activeAdminUserIds = activeAdminUserIds;
     state.staffAccess.pendingApprovalSummaries = pendingApprovalSummaries;
@@ -3531,6 +5477,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
       state.staffAccess.selectedRoles = [];
       state.staffAccess.selectedScopes = [];
       state.staffAccess.selectedAuditEntries = [];
+      state.staffAccess.selectedDirectoryAuditEntries = [];
       state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
       state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
       state.staffAccess.detailError = "";
@@ -3547,6 +5494,7 @@ async function loadStaffAccessDirectory({ preserveSelection = true } = {}) {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -3567,6 +5515,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -3590,8 +5539,9 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
       isLinkedProfile && safeTargetUserId
         ? listStaffAccessAuditEntries(safeTargetUserId, { limit: STAFF_ACCESS_AUDIT_LIMIT })
         : Promise.resolve([]),
+      listStaffDirectoryAuditEntries(safeProfileId, { limit: STAFF_ACCESS_AUDIT_LIMIT }),
     ];
-    const [pendingApprovalDetail, roles, scopes, auditEntries] = await Promise.all(requestParts);
+    const [pendingApprovalDetail, roles, scopes, auditEntries, directoryAuditEntries] = await Promise.all(requestParts);
     if (requestId !== staffAccessDetailsRequestId) return;
     state.staffAccess.selectedPendingApproval = pendingApprovalDetail || createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = isLinkedProfile
@@ -3600,6 +5550,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = roles;
     state.staffAccess.selectedScopes = scopes;
     state.staffAccess.selectedAuditEntries = auditEntries;
+    state.staffAccess.selectedDirectoryAuditEntries = directoryAuditEntries;
     syncStaffAccessPendingScopeSelections();
   } catch (error) {
     if (requestId !== staffAccessDetailsRequestId) return;
@@ -3608,6 +5559,7 @@ async function loadStaffAccessSelectionDetails(profileId = "") {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
   } finally {
@@ -3633,6 +5585,7 @@ async function syncStaffAccessSelectionForVisibleDirectory() {
     state.staffAccess.selectedRoles = [];
     state.staffAccess.selectedScopes = [];
     state.staffAccess.selectedAuditEntries = [];
+    state.staffAccess.selectedDirectoryAuditEntries = [];
     state.staffAccess.selectedPendingApproval = createDefaultStaffPendingApprovalDetail();
     state.staffAccess.pendingApprovalDraft = createDefaultStaffPendingApprovalDraft();
     state.staffAccess.detailError = "";
@@ -3715,6 +5668,67 @@ function buildStaffPendingAccessApprovalConfirmation() {
   };
 }
 
+function buildStaffLifecycleConfirmation({ mode = "", blocked = false } = {}) {
+  const selectedProfile = getStaffAccessSelectedProfile();
+  const selectedProfileId = String(selectedProfile?.id || "").trim();
+  const selectedUserId = String(selectedProfile?.user_id || "").trim();
+  const displayName = getStaffAccessDisplayName(selectedProfileId);
+
+  if (blocked) {
+    return {
+      title: "Cannot remove the last active Admin",
+      body: [
+        `${displayName} is currently the last active Admin.`,
+        "Archive and revoke-live-access both remove live access, so another active Admin must be in place first.",
+      ],
+      confirmLabel: "Close",
+      dismissLabel: "",
+      action: null,
+      tone: "danger",
+    };
+  }
+
+  if (mode === "archive") {
+    return {
+      title: `Archive ${displayName}?`,
+      body: [
+        "The staff directory record will be archived.",
+        "Any live access will be revoked and pending approvals will be invalidated by the server workflow.",
+      ],
+      confirmLabel: "Archive record",
+      dismissLabel: "Cancel",
+      action: { type: "archive-staff-record", profileId: selectedProfileId, userId: selectedUserId },
+      tone: "danger",
+    };
+  }
+
+  if (mode === "restore") {
+    return {
+      title: `Restore ${displayName}?`,
+      body: [
+        "The staff directory record will become active again.",
+        "Live access, pending approvals, and previous active role or scope assignments will not be recreated.",
+      ],
+      confirmLabel: "Restore record",
+      dismissLabel: "Cancel",
+      action: { type: "restore-staff-record", profileId: selectedProfileId, userId: selectedUserId },
+      tone: "",
+    };
+  }
+
+  return {
+    title: `Revoke live access for ${displayName}?`,
+    body: [
+      "All active roles and scopes for this linked account will be removed.",
+      "The staff directory record will remain active.",
+    ],
+    confirmLabel: "Revoke live access",
+    dismissLabel: "Cancel",
+    action: { type: "revoke-all-live-access", profileId: selectedProfileId, userId: selectedUserId },
+    tone: "danger",
+  };
+}
+
 function openStaffAccessConfirmation(config = null) {
   state.staffAccess.confirmation = config && typeof config === "object" ? config : null;
 }
@@ -3741,6 +5755,18 @@ async function handleConfirmStaffAccessAction() {
   }
   if (action.type === "approve-pending-access") {
     await handleSaveStaffPendingAccessApproval({ skipConfirmation: true });
+    return;
+  }
+  if (action.type === "revoke-all-live-access") {
+    await handleRevokeAllStaffLiveAccessFromDashboard({ skipConfirmation: true, profileId: action.profileId, userId: action.userId });
+    return;
+  }
+  if (action.type === "archive-staff-record") {
+    await handleArchiveStaffDirectoryRecordFromDashboard({ skipConfirmation: true, profileId: action.profileId });
+    return;
+  }
+  if (action.type === "restore-staff-record") {
+    await handleRestoreStaffDirectoryRecordFromDashboard({ skipConfirmation: true, profileId: action.profileId });
   }
 }
 
@@ -4089,6 +6115,7 @@ async function loadGroupComparison({ button = null } = {}) {
 
   try {
     const accessToken = await getTeacherAccessTokenOrThrow();
+    const activeSchoolId = getActiveSchoolIdFromAccessContext(state.accessContext);
     const sharedFilters = {
       classId: scopeType === "class" ? scopeValue || null : null,
       yearGroup: scopeType === "year_group" ? scopeValue || null : null,
@@ -4103,6 +6130,7 @@ async function loadGroupComparison({ button = null } = {}) {
           groupType: option.value,
           filters: sharedFilters,
           accessToken,
+          schoolId: activeSchoolId,
         }),
       ]))
     );
@@ -4225,13 +6253,15 @@ async function loadAnalyticsAssistantThreads(teacherId) {
   if (!teacherId || state.analyticsAssistant.historyAvailable === false) return [];
 
   state.analyticsAssistant.threadsLoading = true;
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_threads")
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at, archived_at")
     .eq("teacher_id", teacherId)
     .is("archived_at", null)
     .order("last_message_at", { ascending: false })
     .limit(ANALYTICS_ASSISTANT_THREAD_LIMIT);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query;
 
   state.analyticsAssistant.threadsLoading = false;
 
@@ -4253,11 +6283,13 @@ async function loadAnalyticsAssistantThreads(teacherId) {
 async function loadAnalyticsAssistantThreadMessages(threadId) {
   if (!threadId || state.analyticsAssistant.historyAvailable === false) return null;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_messages")
     .select("id, role, text, scope_label, meta, created_at")
     .eq("thread_id", threadId)
     .order("created_at", { ascending: true });
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingAnalyticsAssistantHistoryTableError(error)) {
@@ -4293,7 +6325,7 @@ async function createAnalyticsAssistantThread({
 
   const { data, error } = await supabase
     .from("teacher_ai_threads")
-    .insert(payload)
+    .insert(withActiveSchoolId(payload, state.accessContext))
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at")
     .single();
 
@@ -4326,10 +6358,12 @@ async function updateAnalyticsAssistantThread(threadId, {
     last_message_at: lastMessageAt || new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("teacher_ai_threads")
     .update(payload)
-    .eq("id", threadId)
+    .eq("id", threadId);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { data, error } = await query
     .select("id, title, scope_type, scope_id, created_at, updated_at, last_message_at")
     .single();
 
@@ -4369,7 +6403,7 @@ async function saveAnalyticsAssistantMessage({
 
   const { data, error } = await supabase
     .from("teacher_ai_messages")
-    .insert(payload)
+    .insert(withActiveSchoolId(payload, state.accessContext))
     .select("id, role, text, scope_label, meta, created_at")
     .single();
 
@@ -4414,10 +6448,12 @@ function startNewAnalyticsAssistantThread() {
 }
 
 async function loadClasses() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("classes")
-    .select("*")
-    .order("name", { ascending: true });
+    .select("*");
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("name", { ascending: true });
 
   if (error) {
     console.error("loadClasses error:", error);
@@ -4431,7 +6467,7 @@ async function loadClasses() {
 }
 
 async function loadTests() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("tests")
     .select(`
       *,
@@ -4449,8 +6485,10 @@ async function loadTests() {
           name
         )
       )
-    `)
-    .order("created_at", { ascending: false });
+    `);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     console.error("loadTests error:", error);
@@ -4485,7 +6523,7 @@ async function loadTests() {
 }
 
 async function loadAssignments() {
-  const { data, error } = await supabase
+  let query = supabase
     .from("assignments_v2")
     .select(`
       *,
@@ -4497,8 +6535,10 @@ async function loadAssignments() {
         id,
         name
       )
-    `)
-    .order("created_at", { ascending: false });
+    `);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     console.error("loadAssignments error:", error);
@@ -4506,6 +6546,77 @@ async function loadAssignments() {
   }
 
   return (data || []).map((item) => ({ ...item, deadline: item.end_at || null }));
+}
+
+async function refreshAssignmentLifecycleSummaries() {
+  const assignments = Array.isArray(state.assignments) ? state.assignments : [];
+  const assignmentIds = normalizeIdList(assignments.map((item) => item?.id));
+  const classIds = normalizeIdList(assignments.map((item) => item?.class_id));
+
+  state.assignmentLifecycle.status = assignmentIds.length ? "loading" : "ready";
+  state.assignmentLifecycle.message = "";
+  state.assignmentLifecycle.summariesByAssignmentId = {};
+
+  if (!assignmentIds.length) return;
+
+  try {
+    const statusQuery = supabase
+      .from("assignment_pupil_statuses")
+      .select("assignment_id, pupil_id, status, started_at, completed_at, last_opened_at, last_activity_at, total_words, updated_at, created_at")
+      .in("assignment_id", assignmentIds);
+
+    const targetQuery = supabase
+      .from("assignment_pupil_target_words")
+      .select("assignment_id, pupil_id, created_at")
+      .in("assignment_id", assignmentIds);
+
+    let membershipQuery = classIds.length
+      ? supabase
+        .from("pupil_classes")
+        .select("class_id, pupil_id")
+        .in("class_id", classIds)
+        .eq("active", true)
+      : Promise.resolve({ data: [], error: null });
+    if (classIds.length) {
+      membershipQuery = applyActiveSchoolFilter(membershipQuery, state.accessContext);
+    }
+
+    const [statusRes, targetRes, membershipRes] = await Promise.all([
+      statusQuery,
+      targetQuery,
+      membershipQuery,
+    ]);
+
+    if (statusRes.error && !isMissingAssignmentStatusTableError(statusRes.error)) throw statusRes.error;
+    if (targetRes.error && !isMissingAssignmentTargetTableError(targetRes.error)) throw targetRes.error;
+    if (membershipRes.error) throw membershipRes.error;
+
+    state.assignmentLifecycle.summariesByAssignmentId = groupAssignmentLifecycleInputs({
+      assignments,
+      statusRows: statusRes.error ? [] : (statusRes.data || []),
+      targetRows: targetRes.error ? [] : (targetRes.data || []),
+      membershipRows: membershipRes.data || [],
+      now: new Date(),
+      staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+    });
+    state.assignmentLifecycle.status = "ready";
+  } catch (error) {
+    console.warn("assignment lifecycle summary error:", error);
+    state.assignmentLifecycle.summariesByAssignmentId = Object.fromEntries(
+      assignments
+        .filter((assignment) => assignment?.id)
+        .map((assignment) => [
+          String(assignment.id),
+          buildAssignmentLifecycleModel({
+            assignment,
+            now: new Date(),
+            staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+          }),
+        ])
+    );
+    state.assignmentLifecycle.status = "error";
+    state.assignmentLifecycle.message = "Lifecycle counts are partially unavailable.";
+  }
 }
 
 function getAnalyticsTargetSettingsFromSource(source) {
@@ -5006,7 +7117,7 @@ function describeAssignmentTargetReason(target) {
     return normalizedFocus ? `Confusion check for ${normalizedFocus}` : "Confusion check";
   }
   if (target?.targetReason === "target_supported") {
-    return normalizedFocus ? `Supported practice for ${normalizedFocus}` : "Supported practice";
+    return normalizedFocus ? `Segmented support for ${normalizedFocus}` : "Segmented support";
   }
   if (target?.targetReason === "stretch_probe") {
     return normalizedFocus ? `Stretch check for ${normalizedFocus}` : "Stretch check";
@@ -5173,7 +7284,7 @@ function getGeneratedAssignmentRoleLabel(role) {
 function getAssignmentSupportLabel(support) {
   if (support === "focus") return "Focus";
   if (support === "recognition") return "Recognition";
-  if (support === "supported") return "Supported";
+  if (support === "supported") return "Segmented support";
   return "Independent";
 }
 
@@ -5460,6 +7571,23 @@ function buildAssignmentAnalyticsSnapshot({ assignmentId, classId, className, ro
       .sort((a, b) => b - a)[0] || null;
     const completedByStatus = !!pupilStatus?.completedAt || (!pupilStatus && totalWords > 0 && attemptedWords >= totalWords);
     const startedByStatus = !!(pupilStatus?.startedAt || pupilStatus?.lastOpenedAt || pupilStatus?.lastActivityAt);
+    const headlineWordResults = visibleWordResults
+      .filter((item) => item?.latestAttempt)
+      .filter((item) =>
+        shouldIncludeBaselineResponseInHeadlineAttainment(
+          item,
+          wordRowsById.get(String(item?.baseTestWordId || item?.wordId || ""))
+        )
+      );
+    const headlineAttemptedWords = headlineWordResults.length;
+    const headlineCorrectWords = headlineWordResults.filter((item) => item?.correct).length;
+    const headlineCheckedAccuracy = headlineAttemptedWords ? headlineCorrectWords / headlineAttemptedWords : null;
+    const headlineFirstTimeCorrectRate = headlineAttemptedWords
+      ? headlineWordResults.filter((item) => item?.correct && Math.max(1, Number(item?.attemptsUsed || 1)) === 1).length / headlineAttemptedWords
+      : null;
+    const headlineAverageAttempts = headlineAttemptedWords
+      ? headlineWordResults.reduce((sum, item) => sum + Math.max(1, Number(item?.attemptsUsed || 1)), 0) / headlineAttemptedWords
+      : null;
     console.log("Teacher completion source row:", {
       assignmentId,
       pupilId,
@@ -5476,18 +7604,17 @@ function buildAssignmentAnalyticsSnapshot({ assignmentId, classId, className, ro
       averageAttempts,
     });
     const attainmentIndicator = estimateSpellingAttainmentIndicator({
-      responses: visibleWordResults
-        .filter((item) => item?.latestAttempt)
+      responses: headlineWordResults
         .map((item) => ({
           correct: !!item?.correct,
           difficultyScore: difficultyByWordId.get(String(item?.baseTestWordId || item?.wordId || ""))?.coreScore
             ?? difficultyByWordId.get(String(item?.baseTestWordId || item?.wordId || ""))?.score
             ?? 50,
         })),
-      checkedAccuracy,
-      firstTimeCorrectRate,
+      checkedAccuracy: headlineCheckedAccuracy,
+      firstTimeCorrectRate: headlineFirstTimeCorrectRate,
       completionRate,
-      averageAttempts,
+      averageAttempts: headlineAverageAttempts,
     });
     const generatedSections = isGeneratedAssignment ? buildGeneratedAssignmentSections(generatedWordResults) : [];
     const resolvedStatus = completedByStatus ? "Complete" : (startedByStatus || attemptedWords > 0 ? "In progress" : "Not started");
@@ -5887,7 +8014,7 @@ async function loadVisualAnalyticsSummaryData() {
     const rows = await loadPaginatedRows(
       (from, to) => supabase
         .from("attempts")
-        .select("assignment_id, pupil_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
+        .select("assignment_id, pupil_id, test_word_id, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes, attempt_source")
         .gte("created_at", cutoff)
         .in("assignment_id", chunk)
         .order("created_at", { ascending: true })
@@ -6709,6 +8836,59 @@ function calculateVisualTimelineExpectedAccuracy(rows) {
   return expectedAccuracyTotal / expectedAccuracyCount;
 }
 
+function calculateVisualTimelineAverageDifficulty(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const difficultyCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyCount || 0)), 0);
+  if (!difficultyCount) return null;
+  const difficultyTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyTotal || 0)), 0);
+  return difficultyTotal / difficultyCount;
+}
+
+function calculateVisualTimelineFirstTryRate(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
+  if (!attemptCount) return null;
+  const firstTrySuccessCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.firstTrySuccessCount || 0)), 0);
+  return firstTrySuccessCount / attemptCount;
+}
+
+function calculateVisualTimelineAverageTries(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
+  if (!attemptCount) return null;
+  const attemptNumberTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptNumberTotal || 0)), 0);
+  return attemptNumberTotal / attemptCount;
+}
+
+function buildVisualTrendWindow(rows) {
+  const items = Array.isArray(rows) ? rows : [];
+  const attemptCount = calculateVisualTimelineAttemptCount(items);
+  const accuracy = calculateVisualTimelineAccuracy(items);
+  const expectedAccuracy = calculateVisualTimelineExpectedAccuracy(items);
+  const averageDifficultyScore = calculateVisualTimelineAverageDifficulty(items);
+  const firstTrySuccessRate = calculateVisualTimelineFirstTryRate(items);
+  const averageAttempts = calculateVisualTimelineAverageTries(items);
+  const difficultyCount = items.reduce((sum, item) => sum + Math.max(0, Number(item?.difficultyCount || 0)), 0);
+  const difficultyCoverage = attemptCount ? difficultyCount / attemptCount : 0;
+  const adjustedPerformance = Number.isFinite(Number(expectedAccuracy))
+    ? accuracy - Number(expectedAccuracy)
+    : null;
+  return {
+    attemptCount,
+    accuracy,
+    expectedAccuracy,
+    averageDifficultyScore,
+    firstTrySuccessRate,
+    averageAttempts,
+    difficultyCoverage,
+    adjustedPerformance,
+  };
+}
+
+function isTrendNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
 function getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel) {
   if (!difficultyModel || typeof difficultyModel !== "object") return null;
   const score = Number(difficultyModel?.coreScore ?? difficultyModel?.score);
@@ -6752,61 +8932,146 @@ function formatAnalyticsShortDayLabel(value) {
   });
 }
 
-function buildVisualExpectedBenchmarkPlaceholder({
-  recentAttemptCount = 0,
-  attempts = [],
-  benchmarkComparableAttempt = null,
-} = {}) {
-  // Future expected-performance benchmarking should stay in the analytics
-  // interpretation layer and only use benchmark-eligible evidence. That later
-  // work should gate on enough evidence volume, comparable task types,
-  // support/no-support distinctions, difficulty context, and potentially
-  // benchmark-eligible subsets only rather than all instructional evidence.
-  const comparableAttemptCount = typeof benchmarkComparableAttempt === "function"
-    ? (Array.isArray(attempts) ? attempts.filter((item) => benchmarkComparableAttempt(item)).length : 0)
-    : 0;
-
-  return {
-    label: "Expected benchmark coming soon",
-    statusText: recentAttemptCount >= VISUAL_EXPECTED_MIN_ATTEMPTS
-      ? "More evidence needed"
-      : "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-    tone: "neutral",
-    comparableAttemptCount,
-  };
+function isVisualTrendEvidenceAttempt(attempt) {
+  return isCoreProgressAttemptSource(attempt?.attempt_source || attempt?.attemptSource);
 }
 
-function buildVisualRecentTrend(timelineRows, {
-  attempts = [],
-  benchmarkComparableAttempt = null,
-} = {}) {
+function buildVisualTrendAttemptKey(attempt) {
+  const pupilId = String(attempt?.pupil_id || "").trim();
+  const assignmentId = String(attempt?.assignment_id || "").trim() || "__unassigned__";
+  const wordKey = String(
+    attempt?.test_word_id ||
+    attempt?.word_text ||
+    attempt?.target_graphemes ||
+    attempt?.focus_grapheme ||
+    ""
+  ).trim().toLowerCase();
+  if (!pupilId || !wordKey) return "";
+  return `${assignmentId}::${pupilId}::${wordKey}`;
+}
+
+function shouldReplaceVisualTrendAttempt(currentAttempt, nextAttempt) {
+  if (!currentAttempt) return true;
+  const currentAttemptNumber = Math.max(1, Number(currentAttempt?.attempt_number || 1));
+  const nextAttemptNumber = Math.max(1, Number(nextAttempt?.attempt_number || 1));
+  if (nextAttemptNumber !== currentAttemptNumber) {
+    return nextAttemptNumber > currentAttemptNumber;
+  }
+  return new Date(nextAttempt?.created_at || 0).getTime() >= new Date(currentAttempt?.created_at || 0).getTime();
+}
+
+function buildVisualTimelineRows(attempts, difficultyByWordId = new Map()) {
+  const attemptsByDay = new Map();
+
+  for (const attempt of attempts || []) {
+    if (!isVisualTrendEvidenceAttempt(attempt)) continue;
+    const dayKey = analyticsDayKey(attempt?.created_at);
+    const attemptKey = buildVisualTrendAttemptKey(attempt);
+    if (!dayKey || !attemptKey) continue;
+    const dayAttempts = attemptsByDay.get(dayKey) || new Map();
+    const currentAttempt = dayAttempts.get(attemptKey) || null;
+    if (shouldReplaceVisualTrendAttempt(currentAttempt, attempt)) {
+      dayAttempts.set(attemptKey, attempt);
+    }
+    attemptsByDay.set(dayKey, dayAttempts);
+  }
+
+  return Array.from(attemptsByDay.entries())
+    .map(([dayKey, finalAttemptMap]) => {
+      const finalAttempts = Array.from(finalAttemptMap.values());
+      const summary = {
+        dayKey,
+        attemptCount: 0,
+        correctCount: 0,
+        firstTrySuccessCount: 0,
+        attemptNumberTotal: 0,
+        pupilIds: new Set(),
+        difficultyTotal: 0,
+        difficultyCount: 0,
+        expectedAccuracyTotal: 0,
+        expectedAccuracyCount: 0,
+      };
+
+      for (const attempt of finalAttempts) {
+        const attemptsUsed = Math.max(1, Number(attempt?.attempt_number || 1));
+        const difficultyModel = difficultyByWordId.get(String(attempt?.test_word_id || ""));
+        const difficultyScore = getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel);
+        const expectedAccuracy = getExpectedAccuracyForDifficultyScore(difficultyScore);
+        summary.attemptCount += 1;
+        if (attempt?.correct) summary.correctCount += 1;
+        if (attempt?.correct && attemptsUsed === 1) summary.firstTrySuccessCount += 1;
+        summary.attemptNumberTotal += attemptsUsed;
+        if (attempt?.pupil_id) summary.pupilIds.add(String(attempt.pupil_id));
+        if (Number.isFinite(difficultyScore)) {
+          summary.difficultyTotal += difficultyScore;
+          summary.difficultyCount += 1;
+        }
+        if (Number.isFinite(expectedAccuracy)) {
+          summary.expectedAccuracyTotal += expectedAccuracy;
+          summary.expectedAccuracyCount += 1;
+        }
+      }
+
+      return {
+        dayKey,
+        attemptCount: summary.attemptCount,
+        correctCount: summary.correctCount,
+        firstTrySuccessCount: summary.firstTrySuccessCount,
+        attemptNumberTotal: summary.attemptNumberTotal,
+        pupilCount: summary.pupilIds.size,
+        accuracy: summary.attemptCount ? summary.correctCount / summary.attemptCount : 0,
+        averageDifficultyScore: summary.difficultyCount ? summary.difficultyTotal / summary.difficultyCount : null,
+        difficultyBandKey: summary.difficultyCount ? String(getDifficultyBand(summary.difficultyTotal / summary.difficultyCount)?.key || "") : "",
+        difficultyTotal: summary.difficultyTotal,
+        difficultyCount: summary.difficultyCount,
+        expectedAccuracy: summary.expectedAccuracyCount ? summary.expectedAccuracyTotal / summary.expectedAccuracyCount : null,
+        expectedAccuracyTotal: summary.expectedAccuracyTotal,
+        expectedAccuracyCount: summary.expectedAccuracyCount,
+        firstTrySuccessRate: summary.attemptCount ? summary.firstTrySuccessCount / summary.attemptCount : null,
+        averageAttempts: summary.attemptCount ? summary.attemptNumberTotal / summary.attemptCount : null,
+      };
+    })
+    .sort((a, b) => a.dayKey.localeCompare(b.dayKey))
+    .slice(-7);
+}
+
+function buildVisualRecentTrend(timelineRows) {
   const rows = (Array.isArray(timelineRows) ? timelineRows : []).filter((item) => item?.dayKey);
   const totalAttempts = rows.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
   const startLabel = rows.length ? formatAnalyticsShortDayLabel(rows[0].dayKey) : "";
   const endLabel = rows.length ? formatAnalyticsShortDayLabel(rows[rows.length - 1].dayKey) : "";
   const singleWindowAttemptCount = calculateVisualTimelineAttemptCount(rows);
-  const singleWindowExpectedBenchmark = buildVisualExpectedBenchmarkPlaceholder({
-    recentAttemptCount: singleWindowAttemptCount,
-    attempts,
-    benchmarkComparableAttempt,
-  });
 
   if (rows.length < 2) {
+    const window = buildVisualTrendWindow(rows);
     return {
-      label: "Awaiting data",
+      label: "Low evidence",
       tone: "neutral",
       direction: "waiting",
       delta: 0,
       baselineAccuracy: rows[0]?.accuracy || 0,
       recentAccuracy: rows[0]?.accuracy || 0,
+      rawDelta: 0,
+      adjustedDelta: null,
+      difficultyDelta: null,
+      firstTryDelta: null,
+      averageTriesDelta: null,
       summaryText: rows.length
-        ? "Need one more activity day to compare earlier and recent performance."
-        : "Progress over time will appear once there is activity in this view.",
-      earlierExpectedAccuracy: rows[0]?.expectedAccuracy ?? null,
-      recentExpectedAccuracy: rows[0]?.expectedAccuracy ?? null,
+        ? "There is not enough recent assignment evidence yet to call a trend."
+        : "Progress over time will appear once there is enough recent assignment evidence in this view.",
+      earlierExpectedAccuracy: window.expectedAccuracy,
+      recentExpectedAccuracy: window.expectedAccuracy,
       recentAttemptCount: singleWindowAttemptCount,
-      expectedBenchmark: singleWindowExpectedBenchmark,
+      evidenceLabel: "Low evidence",
+      hasChallengeAdjustment: false,
+      earlierAverageDifficultyScore: window.averageDifficultyScore,
+      recentAverageDifficultyScore: window.averageDifficultyScore,
+      earlierFirstTrySuccessRate: window.firstTrySuccessRate,
+      recentFirstTrySuccessRate: window.firstTrySuccessRate,
+      earlierAverageAttempts: window.averageAttempts,
+      recentAverageAttempts: window.averageAttempts,
+      earlierDifficultyCoverage: window.difficultyCoverage,
+      recentDifficultyCoverage: window.difficultyCoverage,
       dayCount: rows.length,
       totalAttempts,
       startLabel,
@@ -6818,49 +9083,112 @@ function buildVisualRecentTrend(timelineRows, {
   const splitIndex = Math.max(1, Math.floor(rows.length / 2));
   const earlierRows = rows.slice(0, splitIndex);
   const recentRows = rows.slice(splitIndex);
-  const baselineAccuracy = calculateVisualTimelineAccuracy(earlierRows);
-  const recentAccuracy = calculateVisualTimelineAccuracy(recentRows);
+  const earlierWindow = buildVisualTrendWindow(earlierRows);
+  const recentWindow = buildVisualTrendWindow(recentRows);
+  const baselineAccuracy = earlierWindow.accuracy;
+  const recentAccuracy = recentWindow.accuracy;
   const delta = recentAccuracy - baselineAccuracy;
-  const earlierExpectedAccuracy = calculateVisualTimelineExpectedAccuracy(earlierRows);
-  const recentExpectedAccuracy = calculateVisualTimelineExpectedAccuracy(recentRows);
-  const recentAttemptCount = calculateVisualTimelineAttemptCount(recentRows);
-  let label = "Steady";
+  const earlierExpectedAccuracy = earlierWindow.expectedAccuracy;
+  const recentExpectedAccuracy = recentWindow.expectedAccuracy;
+  const recentAttemptCount = recentWindow.attemptCount;
+  const hasChallengeAdjustment = earlierWindow.difficultyCoverage >= VISUAL_TREND_DIFFICULTY_COVERAGE_MIN
+    && recentWindow.difficultyCoverage >= VISUAL_TREND_DIFFICULTY_COVERAGE_MIN
+    && isTrendNumber(earlierWindow.adjustedPerformance)
+    && isTrendNumber(recentWindow.adjustedPerformance);
+  const adjustedDelta = hasChallengeAdjustment
+    ? recentWindow.adjustedPerformance - earlierWindow.adjustedPerformance
+    : null;
+  const difficultyDelta = isTrendNumber(earlierWindow.averageDifficultyScore) && isTrendNumber(recentWindow.averageDifficultyScore)
+    ? recentWindow.averageDifficultyScore - earlierWindow.averageDifficultyScore
+    : null;
+  const firstTryDelta = isTrendNumber(earlierWindow.firstTrySuccessRate) && isTrendNumber(recentWindow.firstTrySuccessRate)
+    ? recentWindow.firstTrySuccessRate - earlierWindow.firstTrySuccessRate
+    : null;
+  const averageTriesDelta = isTrendNumber(earlierWindow.averageAttempts) && isTrendNumber(recentWindow.averageAttempts)
+    ? recentWindow.averageAttempts - earlierWindow.averageAttempts
+    : null;
+  const hasEnoughEvidence = totalAttempts >= VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL
+    && recentAttemptCount >= VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT;
+  const recentDifficultyIsHarder = isTrendNumber(difficultyDelta)
+    && difficultyDelta >= VISUAL_TREND_DIFFICULTY_DELTA;
+  const rawAccuracyIsStable = Math.abs(delta) < VISUAL_TREND_FLAT_DELTA;
+  const retryParts = [];
+  if (isTrendNumber(firstTryDelta) && Math.abs(firstTryDelta) >= VISUAL_TREND_FLAT_DELTA) {
+    retryParts.push(firstTryDelta > 0 ? "more first-try success" : "less first-try success");
+  }
+  if (isTrendNumber(averageTriesDelta) && Math.abs(averageTriesDelta) >= VISUAL_TREND_AVERAGE_TRIES_DELTA) {
+    retryParts.push(averageTriesDelta < 0 ? "fewer retries" : "more retries");
+  }
+  const retrySuffix = retryParts.length ? `, with ${retryParts.join(" and ")}` : "";
+  let label = "Stable";
   let tone = "neutral";
   let direction = "flat";
 
-  if (delta >= VISUAL_TREND_FLAT_DELTA) {
+  if (!hasEnoughEvidence) {
+    label = "Low evidence";
+    direction = "waiting";
+  } else if (
+    (hasChallengeAdjustment && adjustedDelta >= VISUAL_TREND_FLAT_DELTA)
+    || delta >= VISUAL_TREND_FLAT_DELTA
+    || (rawAccuracyIsStable && recentDifficultyIsHarder)
+  ) {
     label = "Improving";
     tone = "green";
     direction = "up";
-  } else if (delta <= -VISUAL_TREND_FLAT_DELTA) {
-    label = "Declining";
+  } else if (
+    (hasChallengeAdjustment && adjustedDelta <= -VISUAL_TREND_FLAT_DELTA)
+    || (delta <= -VISUAL_TREND_FLAT_DELTA && !recentDifficultyIsHarder)
+  ) {
+    label = "Needs attention";
     tone = "red";
     direction = "down";
   }
 
-  const summaryText = label === "Improving"
-    ? `Recent days averaged ${formatPercent(recentAccuracy)}, up from ${formatPercent(baselineAccuracy)} earlier in this view.`
-    : label === "Declining"
-      ? `Recent days averaged ${formatPercent(recentAccuracy)}, down from ${formatPercent(baselineAccuracy)} earlier in this view.`
-      : `Recent days averaged ${formatPercent(recentAccuracy)}, close to the earlier ${formatPercent(baselineAccuracy)} in this view.`;
-  const expectedBenchmark = buildVisualExpectedBenchmarkPlaceholder({
-    recentAttemptCount,
-    attempts,
-    benchmarkComparableAttempt,
-  });
+  const summaryText = label === "Low evidence"
+    ? "There is not enough recent assignment evidence yet to call a trend."
+    : label === "Improving" && hasChallengeAdjustment && adjustedDelta >= VISUAL_TREND_FLAT_DELTA
+      ? `Recent performance is improving after allowing for word difficulty${retrySuffix}.`
+      : label === "Improving" && delta >= VISUAL_TREND_FLAT_DELTA
+        ? `Recent accuracy is higher${getTrendChallengeSentencePart(difficultyDelta)}${retrySuffix}.`
+        : label === "Improving" && rawAccuracyIsStable && recentDifficultyIsHarder
+          ? `Recent performance is improving because accuracy stayed stable on harder words${retrySuffix}.`
+          : label === "Needs attention" && hasChallengeAdjustment && adjustedDelta <= -VISUAL_TREND_FLAT_DELTA
+            ? `Recent performance is lower after allowing for word difficulty${retrySuffix}.`
+            : label === "Needs attention"
+              ? `Recent performance is lower without a clear rise in challenge${retrySuffix}.`
+              : `Recent performance is stable${getTrendChallengeSentencePart(difficultyDelta)}${retrySuffix}.`;
+  const evidenceLabel = !hasEnoughEvidence
+    ? "Low evidence"
+    : totalAttempts >= 20 && rows.length >= 4 && recentAttemptCount >= 8
+      ? "Good evidence"
+      : "Moderate evidence";
 
   return {
     label,
     tone,
     direction,
     delta,
+    rawDelta: delta,
+    adjustedDelta,
+    difficultyDelta,
+    firstTryDelta,
+    averageTriesDelta,
+    hasChallengeAdjustment,
     baselineAccuracy,
     recentAccuracy,
     summaryText,
     earlierExpectedAccuracy,
     recentExpectedAccuracy,
     recentAttemptCount,
-    expectedBenchmark,
+    evidenceLabel,
+    earlierAverageDifficultyScore: earlierWindow.averageDifficultyScore,
+    recentAverageDifficultyScore: recentWindow.averageDifficultyScore,
+    earlierFirstTrySuccessRate: earlierWindow.firstTrySuccessRate,
+    recentFirstTrySuccessRate: recentWindow.firstTrySuccessRate,
+    earlierAverageAttempts: earlierWindow.averageAttempts,
+    recentAverageAttempts: recentWindow.averageAttempts,
+    earlierDifficultyCoverage: earlierWindow.difficultyCoverage,
+    recentDifficultyCoverage: recentWindow.difficultyCoverage,
     dayCount: rows.length,
     totalAttempts,
     startLabel,
@@ -7132,55 +9460,9 @@ function buildVisualScopeSummary({ scopeType, scopeId, data, graphemeFilter = ""
     .sort((a, b) => a.accuracy - b.accuracy || b.averageAttempts - a.averageAttempts || a.word.localeCompare(b.word))
     .slice(0, 5);
 
-  const timelineRows = Array.from(
-    scopedAttempts.reduce((map, row) => {
-      const key = analyticsDayKey(row?.created_at);
-      const difficultyModel = difficultyByWordId.get(String(row?.test_word_id || ""));
-      const difficultyScore = getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel);
-      const expectedAccuracy = getExpectedAccuracyForDifficultyScore(difficultyScore);
-      const current = map.get(key) || {
-        dayKey: key,
-        attemptCount: 0,
-        correctCount: 0,
-        pupilIds: new Set(),
-        difficultyTotal: 0,
-        difficultyCount: 0,
-        expectedAccuracyTotal: 0,
-        expectedAccuracyCount: 0,
-      };
-      current.attemptCount += 1;
-      if (row?.correct) current.correctCount += 1;
-      if (row?.pupil_id) current.pupilIds.add(String(row.pupil_id));
-      if (Number.isFinite(difficultyScore)) {
-        current.difficultyTotal += difficultyScore;
-        current.difficultyCount += 1;
-      }
-      if (Number.isFinite(expectedAccuracy)) {
-        current.expectedAccuracyTotal += expectedAccuracy;
-        current.expectedAccuracyCount += 1;
-      }
-      map.set(key, current);
-      return map;
-    }, new Map()).values(),
-  )
-    .map((item) => ({
-      dayKey: item.dayKey,
-      attemptCount: item.attemptCount,
-      correctCount: item.correctCount,
-      pupilCount: item.pupilIds.size,
-      accuracy: item.attemptCount ? item.correctCount / item.attemptCount : 0,
-      averageDifficultyScore: item.difficultyCount ? item.difficultyTotal / item.difficultyCount : null,
-      difficultyBandKey: item.difficultyCount ? String(getDifficultyBand(item.difficultyTotal / item.difficultyCount)?.key || "") : "",
-      expectedAccuracy: item.expectedAccuracyCount ? item.expectedAccuracyTotal / item.expectedAccuracyCount : null,
-      expectedAccuracyTotal: item.expectedAccuracyTotal,
-      expectedAccuracyCount: item.expectedAccuracyCount,
-    }))
-    .sort((a, b) => a.dayKey.localeCompare(b.dayKey))
-    .slice(-7);
+  const timelineRows = buildVisualTimelineRows(scopedAttempts, difficultyByWordId);
   const commonConfusions = buildVisualCommonConfusions(scopedAttempts, graphemeRows, normalizedGraphemeFilter);
-  const recentTrend = buildVisualRecentTrend(timelineRows, {
-    attempts: scopedAttempts,
-  });
+  const recentTrend = buildVisualRecentTrend(timelineRows);
 
   const classRows = selectedClassIds
     .filter(Boolean)
@@ -7482,7 +9764,8 @@ function onRootInput(event) {
     const nextValue = target.value || "";
     const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
     const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
-    state.staffAccess.search = nextValue;
+    state.staffAccess.lifecycleSearch = nextValue;
+    resetStaffLifecycleVisibleRows();
     void syncStaffAccessSelectionForVisibleDirectory();
     requestAnimationFrame(() => {
       const input = rootEl?.querySelector('[data-field="staff-access-search"]');
@@ -7541,13 +9824,17 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="intervention-group-name"]')) {
+    state.interventionGroup.groupName = target.value || "";
+    return;
+  }
+
   if (target.matches('[data-field="intervention-pupil-search"]')) {
     const nextValue = target.value || "";
     const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
     const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
     state.interventionGroup.filters.search = nextValue;
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply({ debounce: true });
     requestAnimationFrame(() => {
       const input = rootEl?.querySelector('[data-field="intervention-pupil-search"]');
       if (!(input instanceof HTMLInputElement)) return;
@@ -7580,6 +9867,26 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="pupil-lifecycle-search"]')) {
+    const nextValue = target.value || "";
+    const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
+    const selectionEnd = typeof target.selectionEnd === "number" ? target.selectionEnd : nextValue.length;
+    state.pupilOnboarding.lifecycleSearch = nextValue;
+    resetPupilLifecycleVisibleRows();
+    paint();
+    requestAnimationFrame(() => {
+      const input = rootEl?.querySelector('[data-field="pupil-lifecycle-search"]');
+      if (!(input instanceof HTMLInputElement)) return;
+      input.focus();
+      try {
+        input.setSelectionRange(selectionStart, selectionEnd);
+      } catch {
+        // ignore browsers that do not support selection restore here
+      }
+    });
+    return;
+  }
+
   if (target.matches('[data-field="automation-policy-name"]')) {
     setAutomationRunPolicy({ name: target.value || "" });
     return;
@@ -7593,6 +9900,11 @@ function onRootInput(event) {
 function onRootChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  if (target.matches('[data-field="active-school-dev-select"]')) {
+    handleDeveloperSchoolSwitch(target instanceof HTMLSelectElement ? target.value : "");
+    return;
+  }
 
   if (target.matches('[data-field="staff-access-csv-file"]')) {
     const input = target instanceof HTMLInputElement ? target : null;
@@ -7608,8 +9920,65 @@ function onRootChange(event) {
     return;
   }
 
+  if (target.matches('[data-field="test-bulk-select"]')) {
+    const input = target instanceof HTMLInputElement ? target : null;
+    toggleSelectedTestId(input?.value || target.dataset.testId || "", !!input?.checked);
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="manual-assignment-class-select"]')) {
+    const testId = String(target.dataset.testId || "").trim();
+    if (!testId) return;
+    state.assignmentLifecycle.manualAssignClassByTestId = {
+      ...state.assignmentLifecycle.manualAssignClassByTestId,
+      [testId]: String(target.value || "").trim(),
+    };
+    paint();
+    return;
+  }
+
   if (target.matches('[data-field="pupil-placement-form-select"]')) {
     setPupilPlacementSelectedFormId(target.dataset.pupilId || "", target.value || "");
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-status-filter"]')) {
+    state.pupilOnboarding.lifecycleStatusFilter = getPupilLifecycleStatusFilterOptions().some((option) => option.value === target.value)
+      ? target.value
+      : PUPIL_LIFECYCLE_DEFAULT_STATUS_FILTER;
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-year-group-filter"]')) {
+    const nextValue = String(target.value || "").trim();
+    state.pupilOnboarding.lifecycleYearGroupFilter = getPupilLifecycleYearGroupFilterOptions().some((option) => option.value === nextValue)
+      ? nextValue
+      : "";
+    const currentClassFilter = String(state.pupilOnboarding.lifecycleFormFilter || "").trim();
+    if (!getPupilLifecycleClassFilterOptions(state.pupilOnboarding.lifecycleYearGroupFilter).some((option) => option.value === currentClassFilter)) {
+      state.pupilOnboarding.lifecycleFormFilter = "";
+    }
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-class-filter"]')) {
+    const nextValue = String(target.value || "").trim();
+    state.pupilOnboarding.lifecycleFormFilter = getPupilLifecycleClassFilterOptions().some((option) => option.value === nextValue)
+      ? nextValue
+      : "";
+    resetPupilLifecycleVisibleRows();
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="pupil-lifecycle-form-select"]')) {
+    setPupilLifecycleSelectedFormId(target.dataset.pupilId || "", target.value || "");
     paint();
     return;
   }
@@ -7653,8 +10022,19 @@ function onRootChange(event) {
     return;
   }
 
-  if (target.matches('[data-field="automation-run-class"]')) {
-    toggleAutomationRunSelectedClassId(target.value, !!target.checked);
+  if (target.matches('[data-field="automation-policy-type"]')) {
+    const currentPolicy = getAutomationRunPolicy();
+    const nextType = normalizeAutomationPolicyType(target.value);
+    if (nextType === AUTOMATION_POLICY_TYPE_SPELLING_BEE && !canManageSpellingBeePolicies()) {
+      showNotice("Admin access is required to create or manage Spelling Bee policies.", "error");
+      paint();
+      return;
+    }
+    if (nextType === AUTOMATION_POLICY_TYPE_SPELLING_BEE) {
+      setAutomationRunPolicy({ policy_type: nextType, bee_length_mode: normalizeSpellingBeeLengthMode(currentPolicy.bee_length_mode), support_preset: AUTO_ASSIGN_POLICY_DEFAULTS.support_preset, allow_starter_fallback: false });
+    } else {
+      setAutomationRunPolicy({ policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED, support_preset: currentPolicy.support_preset || AUTO_ASSIGN_POLICY_DEFAULTS.support_preset, allow_starter_fallback: currentPolicy.allow_starter_fallback !== false, bee_length_mode: null });
+    }
     paint();
     return;
   }
@@ -7669,15 +10049,22 @@ function onRootChange(event) {
     const nextYearGroup = String(target.value || "").trim();
     state.interventionGroup.filters.yearGroup = nextYearGroup;
     syncInterventionBuilderSourceClassFilter({ yearGroup: nextYearGroup });
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply();
     return;
   }
 
   if (target.matches('[data-field="intervention-source-class"]')) {
     state.interventionGroup.filters.sourceClassId = String(target.value || "").trim();
-    markInterventionFiltersPending();
-    paint();
+    scheduleInterventionFilterApply();
+    return;
+  }
+
+  if (target.matches('[data-field="intervention-status-filter"]')) {
+    const nextStatus = normalizeInterventionStatusOptionValue(target.value || "");
+    state.interventionGroup.filters.status = getInterventionBuilderStatusOptions().some((option) => option.value === nextStatus)
+      ? nextStatus
+      : "";
+    scheduleInterventionFilterApply();
     return;
   }
 
@@ -7699,14 +10086,20 @@ function onRootChange(event) {
     return;
   }
 
-  if (target.matches('[data-field="automation-target-year-group"]')) {
-    setAutomationTargetFilters({ yearGroup: String(target.value || "").trim() });
+  if (target.matches('[data-field="automation-bee-length-mode"]')) {
+    setAutomationRunPolicy({ bee_length_mode: normalizeSpellingBeeLengthMode(target.value) });
     paint();
     return;
   }
 
-  if (target.matches('[data-field="automation-target-class-type"]')) {
-    setAutomationTargetFilters({ classType: String(target.value || "").trim().toLowerCase() });
+  if (target.matches('[data-field="automation-target-year-toggle"]')) {
+    toggleAutomationTargetYearGroup(String(target.value || "").trim(), !!target.checked);
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="automation-target-form-group"]')) {
+    toggleAutomationTargetFormGroup(String(target.value || "").trim(), !!target.checked);
     paint();
     return;
   }
@@ -7793,6 +10186,36 @@ function onRootChange(event) {
 
   if (target.matches('[data-field="summary-grapheme"]')) {
     state.visualAnalytics.selectedGrapheme = normalizeAnalyticsGrapheme(target.value);
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-view"]')) {
+    updateAnalyticsExportState({ view: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-focus"]')) {
+    updateAnalyticsExportState({ focusId: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-grapheme"]')) {
+    updateAnalyticsExportState({ grapheme: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-dataset"]')) {
+    updateAnalyticsExportState({ dataset: target.value });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="analytics-export-format"]')) {
+    updateAnalyticsExportState({ format: target.value });
     paint();
     return;
   }
@@ -8048,6 +10471,165 @@ async function handleRevokeStaffRoleFromDashboard(role = "", { skipConfirmation 
   }
 }
 
+function getStaffLifecycleActionProfile(profileId = "") {
+  const safeProfileId = String(profileId || "").trim() || getStaffAccessSelectedProfileId();
+  return safeProfileId ? (getStaffAccessProfileMap().get(safeProfileId) || null) : null;
+}
+
+async function handleRevokeAllStaffLiveAccessFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+  userId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(userId || profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId || !safeUserId) {
+    showNotice("Choose a linked staff account before revoking live access.", "error");
+    paint();
+    return;
+  }
+  if (isStaffAccessProfileArchived(profile)) {
+    showNotice("Restore this staff record before changing live access.", "error");
+    paint();
+    return;
+  }
+  if (!doesSelectedStaffAccessHaveLiveAccess() && safeProfileId === getStaffAccessSelectedProfileId()) {
+    showNotice("This staff member has no live access to revoke.", "error");
+    paint();
+    return;
+  }
+  if (isSelectedStaffAccessAdminLastActiveAdmin()) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "revoke", blocked: true }));
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "revoke" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "revoke");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await revokeAllStaffLiveAccess({
+      userId: safeUserId,
+      reason: "Live staff access revoked by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Live staff access revoked.", "success");
+  } catch (error) {
+    console.error("revoke all staff live access error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not revoke live access for this staff member.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
+async function handleArchiveStaffDirectoryRecordFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId) {
+    showNotice("Choose a staff record before archiving.", "error");
+    paint();
+    return;
+  }
+  if (isStaffAccessProfileArchived(profile)) {
+    showNotice("This staff record is already archived.", "error");
+    paint();
+    return;
+  }
+  if (safeUserId && isSelectedStaffAccessAdminLastActiveAdmin()) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "archive", blocked: true }));
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "archive" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "archive");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await archiveStaffDirectoryRecord({
+      profileId: safeProfileId,
+      reason: "Staff directory record archived by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Staff record archived.", "success");
+  } catch (error) {
+    console.error("archive staff directory record error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not archive this staff record.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
+async function handleRestoreStaffDirectoryRecordFromDashboard({
+  skipConfirmation = false,
+  profileId = "",
+} = {}) {
+  const profile = getStaffLifecycleActionProfile(profileId);
+  const safeProfileId = String(profile?.id || profileId || "").trim();
+  const safeUserId = String(profile?.user_id || "").trim();
+
+  if (!profile || !safeProfileId) {
+    showNotice("Choose a staff record before restoring.", "error");
+    paint();
+    return;
+  }
+  if (!isStaffAccessProfileArchived(profile)) {
+    showNotice("This staff record is already active.", "error");
+    paint();
+    return;
+  }
+  if (!skipConfirmation) {
+    openStaffAccessConfirmation(buildStaffLifecycleConfirmation({ mode: "restore" }));
+    paint();
+    return;
+  }
+
+  clearStaffLifecycleRowError(safeProfileId);
+  setStaffLifecycleSaving(safeProfileId, true, "restore");
+  state.staffAccess.mutating = true;
+  paint();
+
+  try {
+    await restoreStaffDirectoryRecord({
+      profileId: safeProfileId,
+      reason: "Staff directory record restored by admin",
+    });
+    await refreshStaffAccessAfterMutation({ targetUserId: safeUserId });
+    showNotice("Staff record restored.", "success");
+  } catch (error) {
+    console.error("restore staff directory record error:", error);
+    setStaffLifecycleRowError(safeProfileId, error?.message || "Could not restore this staff record.");
+  } finally {
+    setStaffLifecycleSaving(safeProfileId, false);
+    state.staffAccess.mutating = false;
+    paint();
+  }
+}
+
 async function handleAddStaffScopeFromDashboard(role = "", scopeType = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   const safeScopeType = String(scopeType || "").trim().toLowerCase();
@@ -8159,6 +10741,9 @@ async function onRootClick(event) {
     if (key === "pupilOnboarding" && state.sections.pupilOnboarding) {
       void loadPupilPlacementRows({ force: true });
     }
+    if (key === "bankMonitor" && state.sections.bankMonitor) {
+      void ensureWordloomCoreBankMonitorLoaded();
+    }
     return;
   }
 
@@ -8188,7 +10773,10 @@ async function onRootClick(event) {
   }
 
   if (action === "set-staff-access-filter") {
-    state.staffAccess.filter = String(button.dataset.filter || "all").trim().toLowerCase() || "all";
+    state.staffAccess.lifecycleStatusFilter = getStaffAccessFilterOptions().some((option) => option.value === String(button.dataset.filter || "").trim().toLowerCase())
+      ? String(button.dataset.filter || "").trim().toLowerCase()
+      : STAFF_LIFECYCLE_DEFAULT_STATUS_FILTER;
+    resetStaffLifecycleVisibleRows();
     await syncStaffAccessSelectionForVisibleDirectory();
     return;
   }
@@ -8234,6 +10822,12 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "dismiss-pupil-reset-credential") {
+    clearPupilLifecycleResetCredential();
+    paint();
+    return;
+  }
+
   if (action === "download-pupil-import-rows") {
     handleDownloadPupilImportRows(button.dataset.kind || "error");
     return;
@@ -8249,6 +10843,33 @@ async function onRootClick(event) {
 
   if (action === "move-pupil-to-form") {
     await handleMovePupilToForm(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "move-pupil-lifecycle-form") {
+    await handleMovePupilLifecycleForm(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "pupil-lifecycle-action") {
+    await handlePupilLifecycleAction(button.dataset.pupilId || "", button.dataset.lifecycleAction || "");
+    return;
+  }
+
+  if (action === "reset-pupil-pin") {
+    await handleResetPupilLoginPin(button.dataset.pupilId || "");
+    return;
+  }
+
+  if (action === "show-more-pupil-lifecycle-rows") {
+    showMorePupilLifecycleRows(Number(button.dataset.totalRows || 0));
+    paint();
+    return;
+  }
+
+  if (action === "show-more-staff-lifecycle-rows") {
+    showMoreStaffLifecycleRows(Number(button.dataset.totalRows || 0));
+    paint();
     return;
   }
 
@@ -8279,6 +10900,21 @@ async function onRootClick(event) {
 
   if (action === "revoke-staff-role") {
     await handleRevokeStaffRoleFromDashboard(button.dataset.role || "");
+    return;
+  }
+
+  if (action === "revoke-all-staff-live-access") {
+    await handleRevokeAllStaffLiveAccessFromDashboard();
+    return;
+  }
+
+  if (action === "archive-staff-record") {
+    await handleArchiveStaffDirectoryRecordFromDashboard();
+    return;
+  }
+
+  if (action === "restore-staff-record") {
+    await handleRestoreStaffDirectoryRecordFromDashboard();
     return;
   }
 
@@ -8315,6 +10951,11 @@ async function onRootClick(event) {
     state.visualAnalytics.pupilStatusFilter =
       state.visualAnalytics.pupilStatusFilter === nextFilter ? "all" : nextFilter;
     paint();
+    return;
+  }
+
+  if (action === "download-analytics-export-data") {
+    handleAnalyticsExportDownload();
     return;
   }
 
@@ -8561,7 +11202,7 @@ async function onRootClick(event) {
 
   if (action === "toggle-create-baseline") {
     if (!(canManageOwnContent() && canAssignTests())) {
-      showNotice("Teacher or admin access is required to set a baseline test.", "error");
+      showNotice("Teacher or admin access is required to check baseline status.", "error");
       paint();
       return;
     }
@@ -8593,8 +11234,9 @@ async function onRootClick(event) {
       state.createClassOpen = false;
       state.createBaselineOpen = false;
       state.createAutoAssignOpen = false;
+      resetInterventionBuilderStatusFilter();
       if (!state.interventionGroup.pupils.length && !state.interventionGroup.message) {
-        state.interventionGroup.message = "Choose a filter to find pupils.";
+        state.interventionGroup.message = "Choose a year, group, status, or search to find pupils.";
       }
       paint();
     } else {
@@ -8606,12 +11248,16 @@ async function onRootClick(event) {
         const input = rootEl.querySelector("#tdInterventionGroupNameInput");
         if (input instanceof HTMLInputElement) input.focus();
       });
+      void ensureInterventionGroupStatusOptionsLoaded({ force: true });
     }
     return;
   }
 
   if (action === "apply-intervention-filters") {
-    void applyInterventionGroupFilters({ force: true });
+    void applyInterventionGroupFilters({
+      force: true,
+      allowBroad: button.dataset.allowBroad === "true",
+    });
     return;
   }
 
@@ -8626,6 +11272,7 @@ async function onRootClick(event) {
       state.createClassOpen = false;
       state.createInterventionGroupOpen = false;
       state.createBaselineOpen = false;
+      ensureDefaultAutomationPolicyDraftSelected();
     }
     paint();
     return;
@@ -8661,6 +11308,11 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "dismiss-automation-policy-alert") {
+    handleDismissAutomationPolicyAlert(button.dataset.policyId || "", button.dataset.alertKey || "");
+    return;
+  }
+
   if (action === "delete-automation-policy") {
     await handleDeleteAutomationPolicy(button.dataset.policyId || "");
     return;
@@ -8692,15 +11344,13 @@ async function onRootClick(event) {
   }
 
   if (action === "select-all-automation-classes") {
-    setAutomationRunSelectedClassIds(
-      getFilteredAutomationEligibleClasses().map((item) => String(item?.id || "").trim()).filter(Boolean)
-    );
+    setAutomationTargetYearGroups(getAutomationTargetYearGroupOptions(), { allYearGroups: true });
     paint();
     return;
   }
 
   if (action === "clear-automation-classes") {
-    setAutomationRunSelectedClassIds([]);
+    setAutomationTargetYearGroups([]);
     paint();
     return;
   }
@@ -8757,6 +11407,23 @@ async function onRootClick(event) {
       return;
     }
     await handleCreateTestFromDashboard(button);
+    return;
+  }
+
+  if (action === "select-filtered-tests") {
+    setSelectedTestIds([...getSelectedTestIds(), ...getFilteredEditableTestIds()]);
+    paint();
+    return;
+  }
+
+  if (action === "clear-selected-tests") {
+    clearSelectedTestIds();
+    paint();
+    return;
+  }
+
+  if (action === "delete-selected-tests") {
+    await handleDeleteSelectedTests(button);
     return;
   }
 
@@ -8862,6 +11529,24 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "set-assignment-lifecycle-filter") {
+    const filterKey = String(button.dataset.filterKey || "all");
+    state.assignmentLifecycle.filter = ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === filterKey)
+      ? filterKey
+      : "all";
+    paint();
+    return;
+  }
+
+  if (action === "set-assignment-source-filter") {
+    const filterKey = String(button.dataset.filterKey || "all");
+    state.assignmentLifecycle.sourceFilter = getAssignmentSourceFilterOptions().some((option) => option.key === filterKey)
+      ? filterKey
+      : "all";
+    paint();
+    return;
+  }
+
   if (action === "open-results-assignment") {
     const assignmentId = button.dataset.assignmentId;
     if (!assignmentId) return;
@@ -8885,6 +11570,8 @@ async function onRootClick(event) {
     if (!assignmentId) return;
 
     openDashboardSection("upcoming");
+    state.assignmentLifecycle.filter = "all";
+    state.assignmentLifecycle.sourceFilter = "all";
     state.activePanel = { type: "results-assignment", id: assignmentId };
     paint();
     await ensureAssignmentAnalytics(assignmentId, { force: true });
@@ -8941,11 +11628,24 @@ async function onRootClick(event) {
     if (!classId) return;
     const selectedClass = findClassRecord(classId);
     if (!canEditClassRecord(selectedClass)) {
-      showNotice("You can only delete classes that you own.", "error");
+      showNotice("You can only remove classes that you own.", "error");
       paint();
       return;
     }
-    await handleDeleteClass(classId);
+    await handleOpenClassRemoval(classId, button);
+    return;
+  }
+
+  if (action === "reload-class-removal-preflight") {
+    const classId = button.dataset.classId;
+    if (!classId) return;
+    await loadClassRemovalPreflight(classId, { force: true });
+    return;
+  }
+
+  if (action === "cancel-class-removal") {
+    state.activePanel = null;
+    paint();
     return;
   }
 }
@@ -8998,6 +11698,21 @@ async function onRootSubmit(event) {
 
   if (form.matches('[data-form="class-auto-assign-policy"]')) {
     await handleSaveClassAutoAssignPolicy(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-move"]')) {
+    await handleClassRemovalMoveAndDelete(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-remove-memberships"]')) {
+    await handleClassRemovalRemoveMembershipsAndDelete(form);
+    return;
+  }
+
+  if (form.matches('[data-form="class-removal-delete-empty"]')) {
+    await handleClassRemovalDeleteEmpty(form);
     return;
   }
 
@@ -9134,11 +11849,11 @@ async function handleCreateTestFromDashboard(button) {
 
   const { data, error } = await supabase
     .from("tests")
-    .insert({
+    .insert(withActiveSchoolId({
       teacher_id: state.user.id,
       title: "Untitled test",
       question_type: DEFAULT_QUESTION_TYPE,
-    })
+    }, state.accessContext))
     .select()
     .single();
 
@@ -9371,6 +12086,10 @@ function isBaselineAttemptRow(attempt, baselineAssignmentMetaById) {
   return !!assignmentId && baselineAssignmentMetaById instanceof Map && baselineAssignmentMetaById.has(assignmentId);
 }
 
+function isPracticeAttemptRow(attempt) {
+  return String(attempt?.attempt_source || attempt?.attemptSource || "").trim().toLowerCase() === "practice";
+}
+
 function getIndependentAttemptRows(attempts) {
   return (Array.isArray(attempts) ? attempts : [])
     .filter((attempt) => getQuestionEvidenceTier(attempt?.mode) === "independent");
@@ -9393,6 +12112,43 @@ async function readCompletedBaselineStatusRows({ assignmentIds = [], pupilIds = 
   }
 
   return (data || []).filter((row) => isCompletedAssignmentStatusRow(row));
+}
+
+async function readPriorGeneratedAssignmentTargetRowsForPupils(pupilIds = [], { limit = 1000 } = {}) {
+  const safePupilIds = normalizeIdList(pupilIds);
+  if (!safePupilIds.length) return [];
+  const safeLimit = Math.max(200, Math.min(4000, Number(limit) || 1000));
+
+  const { data, error } = await supabase
+    .from("assignment_pupil_target_words")
+    .select(`
+      id,
+      assignment_id,
+      pupil_id,
+      test_word_id,
+      focus_grapheme,
+      target_source,
+      target_reason,
+      created_at,
+      test_words (
+        id,
+        word,
+        sentence,
+        segments,
+        choice
+      )
+    `)
+    .in("pupil_id", safePupilIds)
+    .eq("target_source", ASSIGNMENT_ENGINE_TARGET_SOURCE)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    if (isMissingAssignmentTargetTableError(error)) return [];
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
 }
 
 function buildPlacementCurrentProfiles({
@@ -9418,7 +12174,7 @@ function buildPlacementCurrentProfiles({
     if (!placementProfile) continue;
 
     const pupilAttempts = (attempts || []).filter((attempt) => String(attempt?.pupil_id || "") === safePupilId);
-    const liveAttempts = pupilAttempts.filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById));
+    const liveAttempts = pupilAttempts.filter((attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt));
     const liveIndependentAttempts = getIndependentAttemptRows(liveAttempts);
     if (liveIndependentAttempts.length >= BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS) continue;
 
@@ -9488,18 +12244,9 @@ function buildPupilWordCountByPupil(pupilPlans = []) {
 }
 
 function isAutomatedPersonalisedAssignment(assignment, testsById = new Map()) {
-  const automationKind = String(assignment?.automation_kind || "").trim().toLowerCase();
-  const automationSource = String(assignment?.automation_source || "").trim().toLowerCase();
-  if (
-    automationKind === ASSIGNMENT_AUTOMATION_KIND_PERSONALISED
-    && automationSource === ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW
-  ) {
-    return true;
-  }
-
-  const testId = String(assignment?.test_id || "").trim();
-  const test = testsById.get(testId) || null;
-  return isFullyGeneratedAssignmentWordRows(test?.test_words || []);
+  return isAssignedCorePersonalisedAutomationAssignment(assignment, testsById, {
+    isFullyGeneratedAssignmentWordRows,
+  });
 }
 
 async function buildActiveAutomatedAssignmentMap({ pupilIds = [] } = {}) {
@@ -9531,45 +12278,14 @@ async function buildActiveAutomatedAssignmentMap({ pupilIds = [] } = {}) {
   if (targetRes.error && !isMissingAssignmentTargetTableError(targetRes.error)) throw targetRes.error;
   if (statusRes.error && !isMissingAssignmentStatusTableError(statusRes.error)) throw statusRes.error;
 
-  const assignmentById = new Map(
-    automatedAssignments.map((assignment) => [String(assignment?.id || "").trim(), assignment])
-  );
-  const statusByKey = new Map(
-    (statusRes.data || []).map((row) => ([
-      `${String(row?.assignment_id || "").trim()}::${String(row?.pupil_id || "").trim()}`,
-      row,
-    ]))
-  );
-  const activeByPupil = new Map();
-
-  for (const row of targetRes.data || []) {
-    const assignmentId = String(row?.assignment_id || "").trim();
-    const pupilId = String(row?.pupil_id || "").trim();
-    if (!assignmentId || !pupilId || activeByPupil.has(pupilId)) continue;
-    const statusRow = statusByKey.get(`${assignmentId}::${pupilId}`) || null;
-    if (isCompletedAssignmentStatusRow(statusRow)) continue;
-    const assignment = assignmentById.get(assignmentId) || null;
-    activeByPupil.set(pupilId, {
-      assignmentId,
-      classId: String(assignment?.class_id || "").trim(),
-      title: String(assignment?.tests?.title || "").trim(),
-    });
-  }
-
-  for (const row of statusRes.data || []) {
-    const assignmentId = String(row?.assignment_id || "").trim();
-    const pupilId = String(row?.pupil_id || "").trim();
-    if (!assignmentId || !pupilId || activeByPupil.has(pupilId)) continue;
-    if (isCompletedAssignmentStatusRow(row)) continue;
-    const assignment = assignmentById.get(assignmentId) || null;
-    activeByPupil.set(pupilId, {
-      assignmentId,
-      classId: String(assignment?.class_id || "").trim(),
-      title: String(assignment?.tests?.title || "").trim(),
-    });
-  }
-
-  return activeByPupil;
+  return buildActiveAssignedCorePersonalisedAssignmentMap({
+    assignments: automatedAssignments,
+    testsById,
+    targetRows: targetRes.data || [],
+    statusRows: statusRes.data || [],
+    pupilIds: safePupilIds,
+    isFullyGeneratedAssignmentWordRows,
+  });
 }
 
 async function buildPersonalisedPlanForClass({
@@ -9590,6 +12306,7 @@ async function buildPersonalisedPlanForClass({
     .from("attempts")
     .select("pupil_id, assignment_id, test_word_id, assignment_target_id, mode, attempt_source, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
     .in("pupil_id", safePupilIds)
+    .or("attempt_source.is.null,attempt_source.neq.practice")
     .order("created_at", { ascending: false })
     .limit(historyLimit);
   if (attemptError) throw attemptError;
@@ -9617,12 +12334,25 @@ async function buildPersonalisedPlanForClass({
     resolvedWordMap,
   });
   const nonBaselineAttempts = (attemptRows || []).filter(
-    (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
+    (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt)
   );
+  const assignmentTargetRows = await readPriorGeneratedAssignmentTargetRowsForPupils(safePupilIds, {
+    limit: historyLimit,
+  });
+  const wordloomCoreWordRows = await listWordloomCoreSpellingBankWordRows();
+  const wordloomCoreTests = wordloomCoreWordRows.length
+    ? [{
+      id: "wordloom-core-spelling-bank",
+      title: "Wordloom Core Spelling Bank",
+      test_words: wordloomCoreWordRows,
+    }]
+    : [];
+  const personalisedSourceTests = [...wordloomCoreTests, ...teacherTests];
   let plan = buildGeneratedAssignmentPlan({
     pupilIds: safePupilIds,
-    teacherTests,
+    teacherTests: personalisedSourceTests,
     attempts: nonBaselineAttempts,
+    assignmentTargetRows,
     totalWords: effectivePolicy.assignment_length,
     currentProfiles,
     resolvedWordMap,
@@ -9632,8 +12362,9 @@ async function buildPersonalisedPlanForClass({
   if (effectivePolicy.allow_starter_fallback && needsStarterCatalogFallback(plan, safePupilIds)) {
     plan = buildGeneratedAssignmentPlan({
       pupilIds: safePupilIds,
-      teacherTests: [...teacherTests, ...buildStarterCatalogVirtualTests()],
+      teacherTests: [...personalisedSourceTests, ...buildStarterCatalogVirtualTests()],
       attempts: nonBaselineAttempts,
+      assignmentTargetRows,
       totalWords: effectivePolicy.assignment_length,
       currentProfiles,
       resolvedWordMap,
@@ -9684,7 +12415,7 @@ async function createGeneratedAssignmentForClass({
       teacher_id: state.user.id,
       title,
       status: "published",
-      question_type: "no_support_assessment",
+      question_type: "segmented_spelling",
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
     }, "id");
@@ -9769,106 +12500,189 @@ async function createGeneratedAssignmentForClass({
   }
 }
 
+function getApprovedSpellingBeeSourceWordRows(teacherTests = state.tests) {
+  return (Array.isArray(teacherTests) ? teacherTests : [])
+    .flatMap((test) =>
+      (Array.isArray(test?.test_words) ? test.test_words : [])
+        .map((wordRow) => ({
+          ...wordRow,
+          source_test_id: String(test?.id || "").trim(),
+        }))
+    );
+}
+
+function buildSpellingBeeReleaseTitle(policy = null) {
+  const name = getAutomationPolicyDisplayName(policy, "Spelling Bee");
+  const date = new Date().toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
+  return `${name} - Spelling Bee - ${date}`;
+}
+
+async function createSpellingBeeCompetitionRelease({
+  classIds = [],
+  deadlineIso = null,
+  ladder = [],
+  policy = null,
+  runRecord = null,
+} = {}) {
+  const safeClassIds = sortAutomationRunClassIds(classIds);
+  const words = Array.isArray(ladder) ? ladder : [];
+  if (!safeClassIds.length || !words.length) {
+    throw new Error("Could not release the Spelling Bee without target groups and approved words.");
+  }
+
+  let createdTestId = "";
+  const createdAssignmentIds = [];
+
+  try {
+    const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback("tests", {
+      teacher_id: state.user.id,
+      title: buildSpellingBeeReleaseTitle(policy),
+      status: "published",
+      question_type: "no_support_assessment",
+      analytics_target_words_enabled: false,
+      analytics_target_words_per_pupil: 0,
+    }, "id");
+    if (testError || !createdTest?.id) throw testError || new Error("Could not create the Spelling Bee test.");
+    createdTestId = String(createdTest.id);
+
+    const beeLengthMode = normalizeSpellingBeeLengthMode(policy?.bee_length_mode);
+    const { error: wordError } = await supabase
+      .from("test_words")
+      .insert(words.map((wordRow, index) => ({
+        test_id: createdTestId,
+        word: String(wordRow?.word || "").trim(),
+        sentence: String(wordRow?.sentence || "").trim() || null,
+        segments: Array.isArray(wordRow?.segments) ? wordRow.segments : [],
+        choice: {
+          ...(wordRow?.choice && typeof wordRow.choice === "object" ? wordRow.choice : {}),
+          source: "spelling_bee",
+          approved_source: "teacher",
+          competition_mode: "spelling_bee",
+          spelling_bee: true,
+          bee_round: Math.max(1, Number(wordRow?.beeRound || index + 1)),
+          bee_time_limit_ms: Math.max(0, Number(wordRow?.beeTimeLimitMs || 0)),
+          bee_length_mode: beeLengthMode,
+          question_type: "no_support_assessment",
+          assignment_role: "spelling_bee",
+          assignment_support: "none",
+        },
+      })));
+    if (wordError) throw wordError;
+
+    const classResults = [];
+    for (const classId of safeClassIds) {
+      const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
+      const className = String(selectedClass?.name || "Class").trim() || "Class";
+      const { data: createdAssignment, error: assignmentError } = await insertSingleRowWithAnalyticsFallback(
+        "assignments_v2",
+        {
+          teacher_id: state.user.id,
+          test_id: createdTestId,
+          class_id: classId,
+          mode: "test",
+          max_attempts: null,
+          audio_enabled: true,
+          hints_enabled: false,
+          end_at: deadlineIso || null,
+          analytics_target_words_enabled: false,
+          analytics_target_words_per_pupil: 0,
+          automation_kind: ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE,
+          automation_source: ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
+          automation_run_id: String(runRecord?.id || "").trim() || null,
+          automation_triggered_by: state.user.id,
+        },
+        "id, created_at",
+      );
+      if (assignmentError && isMissingAutomationMetadataColumnError(assignmentError)) {
+        throw new Error("Spelling Bee automation fields are not available yet. Run the latest Supabase migration.");
+      }
+      if (assignmentError || !createdAssignment?.id) {
+        throw assignmentError || new Error(`Could not create the Spelling Bee assignment for ${className}.`);
+      }
+      const assignmentId = String(createdAssignment.id);
+      createdAssignmentIds.push(assignmentId);
+      classResults.push({
+        classId,
+        className,
+        status: "generated",
+        assignmentId,
+        includedCount: 0,
+        skippedCount: 0,
+        skipReasons: {},
+      });
+    }
+
+    return {
+      testId: createdTestId,
+      assignmentIds: createdAssignmentIds,
+      classResults,
+    };
+  } catch (error) {
+    for (const assignmentId of createdAssignmentIds) {
+      await cleanupAutoAssignedArtifacts({
+        assignmentId,
+        testId: "",
+      });
+    }
+    await cleanupAutoAssignedArtifacts({
+      testId: createdTestId,
+      assignmentId: "",
+    });
+    throw error;
+  }
+}
+
 async function handleCreateBaselineAssignment(form) {
   if (!(canManageOwnContent() && canAssignTests())) {
-    showNotice("Teacher or admin access is required to set a baseline test.", "error");
+    showNotice("Teacher or admin access is required to check baseline status.", "error");
     paint();
     return;
   }
 
   const fd = new FormData(form);
   const classId = String(fd.get("class_id") || "").trim();
-  const deadlineRaw = String(fd.get("deadline") || "").trim();
   const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
 
   if (!classId || !selectedClass || !canEditClassRecord(selectedClass)) {
-    showNotice("Choose a class before setting the baseline test.", "error");
+    showNotice("Choose a form group before checking baseline status.", "error");
+    paint();
+    return;
+  }
+
+  if (normalizeClassType(selectedClass.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_FORM) {
+    showNotice("Choose a form group for standard baseline provisioning.", "error");
     paint();
     return;
   }
 
   const submitBtn = form.querySelector('button[type="submit"]');
-  setBusy(submitBtn, true, "Building...");
-
-  let createdTestId = "";
-  let createdAssignmentId = "";
+  setBusy(submitBtn, true, "Checking...");
 
   try {
-    const { data: membershipRows, error: membershipError } = await supabase
-      .from("pupil_classes")
-      .select("pupil_id")
-      .eq("class_id", classId)
-      .eq("active", true);
-    if (membershipError) throw membershipError;
-    if (!(membershipRows || []).some((row) => String(row?.pupil_id || "").trim())) {
-      throw new Error("This class does not have any active pupils yet.");
-    }
-
-    const definition = buildBaselineAssignmentDefinition({
-      className: selectedClass.name || "Class",
-      date: new Date(),
+    const provisionResult = await ensureFormClassBaselineAssignments({
+      formClassIds: [classId],
     });
-    if (!definition?.wordRows?.length) {
-      throw new Error("Could not build the baseline test.");
+    if (!provisionResult?.ok) {
+      throw new Error(provisionResult?.error || "Could not provision the standard baseline.");
     }
-
-    const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback("tests", {
-      teacher_id: state.user.id,
-      title: definition.title,
-      status: "published",
-      question_type: definition.questionType || "segmented_spelling",
-      analytics_target_words_enabled: false,
-      analytics_target_words_per_pupil: 0,
-    }, "id");
-    if (testError || !createdTest?.id) throw testError || new Error("Could not create the baseline test.");
-    createdTestId = String(createdTest.id);
-
-    const { error: wordError } = await supabase
-      .from("test_words")
-      .insert(
-        definition.wordRows.map((row) => ({
-          test_id: createdTestId,
-          ...row,
-        }))
-      );
-    if (wordError) throw wordError;
-
-    const { data: createdAssignment, error: assignmentError } = await insertSingleRowWithAnalyticsFallback(
-      "assignments_v2",
-      {
-        teacher_id: state.user.id,
-        test_id: createdTestId,
-        class_id: classId,
-        mode: "test",
-        max_attempts: null,
-        audio_enabled: true,
-        hints_enabled: false,
-        end_at: deadlineRaw ? new Date(deadlineRaw).toISOString() : null,
-        analytics_target_words_enabled: false,
-        analytics_target_words_per_pupil: 0,
-      },
-      "id",
-    );
-    if (assignmentError || !createdAssignment?.id) {
-      throw assignmentError || new Error("Could not create the class assignment.");
-    }
-    createdAssignmentId = String(createdAssignment.id);
 
     state.createBaselineOpen = false;
     await loadDashboardData();
     openDashboardSection("upcoming");
     state.activePanel = null;
-    showNotice("Baseline test assigned.", "success");
+    showNotice(
+      provisionResult.createdCount > 0
+        ? "Standard baseline provisioned. Pupils will start it automatically when they next log in."
+        : "Standard baseline is already ready. Pupils will start or continue it automatically when they log in.",
+      "success"
+    );
     paint();
   } catch (error) {
-    console.error("create baseline assignment error:", error);
-    if (createdAssignmentId || createdTestId) {
-      await cleanupAutoAssignedArtifacts({
-        assignmentId: createdAssignmentId,
-        testId: createdTestId,
-      });
-    }
-    showNotice(error?.message || "Could not assign the baseline test.", "error");
+    console.error("baseline status repair error:", error);
+    showNotice(error?.message || "Could not check baseline status.", "error");
     paint();
   } finally {
     setBusy(submitBtn, false);
@@ -9940,33 +12754,15 @@ async function handleAutoAssignPractice(form) {
 function summarizeSkipReasons(rows = []) {
   const counts = {};
   for (const row of rows || []) {
-    const key = String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase();
+    const baseKey = String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase();
+    const detailKey = String(row?.skip_reason_detail || row?.skipReasonDetail || "").trim().toLowerCase();
+    const key = baseKey === "baseline_incomplete" && detailKey === "no_baseline_assignment"
+      ? "no_baseline_assignment"
+      : baseKey;
     if (!key) continue;
     counts[key] = (counts[key] || 0) + 1;
   }
   return counts;
-}
-
-function buildRunNowNotice({
-  classResults = [],
-  includedPupilCount = 0,
-  skippedPupilCount = 0,
-  errorCount = 0,
-} = {}) {
-  const generatedClassCount = (classResults || []).filter((item) => item?.status === "generated").length;
-  const parts = [
-    generatedClassCount === 0
-      ? "No new personalised tests were generated."
-      : (generatedClassCount === 1
-        ? "Generated 1 personalised test."
-        : `Generated ${generatedClassCount} personalised tests.`),
-    `Included ${Math.max(0, Number(includedPupilCount || 0))} pupil${Number(includedPupilCount || 0) === 1 ? "" : "s"}.`,
-    `Skipped ${Math.max(0, Number(skippedPupilCount || 0))} pupil${Number(skippedPupilCount || 0) === 1 ? "" : "s"}.`,
-  ];
-  if (errorCount > 0) {
-    parts.push(`${errorCount} class${errorCount === 1 ? "" : "es"} could not be processed.`);
-  }
-  return parts.join(" ");
 }
 
 async function handleSaveAutomationPolicy(form) {
@@ -9974,9 +12770,26 @@ async function handleSaveAutomationPolicy(form) {
 
   if (isSelectedAutomationPolicyBusy()) return;
 
-  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
-  const draftEntry = getCurrentAutomationDraftEntry();
+  let selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  let draftEntry = getCurrentAutomationDraftEntry();
   if (!draftEntry.dirty) return;
+  const selectedKeyBeforeRefresh = selectedKey;
+  if (!(await refreshAutomationPoliciesForValidation("save"))) return;
+  selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  draftEntry = getCurrentAutomationDraftEntry();
+  if (
+    selectedKeyBeforeRefresh !== AUTOMATION_NEW_POLICY_KEY
+    && selectedKeyBeforeRefresh !== selectedKey
+  ) {
+    showNotice("This automation policy is no longer available. Choose a saved policy before saving.", "error");
+    paint();
+    return;
+  }
+  if (!draftEntry.dirty) {
+    showNotice("Automation policy changes are already up to date.", "info");
+    paint();
+    return;
+  }
   const { policy, errors } = getAutomationRunPolicyValidation();
   if (errors.length) {
     showNotice(errors[0], "error");
@@ -9997,7 +12810,9 @@ async function handleSaveAutomationPolicy(form) {
       id: policy.id,
       name: policy.name,
       description: policy.description,
+      policy_type: policy.policy_type,
       assignment_length: policy.assignment_length,
+      bee_length_mode: isSpellingBeeAutomationPolicy(policy) ? policy.bee_length_mode : null,
       support_preset: policy.support_preset,
       allow_starter_fallback: policy.allow_starter_fallback,
       frequency: policy.frequency,
@@ -10015,6 +12830,7 @@ async function handleSaveAutomationPolicy(form) {
       previousKey: selectedKey,
       previousEntry: draftEntry,
     });
+    await refreshAutomationPoliciesAfterMutation("save");
     showNotice(`Saved "${getAutomationPolicyDisplayName(savedPolicy)}".`, "success");
     shouldScrollToTop = true;
   } catch (error) {
@@ -10036,17 +12852,28 @@ async function handleRunNowPersonalisedGeneration() {
     return;
   }
 
-  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
-  const draftEntry = getCurrentAutomationDraftEntry();
-  const { policy, errors } = getAutomationRunPolicyValidation();
-  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
-  const requestedPolicyKey = resolveAutomationActionPolicyKey(policy, selectedKey);
   const currentAction = getAutomationActionState();
   if (isAutomationRunMode(currentAction.mode)) {
     showNotice("A personalised generation run is already in progress. Wait for it to finish before starting another run.", "info");
     paint();
     return;
   }
+  const selectedKeyBeforeRefresh = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  if (!(await refreshAutomationPoliciesForValidation("run this policy"))) return;
+
+  const selectedKey = getAutomationSelectedPolicyKey() || AUTOMATION_NEW_POLICY_KEY;
+  const draftEntry = getCurrentAutomationDraftEntry();
+  if (
+    selectedKeyBeforeRefresh !== AUTOMATION_NEW_POLICY_KEY
+    && selectedKeyBeforeRefresh !== selectedKey
+  ) {
+    showNotice("This automation policy is no longer available. Choose a saved policy before running.", "error");
+    paint();
+    return;
+  }
+  const { policy, errors } = getAutomationRunPolicyValidation();
+  const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+  const requestedPolicyKey = resolveAutomationActionPolicyKey(policy, selectedKey);
   if (
     currentAction.policyKey
     && currentAction.policyKey === requestedPolicyKey
@@ -10081,9 +12908,12 @@ async function handleRunNowPersonalisedGeneration() {
   const selectedClassIds = sortAutomationRunClassIds(effectivePolicy.target_class_ids);
   const deadlineMeta = derivePersonalisedAutomationDeadline(effectivePolicy, { from: new Date() });
   const deadlineIso = deadlineMeta.deadlineIso || null;
+  const runStatusMessage = isSpellingBeeAutomationPolicy(effectivePolicy)
+    ? "Releasing Spelling Bee competition for this policy..."
+    : "Generating personalised tests for this policy...";
 
   if (!selectedClassIds.length) {
-    showNotice("Select at least one form or intervention group before you run personalised generation.", "error");
+    showNotice("Choose at least one year group before you run this policy.", "error");
     paint();
     return;
   }
@@ -10091,11 +12921,12 @@ async function handleRunNowPersonalisedGeneration() {
   setAutomationActionState({
     policyKey: requestedPolicyKey,
     mode: draftEntry.dirty || !String(policy.id || "").trim() ? "saving_and_running" : "running",
-    statusMessage: "Generating personalised tests for this policy...",
+    statusMessage: runStatusMessage,
   });
   paint();
 
   let runRecord = null;
+  let shouldScrollToRunResult = false;
 
   try {
     if (draftEntry.dirty || !String(effectivePolicy.id || "").trim()) {
@@ -10103,7 +12934,9 @@ async function handleRunNowPersonalisedGeneration() {
         id: effectivePolicy.id,
         name: effectivePolicy.name,
         description: effectivePolicy.description,
+        policy_type: effectivePolicy.policy_type,
         assignment_length: effectivePolicy.assignment_length,
+        bee_length_mode: isSpellingBeeAutomationPolicy(effectivePolicy) ? effectivePolicy.bee_length_mode : null,
         support_preset: effectivePolicy.support_preset,
         allow_starter_fallback: effectivePolicy.allow_starter_fallback,
         frequency: effectivePolicy.frequency,
@@ -10121,11 +12954,14 @@ async function handleRunNowPersonalisedGeneration() {
         previousKey: selectedKey,
         previousEntry: draftEntry,
       });
+      await refreshAutomationPoliciesAfterMutation("save-and-run");
       effectivePolicy = normalizePersonalisedAutomationPolicy(savedFromRun);
       setAutomationActionState({
         policyKey: resolveAutomationActionPolicyKey(effectivePolicy, selectedKey),
         mode: "running",
-        statusMessage: "Generating personalised tests for this policy...",
+        statusMessage: isSpellingBeeAutomationPolicy(effectivePolicy)
+          ? "Releasing Spelling Bee competition for this policy..."
+          : "Generating personalised tests for this policy...",
       });
       paint();
     }
@@ -10135,10 +12971,153 @@ async function handleRunNowPersonalisedGeneration() {
       automationPolicyId: effectivePolicy.id || "",
       policySnapshot: effectivePolicy,
       derivedDeadlineAt: deadlineIso,
+      policy_type: effectivePolicy.policy_type,
       assignment_length: effectivePolicy.assignment_length,
+      bee_length_mode: isSpellingBeeAutomationPolicy(effectivePolicy) ? effectivePolicy.bee_length_mode : null,
       support_preset: effectivePolicy.support_preset,
       allow_starter_fallback: effectivePolicy.allow_starter_fallback,
     });
+
+    if (isSpellingBeeAutomationPolicy(effectivePolicy)) {
+      const ladderResult = buildSpellingBeeLadder({
+        wordRows: getApprovedSpellingBeeSourceWordRows(),
+        maxRounds: effectivePolicy.assignment_length,
+        lengthMode: effectivePolicy.bee_length_mode,
+        seed: String(runRecord?.id || effectivePolicy.id || deadlineIso || ""),
+      });
+      if (ladderResult.status !== "ready") {
+        throw new Error(ladderResult.error || "Not enough teacher-approved words are available for a fair Spelling Bee.");
+      }
+
+      const { pupilIdsByClassId } = await readActivePupilIdsByClass(selectedClassIds);
+      const exposurePlan = buildSpellingBeeExposurePlan({
+        classIds: selectedClassIds,
+        pupilIdsByClassId,
+      });
+      if (!exposurePlan.includedPupilCount) {
+        throw new Error("No active pupils were available for this Spelling Bee run.");
+      }
+
+      const createdBeeRelease = await createSpellingBeeCompetitionRelease({
+        classIds: exposurePlan.releaseClassIds,
+        deadlineIso,
+        ladder: ladderResult.words,
+        policy: effectivePolicy,
+        runRecord,
+      });
+      const generatedResultByClassId = new Map(
+        (createdBeeRelease.classResults || [])
+          .map((item) => [String(item?.classId || "").trim(), item])
+          .filter(([classId]) => !!classId)
+      );
+      const assignmentIdByClassId = new Map(
+        (createdBeeRelease.classResults || [])
+          .map((item) => [String(item?.classId || "").trim(), String(item?.assignmentId || "").trim()])
+          .filter(([classId, assignmentId]) => !!classId && !!assignmentId)
+      );
+      const runPupilRows = [];
+      for (const row of exposurePlan.includedRows) {
+        const assignmentId = assignmentIdByClassId.get(String(row?.classId || "").trim()) || "";
+        if (!assignmentId) {
+          throw new Error("Could not link a Spelling Bee pupil exposure to its assignment.");
+        }
+        runPupilRows.push({
+          runId: runRecord.id,
+          classId: row.classId,
+          pupilId: row.pupilId,
+          assignmentId,
+          status: "included",
+          skipReason: null,
+        });
+      }
+      for (const row of exposurePlan.skippedRows) {
+        runPupilRows.push({
+          runId: runRecord.id,
+          classId: row.classId,
+          pupilId: row.pupilId,
+          assignmentId: null,
+          status: "skipped",
+          skipReason: SPELLING_BEE_DUPLICATE_PUPIL_SKIP_REASON,
+        });
+      }
+      if (runPupilRows.length) {
+        await upsertPersonalisedGenerationRunPupilRows(runPupilRows);
+      }
+
+      const classPlanByClassId = new Map(
+        exposurePlan.classPlans.map((item) => [String(item?.classId || "").trim(), item])
+      );
+      const classResults = selectedClassIds.map((classId) => {
+        const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
+        const className = String(selectedClass?.name || "Class").trim() || "Class";
+        const classPlan = classPlanByClassId.get(classId) || {
+          pupilIds: [],
+          includedPupilIds: [],
+          duplicatePupilIds: [],
+          skipReasons: {},
+        };
+        const generatedResult = generatedResultByClassId.get(classId) || null;
+        if (generatedResult) {
+          return {
+            ...generatedResult,
+            includedCount: classPlan.includedPupilIds.length,
+            skippedCount: classPlan.duplicatePupilIds.length,
+            skipReasons: classPlan.skipReasons || {},
+          };
+        }
+        if (!classPlan.pupilIds.length) {
+          return {
+            classId,
+            className,
+            status: "no_active_pupils",
+            assignmentId: "",
+            includedCount: 0,
+            skippedCount: 0,
+            skipReasons: {},
+          };
+        }
+        return {
+          classId,
+          className,
+          status: "skipped",
+          assignmentId: "",
+          includedCount: 0,
+          skippedCount: classPlan.duplicatePupilIds.length,
+          skipReasons: classPlan.skipReasons || {},
+        };
+      });
+      await updatePersonalisedGenerationRun({
+        runId: runRecord.id,
+        status: "completed",
+        classCount: selectedClassIds.length,
+        includedPupilCount: exposurePlan.includedPupilCount,
+        skippedPupilCount: exposurePlan.skippedPupilCount,
+        summary: {
+          classes: classResults,
+          errorCount: 0,
+          automationPolicyId: effectivePolicy.id || null,
+          policySnapshot: effectivePolicy,
+          derivedDeadlineAt: deadlineIso,
+          nextReleaseAt: deadlineMeta.nextRelease ? deadlineMeta.nextRelease.toISOString() : null,
+          policy_type: effectivePolicy.policy_type,
+          bee_length_mode: effectivePolicy.bee_length_mode,
+          testId: createdBeeRelease.testId,
+          assignmentIds: createdBeeRelease.assignmentIds,
+        },
+      });
+
+      await loadDashboardData();
+      openDashboardSection("upcoming");
+      state.createAutoAssignOpen = false;
+      state.activePanel = null;
+      showNotice(
+        `Released Spelling Bee competition to ${exposurePlan.releaseClassIds.length} group${exposurePlan.releaseClassIds.length === 1 ? "" : "s"}.`,
+        "success",
+      );
+      shouldScrollToRunResult = true;
+      paint();
+      return;
+    }
 
     const { pupilIdsByClassId, allPupilIds } = await readActivePupilIdsByClass(selectedClassIds);
     const [activeAutomationByPupil, baselineGateEntries] = await Promise.all([
@@ -10155,13 +13134,16 @@ async function handleRunNowPersonalisedGeneration() {
     const classResults = [];
     let includedPupilCount = 0;
     let skippedPupilCount = 0;
+    let waitingPupilCount = 0;
     let errorCount = 0;
+    const pupilIdsIncludedThisRun = new Set();
 
     for (const classId of selectedClassIds) {
       const selectedClass = state.classes.find((item) => String(item?.id || "") === classId) || null;
       const className = String(selectedClass?.name || "Class").trim() || "Class";
       const classPupilIds = pupilIdsByClassId.get(classId) || [];
       const skippedRows = [];
+      const waitingRows = [];
 
       if (!classPupilIds.length) {
         classResults.push({
@@ -10169,7 +13151,9 @@ async function handleRunNowPersonalisedGeneration() {
           className,
           status: "no_active_pupils",
           includedCount: 0,
+          waitingCount: 0,
           skippedCount: 0,
+          waitingReasons: {},
           skipReasons: {},
           assignmentId: "",
         });
@@ -10180,12 +13164,27 @@ async function handleRunNowPersonalisedGeneration() {
       for (const pupilId of classPupilIds) {
         const baselineGate = baselineGateByPupil.get(pupilId) || null;
         if (baselineGate?.status !== "ready") {
+          const baselineWaitingReason = String(
+            baselineGate?.waiting_reason || baselineGate?.waitingReason || ""
+          ).trim().toLowerCase();
+          waitingRows.push({
+            runId: runRecord.id,
+            classId,
+            pupilId,
+            status: "waiting",
+            skipReason: baselineWaitingReason === "no_baseline_assignment"
+              ? "no_baseline_assignment"
+              : "baseline_incomplete",
+          });
+          continue;
+        }
+        if (pupilIdsIncludedThisRun.has(pupilId)) {
           skippedRows.push({
             runId: runRecord.id,
             classId,
             pupilId,
             status: "skipped",
-            skipReason: "baseline_incomplete",
+            skipReason: "duplicate_pupil_in_run",
           });
           continue;
         }
@@ -10203,17 +13202,20 @@ async function handleRunNowPersonalisedGeneration() {
       }
 
       skippedPupilCount += skippedRows.length;
+      waitingPupilCount += waitingRows.length;
 
       if (!includedPupilIds.length) {
-        if (skippedRows.length) {
-          await upsertPersonalisedGenerationRunPupilRows(skippedRows);
+        if (waitingRows.length || skippedRows.length) {
+          await upsertPersonalisedGenerationRunPupilRows([...waitingRows, ...skippedRows]);
         }
         classResults.push({
           classId,
           className,
-          status: "skipped",
+          status: waitingRows.length && !skippedRows.length ? "waiting" : "skipped",
           includedCount: 0,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
           assignmentId: "",
         });
@@ -10227,6 +13229,7 @@ async function handleRunNowPersonalisedGeneration() {
           pupilIds: includedPupilIds,
           policy: effectivePolicy,
         });
+        const coverageWarnings = normalizeCoverageWarnings(plan?.coverageWarnings);
         created = await createGeneratedAssignmentForClass({
           classId,
           className,
@@ -10249,9 +13252,10 @@ async function handleRunNowPersonalisedGeneration() {
           status: "included",
           skipReason: null,
         }));
-        await upsertPersonalisedGenerationRunPupilRows([...includedRows, ...skippedRows]);
+        await upsertPersonalisedGenerationRunPupilRows([...includedRows, ...waitingRows, ...skippedRows]);
 
         for (const pupilId of includedPupilIds) {
+          pupilIdsIncludedThisRun.add(pupilId);
           activeAutomationByPupil.set(pupilId, {
             assignmentId: created.assignmentId,
             classId,
@@ -10266,8 +13270,11 @@ async function handleRunNowPersonalisedGeneration() {
           status: "generated",
           assignmentId: created.assignmentId,
           includedCount: includedRows.length,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
+          coverageWarnings,
         });
       } catch (classError) {
         console.error("run now personalised generation class error:", {
@@ -10281,8 +13288,8 @@ async function handleRunNowPersonalisedGeneration() {
           });
         }
         errorCount += 1;
-        if (skippedRows.length) {
-          await upsertPersonalisedGenerationRunPupilRows(skippedRows);
+        if (waitingRows.length || skippedRows.length) {
+          await upsertPersonalisedGenerationRunPupilRows([...waitingRows, ...skippedRows]);
         }
         classResults.push({
           classId,
@@ -10290,7 +13297,9 @@ async function handleRunNowPersonalisedGeneration() {
           status: "error",
           assignmentId: "",
           includedCount: 0,
+          waitingCount: waitingRows.length,
           skippedCount: skippedRows.length,
+          waitingReasons: summarizeSkipReasons(waitingRows),
           skipReasons: summarizeSkipReasons(skippedRows),
           error: classError?.message || "Could not generate a personalised test for this class.",
         });
@@ -10298,6 +13307,7 @@ async function handleRunNowPersonalisedGeneration() {
     }
 
     const runStatus = errorCount > 0 && includedPupilCount === 0 ? "failed" : "completed";
+    const coverageWarnings = classResults.flatMap((result) => normalizeCoverageWarnings(result?.coverageWarnings));
     await updatePersonalisedGenerationRun({
       runId: runRecord.id,
       status: runStatus,
@@ -10307,6 +13317,8 @@ async function handleRunNowPersonalisedGeneration() {
       summary: {
         classes: classResults,
         errorCount,
+        waitingPupilCount,
+        coverageWarnings,
         automationPolicyId: effectivePolicy.id || null,
         policySnapshot: effectivePolicy,
         derivedDeadlineAt: deadlineIso,
@@ -10318,15 +13330,16 @@ async function handleRunNowPersonalisedGeneration() {
     openDashboardSection("upcoming");
     state.createAutoAssignOpen = false;
     state.activePanel = null;
-    showNotice(
-      buildRunNowNotice({
-        classResults,
-        includedPupilCount,
-        skippedPupilCount,
-        errorCount,
-      }),
-      runStatus === "failed" ? "error" : (errorCount > 0 ? "info" : "success"),
-    );
+    const runNotice = buildAutomationRunFeedbackNotice({
+      classResults,
+      includedPupilCount,
+      skippedPupilCount,
+      waitingPupilCount,
+      errorCount,
+      runStatus,
+    });
+    showNotice(runNotice.message, runNotice.type);
+    shouldScrollToRunResult = true;
     paint();
   } catch (error) {
     console.error("run now personalised generation error:", error);
@@ -10345,9 +13358,13 @@ async function handleRunNowPersonalisedGeneration() {
       });
     }
     showNotice(error?.message || "Could not run personalised generation.", "error");
+    shouldScrollToRunResult = true;
   } finally {
     clearAutomationActionState();
     paint();
+    if (shouldScrollToRunResult) {
+      scrollDashboardNoticeIntoView({ behavior: "smooth" });
+    }
   }
 }
 
@@ -10415,6 +13432,12 @@ function handleExtendAutomationPolicy(policyId) {
   focusAutomationPolicyScheduleField();
 }
 
+function handleDismissAutomationPolicyAlert(policyId, alertKey) {
+  if (!canManageAutomation()) return;
+  dismissAutomationPolicyAlert(policyId, alertKey);
+  paint();
+}
+
 function handleDuplicateAutomationPolicy(policyId) {
   if (!canManageAutomation()) return;
   if (isAnyAutomationPolicyBusy()) {
@@ -10474,6 +13497,7 @@ async function handleSetAutomationPolicyArchived(policyId, archived) {
         targetFiltersTouched: currentEntry?.targetFiltersTouched === true,
       }, { basePolicy: savedPolicy });
     }
+    await refreshAutomationPoliciesAfterMutation(actionLabel);
     persistAutomationPolicyDraft();
     showNotice(
       archived
@@ -10517,8 +13541,10 @@ async function handleDeleteAutomationPolicy(policyId) {
     if (String(state.automationSelectedPolicyKey || "").trim() === String(policyId || "").trim()) {
       state.automationSelectedPolicyKey = state.automationDraftsByKey?.[AUTOMATION_NEW_POLICY_KEY]
         ? AUTOMATION_NEW_POLICY_KEY
-        : String(state.automationPolicies[0]?.id || "").trim();
+        : "";
+      state.automationSelectionExplicit = !!state.automationSelectedPolicyKey;
     }
+    await refreshAutomationPoliciesAfterMutation("delete");
     persistAutomationPolicyDraft();
     showNotice(`Deleted "${getAutomationPolicyDisplayName(deletedPolicy || sourcePolicy)}".`, "success");
     paint();
@@ -10810,6 +13836,10 @@ async function handleAssignTest(form) {
     }
   }
 
+  state.assignmentLifecycle.manualAssignClassByTestId = {
+    ...state.assignmentLifecycle.manualAssignClassByTestId,
+    [testId]: "",
+  };
   await loadDashboardData();
   openDashboardSection("upcoming");
   state.activePanel = null;
@@ -10934,11 +13964,13 @@ async function handleDeleteTest(testId) {
   const ok = window.confirm(`Delete "${label}"?`);
   if (!ok) return;
 
-  const { error } = await supabase
+  let query = supabase
     .from("tests")
     .delete()
     .eq("id", testId)
     .eq("teacher_id", state.user.id);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
 
   if (error) {
     console.error("delete test error:", error);
@@ -10953,6 +13985,61 @@ async function handleDeleteTest(testId) {
   paint();
 }
 
+async function handleDeleteSelectedTests(button = null) {
+  const selectedTests = getSelectedEditableTests();
+  if (!selectedTests.length) {
+    showNotice("Select one or more tests you own first.", "error");
+    paint();
+    return;
+  }
+
+  const selectedIds = selectedTests
+    .map((test) => String(test?.id || "").trim())
+    .filter(Boolean);
+  const liveCount = selectedTests.filter((test) => isLiveTestRecord(test)).length;
+  const preview = selectedTests
+    .slice(0, 5)
+    .map((test) => `- ${String(test?.title || "Untitled test").trim() || "Untitled test"}`)
+    .join("\n");
+  const extraCount = Math.max(0, selectedTests.length - 5);
+  const titlePreview = `${preview}${extraCount ? `\n- and ${extraCount} more` : ""}`;
+
+  if (liveCount > 0) {
+    const typed = window.prompt(
+      `Delete ${formatCountLabel(selectedTests.length, "selected test")}?\n\n${titlePreview}\n\n${formatCountLabel(liveCount, "test is", "tests are")} live/assigned. Deleting live tests also removes their linked class assignments.\n\nType DELETE to confirm.`
+    );
+    if (typed !== "DELETE") return;
+  } else {
+    const ok = window.confirm(`Delete ${formatCountLabel(selectedTests.length, "selected test")}?\n\n${titlePreview}`);
+    if (!ok) return;
+  }
+
+  setBusy(button, true, "Deleting...");
+
+  let query = supabase
+    .from("tests")
+    .delete()
+    .eq("teacher_id", state.user.id)
+    .in("id", selectedIds);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
+
+  setBusy(button, false);
+
+  if (error) {
+    console.error("delete selected tests error:", error);
+    showNotice("Could not delete the selected tests.", "error");
+    paint();
+    return;
+  }
+
+  await loadDashboardData();
+  if (selectedIds.includes(String(state.activePanel?.id || ""))) state.activePanel = null;
+  clearSelectedTestIds();
+  showNotice(`${formatCountLabel(selectedTests.length, "test")} deleted.`, "success");
+  paint();
+}
+
 async function handleDuplicateTest(testId) {
   const original = state.tests.find((t) => String(t.id) === String(testId));
   if (!canEditTestRecord(original)) {
@@ -10963,11 +14050,11 @@ async function handleDuplicateTest(testId) {
 
   const { data: newTest, error: insertError } = await supabase
     .from("tests")
-    .insert({
+    .insert(withActiveSchoolId({
       teacher_id: state.user.id,
       title: `${original.title} (copy)`,
       question_type: normalizeStoredQuestionType(original.question_type, { title: original.title }),
-    })
+    }, state.accessContext))
     .select()
     .single();
 
@@ -10978,11 +14065,11 @@ async function handleDuplicateTest(testId) {
     return;
   }
 
-  const { data: originalWords, error: qError } = await supabase
+  let originalWordsQuery = supabase
     .from("test_words")
     .select("*")
-    .eq("test_id", testId)
-    .order("position", { ascending: true });
+    .eq("test_id", testId);
+  const { data: originalWords, error: qError } = await originalWordsQuery.order("position", { ascending: true });
 
   if (!qError && Array.isArray(originalWords) && originalWords.length) {
     const wordRows = originalWords.map((q, index) => ({
@@ -11012,35 +14099,358 @@ async function handleDuplicateTest(testId) {
   clearFlashLater("test");
 }
 
-async function handleDeleteClass(classId) {
-  const cls = state.classes.find((c) => String(c.id) === String(classId));
+async function readClassRemovalPreflight(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) throw new Error("Choose a class first.");
+
+  const cls = findClassRecord(safeClassId);
   if (!canEditClassRecord(cls)) {
-    showNotice("You can only delete classes that you own.", "error");
+    throw new Error("You can only remove classes that you own.");
+  }
+
+  const memberships = await loadPaginatedRows((from, to) =>
+    supabase
+      .from("pupil_classes")
+      .select("id, pupil_id, active")
+      .eq("class_id", safeClassId)
+      .range(from, to)
+  );
+  const pupilIds = normalizeIdList(memberships.map((item) => item?.pupil_id));
+  const pupilRows = [];
+  for (const chunk of chunkArray(pupilIds, 100)) {
+    const { data, error } = await supabase
+      .from("pupils")
+      .select("id, first_name, surname, username, mis_id, is_active, archived_at")
+      .in("id", chunk);
+    if (error) throw error;
+    pupilRows.push(...(Array.isArray(data) ? data : []));
+  }
+
+  const pupilsById = new Map(pupilRows.map((item) => [String(item?.id || "").trim(), item]));
+  const activeMemberships = memberships.filter((item) => item?.active !== false);
+  const activePupilIds = normalizeIdList(
+    activeMemberships
+      .map((item) => String(item?.pupil_id || "").trim())
+      .filter((pupilId) => {
+        const pupil = pupilsById.get(pupilId);
+        if (!pupil) return true;
+        return pupil?.is_active !== false && !String(pupil?.archived_at || "").trim();
+      })
+  );
+
+  const [assignmentRows, legacyAssignmentRows] = await Promise.all([
+    loadPaginatedRows((from, to) =>
+      supabase
+        .from("assignments_v2")
+        .select("id, created_at, end_at, tests(title)")
+        .eq("class_id", safeClassId)
+        .range(from, to)
+    ),
+    loadPaginatedRows((from, to) =>
+      supabase
+        .from("assignments")
+        .select("id, created_at, end_at")
+        .eq("class_id", safeClassId)
+        .range(from, to)
+    ).catch((error) => {
+      console.warn("Could not check legacy class assignments:", error);
+      return [];
+    }),
+  ]);
+  const assignmentIds = new Set();
+  for (const row of [...assignmentRows, ...legacyAssignmentRows]) {
+    const assignmentId = String(row?.id || "").trim();
+    if (assignmentId) assignmentIds.add(assignmentId);
+  }
+  const automationPolicies = getAutomationPolicies()
+    .filter((policy) => normalizeIdList(policy?.target_class_ids).includes(safeClassId))
+    .map((policy) => ({
+      id: String(policy?.id || "").trim(),
+      name: getAutomationPolicyDisplayName(policy),
+      archived: !!String(policy?.archived_at || "").trim(),
+      policyType: getAutomationPolicyTypeLabel(policy?.policy_type),
+    }));
+
+  return {
+    classId: safeClassId,
+    membershipCount: memberships.length,
+    activeMembershipCount: activeMemberships.length,
+    activePupilCount: activePupilIds.length,
+    activePupils: activePupilIds.map((pupilId) => pupilsById.get(pupilId) || { id: pupilId }),
+    inactiveMembershipCount: Math.max(0, memberships.length - activeMemberships.length),
+    assignmentCount: assignmentIds.size,
+    assignmentSamples: assignmentRows.slice(0, 3),
+    automationPolicies,
+    activeAutomationPolicyCount: automationPolicies.filter((policy) => !policy.archived).length,
+    hasClassAutoAssignPolicy: !!getSavedClassAutoAssignPolicy(safeClassId),
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+async function loadClassRemovalPreflight(classId, { force = false } = {}) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return null;
+  const current = getClassRemovalStateForClass(safeClassId);
+  if (!force && current.preflight && !current.error) return current.preflight;
+
+  setClassRemovalLoading(safeClassId, true);
+  setClassRemovalError(safeClassId, "");
+  paint();
+
+  try {
+    const preflight = await readClassRemovalPreflight(safeClassId);
+    setClassRemovalPreflight(safeClassId, preflight);
+    return preflight;
+  } catch (error) {
+    console.error("class removal preflight error:", error);
+    setClassRemovalError(safeClassId, error?.message || "Could not check this class before removing it.");
+    setClassRemovalPreflight(safeClassId, null);
+    return null;
+  } finally {
+    setClassRemovalLoading(safeClassId, false);
+    paint();
+  }
+}
+
+async function handleOpenClassRemoval(classId, button = null) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+  const cls = findClassRecord(safeClassId);
+  if (!canEditClassRecord(cls)) {
+    showNotice("You can only remove classes that you own.", "error");
     paint();
     return;
   }
-  const label = cls?.name || "this class";
 
-  const ok = window.confirm(`Delete "${label}"?`);
-  if (!ok) return;
+  const wasSame =
+    state.activePanel?.type === "remove-class" &&
+    String(state.activePanel.id) === safeClassId;
+  const anchorEl = button?.closest?.(".td-class-card") || rootEl;
+
+  preserveScrollAround(anchorEl, () => {
+    state.activePanel = wasSame ? null : { type: "remove-class", id: safeClassId };
+    paint();
+  });
+
+  if (!wasSame) {
+    await loadClassRemovalPreflight(safeClassId, { force: true });
+  }
+}
+
+function buildClassRemovalConfirmMessage({ cls, preflight, mode, targetClass = null } = {}) {
+  const className = String(cls?.name || "this class").trim();
+  const activePupilCount = Number(preflight?.activePupilCount || 0);
+  const assignmentCount = Number(preflight?.assignmentCount || 0);
+  const policyCount = Number(preflight?.activeAutomationPolicyCount || preflight?.automationPolicies?.length || 0);
+  const lines = [];
+
+  if (mode === "move") {
+    lines.push(`Move ${formatCountLabel(activePupilCount, "active pupil")} to "${targetClass?.name || "the selected class"}" and remove "${className}"?`);
+  } else if (mode === "remove-memberships") {
+    lines.push(`Remove ${formatCountLabel(activePupilCount, "active pupil")} from "${className}" and delete the class permanently?`);
+    lines.push("The pupils will remain in the pupil directory, but they may stop receiving assignments or personalised auto-tests until they are added to another class.");
+  } else {
+    lines.push(`Delete "${className}" permanently?`);
+  }
+
+  if (assignmentCount > 0) {
+    lines.push(`This class has ${formatCountLabel(assignmentCount, "linked assignment")}. Linked assignments/results may be removed with the class.`);
+  }
+
+  if (policyCount > 0) {
+    lines.push(`This class is used by ${formatCountLabel(policyCount, "automation policy", "automation policies")}. Future personalised runs will no longer target it.`);
+  }
+
+  lines.push("This cannot be undone.");
+  return lines.join("\n\n");
+}
+
+async function deleteClassMembershipRows(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
 
   const { error } = await supabase
+    .from("pupil_classes")
+    .delete()
+    .eq("class_id", safeClassId);
+
+  if (error) throw error;
+}
+
+async function moveClassMembershipRowsForRemoval(sourceClassId, targetClassId) {
+  const safeSourceClassId = String(sourceClassId || "").trim();
+  const safeTargetClassId = String(targetClassId || "").trim();
+  if (!safeSourceClassId || !safeTargetClassId) {
+    throw new Error("Choose where to move pupils before removing the class.");
+  }
+  if (safeSourceClassId === safeTargetClassId) {
+    throw new Error("Choose a different class to move pupils into.");
+  }
+
+  const sourceRows = await loadPaginatedRows((from, to) =>
+    supabase
+      .from("pupil_classes")
+      .select("id, pupil_id, active")
+      .eq("class_id", safeSourceClassId)
+      .range(from, to)
+  );
+  const activeRows = sourceRows.filter((row) => row?.active !== false);
+  const inactiveIds = sourceRows
+    .filter((row) => row?.active === false)
+    .map((row) => String(row?.id || "").trim())
+    .filter(Boolean);
+  const activePupilIds = normalizeIdList(activeRows.map((row) => row?.pupil_id));
+  const existingTargetPupilIds = new Set();
+
+  for (const chunk of chunkArray(activePupilIds, 100)) {
+    const { data, error } = await supabase
+      .from("pupil_classes")
+      .select("pupil_id")
+      .eq("class_id", safeTargetClassId)
+      .eq("active", true)
+      .in("pupil_id", chunk);
+    if (error) throw error;
+    for (const row of data || []) {
+      const pupilId = String(row?.pupil_id || "").trim();
+      if (pupilId) existingTargetPupilIds.add(pupilId);
+    }
+  }
+
+  const rowsToMove = activeRows.filter((row) => {
+    const pupilId = String(row?.pupil_id || "").trim();
+    return pupilId && !existingTargetPupilIds.has(pupilId);
+  });
+  const idsToMove = rowsToMove.map((row) => String(row?.id || "").trim()).filter(Boolean);
+  const duplicateActiveIds = activeRows
+    .filter((row) => existingTargetPupilIds.has(String(row?.pupil_id || "").trim()))
+    .map((row) => String(row?.id || "").trim())
+    .filter(Boolean);
+
+  for (const chunk of chunkArray(idsToMove, 100)) {
+    const { error } = await supabase
+      .from("pupil_classes")
+      .update({ class_id: safeTargetClassId })
+      .in("id", chunk)
+      .eq("class_id", safeSourceClassId);
+    if (error) throw error;
+  }
+
+  for (const chunk of chunkArray([...inactiveIds, ...duplicateActiveIds], 100)) {
+    if (!chunk.length) continue;
+    const { error } = await supabase
+      .from("pupil_classes")
+      .delete()
+      .in("id", chunk);
+    if (error) throw error;
+  }
+
+  await deleteClassMembershipRows(safeSourceClassId);
+
+  return {
+    movedCount: idsToMove.length,
+    alreadyInTargetCount: duplicateActiveIds.length,
+  };
+}
+
+async function deleteClassRecord(classId) {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return;
+
+  let query = supabase
     .from("classes")
     .delete()
-    .eq("id", classId)
+    .eq("id", safeClassId)
     .eq("teacher_id", state.user.id);
+  query = applyActiveSchoolFilter(query, state.accessContext);
+  const { error } = await query;
 
-  if (error) {
-    console.error("delete class error:", error);
-    showNotice("Could not delete class.", "error");
+  if (error) throw error;
+}
+
+async function handleDeleteClass(classId, { mode = "empty", targetClassId = "" } = {}) {
+  const safeClassId = String(classId || "").trim();
+  const cls = findClassRecord(safeClassId);
+  if (!canEditClassRecord(cls)) {
+    showNotice("You can only remove classes that you own.", "error");
     paint();
     return;
   }
 
-  await loadDashboardData();
-  if (state.activePanel?.id === classId) state.activePanel = null;
-  showNotice("Class deleted.", "success");
+  setClassRemovalBusy(safeClassId, true);
+  setClassRemovalError(safeClassId, "");
   paint();
+
+  try {
+    const preflight = await readClassRemovalPreflight(safeClassId);
+    setClassRemovalPreflight(safeClassId, preflight);
+
+    if (preflight.activePupilCount > 0 && mode === "empty") {
+      throw new Error("Move pupils to another class, or remove them from this class, before deleting it.");
+    }
+
+    const targetClass = targetClassId ? findClassRecord(targetClassId) : null;
+    if (mode === "move") {
+      if (!targetClass || !canEditClassRecord(targetClass)) {
+        throw new Error("Choose a destination class you can manage.");
+      }
+      const sourceType = getNormalizedClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+      const targetType = getNormalizedClassType(targetClass?.class_type, { legacyFallback: CLASS_TYPE_FORM });
+      if (sourceType !== targetType) {
+        throw new Error(`Choose another ${getClassRemovalTypeLabel(cls)} as the destination.`);
+      }
+    }
+
+    const confirmed = window.confirm(buildClassRemovalConfirmMessage({
+      cls,
+      preflight,
+      mode,
+      targetClass,
+    }));
+    if (!confirmed) return;
+
+    if (mode === "move") {
+      await moveClassMembershipRowsForRemoval(safeClassId, targetClassId);
+    } else {
+      await deleteClassMembershipRows(safeClassId);
+    }
+
+    await deleteClassRecord(safeClassId);
+    await loadDashboardData();
+    if (state.activePanel?.id === safeClassId) state.activePanel = null;
+    showNotice(mode === "move" && targetClass
+      ? `Class removed. Pupils moved to ${targetClass.name || "the selected class"}.`
+      : "Class removed. Pupil records were kept.",
+      "success");
+  } catch (error) {
+    console.error("delete class error:", error);
+    setClassRemovalError(safeClassId, error?.message || "Could not remove this class.");
+    showNotice(error?.message || "Could not remove this class.", "error");
+  } finally {
+    setClassRemovalBusy(safeClassId, false);
+    paint();
+  }
+}
+
+async function handleClassRemovalMoveAndDelete(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "move",
+    targetClassId: fd.get("target_class_id"),
+  });
+}
+
+async function handleClassRemovalRemoveMembershipsAndDelete(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "remove-memberships",
+  });
+}
+
+async function handleClassRemovalDeleteEmpty(form) {
+  const fd = new FormData(form);
+  await handleDeleteClass(fd.get("class_id"), {
+    mode: "empty",
+  });
 }
 
 function setBusy(button, isBusy, busyText = "Saving...") {
@@ -11145,6 +14555,7 @@ async function handleManageDemoData(action = "seed") {
     const result = await manageDemoSchoolData({
       action: normalizedAction,
       accessToken,
+      schoolId: getActiveSchoolIdFromAccessContext(state.accessContext),
     });
 
     await loadDashboardData();
@@ -11477,6 +14888,7 @@ async function submitTeacherAnalyticsQuestion(question) {
       scopeId: scopeType === "overview" ? null : scopeId,
       scopeLabel,
       history,
+      schoolId: getActiveSchoolIdFromAccessContext(state.accessContext),
     });
     const latestOutcomes = Number(response?.context?.counts?.latestWordOutcomes || 0);
     const isSampleData = Boolean(response?.context?.mockMode);
@@ -11693,9 +15105,10 @@ function paint() {
   rootEl.innerHTML = `
     <section class="td-shell">
       <div class="td-topbar">
-        <div>
+        <div class="schoolContextStack">
           <h2 class="td-page-title">${escapeHtml(getDashboardTitle())}</h2>
           <p class="td-muted">Signed in as ${escapeHtml(state.user?.email || "")}</p>
+          ${renderCurrentSchoolContextRow()}
         </div>
       </div>
 
@@ -11703,6 +15116,7 @@ function paint() {
       ${renderCreateBar()}
       ${renderSectionStaffAccess()}
       ${renderSectionPupilOnboarding()}
+      ${renderSectionWordloomCoreBankMonitor()}
       ${renderAnalyticsBar()}
       ${renderSectionUpcomingAssignments()}
       ${renderSectionClasses()}
@@ -11787,9 +15201,10 @@ function syncTableScrollShells() {
 
 function renderNotice() {
   if (!state.notice) return "";
+  const role = state.noticeType === "error" ? "alert" : "status";
 
   return `
-    <div class="td-notice td-notice--${state.noticeType}">
+    <div class="td-notice td-notice--${state.noticeType}" data-role="dashboard-notice" role="${role}" tabindex="-1">
       <span>${escapeHtml(state.notice)}</span>
       <button class="td-notice-close" data-action="dismiss-notice" type="button" aria-label="Dismiss message">×</button>
     </div>
@@ -11824,12 +15239,14 @@ function renderCreateBar() {
   });
   const automationPoliciesExpired = automationPolicies.filter((policy) => getPersonalisedAutomationPolicyLifecycle(policy).expired);
   const automationPoliciesArchived = automationPolicies.filter((policy) => !!String(policy?.archived_at || "").trim());
-  const selectedAutomationPolicyKey = getAutomationSelectedPolicyKey();
+  const selectedAutomationPolicyKey = getExplicitAutomationSelectedPolicyKey();
   const hasAutomationSelection = !!selectedAutomationPolicyKey;
   const automationRunPolicy = hasAutomationSelection
     ? getAutomationRunPolicy()
     : buildDefaultPersonalisedAutomationPolicy();
-  const savedAutomationPolicy = getSavedAutomationPolicy();
+  const savedAutomationPolicy = hasAutomationSelection
+    ? getSavedAutomationPolicy(selectedAutomationPolicyKey)
+    : null;
   const selectedAutomationClassIds = hasAutomationSelection ? getAutomationRunSelectedClassIds() : [];
   const automationPolicyValidation = hasAutomationSelection
     ? getAutomationRunPolicyValidation()
@@ -11837,13 +15254,21 @@ function renderCreateBar() {
   const automationRunReadyState = hasAutomationSelection
     ? getSavedAutomationRunReadyState()
     : { ready: false, actionLabel: "Run now", message: "Create or select a policy first." };
-  const automationEligibleClasses = getAutomationEligibleClasses();
+  const automationTargetableClasses = getAutomationTargetableClasses();
+  const automationMissingYearGroupCount = getAutomationFormGroupsMissingYearGroup().length;
   const automationTargetFilters = hasAutomationSelection
     ? getAutomationTargetFilters()
     : createDefaultAutomationTargetFilters();
-  const filteredAutomationEligibleClasses = hasAutomationSelection
-    ? getFilteredAutomationEligibleClasses()
-    : [];
+  const automationEligibleClassesById = new Map(
+    automationTargetableClasses.map((item) => [String(item?.id || "").trim(), item])
+  );
+  const selectedAutomationClasses = selectedAutomationClassIds
+    .map((classId) => automationEligibleClassesById.get(classId) || null)
+    .filter(Boolean);
+  const selectedAutomationClassIdSet = new Set(selectedAutomationClassIds);
+  const automationUnavailableTargetCount = hasAutomationSelection
+    ? getAutomationRunUnavailableTargetClassIds(automationRunPolicy).length
+    : 0;
   const automationIsNewDraft = selectedAutomationPolicyKey === AUTOMATION_NEW_POLICY_KEY;
   const automationLifecycle = getPersonalisedAutomationPolicyLifecycle(automationRunPolicy, {
     warningDays: PERSONALISED_AUTOMATION_EXPIRY_WARNING_DAYS,
@@ -11854,8 +15279,13 @@ function renderCreateBar() {
   const automationActionBusy = hasAutomationSelection ? isAutomationActionBusyMode(automationActionMode) : false;
   const automationRunActive = hasAutomationSelection ? isSelectedAutomationPolicyRunActive() : false;
   const automationBusyStatusMessage = hasAutomationSelection ? getSelectedAutomationActionStatusMessage() : "";
-  const automationEditorLocked = automationActionBusy;
-  const automationStructuralControlsDisabled = automationActionBusy;
+  const automationIsSpellingBee = isSpellingBeeAutomationPolicy(automationRunPolicy);
+  const automationBeeLengthMode = normalizeSpellingBeeLengthMode(automationRunPolicy.bee_length_mode);
+  const automationBeeUntilWrong = isSpellingBeeUntilWrongPolicy(automationRunPolicy);
+  const automationCanManageBee = canManageSpellingBeePolicies();
+  const automationBeeManagementLocked = automationIsSpellingBee && !automationCanManageBee;
+  const automationEditorLocked = automationActionBusy || automationBeeManagementLocked;
+  const automationStructuralControlsDisabled = automationActionBusy || automationBeeManagementLocked;
   const selectedAutomationPolicyId = String(
     savedAutomationPolicy?.id
       || (!automationIsNewDraft ? automationRunPolicy?.id : "")
@@ -11865,32 +15295,66 @@ function renderCreateBar() {
     automationRunPolicy,
     automationIsNewDraft ? "New policy draft" : "Selected policy"
   );
+  const latestAutomationRun = getLatestAutomationRunForPolicy(selectedAutomationPolicyId);
+  const latestAutomationRunOutcomeHtml = renderAutomationLatestRunOutcomePanel(latestAutomationRun, {
+    policySelected: !!selectedAutomationPolicyId,
+    isSpellingBeePolicy: automationIsSpellingBee,
+  });
+  const recentPersonalisedActivityHtml = automationIsSpellingBee
+    ? ""
+    : renderRecentPersonalisedActivityPanel();
   const automationStatusBadge = getAutomationPolicyStatusBadgeMeta(automationRunPolicy, {
     isDraft: automationIsNewDraft && !savedAutomationPolicy,
   });
-  const automationYearGroupOptions = [...new Set(
-    automationEligibleClasses
-      .map((item) => String(item?.year_group || "").trim())
-      .filter(Boolean)
-  )].sort((a, b) => a.localeCompare(b));
-  const automationMetaSummary = getAutomationPolicyCompactMetaLine(automationRunPolicy, {
-    savedAt: savedAutomationPolicy?.updated_at || "",
-    isDraft: automationIsNewDraft && !savedAutomationPolicy,
-  });
+  const automationYearGroupOptions = getAutomationTargetYearGroupOptions();
+  const automationSelectedYearGroups = automationTargetFilters.allYearGroups
+    ? automationYearGroupOptions
+    : normalizeAutomationTargetYearGroups(automationTargetFilters.yearGroups, {
+      availableYearGroups: automationYearGroupOptions,
+    });
+  const automationAllYearGroupsInScope = automationYearGroupOptions.length > 0
+    && (automationTargetFilters.allYearGroups
+      || (automationSelectedYearGroups.length === automationYearGroupOptions.length
+        && automationYearGroupOptions.every((item) => automationSelectedYearGroups.includes(item))));
+  const automationCandidateFormClasses = hasAutomationSelection
+    ? getAutomationClassesForTargetYearGroups(automationSelectedYearGroups, {
+      allYearGroups: automationAllYearGroupsInScope,
+    })
+    : [];
+  const automationTargetableClassIds = automationTargetableClasses
+    .map((item) => String(item?.id || "").trim())
+    .filter(Boolean);
+  const automationAllYearGroupsChecked = automationTargetableClassIds.length > 0
+    && automationTargetableClassIds.every((classId) => selectedAutomationClassIdSet.has(classId));
+  const automationAllYearGroupsPartial = automationAllYearGroupsInScope && !automationAllYearGroupsChecked;
   const automationCadenceLabel = PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
     (option) => option.value === automationRunPolicy.frequency
   )?.label || "Weekly";
   const automationReleasePatternLabel = automationRunPolicy.frequency === "fortnightly"
     ? `Week 1: ${formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays_week_1)} | Week 2: ${automationRunPolicy.selected_weekdays_week_2.length ? formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays_week_2) : "Not selected"}`
     : formatPersonalisedAutomationWeekdayList(automationRunPolicy.selected_weekdays);
-  const automationScheduleWindowLabel = automationRunPolicy.end_date
-    ? `${formatShortDate(automationRunPolicy.start_date)}-${formatShortDate(automationRunPolicy.end_date)}`
-    : `From ${formatShortDate(automationRunPolicy.start_date)}`;
   const automationAlertEntries = buildAutomationPolicyAlertEntries();
   const automationCanDiscardChanges = automationDraftDirty;
   const automationShowDiscardChanges = automationCanDiscardChanges;
-  const automationSaveDisabled = !automationDraftDirty || automationActionBusy;
-  const automationSaveLabel = automationActionMode === "saving" ? "Saving..." : "Save";
+  const automationSaveValidationMessage = automationPolicyValidation.errors[0] || "";
+  const automationDisplayValidationMessage = automationSaveValidationMessage === "Give this automation policy a name."
+    ? "Add a policy name before saving or running this policy."
+    : automationSaveValidationMessage;
+  const automationValidationNotice = (automationPolicyValidation.notices || [])
+    .find((item) => item?.code === AUTOMATION_VALIDATION_POLICY_OVERLAP) || null;
+  const automationReviewValidationCalloutHtml = automationValidationNotice
+    ? `
+      <div class="td-automation-validation-callout" role="alert">
+        <strong>${escapeHtml(automationValidationNotice.title || "Policy overlap")}</strong>
+        <p>${escapeHtml(automationValidationNotice.message || automationDisplayValidationMessage)}</p>
+      </div>
+    `
+    : "";
+  const automationSaveDisabled = !automationDraftDirty
+    || !!automationSaveValidationMessage
+    || automationActionBusy
+    || automationBeeManagementLocked;
+  const automationSaveLabel = automationActionMode === "saving" ? "Saving..." : "Save policy";
   const automationShowRunNowButton = automationActionMode === "running"
     || (!automationDraftDirty && automationActionMode !== "saving_and_running");
   const automationPrimaryRunLabel = automationActionMode === "saving_and_running"
@@ -11899,9 +15363,19 @@ function renderCreateBar() {
       ? "Running..."
       : (automationShowRunNowButton ? "Run now" : "Save and run now"));
   const automationPrimaryRunDisabled = automationActionBusy
+    || automationBeeManagementLocked
     || (automationShowRunNowButton ? !automationRunReadyState.ready : (!automationDraftDirty || !automationRunReadyState.ready));
-  const automationShowRunReadyMessage = !automationRunReadyState.ready
-    && !!String(automationRunReadyState.message || "").trim();
+  const automationSaveStatusMessage = automationDisplayValidationMessage
+    || (automationActionBusy ? (automationBusyStatusMessage || "Wait for the current action to finish.") : "")
+    || (!automationDraftDirty ? "Make a valid change before saving." : "Ready to save.");
+  const automationRunStatusMessage = automationRunReadyState.message
+    || (automationRunReadyState.ready ? "Ready to run now." : "Complete the policy before running.");
+  const automationReviewGuidance = automationValidationNotice
+    ? "Resolve this policy overlap before saving or running."
+    : automationDisplayValidationMessage
+    || (!automationRunReadyState.ready ? automationRunReadyState.message : "")
+    || (automationDraftDirty ? "Review the policy, then save or run it now." : automationRunReadyState.message);
+  const automationShowReviewStatusGrid = !automationDisplayValidationMessage;
   const automationAlertsHtml = automationAlertEntries.length
     ? `
       <div class="td-automation-alerts">
@@ -11910,41 +15384,71 @@ function renderCreateBar() {
             <div class="td-automation-alert-copy">
               <strong>${escapeHtml(entry.title)}</strong>
               <p>${escapeHtml(entry.message)}</p>
+              <small>Extend dates keeps it available. Archive removes it from active policy management. Close hides this warning for now.</small>
             </div>
             <div class="td-automation-alert-actions">
               <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="extend-automation-policy" data-policy-id="${escapeAttr(entry.policyId)}" ${automationStructuralControlsDisabled ? "disabled" : ""}>Extend dates</button>
+              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="archive-automation-policy" data-policy-id="${escapeAttr(entry.policyId)}" ${automationStructuralControlsDisabled ? "disabled" : ""}>Archive</button>
+              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="dismiss-automation-policy-alert" data-policy-id="${escapeAttr(entry.policyId)}" data-alert-key="${escapeAttr(entry.alertKey)}">Close</button>
             </div>
           </div>
         `).join("")}
       </div>
     `
     : "";
-  const automationSummaryMetrics = [
-    {
-      label: "Word count",
-      value: `${automationRunPolicy.assignment_length} words`,
-    },
-    {
-      label: "Support preset",
-      value: getAutoAssignSupportPresetLabel(automationRunPolicy.support_preset),
-    },
-    {
-      label: "Frequency",
-      value: automationCadenceLabel,
-    },
-    {
-      label: "Release days",
-      value: automationReleasePatternLabel,
-    },
-    {
-      label: "Dates",
-      value: automationScheduleWindowLabel,
-    },
-    {
-      label: "Groups",
-      value: `${selectedAutomationClassIds.length} selected`,
-    },
-  ];
+  const automationSummaryMetrics = automationIsSpellingBee
+    ? [
+      {
+        label: "Policy type",
+        value: getAutomationPolicyTypeLabel(automationRunPolicy.policy_type),
+      },
+      {
+        label: "Length",
+        value: buildSpellingBeeLengthModeSummary(automationRunPolicy),
+      },
+      {
+        label: "Question support",
+        value: "No assistance",
+      },
+      {
+        label: "Frequency",
+        value: automationCadenceLabel,
+      },
+      {
+        label: "Release days",
+        value: automationReleasePatternLabel,
+      },
+      {
+        label: "Groups",
+        value: `${selectedAutomationClassIds.length} form group${selectedAutomationClassIds.length === 1 ? "" : "s"}`,
+      },
+    ]
+    : [
+      {
+        label: "Policy type",
+        value: getAutomationPolicyTypeLabel(automationRunPolicy.policy_type),
+      },
+      {
+        label: "Length",
+        value: `${automationRunPolicy.assignment_length} words`,
+      },
+      {
+        label: "Question support",
+        value: getAutomationQuestionSupportLabel(automationRunPolicy.support_preset),
+      },
+      {
+        label: "Frequency",
+        value: automationCadenceLabel,
+      },
+      {
+        label: "Release days",
+        value: automationReleasePatternLabel,
+      },
+      {
+        label: "Groups",
+        value: `${selectedAutomationClassIds.length} form group${selectedAutomationClassIds.length === 1 ? "" : "s"}`,
+      },
+    ];
   const buildAutomationWeekdayCheckboxGridHtml = ({ title, weekKey, selectedWeekdays }) => `
     <div class="td-automation-weekday-row">
       <div class="td-automation-weekday-row-title">${escapeHtml(title)}</div>
@@ -11984,50 +15488,83 @@ function renderCreateBar() {
       weekKey: "weekly",
       selectedWeekdays: automationRunPolicy.selected_weekdays,
     });
-  const automationYearGroupOptionsHtml = automationYearGroupOptions
-    .map((item) => `<option value="${escapeAttr(item)}" ${automationTargetFilters.yearGroup === item ? "selected" : ""}>${escapeHtml(item)}</option>`)
-    .join("");
-  const automationSelectedGroupSummary = joinAutomationSummaryParts([
-    `${selectedAutomationClassIds.length} selected`,
-    `${filteredAutomationEligibleClasses.length} shown`,
-  ]);
-  const automationBottomPrimarySummary = joinAutomationSummaryParts([
-    `${automationPolicyValidation.policy.assignment_length} words`,
-    getAutoAssignSupportPresetLabel(automationPolicyValidation.policy.support_preset),
-    PERSONALISED_AUTOMATION_FREQUENCY_OPTIONS.find(
-      (option) => option.value === automationPolicyValidation.policy.frequency
-    )?.label || "Weekly",
-    `${automationPolicyValidation.policy.target_class_ids.length} group${automationPolicyValidation.policy.target_class_ids.length === 1 ? "" : "s"}`,
-  ]);
+  const automationYearGroupOptionsHtml = automationYearGroupOptions.length
+    ? `
+      <div class="td-automation-year-group-options">
+        <label class="td-automation-year-group-option ${automationAllYearGroupsChecked ? "is-selected" : ""} ${automationAllYearGroupsPartial ? "is-partial" : ""}">
+          <input
+            type="checkbox"
+            value="${escapeAttr(AUTOMATION_TARGET_YEAR_ALL)}"
+            data-field="automation-target-year-toggle"
+            ${automationAllYearGroupsChecked ? "checked" : ""}
+            ${automationEditorLocked ? "disabled" : ""}
+          />
+          <span>All year groups</span>
+          ${automationAllYearGroupsPartial ? `<small>${selectedAutomationClassIds.length} of ${automationTargetableClassIds.length}</small>` : ""}
+        </label>
+        ${automationYearGroupOptions
+          .map((item) => {
+            const yearGroupClasses = automationTargetableClasses.filter((cls) => String(cls?.year_group || "").trim() === item);
+            const selectedCount = yearGroupClasses.filter((cls) => selectedAutomationClassIdSet.has(String(cls?.id || "").trim())).length;
+            const inScope = automationSelectedYearGroups.includes(item);
+            const selected = yearGroupClasses.length > 0 && selectedCount === yearGroupClasses.length;
+            const partial = inScope && !selected;
+            return `
+              <label class="td-automation-year-group-option ${selected ? "is-selected" : ""} ${partial ? "is-partial" : ""}">
+                <input
+                  type="checkbox"
+                  value="${escapeAttr(item)}"
+                  data-field="automation-target-year-toggle"
+                  ${selected ? "checked" : ""}
+                  ${automationEditorLocked ? "disabled" : ""}
+                />
+                <span>${escapeHtml(item)}</span>
+                ${partial ? `<small>${selectedCount} of ${yearGroupClasses.length}</small>` : ""}
+              </label>
+            `;
+          })
+          .join("")}
+      </div>
+    `
+    : `<div class="td-empty td-empty--compact"><strong>No year groups with form groups are available.</strong></div>`;
+  const automationSelectedYearGroupLabel = formatAutomationYearGroupList(automationSelectedYearGroups, {
+    allYearGroups: automationAllYearGroupsInScope,
+  });
+  const automationSelectedGroupSummary = selectedAutomationClasses.length
+    ? `${selectedAutomationClasses.length} form group${selectedAutomationClasses.length === 1 ? "" : "s"} included${automationSelectedYearGroupLabel ? ` from ${automationSelectedYearGroupLabel}` : ""}.`
+    : "No form groups included yet.";
+  const automationMissingYearGroupMessage = automationMissingYearGroupCount
+    ? `${automationMissingYearGroupCount} form group${automationMissingYearGroupCount === 1 ? " is" : "s are"} missing a year group and ${automationMissingYearGroupCount === 1 ? "is" : "are"} not included.`
+    : "";
   const automationBottomSecondarySummary = joinAutomationSummaryParts([
     getAutomationPolicyCompactDateRange(automationPolicyValidation.policy),
     getAutomationPolicyCompactStateLabel(automationPolicyValidation.policy, {
       isDraft: automationIsNewDraft && !savedAutomationPolicy,
     }),
   ]);
-  const automationTargetClassOptionsHtml = filteredAutomationEligibleClasses.length
-    ? filteredAutomationEligibleClasses
+  const automationTargetClassOptionsHtml = automationCandidateFormClasses.length
+    ? automationCandidateFormClasses
       .map((cls) => {
-        const classId = String(cls?.id || "");
-        const checked = selectedAutomationClassIds.includes(classId);
+        const classId = String(cls?.id || "").trim();
+        const checked = selectedAutomationClassIdSet.has(classId);
         return `
-          <label class="td-automation-class-option ${checked ? "is-selected" : ""}">
+          <label class="td-automation-included-form-group ${checked ? "is-selected" : ""}">
             <input
               type="checkbox"
               value="${escapeAttr(classId)}"
-              data-field="automation-run-class"
+              data-field="automation-target-form-group"
               ${checked ? "checked" : ""}
+              ${automationEditorLocked ? "disabled" : ""}
             />
             <span>
-              <strong>${escapeHtml(cls?.name || "Untitled class")}</strong>
-              <small>${escapeHtml(getClassTypeDisplayLabel(cls?.class_type))}</small>
+              <strong>${escapeHtml(cls?.name || "Untitled form group")}</strong>
               ${cls?.year_group ? `<small>${escapeHtml(cls.year_group)}</small>` : ""}
             </span>
           </label>
         `;
       })
       .join("")
-    : `<div class="td-empty td-empty--compact"><strong>No eligible groups match the current filters.</strong></div>`;
+    : `<div class="td-empty td-empty--compact"><strong>${automationSelectedYearGroups.length ? "No form groups match the selected year groups." : "Choose year groups to include their form groups."}</strong></div>`;
   const automationPresetGuideHtml = AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS
     .map((option) => `
       <label class="td-automation-preset-guide-item ${automationRunPolicy.support_preset === option.value ? "is-current" : ""}">
@@ -12039,11 +15576,38 @@ function renderCreateBar() {
           ${automationRunPolicy.support_preset === option.value ? "checked" : ""}
         />
         <span>
-        <strong>${escapeHtml(option.label)}</strong>
+        <strong>${escapeHtml(getAutomationQuestionSupportLabel(option.value))}</strong>
           <small>${escapeHtml(getAutomationSupportPresetShortDescription(option.value))}</small>
         </span>
       </label>
     `)
+    .join("");
+  const automationPolicyTypeCardsHtml = AUTOMATION_POLICY_TYPE_OPTIONS
+    .map((option) => {
+      const selected = normalizeAutomationPolicyType(automationRunPolicy.policy_type) === option.value;
+      const beeOption = option.value === AUTOMATION_POLICY_TYPE_SPELLING_BEE;
+      const disabled = automationEditorLocked || (beeOption && !automationCanManageBee);
+      const helper = beeOption ? "Optional competition" : "Normal personalised test";
+      return `
+        <label class="td-automation-policy-type-card ${selected ? "is-current" : ""} ${disabled ? "is-disabled" : ""}">
+          <input
+            type="radio"
+            name="automation_policy_type"
+            value="${escapeAttr(option.value)}"
+            data-field="automation-policy-type"
+            ${selected ? "checked" : ""}
+            ${disabled ? "disabled" : ""}
+          />
+          <span>
+            <strong>${escapeHtml(option.label)}</strong>
+            <small>${escapeHtml(helper)}</small>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
+  const automationBeeLengthModeOptionsHtml = SPELLING_BEE_LENGTH_MODE_OPTIONS
+    .map((option) => `<option value="${escapeAttr(option.value)}" ${automationBeeLengthMode === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`)
     .join("");
   const buildAutomationPolicyOptionHtml = (policy) => {
     const policyId = String(policy?.id || "").trim();
@@ -12053,9 +15617,7 @@ function renderCreateBar() {
     return `<option value="${escapeAttr(policyId)}" ${isSelected ? "selected" : ""}>${escapeHtml(`${getAutomationPolicyDisplayName(policy)} · ${statusLabel}${hasDirtyDraft ? " · Unsaved draft" : ""}`)}</option>`;
   };
   const automationPolicySelectorOptionsHtml = [
-    automationIsNewDraft
-      ? `<option value="${escapeAttr(AUTOMATION_NEW_POLICY_KEY)}" selected>New policy draft</option>`
-      : "",
+    `<option value="" ${selectedAutomationPolicyId ? "" : "selected"} disabled>Choose existing policy...</option>`,
     automationPoliciesCurrentOrScheduled.length
       ? `<optgroup label="Current and scheduled policies">
           ${automationPoliciesCurrentOrScheduled.map(buildAutomationPolicyOptionHtml).join("")}
@@ -12078,7 +15640,24 @@ function renderCreateBar() {
   const interventionYearGroup = String(state.interventionGroup?.filters?.yearGroup || "").trim();
   const interventionSourceClasses = getInterventionBuilderAvailableSourceClasses({ yearGroup: interventionYearGroup });
   const interventionSourceClassId = String(state.interventionGroup?.filters?.sourceClassId || "").trim();
+  const interventionStatusOptions = getInterventionBuilderStatusOptions();
+  const interventionStatusFilter = normalizeInterventionStatusOptionValue(state.interventionGroup?.filters?.status || "");
+  const interventionStatusLoading = state.interventionGroup?.statusOptionsStatus === "loading";
+  const interventionStatusMessage = String(state.interventionGroup?.statusOptionsMessage || "").trim();
+  const interventionHasAnyFilterInput = hasAnyInterventionFilterInput();
+  const interventionSearchTooShort = isInterventionPupilSearchTooShort();
+  const showInterventionShowAllAction = !interventionHasAnyFilterInput;
+  const interventionPupilContext = buildInterventionVisiblePupilContext({
+    pupils: interventionVisiblePupils,
+    yearGroup: interventionYearGroup,
+    sourceClassId: interventionSourceClassId,
+    sourceClasses: interventionSourceClasses,
+    statusLabel: getInterventionSelectedStatusLabel(interventionStatusFilter),
+  });
   const ownedClasses = getOwnedClasses();
+  const ownedFormClasses = ownedClasses.filter((cls) =>
+    normalizeClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM
+  );
 
   return `
     <section class="td-action-bar">
@@ -12088,9 +15667,9 @@ function renderCreateBar() {
         ${showCreateTest ? `<button class="td-btn td-btn--primary" type="button" data-action="create-test">+ Create test</button>` : ""}
         ${showBaselineAction ? `
           <div class="td-action-button-shell">
-            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Set Baseline Test</button>
+            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Baseline status</button>
             ${renderInfoTip(getBaselineActionTooltipText(), {
-              label: "About Set Baseline Test",
+              label: "About Baseline status",
               className: "td-action-info-tip",
               triggerClassName: "td-action-info-tip-trigger",
               bubbleClassName: "td-action-info-tip-bubble",
@@ -12131,7 +15710,7 @@ function renderCreateBar() {
           <form data-form="create-intervention-group" class="td-form-stack td-form-stack--intervention">
             <div class="td-automation-run-head">
               <div class="td-action-inline-copy">
-                Create a separate intervention group with filtered pupils. Choose a filter first, then apply it to load matching pupils.
+                Create a separate intervention group with filtered pupils. Choose a year, group, status, or search to show matching pupils.
               </div>
             </div>
 
@@ -12142,7 +15721,9 @@ function renderCreateBar() {
                 class="td-input"
                 type="text"
                 name="group_name"
+                data-field="intervention-group-name"
                 placeholder="Intervention group name"
+                value="${escapeAttr(String(state.interventionGroup?.groupName || ""))}"
                 autocomplete="off"
                 required
               />
@@ -12152,7 +15733,7 @@ function renderCreateBar() {
               <div class="td-automation-class-picker-head td-automation-class-picker-head--intervention">
                 <div>
                   <strong>Filter pupils</strong>
-                  <div class="td-action-inline-copy">Choose at least one filter, then apply it to load matching pupils.</div>
+                  <div class="td-action-inline-copy">Pupils load automatically once a filter is narrow enough. Search needs at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters.</div>
                 </div>
               </div>
 
@@ -12181,6 +15762,24 @@ function renderCreateBar() {
                   </select>
                 </label>
 
+                <label class="td-field">
+                  <span>Status</span>
+                  <select class="td-input" data-field="intervention-status-filter" ${interventionStatusLoading ? "disabled" : ""}>
+                    <option value="" ${interventionStatusFilter ? "" : "selected"}>All statuses</option>
+                    ${interventionStatusLoading ? `<option value="" disabled>Loading statuses...</option>` : ""}
+                    ${!interventionStatusLoading && interventionStatusMessage && !interventionStatusOptions.length
+                      ? `<option value="" disabled>${escapeHtml(interventionStatusMessage)}</option>`
+                      : ""}
+                    ${interventionStatusOptions
+                      .map((option) => `
+                        <option value="${escapeAttr(option.value)}" ${interventionStatusFilter === option.value ? "selected" : ""}>
+                          ${escapeHtml(getInterventionStatusOptionLabel(option))}
+                        </option>
+                      `)
+                      .join("")}
+                  </select>
+                </label>
+
                 <label class="td-field td-field--intervention-search">
                   <span>Search pupils</span>
                   <input
@@ -12194,84 +15793,107 @@ function renderCreateBar() {
               </div>
 
               <div class="td-automation-run-actions td-automation-run-actions--intervention">
-                <button
-                  class="td-btn td-btn--ghost"
-                  type="button"
-                  data-action="apply-intervention-filters"
-                  ${hasMeaningfulInterventionFilters() ? "" : "disabled"}
-                >
-                  Apply filters
-                </button>
+                ${showInterventionShowAllAction ? `
+                  <button
+                    class="td-btn td-btn--ghost"
+                    type="button"
+                    data-action="apply-intervention-filters"
+                    data-allow-broad="true"
+                    ${state.interventionGroup.status === "loading" ? "disabled" : ""}
+                  >
+                    Show all pupils
+                  </button>
+                ` : interventionSearchTooShort ? `<div class="td-action-inline-copy">Enter at least ${INTERVENTION_PUPIL_SEARCH_MIN_CHARS} characters to search pupils.</div>` : ""}
               </div>
             </div>
 
             <div class="td-automation-class-picker">
-              <div class="td-automation-class-picker-head">
-                <div>
-                  <strong>Select pupils</strong>
-                  <div class="td-action-inline-copy">${escapeHtml(getInterventionBuilderSelectedSummary())}</div>
+              <div class="td-intervention-selection-panel td-intervention-selection-panel--selected">
+                <div class="td-intervention-selection-head">
+                  <div>
+                    <strong>Selected pupils</strong>
+                    <div class="td-action-inline-copy">${escapeHtml(getInterventionBuilderSelectedSummary())}</div>
+                  </div>
                 </div>
-                <div class="td-automation-class-picker-actions">
-                  <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-filtered-intervention-pupils" ${interventionVisiblePupils.length ? "" : "disabled"}>Select all</button>
-                  <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-intervention-pupil-selection" ${interventionSelectedPupilIds.length ? "" : "disabled"}>Clear</button>
-                </div>
+                ${interventionSelectedPupilIds.length ? `
+                  <div class="td-intervention-selected-pupils">
+                    ${getInterventionBuilderSelectedPupils()
+                      .map((item) => `
+                        <button
+                          class="td-selection-chip"
+                          type="button"
+                          data-action="remove-intervention-pupil"
+                          data-pupil-id="${escapeAttr(item.id)}"
+                        >
+                          <span>${escapeHtml(item.display_name || item.username || "Unknown pupil")}</span>
+                          <span aria-hidden="true">&times;</span>
+                        </button>
+                      `)
+                      .join("")}
+                  </div>
+                ` : ""}
               </div>
 
-              ${interventionSelectedPupilIds.length ? `
-                <div class="td-intervention-selected-pupils">
-                  ${getInterventionBuilderSelectedPupils()
-                    .map((item) => `
-                      <button
-                        class="td-selection-chip"
-                        type="button"
-                        data-action="remove-intervention-pupil"
-                        data-pupil-id="${escapeAttr(item.id)}"
-                      >
-                        <span>${escapeHtml(item.display_name || item.username || "Unknown pupil")}</span>
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    `)
-                    .join("")}
+              <div class="td-intervention-selection-panel">
+                <div class="td-automation-class-picker-head">
+                  <div>
+                    <strong>Available pupils</strong>
+                    <div class="td-action-inline-copy">${escapeHtml(interventionPupilContext.summary)}</div>
+                  </div>
+                  <div class="td-automation-class-picker-actions">
+                    <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-filtered-intervention-pupils" ${interventionVisiblePupils.length ? "" : "disabled"}>Select all</button>
+                    <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-intervention-pupil-selection" ${interventionSelectedPupilIds.length ? "" : "disabled"}>Clear</button>
+                  </div>
                 </div>
-              ` : ""}
 
-              ${
-                state.interventionGroup.status === "loading"
-                  ? `<div class="td-empty td-empty--compact"><strong>Loading pupils...</strong></div>`
-                  : state.interventionGroup.status === "error"
-                    ? `<div class="td-empty td-empty--compact"><strong>Could not load pupils.</strong><p>${escapeHtml(state.interventionGroup.message || "Please try again.")}</p></div>`
-                    : state.interventionGroup.status === "idle"
-                      ? `<div class="td-empty td-empty--compact"><strong>${escapeHtml(state.interventionGroup.message || "Choose a filter to find pupils.")}</strong></div>`
-                    : `
+                ${state.interventionGroup.isLimited ? `
+                  <div class="td-empty td-empty--compact td-empty--notice">
+                    <strong>Showing first ${escapeHtml(String(state.interventionGroup.displayLimit || INTERVENTION_PUPIL_DISPLAY_LIMIT))} matching pupils.</strong>
+                    <p>Narrow the filters to see fewer results.</p>
+                  </div>
+                ` : ""}
+
                 ${
-                  interventionVisiblePupils.length
-                    ? `<div class="td-intervention-pupil-grid">
-                        ${interventionVisiblePupils.map((pupil) => {
-                          const pupilId = String(pupil?.id || "").trim();
-                          const pupilClasses = (Array.isArray(pupil?.classes) ? pupil.classes : [])
-                            .filter((item) => getNormalizedClassType(item?.class_type, { legacyFallback: CLASS_TYPE_FORM }) !== CLASS_TYPE_INTERVENTION)
-                            .map((item) => String(item?.class_name || "").trim())
-                            .filter(Boolean);
-                          return `
-                            <label class="td-automation-class-option td-automation-class-option--pupil ${interventionSelectedPupilIds.includes(pupilId) ? "is-selected" : ""}">
-                              <input
-                                type="checkbox"
-                                value="${escapeAttr(pupilId)}"
-                                data-field="intervention-pupil-toggle"
-                                ${interventionSelectedPupilIds.includes(pupilId) ? "checked" : ""}
-                              />
-                              <span>
-                                <strong>${escapeHtml(pupil.display_name || pupil.username || "Unknown pupil")}</strong>
-                                <small>${escapeHtml((Array.isArray(pupil?.year_groups) && pupil.year_groups.length) ? pupil.year_groups.join(", ") : "No year group")}</small>
-                                ${pupilClasses.length ? `<small>${escapeHtml(pupilClasses.join(", "))}</small>` : ""}
-                              </span>
-                            </label>
-                          `;
-                        }).join("")}
-                      </div>`
-                    : `<div class="td-empty td-empty--compact"><strong>No pupils match the current filters.</strong></div>`
+                  state.interventionGroup.status === "loading"
+                    ? `<div class="td-empty td-empty--compact"><strong>Loading pupils...</strong></div>`
+                    : state.interventionGroup.status === "error"
+                      ? `<div class="td-empty td-empty--compact"><strong>Could not load pupils.</strong><p>${escapeHtml(state.interventionGroup.message || "Please try again.")}</p></div>`
+                      : state.interventionGroup.status === "idle"
+                        ? `<div class="td-empty td-empty--compact"><strong>${escapeHtml(state.interventionGroup.message || "Choose a year, group, status, or search to find pupils.")}</strong></div>`
+                      : interventionVisiblePupils.length
+                        ? `<div class="td-intervention-pupil-list">
+                            ${interventionVisiblePupils.map((pupil) => {
+                              const pupilId = String(pupil?.id || "").trim();
+                              const pupilYears = getInterventionPupilYearLabels(pupil);
+                              const pupilGroups = getInterventionPupilGroupLabels(pupil);
+                              const metaParts = [
+                                shouldShowInterventionPupilMeta(interventionPupilContext, "year")
+                                  ? (pupilYears.length ? pupilYears.join(", ") : "No year group")
+                                  : "",
+                                shouldShowInterventionPupilMeta(interventionPupilContext, "group")
+                                  ? (pupilGroups.length ? pupilGroups.join(", ") : "No current group")
+                                  : "",
+                              ].filter(Boolean);
+                              const checked = interventionSelectedPupilIds.includes(pupilId);
+                              return `
+                                <label class="td-intervention-pupil-row ${checked ? "is-selected" : ""}">
+                                  <input
+                                    type="checkbox"
+                                    value="${escapeAttr(pupilId)}"
+                                    data-field="intervention-pupil-toggle"
+                                    ${checked ? "checked" : ""}
+                                  />
+                                  <span class="td-intervention-pupil-row-main">
+                                    <strong>${escapeHtml(pupil.display_name || pupil.username || "Unknown pupil")}</strong>
+                                    ${metaParts.length ? `<small>${escapeHtml(metaParts.join(" | "))}</small>` : ""}
+                                  </span>
+                                </label>
+                              `;
+                            }).join("")}
+                          </div>`
+                        : `<div class="td-empty td-empty--compact"><strong>No pupils match the current filters.</strong></div>`
                 }
-              `}
+              </div>
             </div>
 
             <div class="td-form-actions">
@@ -12289,19 +15911,13 @@ function renderCreateBar() {
             name="class_id"
             required
           >
-            <option value="">Choose class...</option>
-            ${ownedClasses
+            <option value="">Choose form group...</option>
+            ${ownedFormClasses
               .map((cls) => `<option value="${escapeAttr(cls.id)}">${escapeHtml(cls.name || "Untitled class")}</option>`)
               .join("")}
           </select>
-          <input
-            class="td-input"
-            type="datetime-local"
-            name="deadline"
-            aria-label="Optional deadline"
-          />
-          <div class="td-action-inline-copy">Set the standard baseline test for this class. Each item keeps 1 scored attempt, with immediate post-scoring feedback if needed.</div>
-          <button class="td-btn td-btn--ghost" type="submit">Set Baseline Test</button>
+          <div class="td-action-inline-copy">Wordloom uses a standard baseline automatically. Pupils start or continue baseline when they log in, and personalised tests unlock after baseline is complete.</div>
+          <button class="td-btn td-btn--ghost" type="submit">Provision standard baseline</button>
         </form>
       </div>
 
@@ -12312,7 +15928,7 @@ function renderCreateBar() {
               <div class="td-automation-run-head">
                 <div class="td-automation-panel-title-block">
                   <strong class="td-automation-panel-title">Automation policy</strong>
-                  <div class="td-automation-panel-intro">Manage personalised test policies for form and intervention groups.</div>
+                  <div class="td-automation-panel-intro">Manage personalised test policies for year and form groups.</div>
                 </div>
               </div>
 
@@ -12325,31 +15941,22 @@ function renderCreateBar() {
                   </div>
                 ` : `
                   ${automationAlertsHtml}
-                  <div class="td-automation-policy-topbar">
-                    <div class="td-automation-policy-strip-head">
-                      <div>
-                        <strong>Current automation policy</strong>
+                  <div class="td-automation-panel-section td-automation-panel-section--policy-select">
+                    <div class="td-automation-panel-section-head">
+                      <div class="td-automation-step-headline">
+                        <div class="td-automation-step-title">
+                          <span>1</span>
+                          <strong>Select existing or create new</strong>
+                        </div>
                         <div class="td-automation-inline-copy-row">
-                          <div class="td-action-inline-copy">Select a policy to edit or run.</div>
-                          ${renderInfoTip("A group can only belong to one active policy in the same date window.", {
-                            label: "About policy overlap",
-                            className: "td-action-info-tip",
-                            triggerClassName: "td-action-info-tip-trigger",
-                            bubbleClassName: "td-action-info-tip-bubble",
-                            align: "start",
-                          })}
+                          <div class="td-action-inline-copy">Choose an existing policy to edit, or start a new policy draft.</div>
                         </div>
                       </div>
                     </div>
 
-                    <div class="td-automation-policy-strip-controls">
-                      <div class="td-automation-policy-switcher-group">
-                        <label class="td-field td-automation-policy-select-shell">
-                          <span>Policy</span>
-                          <select class="td-input td-automation-policy-selector" data-field="automation-selected-policy" ${automationStructuralControlsDisabled ? "disabled" : ""}>
-                            ${automationPolicySelectorOptionsHtml}
-                          </select>
-                        </label>
+                    <div class="td-automation-policy-topbar">
+                      <div class="td-automation-policy-controls-label">Policy</div>
+                      <div class="td-automation-policy-strip-controls">
                         <button
                           class="td-btn td-btn--ghost td-btn--small"
                           type="button"
@@ -12358,8 +15965,9 @@ function renderCreateBar() {
                         >
                           New policy
                         </button>
-                      </div>
-                      <div class="td-automation-policy-toolbar td-automation-policy-toolbar--structural">
+                        <select class="td-input td-automation-policy-selector" aria-label="Policy" data-field="automation-selected-policy" ${automationStructuralControlsDisabled ? "disabled" : ""}>
+                          ${automationPolicySelectorOptionsHtml}
+                        </select>
                         <button
                           class="td-btn td-btn--ghost td-btn--small"
                           type="button"
@@ -12389,48 +15997,32 @@ function renderCreateBar() {
                         </button>
                       </div>
                     </div>
-
-                    <div class="td-automation-selected-summary">
-                      <div class="td-automation-selected-summary-head">
-                        <div class="td-automation-selected-summary-main">
-                          <strong>${escapeHtml(selectedAutomationPolicyName)}</strong>
-                        </div>
-                        <div class="td-automation-policy-status-badges">
-                          <span class="td-automation-policy-status-badge ${automationStatusBadge.className}">${escapeHtml(automationStatusBadge.label)}</span>
-                          ${automationDraftDirty
-                            ? `<span class="td-automation-policy-status-badge is-dirty">Unsaved changes</span>`
-                            : ""}
-                        </div>
-                      </div>
-
-                      ${automationRunPolicy.description ? `<div class="td-action-inline-copy">${escapeHtml(automationRunPolicy.description)}</div>` : ""}
-
-                      <div class="td-automation-summary-grid">
-                        ${automationSummaryMetrics
-                          .map((item) => `
-                            <div class="td-automation-summary-item">
-                              <span>${escapeHtml(item.label)}</span>
-                              <strong>${escapeHtml(item.value)}</strong>
-                            </div>
-                          `)
-                          .join("")}
-                      </div>
-
-                      <div class="td-automation-selected-summary-foot">
-                        <div class="td-action-inline-copy">${escapeHtml(automationMetaSummary)}</div>
-                        ${automationShowRunReadyMessage
-                          ? `<div class="td-field-error">${escapeHtml(automationRunReadyState.message)}</div>`
-                          : ""}
-                      </div>
-                    </div>
                   </div>
 
                   <div class="td-automation-editor-shell td-automation-editor-shell--full">
                     <form data-form="save-automation-policy" class="td-form-stack td-form-stack--automation-policy">
                       <fieldset class="td-automation-editor-fieldset" ${automationEditorLocked ? "disabled" : ""}>
+                                            <div class="td-automation-panel-section">
+                        <div class="td-automation-panel-section-head">
+                          <div class="td-automation-step-title">
+                            <span>2</span>
+                            <strong>Choose policy type</strong>
+                          </div>
+                          <p>Pick the kind of work this policy should create.</p>
+                        </div>
+                        <div class="td-automation-policy-type-grid">
+                          ${automationPolicyTypeCardsHtml}
+                        </div>
+                        ${!automationCanManageBee ? '<div class="td-action-inline-copy">Spelling Bee is managed by admins.</div>' : ""}
+                      </div>
+
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Policy details</strong>
+                          <div class="td-automation-step-title">
+                            <span>3</span>
+                            <strong>Add policy details</strong>
+                          </div>
+                          <p>Give this policy a clear name and an optional note.</p>
                         </div>
                         <div class="td-automation-run-grid td-automation-run-grid--policy-details">
                           <label class="td-field">
@@ -12458,7 +16050,11 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Schedule</strong>
+                          <div class="td-automation-step-title">
+                            <span>4</span>
+                            <strong>Set the schedule</strong>
+                          </div>
+                          <p>Choose when this policy starts, ends, and releases work.</p>
                         </div>
                         <div class="td-automation-run-grid">
                           <label class="td-field">
@@ -12499,38 +16095,32 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Target groups</strong>
+                          <div class="td-automation-step-title">
+                            <span>5</span>
+                            <strong>Choose target groups</strong>
+                          </div>
+                          <p>Select one or more year groups. The policy will include all form groups in those years.</p>
                         </div>
-                        <div class="td-automation-run-grid td-automation-run-grid--target-filters">
-                          <label class="td-field">
-                            <span>Year group</span>
-                            <select class="td-input" data-field="automation-target-year-group">
-                              <option value="">All year groups</option>
-                              ${automationYearGroupOptionsHtml}
-                            </select>
-                          </label>
-                          <label class="td-field">
-                            <span>Group type</span>
-                            <select class="td-input" data-field="automation-target-class-type">
-                              <option value="all" ${automationTargetFilters.classType === "all" ? "selected" : ""}>All eligible groups</option>
-                              <option value="${CLASS_TYPE_FORM}" ${automationTargetFilters.classType === CLASS_TYPE_FORM ? "selected" : ""}>Form only</option>
-                              <option value="${CLASS_TYPE_INTERVENTION}" ${automationTargetFilters.classType === CLASS_TYPE_INTERVENTION ? "selected" : ""}>Intervention only</option>
-                            </select>
-                          </label>
+                        <div class="td-automation-target-years">
+                          <div class="td-automation-inline-label-row">
+                            <strong>Target year groups</strong>
+                          </div>
+                          ${automationYearGroupOptionsHtml}
                         </div>
+                        ${automationUnavailableTargetCount ? `<div class="td-action-inline-copy td-automation-target-warning">This policy includes older non-form or incomplete targets. Choose year groups again before saving or running.</div>` : ""}
+                        ${automationMissingYearGroupMessage ? `<div class="td-action-inline-copy td-automation-target-warning">${escapeHtml(automationMissingYearGroupMessage)}</div>` : ""}
 
                         <div class="td-automation-class-picker">
                           <div class="td-automation-class-picker-head">
                             <div>
-                              <strong>Selected groups</strong>
+                              <strong>Included form groups</strong>
                               <div class="td-action-inline-copy">${escapeHtml(automationSelectedGroupSummary)}</div>
                             </div>
                             <div class="td-automation-class-picker-actions">
-                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-all-automation-classes">Select visible</button>
-                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-automation-classes" ${selectedAutomationClassIds.length ? "" : "disabled"}>Clear</button>
+                              <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-automation-classes" ${selectedAutomationClassIds.length || automationSelectedYearGroups.length ? "" : "disabled"}>Clear</button>
                             </div>
                           </div>
-                          <div class="td-automation-class-grid">
+                          <div class="td-automation-included-form-grid">
                             ${automationTargetClassOptionsHtml}
                           </div>
                         </div>
@@ -12538,67 +16128,103 @@ function renderCreateBar() {
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Generation settings</strong>
-                        </div>
-                        <div class="td-automation-run-grid td-automation-run-grid--generation">
-                          <label class="td-field">
-                            <span>Word count</span>
-                            <input
-                              class="td-input"
-                              type="number"
-                              min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}"
-                              max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}"
-                              step="1"
-                              data-field="automation-run-length"
-                              value="${escapeAttr(String(automationRunPolicy.assignment_length))}"
-                            />
-                          </label>
-                          <div class="td-field td-field--checkbox td-field--automation-checkbox" style="grid-column: span 2;">
-                            <span class="td-automation-inline-label">
-                              <span>Starter fallback</span>
-                              ${renderInfoTip("Uses the starter catalog when pupil evidence is limited.", {
-                                label: "About starter fallback",
-                                className: "td-action-info-tip",
-                                triggerClassName: "td-action-info-tip-trigger",
-                                bubbleClassName: "td-action-info-tip-bubble",
-                                align: "start",
-                              })}
-                            </span>
-                            <label class="td-checkbox-row">
-                              <input
-                                type="checkbox"
-                                data-field="automation-run-starter-fallback"
-                                ${automationRunPolicy.allow_starter_fallback ? "checked" : ""}
-                              />
-                              <span>Use starter catalog</span>
-                            </label>
+                          <div class="td-automation-step-title">
+                            <span>6</span>
+                            <strong>Set generation options</strong>
                           </div>
+                          <p>Set the length and, for regular personalised policies, the question support.</p>
                         </div>
-                        <div class="td-automation-inline-label-row">
-                          <strong>Support preset</strong>
-                          ${renderInfoTip("Controls how much support generated tests use.", {
-                            label: "About support preset",
-                            className: "td-action-info-tip",
-                            triggerClassName: "td-action-info-tip-trigger",
-                            bubbleClassName: "td-action-info-tip-bubble",
-                            align: "start",
-                          })}
-                        </div>
-                        <div class="td-automation-preset-guide">
-                          ${automationPresetGuideHtml}
-                        </div>
+                        ${automationIsSpellingBee ? `
+                          <div class="td-automation-run-grid td-automation-run-grid--generation">
+                            <label class="td-field">
+                              <span>Length mode</span>
+                              <select class="td-input" data-field="automation-bee-length-mode">
+                                ${automationBeeLengthModeOptionsHtml}
+                              </select>
+                            </label>
+                            ${automationBeeUntilWrong ? "" : `
+                              <label class="td-field">
+                                <span>Max rounds</span>
+                                <input class="td-input" type="number" min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}" max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}" step="1" data-field="automation-run-length" value="${escapeAttr(String(automationRunPolicy.assignment_length))}" />
+                              </label>
+                            `}
+                          </div>
+                          <div class="td-action-inline-copy">Spelling Bee uses the approved word bank only and runs with no assistance.</div>
+                        ` : `
+                          <div class="td-automation-run-grid td-automation-run-grid--generation">
+                            <label class="td-field">
+                              <span>Word count</span>
+                              <input class="td-input" type="number" min="${AUTO_ASSIGN_POLICY_LENGTH_MIN}" max="${AUTO_ASSIGN_POLICY_LENGTH_MAX}" step="1" data-field="automation-run-length" value="${escapeAttr(String(automationRunPolicy.assignment_length))}" />
+                            </label>
+                            <div class="td-field td-field--checkbox td-field--automation-checkbox" style="grid-column: span 2;">
+                              <span class="td-automation-inline-label">
+                                <span>Starter fallback</span>
+                                ${renderInfoTip("Uses the starter catalogue when pupil evidence is limited.", { label: "About starter fallback", className: "td-action-info-tip", triggerClassName: "td-action-info-tip-trigger", bubbleClassName: "td-action-info-tip-bubble", align: "start" })}
+                              </span>
+                              <label class="td-checkbox-row">
+                                <input type="checkbox" data-field="automation-run-starter-fallback" ${automationRunPolicy.allow_starter_fallback ? "checked" : ""} />
+                                <span>Use starter catalogue</span>
+                              </label>
+                            </div>
+                          </div>
+                          <div class="td-automation-inline-label-row">
+                            <strong>Question support</strong>
+                          </div>
+                          <div class="td-action-inline-copy">Controls how often pupils get segmented spelling support instead of independent typing.</div>
+                          <div class="td-automation-preset-guide">
+                            ${automationPresetGuideHtml}
+                          </div>
+                        `}
                       </div>
                       </fieldset>
 
                       <div class="td-automation-panel-section">
                         <div class="td-automation-panel-section-head">
-                          <strong>Editor actions</strong>
+                          <div class="td-automation-step-title">
+                            <span>7</span>
+                            <strong>Review and save</strong>
+                          </div>
+                          <p>Check the summary, then save or run the policy when it is ready.</p>
                         </div>
                         <div class="td-automation-policy-summary td-automation-policy-summary--draft">
-                          <strong>${escapeHtml(getAutomationPolicyDisplayName(automationRunPolicy, automationIsNewDraft ? "New policy draft" : "Selected policy"))}</strong>
-                          <div>${escapeHtml(automationBottomPrimarySummary)}</div>
+                          <div class="td-automation-policy-status-row">
+                            <div class="td-automation-policy-status-main">
+                              <strong>${escapeHtml(selectedAutomationPolicyName)}</strong>
+                            </div>
+                            <div class="td-automation-policy-status-badges">
+                              <span class="td-automation-policy-status-badge ${automationStatusBadge.className}">${escapeHtml(automationStatusBadge.label)}</span>
+                              ${automationDraftDirty
+                                ? `<span class="td-automation-policy-status-badge is-dirty">Unsaved changes</span>`
+                                : ""}
+                            </div>
+                          </div>
+                          <div class="td-automation-summary-grid">
+                            ${automationSummaryMetrics
+                              .map((item) => `
+                                <div class="td-automation-summary-item">
+                                  <span>${escapeHtml(item.label)}</span>
+                                  <strong>${escapeHtml(item.value)}</strong>
+                                </div>
+                              `)
+                              .join("")}
+                          </div>
                           ${automationBottomSecondarySummary ? `<div>${escapeHtml(automationBottomSecondarySummary)}</div>` : ""}
-                          ${automationPolicyValidation.errors.length ? `<div class="td-field-error">${escapeHtml(automationPolicyValidation.errors[0])}</div>` : ""}
+                          ${automationReviewValidationCalloutHtml}
+                          <div class="td-automation-review-guidance">${escapeHtml(automationReviewGuidance)}</div>
+                          ${automationShowReviewStatusGrid ? `
+                            <div class="td-automation-review-status-grid">
+                              <div>
+                                <span>Save</span>
+                                <strong>${escapeHtml(automationSaveStatusMessage)}</strong>
+                              </div>
+                              <div>
+                                <span>Run now</span>
+                                <strong>${escapeHtml(automationRunStatusMessage)}</strong>
+                              </div>
+                            </div>
+                          ` : ""}
+                          ${latestAutomationRunOutcomeHtml}
+                          ${recentPersonalisedActivityHtml}
                         </div>
 
                         <div class="td-automation-policy-actions">
@@ -12731,6 +16357,7 @@ function renderAnalyticsBar() {
 
           ${showAttainmentGuide ? "" : renderGroupComparisonPanel()}
           ${showAttainmentGuide ? "" : renderInlineAnalyticsAssistant()}
+          ${renderAnalyticsExportCard()}
         </div>
         </div>
       `
@@ -14216,10 +17843,50 @@ function formatTrendDelta(value) {
   return `${roundedValue > 0 ? "+" : "-"}${Math.abs(roundedValue)} pts`;
 }
 
+function formatTrendDifficultyScore(value) {
+  return isTrendNumber(value) ? String(Math.round(Number(value))) : "";
+}
+
+function formatTrendDifficultyRange(earlierValue, recentValue) {
+  if (isTrendNumber(earlierValue) && isTrendNumber(recentValue)) {
+    return `Difficulty ${formatTrendDifficultyScore(earlierValue)} -> ${formatTrendDifficultyScore(recentValue)}`;
+  }
+  if (isTrendNumber(recentValue)) {
+    return `Recent difficulty ${formatTrendDifficultyScore(recentValue)}`;
+  }
+  return "Difficulty data unavailable";
+}
+
+function formatTrendDifficultyDelta(value) {
+  if (!isTrendNumber(value)) return "Limited data";
+  const numericValue = Number(value);
+  if (numericValue >= 8) return "Much harder";
+  if (numericValue >= 2) return "Slightly harder";
+  if (numericValue <= -2) return "Easier";
+  return "Similar";
+}
+
+function getTrendChallengeSentencePart(value) {
+  if (!isTrendNumber(value)) return "";
+  const numericValue = Number(value);
+  if (numericValue >= 8) return " on much harder words";
+  if (numericValue >= 2) return " on slightly harder words";
+  if (numericValue <= -2) return " on easier words";
+  return " with similar challenge";
+}
+
+function formatTrendAverageTries(value) {
+  return isTrendNumber(value) ? `${formatOneDecimal(value)} avg tries` : "Avg tries unavailable";
+}
+
+function formatTrendFirstTryRate(value) {
+  return isTrendNumber(value) ? `First try ${formatPercent(value)}` : "First try unavailable";
+}
+
 function getVisualTrendExplanation(dayCount) {
   return dayCount >= 2
-    ? "This compares the earlier half of these activity days with the most recent half, so one day can dip without changing the overall direction."
-    : "One activity day is not enough to compare earlier and recent performance yet.";
+    ? "This compares the earlier half of these activity days with the most recent half, so one lower day does not automatically change the overall direction."
+    : "Two activity days are needed before the dashboard can call a trend.";
 }
 
 function getVisualTrendSplitIndex(dayCount) {
@@ -14329,12 +17996,26 @@ function renderVisualTrendSummary(trend) {
       : `${startLabel} to ${endLabel}`
     : startLabel || endLabel;
   const summaryText = trend?.summaryText || "Progress over time will appear once there is activity in this view.";
-  const expectedBenchmark = trend?.expectedBenchmark || {
-    label: "Expected benchmark coming soon",
-    statusText: "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-    tone: "neutral",
-  };
+  const hasChallengeAdjustment = trend?.hasChallengeAdjustment === true && isTrendNumber(trend?.adjustedDelta);
+  const changeDelta = hasChallengeAdjustment ? trend.adjustedDelta : trend?.rawDelta ?? trend?.delta;
+  const changeLabel = hasChallengeAdjustment ? "Adjusted for challenge" : "Raw accuracy change";
+  const evidenceLabel = trend?.evidenceLabel || "Low evidence";
+  const totalChecks = Math.max(0, Number(trend?.totalAttempts || 0));
+  const recentChecks = Math.max(0, Number(trend?.recentAttemptCount || 0));
+  const challengeText = formatTrendDifficultyDelta(trend?.difficultyDelta);
+  const challengeNote = formatTrendDifficultyRange(
+    trend?.earlierAverageDifficultyScore,
+    trend?.recentAverageDifficultyScore,
+  );
+  const earlierDifficultyText = isTrendNumber(trend?.earlierAverageDifficultyScore)
+    ? `Difficulty ${formatTrendDifficultyScore(trend.earlierAverageDifficultyScore)}`
+    : "";
+  const recentDifficultyText = isTrendNumber(trend?.recentAverageDifficultyScore)
+    ? `Difficulty ${formatTrendDifficultyScore(trend.recentAverageDifficultyScore)}`
+    : "";
+  const earlierRetryText = `${formatTrendFirstTryRate(trend?.earlierFirstTrySuccessRate)} • ${formatTrendAverageTries(trend?.earlierAverageAttempts)}`;
+  const recentRetryText = `${formatTrendFirstTryRate(trend?.recentFirstTrySuccessRate)} • ${formatTrendAverageTries(trend?.recentAverageAttempts)}`;
+  const evidenceText = `${totalChecks} check${totalChecks === 1 ? "" : "s"} across ${dayCount} day${dayCount === 1 ? "" : "s"}`;
 
   return `
     <div class="td-trend-panel">
@@ -14345,17 +18026,32 @@ function renderVisualTrendSummary(trend) {
       ${renderVisualTrendChart(trend)}
       <div class="td-trend-compare">
         <div class="td-trend-stat">
-          <span>${escapeHtml(hasComparison ? "Earlier average" : "Current accuracy")}</span>
+          <span>${escapeHtml(hasComparison ? "Earlier" : "Current")}</span>
           <strong>${escapeHtml(formatPercent(trend?.baselineAccuracy || 0))}</strong>
-        </div>
-        <div class="td-trend-change td-trend-change--${escapeAttr(expectedBenchmark.tone || "neutral")}">
-          <span class="td-trend-change-label">${escapeHtml(expectedBenchmark.label || "Expected benchmark coming soon")}</span>
-          <strong>${escapeHtml(expectedBenchmark.statusText || "More evidence needed")}</strong>
-          <small class="td-trend-change-note">${escapeHtml(expectedBenchmark.note || "")}</small>
+          ${earlierDifficultyText ? `<small>${escapeHtml(earlierDifficultyText)}</small>` : ""}
+          <small>${escapeHtml(earlierRetryText)}</small>
         </div>
         <div class="td-trend-stat">
-          <span>${escapeHtml(hasComparison ? "Recent average" : "Activity days")}</span>
+          <span>${escapeHtml(hasComparison ? "Recent" : "Activity days")}</span>
           <strong>${escapeHtml(hasComparison ? formatPercent(trend?.recentAccuracy || 0) : String(dayCount))}</strong>
+          ${recentDifficultyText ? `<small>${escapeHtml(recentDifficultyText)}</small>` : ""}
+          <small>${escapeHtml(recentRetryText)}</small>
+        </div>
+        <div class="td-trend-change td-trend-change--${escapeAttr(trend?.tone || "neutral")}">
+          <span class="td-trend-change-label">Change</span>
+          <strong>${escapeHtml(hasComparison ? formatTrendDelta(changeDelta) : "Waiting")}</strong>
+          <small class="td-trend-change-note">${escapeHtml(hasComparison ? changeLabel : "Need more days")}</small>
+        </div>
+        <div class="td-trend-stat">
+          <span>Challenge</span>
+          <strong>${escapeHtml(challengeText)}</strong>
+          <small>${escapeHtml(challengeNote)}</small>
+        </div>
+        <div class="td-trend-stat">
+          <span>Evidence</span>
+          <strong>${escapeHtml(evidenceLabel)}</strong>
+          <small>${escapeHtml(evidenceText)}</small>
+          <small>${escapeHtml(`Recent ${recentChecks} check${recentChecks === 1 ? "" : "s"}`)}</small>
         </div>
       </div>
       <p class="td-trend-summary-text">${escapeHtml(summaryText)}</p>
@@ -14429,14 +18125,9 @@ function renderCommonConfusionsSection(summary) {
 function renderRecentTrendSection(summary) {
   const trend = summary?.recentTrend || {};
   const points = trend?.points || [];
-  const expectedBenchmark = trend?.expectedBenchmark || {
-    label: "Expected benchmark coming soon",
-    statusText: "Not enough data yet",
-    note: "We need more app data across difficulty levels and question types before expected performance can be shown reliably.",
-  };
   const trendInfo = [
-    "Raw accuracy stays visible here so you can see whether recent performance is improving, steady, or dropping.",
-    expectedBenchmark.note,
+    "Raw accuracy stays visible here, with challenge and retry context layered in so steady accuracy on harder words can still count as progress.",
+    "Practice and baseline attempts are left out so this trend reflects recent assignment evidence.",
     getVisualTrendExplanation(trend?.dayCount || 0),
   ].filter(Boolean).join("\n");
 
@@ -14447,7 +18138,7 @@ function renderRecentTrendSection(summary) {
           tag: "h5",
           infoLabel: "About progress over time",
         })}
-        <span class="td-trend-pill td-trend-pill--${escapeAttr(trend.tone || "neutral")}">${escapeHtml(trend.label || "Awaiting data")}</span>
+        <span class="td-trend-pill td-trend-pill--${escapeAttr(trend.tone || "neutral")}">${escapeHtml(trend.label || "Low evidence")}</span>
       </div>
       ${
         points.length
@@ -15082,9 +18773,9 @@ function getContextRankTrendMeta(summary) {
   if (!summary?.checkedWords || dayCount < 2) {
     return {
       tone: "slate",
-      label: "Awaiting data",
+      label: "Low evidence",
       iconHtml: "&rarr;",
-      title: "Not enough recent activity yet to compare earlier and recent performance.",
+      title: "There is not enough recent assignment evidence yet to call a trend.",
     };
   }
 
@@ -15100,23 +18791,23 @@ function getContextRankTrendMeta(summary) {
   if (direction === "down" || String(trend?.tone || "") === "red") {
     return {
       tone: "red",
-      label: String(trend?.label || "Declining"),
+      label: String(trend?.label || "Needs attention"),
       iconHtml: "&darr;",
-      title: String(trend?.summaryText || "Recent performance is declining."),
+      title: String(trend?.summaryText || "Recent performance needs attention."),
     };
   }
 
   return {
     tone: "amber",
-    label: String(trend?.label || "Steady"),
+    label: String(trend?.label || "Stable"),
     iconHtml: "&rarr;",
-    title: String(trend?.summaryText || "Recent performance is holding steady."),
+    title: String(trend?.summaryText || "Recent performance is stable."),
   };
 }
 
 function renderVisualPupilPerformanceContextSection(summary) {
   const cards = buildVisualPupilPerformanceCards(summary);
-  const infoText = "Ranks are based on the Spelling Attainment Indicator in the current view. If a grapheme filter is active, the rank reflects that filter too. The arrow chip shows whether recent performance is improving, steady, or dropping.";
+  const infoText = "Ranks are based on the Spelling Attainment Indicator in the current view. If a grapheme filter is active, the rank reflects that filter too. The arrow chip shows whether recent performance is improving, stable, needs attention, or still low on evidence.";
 
   return `
     <section class="td-results-block td-results-block--soft td-results-block--wide">
@@ -15149,7 +18840,7 @@ function renderVisualPupilPerformanceContextSection(summary) {
               >
                 <span class="td-context-rank-chip-content">
                   <span class="td-context-rank-chip-icon" aria-hidden="true">${item?.trendMeta?.iconHtml || "&rarr;"}</span>
-                  <span class="td-context-rank-chip-label">${escapeHtml(item?.trendMeta?.label || "Awaiting data")}</span>
+                  <span class="td-context-rank-chip-label">${escapeHtml(item?.trendMeta?.label || "Low evidence")}</span>
                 </span>
               </div>
             </article>
@@ -15617,8 +19308,62 @@ function renderAssignmentResultsMatrix(analytics, options = {}) {
   `;
 }
 
+function findAutomationRunClassForAssignment(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return null;
+  for (const run of getAutomationRecentRuns()) {
+    const classResults = Array.isArray(run?.summary?.classes) ? run.summary.classes : [];
+    const classResult = classResults.find((item) => String(item?.assignmentId || item?.assignment_id || "").trim() === safeAssignmentId);
+    if (classResult) return { run, classResult };
+  }
+  return null;
+}
+
+function renderGeneratedAssignmentCoverage(analytics) {
+  const match = findAutomationRunClassForAssignment(analytics?.assignmentId || "");
+  const display = match
+    ? buildCoverageWarningDisplay(match.classResult, {
+      notRecordedMessage: "Coverage warnings not recorded for this assignment.",
+      clearMessage: "No coverage warnings recorded for this assignment.",
+    })
+    : buildCoverageWarningDisplay(null, {
+      notRecordedMessage: "Coverage warnings not recorded for this assignment.",
+      clearMessage: "No coverage warnings recorded for this assignment.",
+    });
+  return renderAutomationCoverageDisplay(display, { compact: true });
+}
+
+function renderGeneratedAssignmentExplainability(pupil, sections = []) {
+  const summary = buildGeneratedAssignmentExplainabilitySummary({
+    sections,
+    words: pupil?.targetWords || [],
+    pupil,
+  });
+  const roleChips = summary.roleItems
+    .map((item) => `<span class="td-generated-explain-chip">${escapeHtml(`${item.label}: ${item.count}`)}</span>`)
+    .join("");
+  const supportChips = summary.supportItems
+    .map((item) => `<span class="td-generated-explain-chip">${escapeHtml(`${item.label}: ${item.count}`)}</span>`)
+    .join("");
+
+  return `
+    <div class="td-generated-explainability">
+      <div class="td-generated-explainability-head">
+        <span>${escapeHtml(`Focus: ${summary.focusLabel}`)}</span>
+        <span>${escapeHtml(`Mix: ${summary.roleMixText}`)}</span>
+      </div>
+      <p>${escapeHtml(summary.whySentence)}</p>
+      <div class="td-generated-explainability-chips">
+        ${roleChips}
+        ${supportChips}
+      </div>
+    </div>
+  `;
+}
+
 function renderGeneratedAssignmentResults(analytics, options = {}) {
   const highlightedPupilId = String(options?.highlightedPupilId || "");
+  const showCoverage = options?.showCoverage !== false;
   const visiblePupilIds = Array.isArray(options?.visiblePupilIds)
     ? new Set(options.visiblePupilIds.map((value) => String(value || "")).filter(Boolean))
     : null;
@@ -15635,6 +19380,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
 
   return `
     <div class="td-generated-results-shell">
+      ${showCoverage ? renderGeneratedAssignmentCoverage(analytics) : ""}
       ${rows.map((pupil) => {
         const pupilId = String(pupil?.pupilId || "");
         const isHighlighted = highlightedPupilId && pupilId === highlightedPupilId;
@@ -15668,6 +19414,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
               </div>
               ${renderPupilSignalBadge({ tone: pupil?.signalTone, label: pupil?.signalLabel })}
             </div>
+            ${renderGeneratedAssignmentExplainability(pupil, sections)}
             <div class="td-generated-results-sections">
               ${sections.map((section) => `
                 <section class="td-generated-results-section">
@@ -15683,6 +19430,7 @@ function renderGeneratedAssignmentResults(analytics, options = {}) {
                           <span class="td-generated-results-note">${escapeHtml(describeAssignmentTargetReason(item))}</span>
                         </div>
                         <div class="td-generated-results-item-meta">
+                          ${item?.focusGrapheme ? `<span class="td-generated-results-tag">${escapeHtml(item.focusGrapheme)}</span>` : ""}
                           <span class="td-generated-results-tag">${escapeHtml(getAssignmentSupportLabel(item?.assignmentSupport || "independent"))}</span>
                           ${renderAssignmentStatusDot(item)}
                         </div>
@@ -17142,10 +20890,12 @@ function renderStaffAccessRoleCard(role = "") {
   const roleIsActive = selectedRoleSet.has(safeRole);
   const roleLabel = getStaffAccessRoleLabel(safeRole);
   const mutating = !!getStaffAccessState()?.mutating;
+  const selectedProfile = getStaffAccessSelectedProfile();
+  const archivedRecord = isStaffAccessProfileArchived(selectedProfile);
   const hasLiveAccessTarget = canManageSelectedStaffAccessLiveAccess();
-  const waitingForSignInLink = !hasLiveAccessTarget;
+  const waitingForSignInLink = !archivedRecord && !hasLiveAccessTarget;
   const revokeDisabled = safeRole === "admin" && roleIsActive && !canRevokeSelectedAdminRole();
-  const actionDisabled = mutating || revokeDisabled;
+  const actionDisabled = mutating || revokeDisabled || archivedRecord;
   const scopedRoleConfig = getStaffAccessScopedRoleConfig(safeRole);
   const scopedRolePlan = getStaffAccessScopedRolePendingPlan(safeRole);
   let primaryActionLabel = scopedRoleConfig
@@ -17163,6 +20913,11 @@ function renderStaffAccessRoleCard(role = "") {
 
   if (waitingForSignInLink) {
     primaryActionLabel = "Waiting for sign-in";
+    primaryActionDisabled = true;
+    primaryAction = "";
+  }
+  if (archivedRecord) {
+    primaryActionLabel = "Archived";
     primaryActionDisabled = true;
     primaryAction = "";
   }
@@ -17204,6 +20959,11 @@ function renderStaffAccessRoleCard(role = "") {
       ${
         waitingForSignInLink
           ? `<p class="td-staff-access-note td-staff-access-note--warning">This imported staff record is pending sign-in linkage, so live access cannot be granted yet.</p>`
+          : ""
+      }
+      ${
+        archivedRecord
+          ? `<p class="td-staff-access-note td-staff-access-note--warning">Restore this directory record before changing live access.</p>`
           : ""
       }
       ${
@@ -17252,10 +21012,12 @@ function renderStaffAccessRoleCard(role = "") {
           : ""
       }
       ${
-        scopedRoleConfig && waitingForSignInLink
+        scopedRoleConfig && (waitingForSignInLink || archivedRecord)
           ? `
             <p class="td-staff-access-note td-staff-access-note--compact">
-              Scope setup will become available after the staff member signs in and links this directory record.
+              ${escapeHtml(archivedRecord
+                ? "Scope setup will become available after this directory record is restored."
+                : "Scope setup will become available after the staff member signs in and links this directory record.")}
             </p>
           `
           : ""
@@ -17313,6 +21075,134 @@ function renderStaffAccessAuditList() {
   `;
 }
 
+function getStaffDirectoryAuditActionLabel(action = "") {
+  const safeAction = String(action || "").trim().toLowerCase();
+  if (safeAction === "archive") return "Archived record";
+  if (safeAction === "restore") return "Restored record";
+  if (safeAction === "revoke_all_live_access") return "Revoked live access";
+  return "Updated record";
+}
+
+function renderStaffDirectoryAuditList() {
+  const auditEntries = Array.isArray(getStaffAccessState()?.selectedDirectoryAuditEntries)
+    ? getStaffAccessState().selectedDirectoryAuditEntries
+    : [];
+  const profileMap = getStaffAccessProfileByUserIdMap();
+
+  if (!auditEntries.length) {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>No recent directory lifecycle changes yet.</strong>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="td-staff-access-audit-list">
+      ${auditEntries.map((entry) => {
+        const actorUserId = String(entry?.actor_user_id || "").trim();
+        const actorLabel = actorUserId === getCurrentTeacherId()
+          ? "You"
+          : (profileMap.get(actorUserId)?.display_name || actorUserId || "Unknown");
+        const reason = String(entry?.reason || "").trim();
+        return `
+          <div class="td-staff-access-audit-item">
+            <div class="td-staff-access-audit-copy">
+              <strong>${escapeHtml(getStaffDirectoryAuditActionLabel(entry?.action))}</strong>
+              <span>${escapeHtml(reason || "Directory lifecycle change")}</span>
+            </div>
+            <div class="td-staff-access-audit-meta">
+              <span>${escapeHtml(actorLabel)}</span>
+              <span>${escapeHtml(formatStaffAccessDateTime(entry?.created_at))}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderStaffDirectoryAuditCard() {
+  return `
+    <div class="td-staff-access-audit-card">
+      <div class="td-staff-access-audit-head">
+        <h4>Recent directory lifecycle changes</h4>
+        <span>Latest ${escapeHtml(String(STAFF_ACCESS_AUDIT_LIMIT))}</span>
+      </div>
+      ${renderStaffDirectoryAuditList()}
+    </div>
+  `;
+}
+
+function renderStaffLifecycleRecordPanel(profile = null) {
+  if (!profile) return "";
+  const profileId = String(profile?.id || "").trim();
+  const archived = isStaffAccessProfileArchived(profile);
+  const linked = isStaffAccessProfileLinked(profile);
+  const hasLiveAccess = doesSelectedStaffAccessHaveLiveAccess();
+  const saving = !!getStaffAccessState()?.lifecycleSavingProfileIds?.[profileId];
+  const savingAction = String(getStaffAccessState()?.lifecycleSavingActions?.[profileId] || "").trim();
+  const rowError = String(getStaffAccessState()?.lifecycleRowErrors?.[profileId] || "").trim();
+  const mutating = !!getStaffAccessState()?.mutating;
+  const archiveNote = archived
+    ? [
+        String(profile?.archived_at || "").trim() ? `Archived ${formatStaffAccessDateTime(profile.archived_at)}` : "Archived",
+        String(profile?.archive_reason || "").trim(),
+      ].filter(Boolean).join(" - ")
+    : "";
+
+  return `
+    <div class="td-staff-access-summary-card td-staff-lifecycle-record-card">
+      <span class="td-staff-access-head-inline">
+        <span>Staff lifecycle</span>
+        ${renderStaffAccessInlineTip("Directory record state, account link state, and live access state are tracked separately.", "Staff lifecycle help")}
+      </span>
+      ${renderStaffAccessStatusRows(profile)}
+      ${archiveNote ? `<p class="td-staff-access-note td-staff-access-note--compact">${escapeHtml(archiveNote)}</p>` : ""}
+      <div class="td-staff-lifecycle-actions">
+        ${
+          !archived && linked && hasLiveAccess
+            ? `
+              <button
+                class="td-btn td-btn--ghost td-btn--small td-staff-access-btn--danger"
+                type="button"
+                data-action="revoke-all-staff-live-access"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "revoke" ? "Revoking..." : "Revoke live access")}
+              </button>
+            `
+            : ""
+        }
+        ${
+          archived
+            ? `
+              <button
+                class="td-btn td-btn--small"
+                type="button"
+                data-action="restore-staff-record"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "restore" ? "Restoring..." : "Restore record")}
+              </button>
+            `
+            : `
+              <button
+                class="td-btn td-btn--ghost td-btn--small td-staff-access-btn--danger"
+                type="button"
+                data-action="archive-staff-record"
+                ${mutating || saving ? "disabled" : ""}
+              >
+                ${escapeHtml(savingAction === "archive" ? "Archiving..." : "Archive record")}
+              </button>
+            `
+        }
+      </div>
+      ${rowError ? `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">${escapeHtml(rowError)}</p>` : ""}
+    </div>
+  `;
+}
+
 function renderStaffAccessProfileBadges(profile = null, { includeCurrentUser = false } = {}) {
   const pills = [...getStaffAccessProfileStatusPills(profile)];
   if (includeCurrentUser && String(profile?.user_id || "").trim() === getCurrentTeacherId()) {
@@ -17325,7 +21215,7 @@ function renderStaffAccessProfileBadges(profile = null, { includeCurrentUser = f
 }
 
 function renderStaffAccessFilterBar() {
-  const currentFilter = String(getStaffAccessState()?.filter || "all").trim().toLowerCase();
+  const currentFilter = getStaffLifecycleStatusFilter();
   return `
     <div class="td-staff-access-filter-row">
       ${getStaffAccessFilterOptions().map((option) => `
@@ -17367,6 +21257,544 @@ function downloadTextFile(filename = "export.csv", text = "", mimeType = "text/p
   link.click();
   link.remove();
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+}
+
+function normalizeAnalyticsExportView(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_VIEW_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "class";
+}
+
+function normalizeAnalyticsExportDataset(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_DATASET_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "summary";
+}
+
+function normalizeAnalyticsExportFormat(value = "") {
+  const safeValue = String(value || "").trim();
+  return ANALYTICS_EXPORT_FORMAT_OPTIONS.some((option) => option.value === safeValue)
+    ? safeValue
+    : "csv";
+}
+
+function getAnalyticsExportDefaultFocusId(view = "class") {
+  if (view === "pupil") return ALL_PUPILS_EXPORT_SCOPE_VALUE;
+  if (view === "year") return ALL_YEARS_EXPORT_SCOPE_VALUE;
+  return ALL_CLASSES_EXPORT_SCOPE_VALUE;
+}
+
+function getAnalyticsExportFocusOptions(view = "class") {
+  const safeView = normalizeAnalyticsExportView(view);
+  if (safeView === "pupil") {
+    return [
+      { value: ALL_PUPILS_EXPORT_SCOPE_VALUE, label: "All pupils" },
+      ...getAnalyticsPupilOptions(),
+    ];
+  }
+  if (safeView === "year") {
+    return [
+      { value: ALL_YEARS_EXPORT_SCOPE_VALUE, label: "All years" },
+      ...getAnalyticsYearGroupOptions().map((item) => ({ value: item, label: item })),
+    ];
+  }
+  return [
+    { value: ALL_CLASSES_EXPORT_SCOPE_VALUE, label: "All classes" },
+    ...getAnalyticsClassOptions(),
+  ];
+}
+
+function syncAnalyticsExportFocusId(view = "class", preferredId = "") {
+  const options = getAnalyticsExportFocusOptions(view);
+  const safePreferred = String(preferredId || "").trim();
+  if (options.some((option) => String(option.value) === safePreferred)) return safePreferred;
+  if (safePreferred && state.visualAnalytics.status !== "ready") return safePreferred;
+  return getAnalyticsExportDefaultFocusId(normalizeAnalyticsExportView(view));
+}
+
+function prefillAnalyticsExportState() {
+  const scopeType = String(state.analyticsAssistant.scopeType || "overview");
+  const scopeId = String(state.analyticsAssistant.scopeId || "");
+  let view = "class";
+  let focusId = ALL_CLASSES_EXPORT_SCOPE_VALUE;
+
+  if (scopeType === "pupil") {
+    view = "pupil";
+    focusId = scopeId || ALL_PUPILS_EXPORT_SCOPE_VALUE;
+  } else if (scopeType === "year_group") {
+    view = "year";
+    focusId = scopeId || ALL_YEARS_EXPORT_SCOPE_VALUE;
+  } else if (scopeType === "class") {
+    view = "class";
+    focusId = scopeId || ALL_CLASSES_EXPORT_SCOPE_VALUE;
+  }
+
+  return {
+    ...createDefaultAnalyticsExportState(),
+    initialized: true,
+    view,
+    focusId: syncAnalyticsExportFocusId(view, focusId),
+    grapheme: normalizeAnalyticsGrapheme(state.visualAnalytics.selectedGrapheme),
+  };
+}
+
+function ensureAnalyticsExportStateInitialized() {
+  if (!state.analyticsExport || typeof state.analyticsExport !== "object") {
+    state.analyticsExport = createDefaultAnalyticsExportState();
+  }
+  if (state.analyticsExport.initialized === true) return state.analyticsExport;
+  state.analyticsExport = prefillAnalyticsExportState();
+  return state.analyticsExport;
+}
+
+function setAnalyticsExportMessage(message = "", type = "info") {
+  ensureAnalyticsExportStateInitialized();
+  state.analyticsExport.message = String(message || "");
+  state.analyticsExport.messageType = type === "error" ? "error" : type === "success" ? "success" : "info";
+}
+
+function updateAnalyticsExportState(patch = {}) {
+  const current = ensureAnalyticsExportStateInitialized();
+  const nextView = Object.prototype.hasOwnProperty.call(patch, "view")
+    ? normalizeAnalyticsExportView(patch.view)
+    : normalizeAnalyticsExportView(current.view);
+  const viewChanged = nextView !== current.view;
+  const nextFocusId = Object.prototype.hasOwnProperty.call(patch, "focusId")
+    ? syncAnalyticsExportFocusId(nextView, patch.focusId)
+    : viewChanged
+      ? getAnalyticsExportDefaultFocusId(nextView)
+      : syncAnalyticsExportFocusId(nextView, current.focusId);
+
+  state.analyticsExport = {
+    ...current,
+    ...patch,
+    initialized: true,
+    view: nextView,
+    focusId: nextFocusId,
+    grapheme: Object.prototype.hasOwnProperty.call(patch, "grapheme")
+      ? normalizeAnalyticsGrapheme(patch.grapheme)
+      : normalizeAnalyticsGrapheme(current.grapheme),
+    dataset: Object.prototype.hasOwnProperty.call(patch, "dataset")
+      ? normalizeAnalyticsExportDataset(patch.dataset)
+      : normalizeAnalyticsExportDataset(current.dataset),
+    format: Object.prototype.hasOwnProperty.call(patch, "format")
+      ? normalizeAnalyticsExportFormat(patch.format)
+      : normalizeAnalyticsExportFormat(current.format),
+    message: "",
+    messageType: "info",
+  };
+}
+
+function getAnalyticsExportOptionLabel(options = [], value = "") {
+  return (options || []).find((option) => String(option?.value || "") === String(value || ""))?.label || String(value || "");
+}
+
+function renderAnalyticsExportSelect({ label, fieldName, value, options = [], disabled = false } = {}) {
+  return `
+    <label class="td-field td-field--compact td-field--toolbar">
+      <span>${escapeHtml(label || "")}</span>
+      <select class="td-input" data-field="${escapeAttr(fieldName || "")}" ${disabled ? "disabled" : ""}>
+        ${options.map((option) => `
+          <option value="${escapeAttr(option.value)}" ${String(option.value) === String(value) ? "selected" : ""}>
+            ${escapeHtml(option.label)}
+          </option>
+        `).join("")}
+      </select>
+    </label>
+  `;
+}
+
+function renderAnalyticsExportCard() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  const isReady = state.visualAnalytics.status === "ready" && !!state.visualAnalytics.sourceData;
+  const focusOptions = getAnalyticsExportFocusOptions(exportState.view);
+  const graphemeOptions = [
+    { value: "", label: "All graphemes" },
+    ...((getVisualAnalyticsViewModel().graphemeOptions || []).map((item) => ({
+      value: item.value,
+      label: `${item.label} (${item.count})`,
+    }))),
+  ];
+  const messageClass = exportState.messageType === "error"
+    ? "is-error"
+    : exportState.messageType === "success"
+      ? "is-success"
+      : "";
+
+  return `
+    <div class="td-analytics-bar-card td-analytics-export-card">
+      <div class="td-analytics-export-card-head">
+        <div>
+          <h4>Export data</h4>
+          <p>Choose exactly what data to download.</p>
+        </div>
+      </div>
+      <div class="td-analytics-export-grid">
+        ${renderAnalyticsExportSelect({
+          label: "View",
+          fieldName: "analytics-export-view",
+          value: exportState.view,
+          options: ANALYTICS_EXPORT_VIEW_OPTIONS,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Focus",
+          fieldName: "analytics-export-focus",
+          value: syncAnalyticsExportFocusId(exportState.view, exportState.focusId),
+          options: focusOptions,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Grapheme",
+          fieldName: "analytics-export-grapheme",
+          value: exportState.grapheme,
+          options: graphemeOptions,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Dataset",
+          fieldName: "analytics-export-dataset",
+          value: exportState.dataset,
+          options: ANALYTICS_EXPORT_DATASET_OPTIONS,
+          disabled: !isReady,
+        })}
+        ${renderAnalyticsExportSelect({
+          label: "Format",
+          fieldName: "analytics-export-format",
+          value: exportState.format,
+          options: ANALYTICS_EXPORT_FORMAT_OPTIONS,
+          disabled: !isReady,
+        })}
+        <div class="td-analytics-export-action">
+          <span aria-hidden="true">&nbsp;</span>
+          <button
+            type="button"
+            class="td-btn td-btn--primary"
+            data-action="download-analytics-export-data"
+            ${isReady ? "" : "disabled"}
+          >
+            Download
+          </button>
+        </div>
+      </div>
+      ${
+        exportState.message
+          ? `<div class="td-analytics-export-message ${messageClass}" role="status">${escapeHtml(exportState.message)}</div>`
+          : !isReady
+            ? `<div class="td-analytics-export-message" role="status">Analytics need to finish loading before export.</div>`
+            : ""
+      }
+    </div>
+  `;
+}
+
+function getAnalyticsExportWordRowById(data = null) {
+  return new Map((data?.wordRows || []).map((row) => [String(row?.id || ""), row]));
+}
+
+function resolveAnalyticsExportScope(exportState = state.analyticsExport, data = state.visualAnalytics.sourceData) {
+  const view = normalizeAnalyticsExportView(exportState?.view);
+  const focusId = syncAnalyticsExportFocusId(view, exportState?.focusId);
+  const classes = data?.classes || [];
+  const allClassIds = classes.map((item) => String(item?.id || "")).filter(Boolean);
+  const classIdSet = new Set();
+  const pupilIdSet = new Set();
+  let scopeLabel = "All classes";
+
+  if (view === "pupil") {
+    if (focusId === ALL_PUPILS_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All pupils";
+      for (const pupil of data?.pupils || []) {
+        const pupilId = String(pupil?.id || "");
+        if (pupilId) pupilIdSet.add(pupilId);
+      }
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      scopeLabel = pupilDisplayName(data?.pupilById?.get(String(focusId)));
+      pupilIdSet.add(String(focusId));
+      for (const classId of data?.classIdsByPupil?.get(String(focusId)) || []) {
+        classIdSet.add(String(classId));
+      }
+    }
+  } else if (view === "year") {
+    if (focusId === ALL_YEARS_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All years";
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      scopeLabel = String(focusId || "Selected year");
+      for (const cls of classes) {
+        if (String(cls?.year_group || "").trim() === String(focusId)) {
+          const classId = String(cls?.id || "");
+          if (classId) classIdSet.add(classId);
+        }
+      }
+    }
+    for (const classId of classIdSet) {
+      for (const pupilId of data?.pupilIdsByClass?.get(String(classId)) || []) {
+        pupilIdSet.add(String(pupilId));
+      }
+    }
+  } else {
+    if (focusId === ALL_CLASSES_EXPORT_SCOPE_VALUE) {
+      scopeLabel = "All classes";
+      for (const classId of allClassIds) classIdSet.add(classId);
+    } else {
+      const cls = data?.classById?.get(String(focusId));
+      scopeLabel = cls?.name || "Selected class";
+      classIdSet.add(String(focusId));
+    }
+    for (const classId of classIdSet) {
+      for (const pupilId of data?.pupilIdsByClass?.get(String(classId)) || []) {
+        pupilIdSet.add(String(pupilId));
+      }
+    }
+  }
+
+  return {
+    view,
+    focusId,
+    scopeLabel,
+    classIdSet,
+    pupilIdSet,
+  };
+}
+
+function analyticsExportRowMatchesScope(row = null, scope = null, grapheme = "") {
+  const pupilId = String(row?.pupil_id || "");
+  const classId = String(row?.class_id || "");
+  if (!pupilId || !classId) return false;
+  if (scope?.pupilIdSet?.size && !scope.pupilIdSet.has(pupilId)) return false;
+  if (scope?.classIdSet?.size && !scope.classIdSet.has(classId)) return false;
+  const normalizedGrapheme = normalizeAnalyticsGrapheme(grapheme);
+  if (!normalizedGrapheme) return true;
+  return normalizeAnalyticsGrapheme(analyticsTargetForAttempt(row)) === normalizedGrapheme;
+}
+
+function getAnalyticsExportClassContext(row = null, data = null, scope = null) {
+  const rowClassId = String(row?.class_id || "");
+  const classIds = rowClassId
+    ? [rowClassId]
+    : Array.from(scope?.classIdSet || []);
+  const classNames = [];
+  const yearGroups = [];
+  for (const classId of classIds) {
+    const cls = data?.classById?.get(String(classId));
+    if (cls?.name) classNames.push(cls.name);
+    const yearGroup = String(cls?.year_group || "").trim();
+    if (yearGroup) yearGroups.push(yearGroup);
+  }
+  return {
+    className: [...new Set(classNames)].join(", "),
+    yearGroup: [...new Set(yearGroups)].join(", "),
+  };
+}
+
+function buildAnalyticsExportAttemptRows(exportState = state.analyticsExport) {
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return [];
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const grapheme = normalizeAnalyticsGrapheme(exportState?.grapheme);
+  const wordRowsById = getAnalyticsExportWordRowById(data);
+
+  return (data.attempts || [])
+    .filter((row) => analyticsExportRowMatchesScope(row, scope, grapheme))
+    .map((row) => {
+      const assignment = data.assignmentById?.get(String(row?.assignment_id || ""));
+      const classContext = getAnalyticsExportClassContext(row, data, scope);
+      const wordRow = wordRowsById.get(String(row?.test_word_id || "")) || null;
+      const choice = wordRow?.choice || {};
+      const correct = row?.correct === true;
+      const assignmentType = String(
+        assignment?.automation_kind ||
+        assignment?.automation_source ||
+        assignment?.question_type ||
+        ""
+      ).trim();
+      const supportParts = [
+        choice.assignment_support,
+        choice.support_preset,
+        assignment?.hints_enabled === false ? "no_hints" : "",
+      ].filter(Boolean);
+
+      return {
+        pupil_name: pupilDisplayName(data.pupilById?.get(String(row?.pupil_id || ""))),
+        pupil_id: String(row?.pupil_id || ""),
+        class_name: classContext.className,
+        class_id: String(row?.class_id || ""),
+        year_group: classContext.yearGroup,
+        grapheme: analyticsTargetForAttempt(row),
+        word: String(row?.word_text || wordRow?.word || "").trim(),
+        typed_answer: String(row?.typed || "").trim(),
+        assignment_name: String(assignment?.tests?.title || "").trim(),
+        assignment_id: String(row?.assignment_id || ""),
+        assignment_type: assignmentType,
+        attempt_source: String(row?.attempt_source || assignmentType || "").trim(),
+        timestamp: row?.created_at || "",
+        correct: correct ? "Yes" : "No",
+        incorrect: correct ? "No" : "Yes",
+        score: correct ? 1 : 0,
+        accuracy: formatPercent(correct ? 1 : 0),
+        attempt_number: Math.max(1, Number(row?.attempt_number || 1)),
+        mode: String(row?.mode || "").trim(),
+        question_type: String(assignment?.question_type || "").trim(),
+        support: supportParts.join(", "),
+        status: correct ? "Correct" : "Incorrect",
+        test_word_id: String(row?.test_word_id || ""),
+      };
+    });
+}
+
+function buildAnalyticsExportSummaryRows(exportState = state.analyticsExport) {
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return [];
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const grapheme = normalizeAnalyticsGrapheme(exportState?.grapheme);
+  const groups = new Map();
+
+  for (const row of data.latestRows || []) {
+    if (!analyticsExportRowMatchesScope(row, scope, grapheme)) continue;
+    const pupilId = String(row?.pupil_id || "");
+    const target = normalizeAnalyticsGrapheme(analyticsTargetForAttempt(row));
+    if (!pupilId || !target || target === "general") continue;
+    const key = `${pupilId}::${target}`;
+    const entry = groups.get(key) || {
+      pupilId,
+      target,
+      rows: [],
+      classIds: new Set(),
+    };
+    entry.rows.push(row);
+    if (row?.class_id) entry.classIds.add(String(row.class_id));
+    groups.set(key, entry);
+  }
+
+  return Array.from(groups.values())
+    .map((entry) => {
+      const rows = entry.rows;
+      const total = rows.length;
+      const correct = rows.filter((row) => row?.correct).length;
+      const firstTryCorrect = rows.filter((row) => row?.correct && Math.max(1, Number(row?.attempt_number || 1)) === 1).length;
+      const averageAttempts = total
+        ? rows.reduce((sum, row) => sum + Math.max(1, Number(row?.attempt_number || 1)), 0) / total
+        : 0;
+      const latestActivity = rows
+        .map((row) => new Date(row?.created_at || 0).getTime())
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => b - a)[0] || null;
+      const classContext = getAnalyticsExportClassContext(
+        { class_id: "" },
+        data,
+        { classIdSet: entry.classIds },
+      );
+      const accuracy = total ? correct / total : 0;
+      const signal = getVisualPupilSignal({
+        checkedWords: total,
+        accuracy,
+        averageAttempts,
+        needsIntervention: total >= 2 && (accuracy < 0.65 || averageAttempts > 2.2),
+      });
+      const indicator = estimateSpellingAttainmentIndicator({
+        responses: rows.map((row) => ({
+          correct: !!row?.correct,
+          difficultyScore: data.difficultyByWordId?.get(String(row?.test_word_id || ""))?.coreScore
+            ?? data.difficultyByWordId?.get(String(row?.test_word_id || ""))?.score
+            ?? 50,
+        })),
+        checkedAccuracy: total ? accuracy : null,
+        firstTimeCorrectRate: total ? firstTryCorrect / total : null,
+        completionRate: null,
+        averageAttempts: total ? averageAttempts : null,
+      });
+
+      return {
+        pupil_name: pupilDisplayName(data.pupilById?.get(String(entry.pupilId))),
+        pupil_id: entry.pupilId,
+        class_name: classContext.className,
+        year_group: classContext.yearGroup,
+        grapheme: entry.target,
+        attempts_count: total,
+        correct_count: correct,
+        incorrect_count: Math.max(0, total - correct),
+        accuracy: formatPercent(accuracy),
+        first_try: formatPercent(total ? firstTryCorrect / total : 0),
+        average_tries: formatOneDecimal(averageAttempts),
+        latest_activity: latestActivity ? new Date(latestActivity).toISOString() : "",
+        signal: signal.label,
+        sai: indicator?.score == null ? "" : String(indicator.score),
+        level: getIndicatorLevelText(indicator),
+        performance_descriptor: getIndicatorPerformanceText(indicator),
+      };
+    })
+    .sort((a, b) =>
+      String(a.pupil_name || "").localeCompare(String(b.pupil_name || "")) ||
+      String(a.grapheme || "").localeCompare(String(b.grapheme || ""))
+    );
+}
+
+function buildAnalyticsExportModelFromState() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  const data = state.visualAnalytics.sourceData;
+  if (!data) return null;
+  const scope = resolveAnalyticsExportScope(exportState, data);
+  const dataset = normalizeAnalyticsExportDataset(exportState.dataset);
+  const rows = dataset === "attempts"
+    ? buildAnalyticsExportAttemptRows(exportState)
+    : buildAnalyticsExportSummaryRows(exportState);
+  const viewLabel = getAnalyticsExportOptionLabel(ANALYTICS_EXPORT_VIEW_OPTIONS, scope.view);
+  const graphemeLabel = normalizeAnalyticsGrapheme(exportState.grapheme) || "All graphemes";
+
+  return buildScopedAnalyticsExportModel({
+    dataset,
+    viewLabel,
+    scopeLabel: scope.scopeLabel,
+    graphemeLabel,
+    windowDays: state.visualAnalytics.windowDays || VISUAL_ANALYTICS_WINDOW_DAYS,
+    generatedAt: new Date().toISOString(),
+    rows,
+  });
+}
+
+function handleAnalyticsExportDownload() {
+  const exportState = ensureAnalyticsExportStateInitialized();
+  if (state.visualAnalytics.status !== "ready" || !state.visualAnalytics.sourceData) {
+    setAnalyticsExportMessage("Analytics need to finish loading before export.", "error");
+    paint();
+    return;
+  }
+  const model = buildAnalyticsExportModelFromState();
+  downloadAnalyticsExportModel(model, normalizeAnalyticsExportFormat(exportState.format));
+}
+
+function downloadAnalyticsExportModel(model = null, format = "csv") {
+  if (!model || !exportModelHasRows(model)) {
+    setAnalyticsExportMessage("No data found for that export selection.", "error");
+    paint();
+    return;
+  }
+
+  if (format === "xlsx") {
+    try {
+      writeExportWorkbook(model, window.XLSX);
+      setAnalyticsExportMessage("Excel export downloaded.", "success");
+    } catch (error) {
+      setAnalyticsExportMessage(error?.message || EXCEL_UNAVAILABLE_MESSAGE, "error");
+    }
+    paint();
+    return;
+  }
+
+  const csv = serializeExportCsv(model);
+  if (!csv.trim()) {
+    setAnalyticsExportMessage("No data found for that export selection.", "error");
+    paint();
+    return;
+  }
+
+  downloadTextFile(buildExportFilename(model, "csv"), csv, "text/csv;charset=utf-8");
+  setAnalyticsExportMessage("CSV export downloaded.", "success");
+  paint();
 }
 
 function getImportPreviewExportRows(preview = null, kind = "error") {
@@ -17912,7 +22340,7 @@ function renderPupilOnboardingResultCard() {
           ? `
             <div class="td-pupil-import-guidance">
               <strong>New pupil credentials</strong>
-              <span>Shown once. Save now.</span>
+              <span>PINs are shown once. Save these login details before closing this panel.</span>
             </div>
             <div class="td-pupil-import-credentials">
               ${createdCredentials.map((item) => `
@@ -17938,9 +22366,282 @@ function renderPupilOnboardingResultCard() {
           data-action="dismiss-pupil-import-result"
           ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
         >
-          Dismiss result
+          Hide
         </button>
       </div>
+    </div>
+  `;
+}
+
+function renderPupilResetCredentialCard() {
+  const credential = getPupilOnboardingState()?.lifecycleResetCredential;
+  const pin = String(credential?.pin || "").trim();
+  const username = String(credential?.username || "").trim();
+  if (!pin || !username) return "";
+
+  const displayName = String(credential?.display_name || "").trim()
+    || [credential?.first_name, credential?.surname].map((value) => String(value || "").trim()).filter(Boolean).join(" ")
+    || username;
+
+  return `
+    <div class="td-staff-access-import-card td-staff-access-import-card--result">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Pupil PIN reset</h4>
+          <p>Shown once. Save this now. It will not be shown again.</p>
+        </div>
+      </div>
+      <div class="td-pupil-import-credentials">
+        <div class="td-pupil-import-credential-row">
+          <div>
+            <strong>${escapeHtml(displayName)}</strong>
+          </div>
+          <div class="td-pupil-import-credential-copy">
+            <span>${escapeHtml(`Username: ${username}`)}</span>
+            <span class="td-pupil-import-credential-secret">${escapeHtml(`PIN: ${pin}`)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="td-staff-access-import-actions">
+        <button
+          class="td-btn td-btn--ghost"
+          type="button"
+          data-action="dismiss-pupil-reset-credential"
+          ${getPupilOnboardingState()?.mutating ? "disabled" : ""}
+        >
+          Hide PIN
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPupilLifecyclePanel() {
+  const onboarding = getPupilOnboardingState();
+  const allRows = getPupilLifecycleRows();
+  const rows = getFilteredPupilLifecycleRows(allRows);
+  const visibleRowCount = getPupilLifecycleVisibleRowCount(rows.length);
+  const visibleRows = rows.slice(0, visibleRowCount);
+  const hiddenRowCount = Math.max(0, rows.length - visibleRows.length);
+  const isLoading = !!onboarding?.referenceLoading
+    || !!onboarding?.placementLoading
+    || !onboarding?.referenceLoaded
+    || !onboarding?.placementLoaded;
+  const resetPinUnavailable = !!onboarding?.lifecycleResetPinUnavailable;
+  const lifecycleSaving = onboarding?.lifecycleSavingPupilIds || {};
+  const lifecycleSavingActions = onboarding?.lifecycleSavingActions || {};
+  const lifecycleErrors = onboarding?.lifecycleRowErrors || {};
+  const statusFilter = getPupilLifecycleStatusFilter();
+  const yearGroupFilter = getPupilLifecycleYearGroupFilter();
+  const formFilter = getPupilLifecycleClassFilter();
+  const search = getPupilLifecycleSearch();
+  const countLabel = `${Number(visibleRows.length || 0).toLocaleString("en-GB")} of ${Number(rows.length || 0).toLocaleString("en-GB")} matching pupils`;
+
+  return `
+    <div class="td-staff-access-import-card">
+      <div class="td-staff-access-import-head">
+        <div>
+          <h4>Pupil lifecycle</h4>
+          <p>Review lifecycle attention items first, or deliberately filter into active pupils for one-row form moves.</p>
+        </div>
+      </div>
+      ${
+        isLoading
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>Checking pupil lifecycle...</strong>
+            </div>
+          `
+          : `
+            <div class="td-import-preview-toolbar">
+              <label class="td-import-preview-search">
+                <span>Search pupils</span>
+                <input
+                  class="td-input"
+                  type="search"
+                  placeholder="Search name, username, MIS ID, or form"
+                  data-field="pupil-lifecycle-search"
+                  value="${escapeAttr(search)}"
+                />
+              </label>
+            </div>
+            <div class="td-import-preview-toolbar">
+              <label class="td-import-preview-search">
+                <span>Year group</span>
+                <select class="td-input" data-field="pupil-lifecycle-year-group-filter">
+                  ${getPupilLifecycleYearGroupFilterOptions().map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === yearGroupFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+              <label class="td-import-preview-search">
+                <span>Class</span>
+                <select class="td-input" data-field="pupil-lifecycle-class-filter">
+                  ${getPupilLifecycleClassFilterOptions(yearGroupFilter).map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === formFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+              <label class="td-import-preview-search">
+                <span>Status</span>
+                <select class="td-input" data-field="pupil-lifecycle-status-filter">
+                  ${getPupilLifecycleStatusFilterOptions().map((option) => `
+                    <option value="${escapeAttr(option.value)}" ${option.value === statusFilter ? "selected" : ""}>
+                      ${escapeHtml(option.label)}
+                    </option>
+                  `).join("")}
+                </select>
+              </label>
+            </div>
+            ${
+              rows.length
+                ? `<div class="td-staff-access-import-summary"><span>${escapeHtml(`Showing ${countLabel}`)}</span></div>`
+                : ""
+            }
+          `
+      }
+      ${
+        isLoading
+          ? ""
+          : visibleRows.length
+            ? `
+              <div class="td-import-preview-table-shell">
+                <table class="td-import-preview-table">
+                  <thead>
+                    <tr>
+                      <th>Pupil</th>
+                      <th>Current class</th>
+                      <th>Status</th>
+                      <th>Move form</th>
+                      <th>Lifecycle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${visibleRows.map((row) => {
+                      const pupilId = String(row?.id || "").trim();
+                      const status = row?.lifecycleStatus || getPupilLifecycleStatus(row);
+                      const isSaving = !!lifecycleSaving[pupilId];
+                      const savingAction = String(lifecycleSavingActions[pupilId] || "").trim();
+                      const rowError = String(lifecycleErrors[pupilId] || "").trim();
+                      const lifecycleAction = status.key === "archived" ? "restore" : "archive";
+                      const actionLabel = lifecycleAction === "restore" ? "Restore" : "Archive";
+                      const busyLabel = lifecycleAction === "restore" ? "Restoring..." : "Archiving...";
+                      const canResetPin = !resetPinUnavailable && row?.is_active !== false && !String(row?.archived_at || "").trim() && status.key !== "archived";
+                      const resetPinTitle = canResetPin
+                        ? "Reset PIN"
+                        : (
+                          resetPinUnavailable
+                            ? "Pupil PIN reset is not available yet. Run the latest Supabase migration."
+                            : (status.key === "archived" ? "Restore this pupil before resetting their PIN." : "Only active pupils can have a PIN reset in this phase.")
+                        );
+                      const moveMeta = getPupilLifecycleMoveMeta(row);
+                      const targetFormIds = moveMeta.targetFormClasses.map((item) => String(item?.id || "").trim()).filter(Boolean);
+                      const selectedFormId = getPupilLifecycleSelectedFormId(pupilId, targetFormIds);
+                      const moveDisabled = isSaving || !moveMeta.canMove || !selectedFormId;
+                      return `
+                        <tr>
+                          <td>
+                            <div class="td-import-preview-cell-primary">
+                              <strong>${escapeHtml(row?.display_name || getPupilPlacementDisplayName(row))}</strong>
+                              <span>${escapeHtml(getPupilPlacementMetaLabel(row))}</span>
+                            </div>
+                          </td>
+                          <td>${escapeHtml(getPupilLifecycleCurrentFormLabel(row))}</td>
+                          <td>
+                            <span class="td-staff-access-chip">${escapeHtml(status.label)}</span>
+                          </td>
+                          <td>
+                            ${
+                              moveMeta.canMove
+                                ? `
+                                  <select
+                                    class="td-input"
+                                    data-field="pupil-lifecycle-form-select"
+                                    data-pupil-id="${escapeAttr(pupilId)}"
+                                    ${isSaving ? "disabled" : ""}
+                                  >
+                                    <option value="">${escapeHtml(moveMeta.emptyTargetLabel)}</option>
+                                    ${moveMeta.targetFormClasses.map((formClass) => {
+                                      const formClassId = String(formClass?.id || "").trim();
+                                      return `
+                                        <option value="${escapeAttr(formClassId)}" ${formClassId === selectedFormId ? "selected" : ""}>
+                                          ${escapeHtml(formatPupilPlacementFormLabel(formClass))}
+                                        </option>
+                                      `;
+                                    }).join("")}
+                                  </select>
+                                  <button
+                                    class="td-btn td-btn--compact"
+                                    type="button"
+                                    data-action="move-pupil-lifecycle-form"
+                                    data-pupil-id="${escapeAttr(pupilId)}"
+                                    ${moveDisabled ? "disabled" : ""}
+                                  >
+                                    ${escapeHtml(["move", "place"].includes(savingAction) ? moveMeta.busyLabel : moveMeta.actionLabel)}
+                                  </button>
+                                `
+                                : `<p class="td-staff-access-note td-staff-access-note--compact">${escapeHtml(moveMeta.disabledReason || "No form move available.")}</p>`
+                            }
+                          </td>
+                          <td>
+                            <div class="td-pupil-lifecycle-actions">
+                              <button
+                                class="td-btn td-btn--compact"
+                                type="button"
+                                data-action="reset-pupil-pin"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                title="${escapeAttr(resetPinTitle)}"
+                                ${isSaving || !canResetPin ? "disabled" : ""}
+                              >
+                                ${escapeHtml(savingAction === "reset_pin" ? "Resetting..." : "Reset PIN")}
+                              </button>
+                              <button
+                                class="td-btn td-btn--compact ${lifecycleAction === "archive" ? "td-btn--ghost" : ""}"
+                                type="button"
+                                data-action="pupil-lifecycle-action"
+                                data-lifecycle-action="${escapeAttr(lifecycleAction)}"
+                                data-pupil-id="${escapeAttr(pupilId)}"
+                                ${isSaving ? "disabled" : ""}
+                              >
+                                ${escapeHtml(savingAction === lifecycleAction ? busyLabel : actionLabel)}
+                              </button>
+                            </div>
+                            ${rowError ? `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">${escapeHtml(rowError)}</p>` : ""}
+                          </td>
+                        </tr>
+                      `;
+                    }).join("")}
+                  </tbody>
+                </table>
+              </div>
+              ${
+                hiddenRowCount > 0
+                  ? `
+                    <div class="td-staff-access-import-actions">
+                      <button
+                        class="td-btn td-btn--ghost td-btn--compact"
+                        type="button"
+                        data-action="show-more-pupil-lifecycle-rows"
+                        data-total-rows="${escapeAttr(String(rows.length))}"
+                      >
+                        ${escapeHtml(`Show ${Math.min(PUPIL_LIFECYCLE_VISIBLE_ROWS_STEP, hiddenRowCount)} more`)}
+                      </button>
+                    </div>
+                  `
+                  : ""
+              }
+            `
+            : `
+              <div class="td-empty td-empty--compact">
+                <strong>${escapeHtml(allRows.length ? "No pupils match these lifecycle filters." : "No pupil records are visible yet.")}</strong>
+                ${allRows.length ? "<p>Change the filters or search to widen the action queue.</p>" : ""}
+              </div>
+            `
+      }
     </div>
   `;
 }
@@ -18323,9 +23024,209 @@ function renderSectionPupilOnboarding() {
           ? `
             <div class="td-section-body">
               ${renderPupilOnboardingResultCard()}
+              ${renderPupilResetCredentialCard()}
+              ${renderPupilLifecyclePanel()}
               ${renderPupilPlacementPanel()}
               ${renderPupilOnboardingPreflightCard()}
               ${renderPupilOnboardingPreviewCard()}
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
+function getBankMonitorState() {
+  return state.bankMonitor && typeof state.bankMonitor === "object"
+    ? state.bankMonitor
+    : createDefaultBankMonitorState();
+}
+
+function formatBankMonitorStatusLabel(value = "") {
+  const clean = String(value || "").trim().toLowerCase();
+  if (!clean) return "Unknown";
+  return clean
+    .split("_")
+    .map((part) => part ? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}` : "")
+    .filter(Boolean)
+    .join(" ");
+}
+
+function renderBankMonitorMetric(label = "", value = "", helper = "") {
+  return `
+    <div class="td-bank-monitor-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value))}</strong>
+      ${helper ? `<small>${escapeHtml(helper)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderBankMonitorBreakdown(title = "", rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return `
+    <section class="td-bank-monitor-block">
+      <div class="td-bank-monitor-block-head">
+        <h4>${escapeHtml(title)}</h4>
+      </div>
+      <div class="td-bank-monitor-breakdown">
+        ${
+          safeRows.length
+            ? safeRows.map((row) => `
+              <div class="td-bank-monitor-breakdown-row">
+                <span>${escapeHtml(formatBankMonitorStatusLabel(row?.status))}</span>
+                <strong>${escapeHtml(String(Math.max(0, Number(row?.count || 0))))}</strong>
+              </div>
+            `).join("")
+            : `<div class="td-empty td-empty--compact"><strong>No status rows.</strong></div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderBankMonitorWarnings(warnings = []) {
+  const safeWarnings = Array.isArray(warnings) ? warnings : [];
+  return `
+    <section class="td-bank-monitor-block">
+      <div class="td-bank-monitor-block-head">
+        <h4>Selector smoke warnings</h4>
+        <span class="td-pill ${safeWarnings.length ? "" : "td-pill--muted"}">${escapeHtml(String(safeWarnings.length))}</span>
+      </div>
+      ${
+        safeWarnings.length
+          ? `
+            <div class="td-bank-monitor-warning-row">
+              ${safeWarnings.map((warning) => `
+                <span class="td-bank-monitor-warning-chip">
+                  <strong>${escapeHtml(warning.focusGrapheme || "")}</strong>
+                  ${escapeHtml(`${Math.max(0, Number(warning.selectedTargetCount || 0))}/${Math.max(0, Number(warning.requestedTargetCount || 0))}`)}
+                </span>
+              `).join("")}
+            </div>
+          `
+          : `<div class="td-empty td-empty--compact"><strong>No selector smoke warnings.</strong></div>`
+      }
+    </section>
+  `;
+}
+
+function renderBankMonitorGraphemes(model = {}) {
+  const graphemes = Array.isArray(model?.graphemes) ? model.graphemes : [];
+  return `
+    <section class="td-bank-monitor-block td-bank-monitor-block--wide">
+      <div class="td-bank-monitor-block-head">
+        <h4>Usable primary words per grapheme</h4>
+        <span class="td-pill">${escapeHtml(`Threshold ${model?.threshold || 6}`)}</span>
+      </div>
+      ${
+        graphemes.length
+          ? `
+            <div class="td-bank-monitor-grapheme-grid">
+              ${graphemes.map((row) => `
+                <div class="td-bank-monitor-grapheme ${row?.belowThreshold ? "is-low" : ""}">
+                  <span>${escapeHtml(row?.displayLabel || row?.focusGrapheme || "")}</span>
+                  <strong>${escapeHtml(String(Math.max(0, Number(row?.usablePrimaryWordCount || 0))))}</strong>
+                </div>
+              `).join("")}
+            </div>
+          `
+          : `<div class="td-empty td-empty--compact"><strong>No active focus graphemes.</strong></div>`
+      }
+    </section>
+  `;
+}
+
+function renderBankMonitorContent() {
+  const monitor = getBankMonitorState();
+  const status = String(monitor.status || "idle");
+  if (status === "idle") {
+    return `<div class="td-empty td-empty--compact"><strong>Open the monitor to load core bank coverage.</strong></div>`;
+  }
+  if (status === "loading") {
+    return `<div class="td-empty td-empty--compact"><strong>Loading core bank monitor...</strong></div>`;
+  }
+  if (status === "error") {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>Could not load the core bank monitor.</strong>
+        <p>${escapeHtml(monitor.message || "Please try again later.")}</p>
+      </div>
+    `;
+  }
+
+  const model = monitor.data || null;
+  if (!model || model.available === false || status === "unavailable") {
+    return `
+      <div class="td-empty td-empty--compact">
+        <strong>Core bank monitor unavailable.</strong>
+        <p>${escapeHtml(model?.message || monitor.message || "The core bank tables could not be read in this environment.")}</p>
+      </div>
+    `;
+  }
+
+  const confidence = model.coverageConfidence || {};
+  const missingContextCount = Math.max(0, Number(model.missingSentenceCount || 0) + Number(model.missingMeaningCount || 0));
+  return `
+    <div class="td-bank-monitor-panel">
+      <div class="td-bank-monitor-top">
+        <div>
+          <h3>Wordloom core bank</h3>
+          <p>${escapeHtml(confidence.summary || "Core bank coverage summary.")}</p>
+        </div>
+        <div class="td-bank-monitor-status">
+          <span class="td-bank-monitor-confidence td-bank-monitor-confidence--${escapeAttr(confidence.tone || "muted")}">
+            ${escapeHtml(confidence.label || "Status")}
+          </span>
+          <span class="td-pill td-pill--muted">Read-only</span>
+        </div>
+      </div>
+
+      <div class="td-bank-monitor-metrics">
+        ${renderBankMonitorMetric("Usable active words", model.usableActiveWordCount || 0, `${model.totalCoreWordCount || 0} total core words`)}
+        ${renderBankMonitorMetric("Active focus graphemes", model.activeFocusGraphemeCount || 0)}
+        ${renderBankMonitorMetric("Below threshold", Array.isArray(model.belowThresholdGraphemes) ? model.belowThresholdGraphemes.length : 0, `Threshold ${model.threshold || 6}`)}
+        ${renderBankMonitorMetric("Missing context", missingContextCount, `${model.missingSentenceCount || 0} sentence | ${model.missingMeaningCount || 0} meaning`)}
+      </div>
+
+      <div class="td-bank-monitor-grid">
+        ${renderBankMonitorGraphemes(model)}
+        ${renderBankMonitorWarnings(model.selectorSmokeWarnings || [])}
+        ${renderBankMonitorBreakdown("Approval status", model.approvalStatusBreakdown || [])}
+        ${renderBankMonitorBreakdown("Suitability status", model.suitabilityStatusBreakdown || [])}
+        <section class="td-bank-monitor-block">
+          <div class="td-bank-monitor-block-head">
+            <h4>Inactive words</h4>
+          </div>
+          <div class="td-bank-monitor-breakdown">
+            <div class="td-bank-monitor-breakdown-row">
+              <span>Inactive</span>
+              <strong>${escapeHtml(String(Math.max(0, Number(model.inactiveWordCount || 0))))}</strong>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+function renderSectionWordloomCoreBankMonitor() {
+  if (!canViewWordloomCoreBankMonitor()) return "";
+  const isOpen = !!state.sections.bankMonitor;
+
+  return `
+    <section class="td-section td-section--bank-monitor">
+      ${renderCollapsibleSectionHeader({
+        title: "Core bank monitor",
+        section: "bankMonitor",
+        isOpen,
+      })}
+      ${
+        isOpen
+          ? `
+            <div class="td-section-body">
+              ${renderBankMonitorContent()}
             </div>
           `
           : ""
@@ -18641,6 +23542,7 @@ function renderStaffPendingAccessDetail(profile = null) {
 
   return `
     ${renderStaffAccessWarnings()}
+    ${renderStaffLifecycleRecordPanel(profile)}
     ${
       failureMessage
         ? `
@@ -18722,12 +23624,14 @@ function renderStaffPendingAccessDetail(profile = null) {
         Linked profile -> live access workflow. Unlinked profile -> pending approval workflow.
       </p>
     </div>
+    ${renderStaffDirectoryAuditCard()}
   `;
 }
 
 function renderStaffAccessLiveDetail(selectedProfile = null) {
   return `
     ${renderStaffAccessWarnings()}
+    ${renderStaffLifecycleRecordPanel(selectedProfile)}
     <div class="td-staff-access-summary-grid">
       <div class="td-staff-access-summary-card">
         <span class="td-staff-access-head-inline">
@@ -18755,6 +23659,7 @@ function renderStaffAccessLiveDetail(selectedProfile = null) {
       </div>
       ${renderStaffAccessAuditList()}
     </div>
+    ${renderStaffDirectoryAuditCard()}
   `;
 }
 
@@ -18764,7 +23669,10 @@ function renderSectionStaffAccess() {
   const selectedProfile = getStaffAccessSelectedProfile();
   const selectedProfileLinked = isStaffAccessProfileLinked(selectedProfile);
   const filteredProfiles = getStaffAccessFilteredProfiles();
-  const hasDirectorySearch = !!String(getStaffAccessState()?.search || "").trim();
+  const visibleRowCount = getStaffLifecycleVisibleRowCount(filteredProfiles.length);
+  const visibleProfiles = filteredProfiles.slice(0, visibleRowCount);
+  const hiddenRowCount = Math.max(0, filteredProfiles.length - visibleRowCount);
+  const hasDirectorySearch = !!String(getStaffLifecycleSearch() || "").trim();
   const directoryEmptyMessage = "Only staff who have signed in and opened the staff dashboard appear here yet. Imported CSV staff will also appear here in Pending access.";
 
   return `
@@ -18789,7 +23697,7 @@ function renderSectionStaffAccess() {
                       class="td-input"
                       type="text"
                       data-field="staff-access-search"
-                      value="${escapeAttr(String(getStaffAccessState()?.search || ""))}"
+                      value="${escapeAttr(getStaffLifecycleSearch())}"
                       placeholder="Search staff by name or email..."
                       autocomplete="off"
                     />
@@ -18810,8 +23718,11 @@ function renderSectionStaffAccess() {
                         `
                         : filteredProfiles.length
                           ? `
+                            <div class="td-staff-access-list-summary">
+                              <span>${escapeHtml(`Showing ${visibleProfiles.length} of ${filteredProfiles.length}`)}</span>
+                            </div>
                             <div class="td-staff-access-directory">
-                              ${filteredProfiles.map((profile) => {
+                              ${visibleProfiles.map((profile) => {
                                 const isSelected = String(profile?.id || "") === getStaffAccessSelectedProfileId();
                                 const isCurrentUser = String(profile?.user_id || "") === getCurrentTeacherId();
                                 return `
@@ -18825,6 +23736,7 @@ function renderSectionStaffAccess() {
                                     <span class="td-staff-access-person-copy">
                                       <strong>${escapeHtml(profile.display_name)}</strong>
                                       <span>${escapeHtml(profile.email)}</span>
+                                      ${renderStaffAccessStatusTriplet(profile, { compact: true })}
                                     </span>
                                     <span class="td-staff-access-person-badges">
                                       ${renderStaffAccessProfileBadges(profile, { includeCurrentUser: isCurrentUser })}
@@ -18833,6 +23745,23 @@ function renderSectionStaffAccess() {
                                 `;
                               }).join("")}
                             </div>
+                            ${
+                              hiddenRowCount
+                                ? `
+                                  <div class="td-staff-access-import-actions">
+                                    <button
+                                      class="td-btn td-btn--ghost td-btn--small"
+                                      type="button"
+                                      data-action="show-more-staff-lifecycle-rows"
+                                      data-total-rows="${escapeAttr(String(filteredProfiles.length))}"
+                                      ${getStaffAccessState()?.mutating ? "disabled" : ""}
+                                    >
+                                      ${escapeHtml(`Show ${Math.min(STAFF_LIFECYCLE_VISIBLE_ROWS_STEP, hiddenRowCount)} more`)}
+                                    </button>
+                                  </div>
+                                `
+                                : ""
+                            }
                           `
                           : `
                             <div class="td-empty td-empty--compact">
@@ -18858,6 +23787,7 @@ function renderSectionStaffAccess() {
                             <div>
                               <h3>${escapeHtml(selectedProfile.display_name)}</h3>
                               <p>${escapeHtml(selectedProfile.email)}</p>
+                              ${renderStaffAccessStatusTriplet(selectedProfile)}
                             </div>
                             <div class="td-staff-access-header-pills">
                               ${renderStaffAccessProfileBadges(selectedProfile, { includeCurrentUser: true })}
@@ -18934,13 +23864,119 @@ function renderInlineAnalyticsAssistant() {
   });
 }
 
+function getAssignmentLifecycleModel(item) {
+  const assignmentId = String(item?.id || "").trim();
+  return state.assignmentLifecycle.summariesByAssignmentId?.[assignmentId]
+    || buildAssignmentLifecycleModel({
+      assignment: item,
+      now: new Date(),
+      staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+    });
+}
+
+function getAssignmentLifecycleFilter() {
+  const current = String(state.assignmentLifecycle.filter || "all");
+  return ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === current)
+    ? current
+    : "all";
+}
+
+function getAssignmentSourceFilter() {
+  const current = String(state.assignmentLifecycle.sourceFilter || "all");
+  return getAssignmentSourceFilterOptions().some((option) => option.key === current)
+    ? current
+    : "all";
+}
+
+function getAssignmentLifecycleEntries() {
+  return (state.assignments || []).map((item) => ({
+    item,
+    lifecycle: getAssignmentLifecycleModel(item),
+    source: getAssignmentSourceView(item),
+  }));
+}
+
+function getFilteredAssignmentLifecycleItems() {
+  const lifecycleFilter = getAssignmentLifecycleFilter();
+  const sourceFilter = getAssignmentSourceFilter();
+  return getAssignmentLifecycleEntries()
+    .filter(({ lifecycle, source }) =>
+      doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
+      && doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
+    )
+    .map(({ item }) => item);
+}
+
+function renderAssignmentLifecycleFilters() {
+  const filter = getAssignmentLifecycleFilter();
+  const sourceFilter = getAssignmentSourceFilter();
+  const entries = getAssignmentLifecycleEntries();
+  const sourceMatchedEntries = entries.filter(({ source }) =>
+    doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
+  );
+  const lifecycleMatchedEntries = entries.filter(({ lifecycle }) =>
+    doesAssignmentMatchLifecycleFilter(lifecycle, filter)
+  );
+  const lifecycleCounts = buildAssignmentLifecycleFilterCounts(
+    sourceMatchedEntries.map(({ lifecycle }) => lifecycle)
+  );
+  const sourceCounts = buildAssignmentSourceFilterCounts(
+    lifecycleMatchedEntries.map(({ source }) => source?.key)
+  );
+  const sourceOptions = getAssignmentSourceFilterOptions();
+
+  return `
+    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
+      ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
+        <button
+          type="button"
+          class="td-filter-chip ${filter === option.key ? "is-active" : ""}"
+          data-action="set-assignment-lifecycle-filter"
+          data-filter-key="${escapeAttr(option.key)}"
+          role="tab"
+          aria-selected="${filter === option.key ? "true" : "false"}"
+        >
+          ${escapeHtml(option.label)}
+          <span>${escapeHtml(String(lifecycleCounts[option.key] || 0))}</span>
+        </button>
+      `).join("")}
+    </div>
+    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment source filters">
+      ${sourceOptions.map((option) => `
+        <button
+          type="button"
+          class="td-filter-chip ${sourceFilter === option.key ? "is-active" : ""}"
+          data-action="set-assignment-source-filter"
+          data-filter-key="${escapeAttr(option.key)}"
+          role="tab"
+          aria-selected="${sourceFilter === option.key ? "true" : "false"}"
+        >
+          ${escapeHtml(option.label)}
+          <span>${escapeHtml(String(sourceCounts[option.key] || 0))}</span>
+        </button>
+      `).join("")}
+    </div>
+    <p class="td-assignment-lifecycle-helper">Needs attention includes expired, stale, unknown, or assignments missing participant data.</p>
+  `;
+}
+
+function renderAssignmentLifecycleStatusMessage() {
+  if (state.assignmentLifecycle.status !== "error" || !state.assignmentLifecycle.message) return "";
+  return `
+    <div class="td-assignment-lifecycle-status" role="status">
+      ${escapeHtml(state.assignmentLifecycle.message)}
+    </div>
+  `;
+}
+
 function renderSectionUpcomingAssignments() {
   const isOpen = state.sections.upcoming;
+  const visibleAssignments = getFilteredAssignmentLifecycleItems();
 
   return `
     <section class="td-section td-section--upcoming">
       ${renderCollapsibleSectionHeader({
-        title: "Upcoming assignments",
+        title: "Assignment lifecycle",
         section: "upcoming",
         isOpen,
       })}
@@ -18949,9 +23985,18 @@ function renderSectionUpcomingAssignments() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${state.assignments.length ? renderAssignmentLifecycleFilters() : ""}
+          ${renderAssignmentLifecycleStatusMessage()}
           ${
             state.assignments.length
-              ? `<div class="td-list">${state.assignments.map(renderAssignmentCardCompact).join("")}</div>`
+              ? visibleAssignments.length
+                ? `<div class="td-list">${visibleAssignments.map(renderAssignmentCardCompact).join("")}</div>`
+                : `
+            <div class="td-empty">
+              <strong>No assignments in this view.</strong>
+              <p>Try another lifecycle or source filter to see the rest of the assignment history.</p>
+            </div>
+          `
               : `
             <div class="td-empty">
               <strong>No assignments yet.</strong>
@@ -18986,6 +24031,7 @@ function renderSectionTestsLegacy() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${renderTestLibraryCreateAction()}
           <div class="td-search-row">
             <input
               class="td-input"
@@ -19004,13 +24050,13 @@ function renderSectionTestsLegacy() {
                 : `
                 <div class="td-empty">
                   <strong>No matching tests.</strong>
-                  <p>Try a different search term.</p>
+                  <p>${escapeHtml(getNoMatchingTestsMessage())}</p>
                 </div>
               `
               : `
             <div class="td-empty">
-              <strong>You haven’t created any tests yet.</strong>
-              <p>Use + Create test above to build your first one.</p>
+              <strong>${escapeHtml(getEmptyTestLibraryTitle())}</strong>
+              <p>${escapeHtml(getEmptyTestLibraryMessage())}</p>
             </div>
           `
           }
@@ -19089,6 +24135,55 @@ function renderTestLibrarySummary(groups, filteredCount) {
   `;
 }
 
+function renderTestLibraryCreateAction() {
+  if (!canCreateTests()) return "";
+  return `
+    <div class="td-test-library-action-row">
+      <button class="td-btn td-btn--primary td-btn--small" type="button" data-action="create-test">+ Create test</button>
+    </div>
+  `;
+}
+
+function getNoMatchingTestsMessage() {
+  return canCreateTests()
+    ? "Try a different search term, or create a new test."
+    : "Try a different search term.";
+}
+
+function getEmptyTestLibraryMessage() {
+  return canCreateTests()
+    ? "Use Create test to build your first one."
+    : "No tests are available for your current access.";
+}
+
+function getEmptyTestLibraryTitle() {
+  return canCreateTests()
+    ? "You have not created any tests yet."
+    : "No tests available.";
+}
+
+function renderTestBulkActions() {
+  const selectedCount = getSelectedEditableTests().length;
+  const matchingEditableCount = getFilteredEditableTestIds().length;
+
+  if (!selectedCount && !matchingEditableCount) return "";
+
+  return `
+    <div class="td-test-bulk-row">
+      <span>${escapeHtml(
+        selectedCount
+          ? `${formatCountLabel(selectedCount, "test")} selected`
+          : `${formatCountLabel(matchingEditableCount, "editable test")} in current results`
+      )}</span>
+      <div class="td-test-bulk-actions">
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="select-filtered-tests" ${matchingEditableCount ? "" : "disabled"}>Select results</button>
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="clear-selected-tests" ${selectedCount ? "" : "disabled"}>Clear</button>
+        <button class="td-btn td-btn--danger td-btn--small" type="button" data-action="delete-selected-tests" ${selectedCount ? "" : "disabled"}>Delete selected</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderTestGroupSection({ key, title, description, tests, term }) {
   if (!tests.length) return "";
 
@@ -19144,6 +24239,7 @@ function renderSectionTests() {
         isOpen
           ? `
         <div class="td-section-body">
+          ${renderTestLibraryCreateAction()}
           <div class="td-search-row">
             <input
               class="td-input"
@@ -19160,6 +24256,7 @@ function renderSectionTests() {
               ? filteredCount
                 ? `
                   ${renderTestLibrarySummary(groups, filteredCount)}
+                  ${renderTestBulkActions()}
                   <div class="td-test-groups">
                     ${renderTestGroupSection({
                       key: "live",
@@ -19187,13 +24284,13 @@ function renderSectionTests() {
                 : `
                 <div class="td-empty">
                   <strong>No matching tests.</strong>
-                  <p>Try a different search term.</p>
+                  <p>${escapeHtml(getNoMatchingTestsMessage())}</p>
                 </div>
               `
               : `
             <div class="td-empty">
-              <strong>You haven’t created any tests yet.</strong>
-              <p>Use + Create test above to build your first one.</p>
+              <strong>${escapeHtml(getEmptyTestLibraryTitle())}</strong>
+              <p>${escapeHtml(getEmptyTestLibraryMessage())}</p>
             </div>
           `
           }
@@ -20470,7 +25567,7 @@ function renderClassComparisonCompact(rows) {
   `;
 }
 
-function renderAssignmentProgressHero(analytics) {
+function renderAssignmentProgressHero(analytics, { progressHeading = "Class progress" } = {}) {
   const rosterCount = Math.max(1, Number(analytics?.rosterCount || 0));
   const completed = Math.max(0, Number(analytics?.completedCount || 0));
   const started = Math.max(0, Number(analytics?.startedCount || 0));
@@ -20487,7 +25584,7 @@ function renderAssignmentProgressHero(analytics) {
     <section class="td-progress-hero">
       <div class="td-progress-hero-head">
         <div>
-          <h5>Class progress</h5>
+          <h5>${escapeHtml(progressHeading || "Class progress")}</h5>
           <p>${escapeHtml(summaryText)}</p>
         </div>
       </div>
@@ -20738,16 +25835,18 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
   const assignmentId = String(item.id);
   const analyticsState = state.analyticsByAssignment[assignmentId];
   const panelClasses = ["td-inline-panel", "td-inline-panel--attached", panelClassName].filter(Boolean).join(" ");
+  const framing = getAssignmentResultsFraming(item);
+  const statusCopy = getAssignmentResultsStatusCopy(framing);
 
   if (!analyticsState || analyticsState.status === "loading") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>Loading results...</strong>
+          <strong>${escapeHtml(statusCopy.loading)}</strong>
           <p>Pulling the latest pupil attempts for this assignment.</p>
         </div>
       </div>
@@ -20758,11 +25857,11 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>Could not load analytics.</strong>
+          <strong>${escapeHtml(statusCopy.error)}</strong>
           <p>${escapeHtml(analyticsState.message || "Please try again.")}</p>
         </div>
       </div>
@@ -20774,20 +25873,23 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
     return `
       <div class="${panelClasses}">
         <div class="td-inline-head">
-          <h4>Results</h4>
+          <h4>${escapeHtml(framing.resultsHeading)}</h4>
           <button type="button" class="td-btn td-btn--tiny" data-action="close-panel">Close</button>
         </div>
         <div class="td-empty td-empty--compact">
-          <strong>No analytics available yet.</strong>
+          <strong>${escapeHtml(statusCopy.empty)}</strong>
         </div>
       </div>
     `;
   }
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const provenanceLine = getAssignmentProvenanceLine(item);
+  const generatedCoverageHtml = analytics?.isGenerated ? renderGeneratedAssignmentCoverage(analytics) : "";
 
   return `
     <div class="${panelClasses}">
       <div class="td-inline-head">
-        <h4>Results</h4>
+        <h4>${escapeHtml(framing.resultsHeading)}</h4>
         <div class="td-inline-actions">
           <button
             type="button"
@@ -20811,16 +25913,22 @@ function renderAssignmentResultsContent(item, panelClassName = "") {
         </div>
       </div>
 
-      ${renderAssignmentProgressHero(analytics)}
+      ${generatedCoverageHtml}
+      ${renderAssignmentResultsIntroNote(framing)}
+      ${renderAssignmentProgressHero(analytics, { progressHeading: framing.progressHeading })}
 
       <div class="td-results-grid td-results-grid--analytics">
         <section class="td-results-block td-results-block--wide">
             <div class="td-class-results-selected">
               <div class="td-class-results-selected-head">
-                <strong>${escapeHtml(item?.tests?.title || "Untitled test")}</strong>
-                <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+                <div>
+                  <strong>${escapeHtml(item?.tests?.title || "Untitled test")}</strong>
+                  <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+                  ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
+                </div>
+                ${sourceBadgeHtml}
               </div>
-            ${renderAssignmentResultsTable(analytics)}
+            ${renderAssignmentResultsTable(analytics, { showCoverage: !analytics?.isGenerated })}
           </div>
         </section>
       </div>
@@ -20925,35 +26033,124 @@ function renderAssignmentCard(item) {
   `;
 }
 
+function formatAssignmentLifecycleProgressLabel(lifecycle, analytics = null) {
+  if (lifecycle?.hasCounts) {
+    const total = Math.max(0, Number(lifecycle.totalPupilCount || 0));
+    const completed = Math.max(0, Number(lifecycle.completedCount || 0));
+    if (total > 0) return completed >= total ? `${completed}/${total} complete` : `${completed}/${total} done`;
+  }
+  if (analytics) {
+    const total = Math.max(0, Number(analytics.rosterCount || 0));
+    const completed = Math.max(0, Number(analytics.completedCount || 0));
+    if (total > 0) return completed >= total ? `${completed}/${total} complete` : `${completed}/${total} done`;
+  }
+  return "Progress pending";
+}
+
+function formatAssignmentLifecycleTargetLabel(lifecycle) {
+  const targeted = Math.max(0, Number(lifecycle?.targetedPupilCount || 0));
+  const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
+  if (targeted > 0) return `${targeted} targeted pupil${targeted === 1 ? "" : "s"}`;
+  if (total > 0) return `${total} pupil${total === 1 ? "" : "s"}`;
+  return "";
+}
+
+function renderAssignmentLifecycleBadge(lifecycle) {
+  const key = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const label = lifecycle?.label || "Unknown";
+  const detail = lifecycle?.detail || "Derived lifecycle display signal.";
+  return `<span class="td-assignment-chip td-assignment-lifecycle-badge td-assignment-lifecycle-badge--${escapeAttr(key)}" title="${escapeAttr(detail)}">${escapeHtml(label)}</span>`;
+}
+
+function getAssignmentLifecycleSignalText(lifecycle) {
+  const key = String(lifecycle?.key || "").trim().toLowerCase();
+  if (key === "expired") return "Expired - deadline passed";
+  if (key === "stale") return "Stale - no recent activity";
+  if (key === "needs_attention") return "Needs attention - participant data missing";
+  return "";
+}
+
+function renderAssignmentLifecycleSignal(lifecycle) {
+  const signal = getAssignmentLifecycleSignalText(lifecycle);
+  if (!signal) return "";
+  return `
+    <div class="td-assignment-lifecycle-signal td-assignment-lifecycle-signal--${escapeAttr(lifecycle.tone || "warning")}">
+      ${escapeHtml(signal)}
+    </div>
+  `;
+}
+
+function renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics = null) {
+  const createdAt = lifecycle?.createdAt || item?.created_at || item?.createdAt || "";
+  const targeted = Math.max(0, Number(lifecycle?.targetedPupilCount || 0));
+  const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
+  const started = Math.max(0, Number(lifecycle?.startedCount || 0));
+  const waiting = Math.max(0, Number(lifecycle?.waitingCount || 0));
+  const details = [];
+
+  if (createdAt) details.push(`Created ${formatDate(createdAt)}`);
+  if (targeted > 0) details.push(`${targeted} targeted pupil${targeted === 1 ? "" : "s"}`);
+  if (lifecycle?.hasCounts && total > 0) {
+    details.push(`Started ${started}/${total}`);
+    details.push(`${waiting} waiting`);
+  }
+  if (analytics && analytics.averageIndicatorScore != null) {
+    details.push(`Average SAI ${formatAverageIndicatorValue(analytics.averageIndicatorScore)}`);
+  }
+  if (!details.length) return "";
+
+  return `
+    <div class="td-assignment-secondary-details">
+      ${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
+    </div>
+  `;
+}
+
 function renderAssignmentCardCompact(item) {
   const assignmentId = String(item.id);
   const title = item.tests?.title || "Untitled test";
   const className = item.classes?.name || "Unknown class";
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const resultsFraming = getAssignmentResultsFraming(item);
+  const provenanceLine = getAssignmentProvenanceLine(item);
+  const lifecycle = getAssignmentLifecycleModel(item);
   const isResultsOpen =
     state.activePanel?.type === "results-assignment" &&
     String(state.activePanel.id) === assignmentId;
 
-  const status = getAssignmentStatus(item);
   const isActive = isResultsOpen;
   const analyticsReady = state.analyticsByAssignment[assignmentId]?.status === "ready";
   const analytics = analyticsReady ? state.analyticsByAssignment[assignmentId].data.current : null;
-  const dueLabel = item.deadline ? `Due ${formatDate(item.deadline)}` : "No due date";
-  const progressLabel = analytics ? `${analytics.completedCount}/${analytics.rosterCount} done` : "Results pending";
-  const scoreLabel = analytics ? `${formatAverageIndicatorValue(analytics.averageIndicatorScore)} attainment` : "No indicator yet";
+  const dueAt = lifecycle?.dueAt || item.deadline || item.end_at || item.endAt || "";
+  const dueLabel = dueAt ? `Due ${formatDate(dueAt)}` : "No due date";
+  const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
+  const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
+  const cardClasses = [
+    "td-assignment-card",
+    "td-assignment-card--lifecycle",
+    `td-assignment-card--lifecycle-${lifecycleKey}`,
+    isActive ? "is-active" : "",
+    isClosedStaleState ? "td-assignment-card--closed-stale-state" : "",
+  ].filter(Boolean).join(" ");
 
   return `
-    <article class="td-assignment-card ${isActive ? "is-active" : ""}" data-assignment-card-id="${escapeAttr(assignmentId)}">
+    <article class="${escapeAttr(cardClasses)}" data-assignment-card-id="${escapeAttr(assignmentId)}">
       <div class="td-card-row">
         <div class="td-card-main">
-          <div class="td-card-title">${escapeHtml(title)}</div>
+          <div class="td-card-title td-card-title--with-badges">
+            <span>${escapeHtml(title)}</span>
+            ${sourceBadgeHtml}
+          </div>
           <div class="td-card-subtitle">Class: ${escapeHtml(className)}</div>
+          ${provenanceLine ? `<div class="td-card-subtitle">${escapeHtml(provenanceLine)}</div>` : ""}
 
           <div class="td-assignment-meta td-assignment-meta--stack td-assignment-meta--compact">
+            ${renderAssignmentLifecycleBadge(lifecycle)}
             <span class="td-assignment-chip">${renderIconLabel("calendar", dueLabel)}</span>
             <span class="td-assignment-chip">${renderIconLabel("checkCircle", progressLabel)}</span>
-            <span class="td-assignment-chip">${renderIconLabel("award", scoreLabel)}</span>
-            <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
           </div>
+          ${isResultsOpen ? renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics) : renderAssignmentLifecycleSignal(lifecycle)}
         </div>
 
         <div class="td-card-actions">
@@ -20963,7 +26160,7 @@ function renderAssignmentCardCompact(item) {
             data-action="open-results-assignment"
             data-assignment-id="${escapeAttr(assignmentId)}"
           >
-            ${isResultsOpen ? "Hide results" : "View results"}
+            ${escapeHtml(isResultsOpen ? resultsFraming.openButtonLabel : resultsFraming.closedButtonLabel)}
           </button>
         </div>
       </div>
@@ -20978,6 +26175,8 @@ function renderClassResultsRow(item) {
   const title = item?.tests?.title || "Untitled test";
   const status = getAssignmentStatus(item);
   const analyticsState = state.analyticsByAssignment[assignmentId];
+  const sourceBadgeHtml = getAssignmentSourceBadgeHtml(item, { compact: true });
+  const provenanceLine = getAssignmentProvenanceLine(item);
 
   if (analyticsState?.status === "ready") {
     const analytics = analyticsState.data?.current;
@@ -20996,8 +26195,10 @@ function renderClassResultsRow(item) {
           <div class="td-class-results-copy">
             <strong>${escapeHtml(title)}</strong>
             <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+            ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
           </div>
           <div class="td-class-results-actions">
+            ${sourceBadgeHtml}
             <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
             <button
               class="td-btn td-btn--tiny td-btn--ghost"
@@ -21029,8 +26230,10 @@ function renderClassResultsRow(item) {
         <div class="td-class-results-copy">
           <strong>${escapeHtml(title)}</strong>
           <span>${escapeHtml(getAssignmentReferenceLabel(item))}</span>
+          ${provenanceLine ? `<span>${escapeHtml(provenanceLine)}</span>` : ""}
         </div>
         <div class="td-class-results-actions">
+          ${sourceBadgeHtml}
           <span class="td-assignment-chip td-assignment-chip--status">${escapeHtml(status)}</span>
           <button
             class="td-btn td-btn--tiny td-btn--ghost"
@@ -21105,6 +26308,38 @@ function renderClassResultsPanelLegacy(cls) {
   `;
 }
 
+function getManualAssignmentSelectedClassId(testId = "") {
+  return String(state.assignmentLifecycle.manualAssignClassByTestId?.[String(testId || "").trim()] || "").trim();
+}
+
+function getManualAssignmentDuplicateWarning(testId = "") {
+  return buildDuplicateManualAssignmentWarningModel({
+    assignments: state.assignments,
+    testId,
+    classId: getManualAssignmentSelectedClassId(testId),
+  });
+}
+
+function renderManualAssignmentDuplicateWarning(testId = "") {
+  const warning = getManualAssignmentDuplicateWarning(testId);
+  if (!warning.hasDuplicate || !warning.assignmentId) return "";
+
+  return `
+    <div class="td-assignment-duplicate-warning" role="status">
+      <strong>Check existing assignment first</strong>
+      <p>${escapeHtml(warning.message)}</p>
+      <button
+        class="td-btn td-btn--tiny td-btn--ghost"
+        type="button"
+        data-action="jump-assignment-results"
+        data-assignment-id="${escapeAttr(warning.assignmentId)}"
+      >
+        View existing assignment
+      </button>
+    </div>
+  `;
+}
+
 function renderTestCard(test) {
   const canEditTest = canEditTestRecord(test);
   const canAssignTest = canAssignFromTestRecord(test);
@@ -21116,13 +26351,33 @@ function renderTestCard(test) {
     String(state.activePanel.id) === String(test.id);
 
   const isFlashed = String(state.flashTestId) === String(test.id);
+  const testId = String(test?.id || "").trim();
+  const isSelected = getSelectedTestIds().includes(testId);
+  const title = test.title || "Untitled test";
+  const selectedManualClassId = getManualAssignmentSelectedClassId(testId);
 
   return `
-    <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""}">
+    <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""} ${isSelected ? "is-selected" : ""}">
       <div class="td-card-row">
+        ${
+          canEditTest
+            ? `
+              <label class="td-test-select td-checkbox-row">
+                <input
+                  type="checkbox"
+                  data-field="test-bulk-select"
+                  data-test-id="${escapeAttr(testId)}"
+                  value="${escapeAttr(testId)}"
+                  aria-label="${escapeAttr(`Select ${title} for bulk delete`)}"
+                  ${isSelected ? "checked" : ""}
+                />
+              </label>
+            `
+            : ""
+        }
         <div class="td-card-main">
           <div class="td-card-title">
-            ${escapeHtml(test.title || "Untitled test")}
+            ${escapeHtml(title)}
             ${test?.is_auto_generated ? `<span class="td-pill">Auto-assigned</span>` : ""}
           </div>
           <div class="td-card-subtitle">${renderTestMeta(test)}</div>
@@ -21160,12 +26415,12 @@ function renderTestCard(test) {
             <div class="td-form-grid td-form-grid--assign">
               <label class="td-field">
                 <span>Class</span>
-                <select class="td-input" name="class_id" required>
+                <select class="td-input" name="class_id" data-field="manual-assignment-class-select" data-test-id="${escapeAttr(test.id)}" required>
                   <option value="">Select class...</option>
                   ${assignableClasses
                     .map(
                       (cls) =>
-                        `<option value="${escapeAttr(cls.id)}">${escapeHtml(cls.name || "Untitled class")}</option>`
+                        `<option value="${escapeAttr(cls.id)}" ${String(cls.id) === selectedManualClassId ? "selected" : ""}>${escapeHtml(cls.name || "Untitled class")}</option>`
                     )
                     .join("")}
                 </select>
@@ -21190,6 +26445,8 @@ function renderTestCard(test) {
               </label>
             </div>
 
+            ${renderManualAssignmentDuplicateWarning(test.id)}
+
             <div class="td-form-actions">
               <button class="td-btn td-btn--primary" type="submit">Assign</button>
             </div>
@@ -21202,15 +26459,224 @@ function renderTestCard(test) {
   `;
 }
 
+function renderClassRemovalWarningList(cls, preflight) {
+  const warnings = [];
+  const activePupilCount = Number(preflight?.activePupilCount || 0);
+  const inactiveMembershipCount = Number(preflight?.inactiveMembershipCount || 0);
+  const assignmentCount = Number(preflight?.assignmentCount || 0);
+  const activeAutomationPolicyCount = Number(preflight?.activeAutomationPolicyCount || 0);
+  const archivedAutomationPolicyCount = Math.max(0, Number(preflight?.automationPolicies?.length || 0) - activeAutomationPolicyCount);
+  const sampleNames = (preflight?.activePupils || [])
+    .slice(0, 4)
+    .map((pupil) => getPupilPlacementDisplayName(pupil))
+    .filter(Boolean);
+
+  if (activePupilCount > 0) {
+    warnings.push({
+      severity: "error",
+      title: `${formatCountLabel(activePupilCount, "active pupil")} in this ${getClassRemovalTypeLabel(cls)}`,
+      body: `Move pupils to another ${getClassRemovalTypeLabel(cls)}, or remove them from this class. If they are removed and not added elsewhere, they may stop receiving assignments or personalised auto-tests.`,
+      points: sampleNames.length
+        ? [`Examples: ${sampleNames.join(", ")}${activePupilCount > sampleNames.length ? ", ..." : ""}`]
+        : [],
+    });
+  }
+
+  if (assignmentCount > 0) {
+    warnings.push({
+      severity: "error",
+      title: `${formatCountLabel(assignmentCount, "linked assignment")}`,
+      body: "Deleting the class can remove class-linked assignments, status rows, target-word rows, and related result views. Use this only when you are intentionally clearing the class.",
+      points: (preflight?.assignmentSamples || [])
+        .map((assignment) => String(assignment?.tests?.title || "").trim())
+        .filter(Boolean)
+        .slice(0, 3),
+    });
+  }
+
+  if (activeAutomationPolicyCount > 0) {
+    warnings.push({
+      severity: "warning",
+      title: `${formatCountLabel(activeAutomationPolicyCount, "active automation policy", "active automation policies")} target this class`,
+      body: "Future personalised runs will not include this class after it is removed.",
+      points: (preflight?.automationPolicies || [])
+        .filter((policy) => !policy.archived)
+        .map((policy) => `${policy.name}${policy.policyType ? ` (${policy.policyType})` : ""}`)
+        .slice(0, 4),
+    });
+  }
+
+  if (archivedAutomationPolicyCount > 0 || preflight?.hasClassAutoAssignPolicy) {
+    warnings.push({
+      severity: "warning",
+      title: "Class setup links will be removed",
+      body: "Saved class policy links and archived automation references for this class will no longer be usable after deletion.",
+      points: [],
+    });
+  }
+
+  if (inactiveMembershipCount > 0) {
+    warnings.push({
+      severity: "warning",
+      title: `${formatCountLabel(inactiveMembershipCount, "old membership record")}`,
+      body: "Old membership rows for this class must also be cleared before the class can be deleted.",
+      points: [],
+    });
+  }
+
+  if (!warnings.length) {
+    warnings.push({
+      severity: "info",
+      title: "No active pupil memberships found",
+      body: "This class looks empty. You can delete it permanently if it was created by mistake or is no longer needed.",
+      points: [],
+    });
+  }
+
+  return `
+    <div class="td-staff-access-warning-list">
+      ${warnings.map((warning) => `
+        <div class="td-staff-access-warning ${warning.severity === "error" ? "is-error" : warning.severity === "info" ? "is-info" : ""}">
+          <strong>${escapeHtml(warning.title)}</strong>
+          <p>${escapeHtml(warning.body)}</p>
+          ${
+            warning.points?.length
+              ? `<div class="td-staff-access-warning-points">${warning.points.map((point) => `<span>${escapeHtml(point)}</span>`).join("")}</div>`
+              : ""
+          }
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderClassRemovalPanel(cls) {
+  const classId = String(cls?.id || "").trim();
+  const removal = getClassRemovalStateForClass(classId);
+  const preflight = removal.preflight;
+  const targetClasses = getClassRemovalTargetClasses(cls);
+  const hasActivePupils = Number(preflight?.activePupilCount || 0) > 0;
+  const busyLabel = removal.busy ? "Removing..." : "";
+  const typeLabel = getClassRemovalTypeLabel(cls);
+
+  return `
+    <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm">
+      <div class="td-inline-head">
+        <h4>Remove class</h4>
+        <button type="button" class="td-btn td-btn--tiny" data-action="cancel-class-removal">Close</button>
+      </div>
+
+      <div class="td-class-removal-intro">
+        <strong>${escapeHtml(cls?.name || "Untitled class")}</strong>
+        <p>Before this class is deleted, Wordloom checks pupils, assignments, and automation links so you do not accidentally orphan pupils or stop personalised testing.</p>
+      </div>
+
+      ${
+        removal.loading && !preflight
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>Checking class before removal...</strong>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        removal.error
+          ? `
+            <div class="td-staff-access-warning-list">
+              <div class="td-staff-access-warning is-error">
+                <strong>Could not check this class</strong>
+                <p>${escapeHtml(removal.error)}</p>
+              </div>
+            </div>
+            <div class="td-form-actions">
+              <button class="td-btn td-btn--ghost" type="button" data-action="reload-class-removal-preflight" data-class-id="${escapeAttr(classId)}">Try again</button>
+              <button class="td-btn td-btn--ghost" type="button" data-action="cancel-class-removal">Cancel</button>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        preflight && !removal.error
+          ? `
+            ${renderClassRemovalWarningList(cls, preflight)}
+
+            ${
+              hasActivePupils
+                ? `
+                  <form data-form="class-removal-move" class="td-form-stack td-class-removal-option">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Move pupils to another ${escapeHtml(typeLabel)}</strong>
+                      <p class="td-muted">Best choice when pupils should continue receiving assignments or personalised auto-tests from another live group.</p>
+                    </div>
+                    <label class="td-field">
+                      <span>Destination ${escapeHtml(typeLabel)}</span>
+                      <select class="td-input" name="target_class_id" ${removal.busy || !targetClasses.length ? "disabled" : ""} required>
+                        <option value="">Choose destination...</option>
+                        ${targetClasses.map((targetClass) => `
+                          <option value="${escapeAttr(targetClass.id)}">
+                            ${escapeHtml(targetClass?.year_group ? `${targetClass.name} (${targetClass.year_group})` : targetClass.name || "Untitled class")}
+                          </option>
+                        `).join("")}
+                      </select>
+                    </label>
+                    ${
+                      targetClasses.length
+                        ? ""
+                        : `<p class="td-staff-access-note td-staff-access-note--compact td-staff-access-note--warning">Create another ${escapeHtml(typeLabel)} before moving pupils.</p>`
+                    }
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--primary" type="submit" ${removal.busy || !targetClasses.length ? "disabled" : ""}>${escapeHtml(busyLabel || "Move pupils and delete class")}</button>
+                    </div>
+                  </form>
+
+                  <form data-form="class-removal-remove-memberships" class="td-form-stack td-class-removal-option td-class-removal-option--danger">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Remove pupils from this class</strong>
+                      <p class="td-muted">Pupils stay in the pupil directory, but they will no longer be members of this class and may stop receiving assignments or personalised auto-tests until added to another class.</p>
+                    </div>
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--danger" type="submit" ${removal.busy ? "disabled" : ""}>${escapeHtml(busyLabel || "Remove memberships and delete class")}</button>
+                    </div>
+                  </form>
+                `
+                : `
+                  <form data-form="class-removal-delete-empty" class="td-form-stack td-class-removal-option">
+                    <input type="hidden" name="class_id" value="${escapeAttr(classId)}" />
+                    <div>
+                      <strong>Delete this class permanently</strong>
+                      <p class="td-muted">Use this for empty classes or setup mistakes. Pupil records are not deleted.</p>
+                    </div>
+                    <div class="td-form-actions">
+                      <button class="td-btn td-btn--danger" type="submit" ${removal.busy ? "disabled" : ""}>${escapeHtml(busyLabel || "Delete class permanently")}</button>
+                      <button class="td-btn td-btn--ghost" type="button" data-action="reload-class-removal-preflight" data-class-id="${escapeAttr(classId)}" ${removal.busy ? "disabled" : ""}>Check again</button>
+                    </div>
+                  </form>
+                `
+            }
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderClassCardLegacy(cls) {
   const isEditOpen =
     state.activePanel?.type === "edit-class" &&
+    String(state.activePanel.id) === String(cls.id);
+  const isRemovalOpen =
+    state.activePanel?.type === "remove-class" &&
     String(state.activePanel.id) === String(cls.id);
   const isResultsOpen =
     state.activePanel?.type === "class-results" &&
     String(state.activePanel.id) === String(cls.id);
 
-  const isActive = isEditOpen || isResultsOpen;
+  const isActive = isEditOpen || isRemovalOpen || isResultsOpen;
   const isFlashed = String(state.flashClassId) === String(cls.id);
   const subtitleParts = [];
   if (cls?.year_group) subtitleParts.push(cls.year_group);
@@ -21243,13 +26709,15 @@ function renderClassCardLegacy(cls) {
             Analytics
           </button>
           <button class="td-btn td-btn--ghost" type="button" data-action="open-edit-class" data-class-id="${escapeAttr(cls.id)}">Edit</button>
-          <button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">Delete</button>
+          <button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">${isRemovalOpen ? "Close remove" : "Remove"}</button>
         </div>
       </div>
 
       ${
         isResultsOpen
           ? renderClassResultsPanel(cls)
+          : isRemovalOpen
+          ? renderClassRemovalPanel(cls)
           : isEditOpen
           ? `
         <div class="td-inline-panel td-inline-panel--attached">
@@ -21291,6 +26759,8 @@ function renderClassResultsPanel(cls) {
   const selectedItem = items.find((item) => String(item?.id || "") === selectedAssignmentId) || null;
   const selectedAnalyticsState = selectedAssignmentId ? state.analyticsByAssignment[selectedAssignmentId] : null;
   const selectedAnalytics = selectedAnalyticsState?.status === "ready" ? selectedAnalyticsState.data?.current : null;
+  const selectedFraming = selectedItem ? getAssignmentResultsFraming(selectedItem) : buildAssignmentResultsFraming();
+  const selectedStatusCopy = getAssignmentResultsStatusCopy(selectedFraming);
 
   return `
     <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm">
@@ -21317,7 +26787,7 @@ function renderClassResultsPanel(cls) {
             <div class="td-field td-field--compact td-field--results-select">
               <div class="td-field-label-row">
                 <label for="${escapeAttr(assignmentSelectId)}">Recent assignments</label>
-                ${renderInfoTip("Choose from the five most recent assignments for this class to open the pupil-by-word results table.", {
+                ${renderInfoTip("Choose from the five most recent assignments for this class. Teacher-created assignments open a pupil-by-word table; personalised assignments open pupil-by-pupil outcomes.", {
                   label: "About recent assignments",
                   align: "start",
                 })}
@@ -21325,7 +26795,7 @@ function renderClassResultsPanel(cls) {
               <select id="${escapeAttr(assignmentSelectId)}" class="td-input" data-field="class-results-assignment" data-class-id="${escapeAttr(classId)}">
                 ${items.map((item) => `
                   <option value="${escapeAttr(item.id)}" ${String(item.id) === selectedAssignmentId ? "selected" : ""}>
-                    ${escapeHtml(item?.tests?.title || "Untitled test")} (${escapeHtml(getAssignmentReferenceLabel(item))})
+                    ${escapeHtml(getAssignmentOptionLabel(item))}
                   </option>
                 `).join("")}
               </select>
@@ -21336,7 +26806,7 @@ function renderClassResultsPanel(cls) {
 
           ${
             items.length && selectedAnalytics
-              ? `${renderAssignmentProgressHero(selectedAnalytics)}`
+              ? `${renderAssignmentProgressHero(selectedAnalytics, { progressHeading: selectedFraming.progressHeading })}`
               : ""
           }
 
@@ -21346,22 +26816,27 @@ function renderClassResultsPanel(cls) {
               : !selectedAnalyticsState || selectedAnalyticsState.status === "loading"
                 ? `
             <div class="td-empty td-empty--compact">
-              <strong>Loading assignment results...</strong>
+              <strong>${escapeHtml(selectedFraming.introNote ? selectedStatusCopy.loading : "Loading assignment results...")}</strong>
             </div>
           `
                 : selectedAnalyticsState.status === "error"
                   ? `
             <div class="td-empty td-empty--compact">
-              <strong>Could not load this assignment.</strong>
+              <strong>${escapeHtml(selectedFraming.introNote ? selectedStatusCopy.error : "Could not load this assignment.")}</strong>
               <p>${escapeHtml(selectedAnalyticsState.message || "Please try again.")}</p>
             </div>
           `
                   : `
             <div class="td-class-results-selected">
               <div class="td-class-results-selected-head">
-                <strong>${escapeHtml(selectedItem?.tests?.title || "Untitled test")}</strong>
-                <span>${escapeHtml(getAssignmentReferenceLabel(selectedItem))}</span>
+                <div>
+                  <strong>${escapeHtml(selectedItem?.tests?.title || "Untitled test")}</strong>
+                  <span>${escapeHtml(getAssignmentReferenceLabel(selectedItem))}</span>
+                  ${getAssignmentProvenanceLine(selectedItem) ? `<span>${escapeHtml(getAssignmentProvenanceLine(selectedItem))}</span>` : ""}
+                </div>
+                ${getAssignmentSourceBadgeHtml(selectedItem, { compact: true })}
               </div>
+              ${renderAssignmentResultsIntroNote(selectedFraming)}
               ${renderAssignmentResultsTable(selectedAnalyticsState.data?.current)}
             </div>
           `
@@ -21378,11 +26853,15 @@ function renderClassCard(cls) {
     canEditClass &&
     state.activePanel?.type === "edit-class" &&
     String(state.activePanel.id) === String(cls.id);
+  const isRemovalOpen =
+    canEditClass &&
+    state.activePanel?.type === "remove-class" &&
+    String(state.activePanel.id) === String(cls.id);
   const isResultsOpen =
     state.activePanel?.type === "class-results" &&
     String(state.activePanel.id) === String(cls.id);
 
-  const isActive = isEditOpen || isResultsOpen;
+  const isActive = isEditOpen || isRemovalOpen || isResultsOpen;
   const isFlashed = String(state.flashClassId) === String(cls.id);
   const savedAutoAssignPolicy = getSavedClassAutoAssignPolicy(cls.id);
   const effectiveAutoAssignPolicy = getEffectiveClassAutoAssignPolicy(cls.id);
@@ -21413,13 +26892,15 @@ function renderClassCard(cls) {
             ${isResultsOpen ? "Hide results" : "Results"}
           </button>
           ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="open-edit-class" data-class-id="${escapeAttr(cls.id)}">Edit</button>` : ""}
-          ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">Delete</button>` : ""}
+          ${canEditClass ? `<button class="td-btn td-btn--ghost" type="button" data-action="delete-class" data-class-id="${escapeAttr(cls.id)}">${isRemovalOpen ? "Close remove" : "Remove"}</button>` : ""}
         </div>
       </div>
 
       ${
         isResultsOpen
           ? renderClassResultsPanel(cls)
+          : isRemovalOpen
+            ? renderClassRemovalPanel(cls)
           : canEditClass && isEditOpen
             ? `
         <div class="td-inline-panel td-inline-panel--attached">
@@ -21550,6 +27031,76 @@ function isAutoGeneratedAssignment(item) {
   return !!findTestRecord(item?.test_id)?.is_auto_generated;
 }
 
+function isBaselineAssignmentRecord(item) {
+  const test = findTestRecord(item?.test_id);
+  return isBaselineAssignmentWordRows(test?.test_words || []);
+}
+
+function isSpellingBeeAssignmentRecord(item) {
+  return String(item?.automation_kind || "").trim().toLowerCase() === ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE;
+}
+
+function getAssignmentSourceView(item) {
+  const runId = String(item?.automation_run_id || "").trim();
+  return buildAssignmentSourceViewModel({
+    assignment: item,
+    isGenerated: isAutoGeneratedAssignment(item),
+    isBaseline: isBaselineAssignmentRecord(item),
+    isSpellingBee: isSpellingBeeAssignmentRecord(item),
+    run: runId ? getAutomationRunById(runId) : null,
+  });
+}
+
+function getAssignmentResultsFraming(item) {
+  return buildAssignmentResultsFraming(getAssignmentSourceView(item).key);
+}
+
+function renderAssignmentResultsIntroNote(framing) {
+  const note = String(framing?.introNote || "").trim();
+  return note ? renderResultsBlockNote(note) : "";
+}
+
+function getAssignmentResultsStatusCopy(framing) {
+  const isPersonalised = String(framing?.resultsHeading || "") === "Personalised outcomes";
+  return {
+    loading: isPersonalised ? "Loading personalised outcomes..." : "Loading results...",
+    error: isPersonalised ? "Could not load personalised outcomes." : "Could not load analytics.",
+    empty: isPersonalised ? "No personalised outcomes available yet." : "No analytics available yet.",
+  };
+}
+
+function getAssignmentSourceBadgeHtml(item, { compact = false } = {}) {
+  const source = getAssignmentSourceView(item);
+  const className = [
+    compact ? "td-assignment-chip" : "td-pill",
+    "td-assignment-source-badge",
+    `td-assignment-source-badge--${source.key}`,
+  ].join(" ");
+  return `<span class="${escapeAttr(className)}" title="${escapeAttr(source.detail || source.label)}">${escapeHtml(source.label)}</span>`;
+}
+
+function getAssignmentProvenanceLine(item) {
+  const source = getAssignmentSourceView(item);
+  const parts = [];
+  if (source.timestamp) {
+    parts.push(`Generated ${formatDate(source.timestamp)}`);
+  }
+  if (source.policyName) {
+    parts.push(`Policy: ${source.policyName}`);
+  } else if (source.runId) {
+    parts.push(`Run: ${source.runId.slice(0, 8)}`);
+  } else if (source.key === "legacy_personalised") {
+    parts.push("Generated before run history was stored");
+  }
+  return parts.join(" - ");
+}
+
+function getAssignmentOptionLabel(item) {
+  const title = item?.tests?.title || "Untitled test";
+  const source = getAssignmentSourceView(item);
+  return `${title} - ${source.label} - ${getAssignmentReferenceLabel(item)}`;
+}
+
 function renderTestMeta(test) {
   const parts = [];
   const generatedWordCount = Math.max(1, Number(test?.question_count || 0) || ASSIGNMENT_ENGINE_DEFAULT_LENGTH);
@@ -21664,6 +27215,11 @@ function injectStyles() {
     .td-notice--success{
       background:#f0fdf4;
       border-color:#bbf7d0;
+    }
+
+    .td-notice--warning{
+      background:#fffbeb;
+      border-color:#fde68a;
     }
 
     .td-notice--error{
@@ -21785,6 +27341,41 @@ function injectStyles() {
       max-width:none;
     }
 
+    .td-class-removal-intro,
+    .td-class-removal-option{
+      border:1px solid var(--wl-border);
+      border-radius:14px;
+      padding:14px;
+      background:#fff;
+    }
+
+    .td-class-removal-intro{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      background:var(--wl-bg-soft);
+    }
+
+    .td-class-removal-intro strong,
+    .td-class-removal-option strong{
+      color:var(--wl-text);
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-class-removal-intro p,
+    .td-class-removal-option p{
+      margin:0;
+      color:var(--wl-text-muted);
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-class-removal-option--danger{
+      border-color:rgba(184,92,75,.34);
+      background:#fff9f6;
+    }
+
     .td-btn--small{
       padding:8px 12px;
       font-size:0.84rem;
@@ -21880,6 +27471,12 @@ function injectStyles() {
       line-height:1.5;
     }
 
+    .td-automation-alert-copy small{
+      color:#64748b;
+      font-size:0.82rem;
+      line-height:1.45;
+    }
+
     .td-automation-alert-actions{
       display:flex;
       flex-wrap:wrap;
@@ -21901,7 +27498,7 @@ function injectStyles() {
     .td-automation-policy-topbar{
       display:flex;
       flex-direction:column;
-      gap:14px;
+      gap:10px;
       padding:16px;
       border:1px solid #dbe3ee;
       border-radius:18px;
@@ -21909,58 +27506,34 @@ function injectStyles() {
       box-shadow:0 8px 20px rgba(15,23,42,0.04);
     }
 
-    .td-automation-policy-strip-head{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      flex-wrap:wrap;
-      gap:12px 18px;
-    }
-
-    .td-automation-policy-strip-head strong{
+    .td-automation-policy-controls-label{
       color:#0f172a;
-      font-size:0.98rem;
+      font-size:0.88rem;
+      font-weight:700;
       line-height:1.3;
     }
 
     .td-automation-policy-strip-controls{
       display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap:12px 16px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-policy-switcher-group{
-      display:flex;
-      align-items:flex-end;
+      align-items:center;
+      justify-content:flex-start;
       gap:8px;
       flex-wrap:wrap;
-      flex:1 1 420px;
-      min-width:0;
-    }
-
-    .td-automation-policy-select-shell{
-      flex:1 1 320px;
-      max-width:420px;
-      min-width:260px;
+      width:100%;
     }
 
     .td-automation-policy-selector{
+      flex:1 1 320px;
+      max-width:460px;
       min-width:240px;
+      height:42px;
+      box-sizing:border-box;
     }
 
-    .td-automation-policy-toolbar{
-      display:flex;
-      align-items:flex-end;
-      justify-content:flex-end;
-      gap:8px;
-      flex-wrap:wrap;
-      flex:1 1 360px;
-    }
-
-    .td-automation-policy-toolbar--structural{
-      flex:0 1 auto;
+    .td-automation-policy-strip-controls .td-btn--small{
+      height:42px;
+      box-sizing:border-box;
+      flex:0 0 auto;
     }
 
     .td-automation-policy-run-form{
@@ -21975,37 +27548,6 @@ function injectStyles() {
       margin:0;
       padding:0;
       border:0;
-    }
-
-    .td-automation-selected-summary{
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-      padding:16px;
-      border:1px solid #dbe3ee;
-      border-radius:16px;
-      background:#f8fafc;
-    }
-
-    .td-automation-selected-summary-head{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:12px 18px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-selected-summary-main{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
-    .td-automation-selected-summary-main strong{
-      color:#0f172a;
-      font-size:1rem;
-      line-height:1.3;
     }
 
     .td-automation-summary-grid{
@@ -22040,15 +27582,6 @@ function injectStyles() {
       word-break:break-word;
     }
 
-    .td-automation-selected-summary-foot{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-      color:#475569;
-      font-size:0.92rem;
-      line-height:1.5;
-    }
-
     .td-empty--automation-policy{
       align-items:flex-start;
       text-align:left;
@@ -22058,11 +27591,16 @@ function injectStyles() {
       display:flex;
       flex-direction:column;
       gap:12px;
-      padding-top:6px;
+      padding-top:18px;
       border-top:1px solid #e2eaf3;
     }
 
     .td-automation-panel-section:first-child{
+      padding-top:0;
+      border-top:none;
+    }
+
+    .td-automation-panel-section--policy-select{
       padding-top:0;
       border-top:none;
     }
@@ -22073,10 +27611,67 @@ function injectStyles() {
       gap:6px;
     }
 
+    .td-automation-panel-section-head p{
+      margin:0;
+      color:#64748b;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-step-title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .td-automation-step-headline{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+
+    .td-automation-step-title span{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 28px;
+      width:28px;
+      height:28px;
+      border-radius:999px;
+      background:#e0f2fe;
+      color:#075985;
+      font-size:0.82rem;
+      font-weight:800;
+      line-height:1;
+    }
+
+    .td-automation-step-title strong,
     .td-automation-panel-section-head strong{
       color:#0f172a;
       font-size:0.98rem;
       line-height:1.3;
+    }
+
+    .td-automation-subsection-head{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      padding-top:4px;
+    }
+
+    .td-automation-subsection-head strong{
+      color:#0f172a;
+      font-size:0.94rem;
+      line-height:1.35;
+    }
+
+    .td-automation-subsection-head p{
+      margin:0;
+      color:#64748b;
+      font-size:0.88rem;
+      line-height:1.45;
     }
 
     .td-automation-inline-copy-row,
@@ -22122,7 +27717,7 @@ function injectStyles() {
     }
 
     .td-automation-run-grid--intervention{
-      grid-template-columns:repeat(3,minmax(0,1fr));
+      grid-template-columns:repeat(4,minmax(0,1fr));
     }
 
     .td-intervention-filter-section{
@@ -22135,6 +27730,15 @@ function injectStyles() {
       max-width:420px;
     }
 
+    .td-field--intervention-search .td-input{
+      appearance:none;
+      -webkit-appearance:none;
+      min-height:46px;
+      border-radius:12px;
+      padding:11px 12px;
+      line-height:1.2;
+    }
+
     .td-field--automation-checkbox{
       justify-content:flex-end;
       align-self:end;
@@ -22144,11 +27748,124 @@ function injectStyles() {
       grid-column:span 2;
     }
 
+    .td-automation-policy-type-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+      gap:10px;
+    }
+
+    .td-automation-policy-type-card{
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+      padding:12px 14px;
+      border:1px solid var(--wl-border);
+      border-radius:12px;
+      background:#fff;
+      color:var(--wl-text-muted);
+      font-size:0.86rem;
+      line-height:1.45;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-automation-policy-type-card:hover{
+      border-color:#94a3b8;
+      background:var(--wl-bg-soft);
+    }
+
+    .td-automation-policy-type-card input{
+      margin-top:2px;
+      flex:0 0 auto;
+    }
+
+    .td-automation-policy-type-card span{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:0;
+    }
+
+    .td-automation-policy-type-card strong{
+      color:var(--wl-text);
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-policy-type-card small{
+      color:var(--wl-text-muted);
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-automation-policy-type-card.is-current{
+      border-color:#94a3b8;
+      background:var(--wl-accent-tint);
+      box-shadow:inset 0 0 0 1px rgba(148,163,184,0.14);
+    }
+
+    .td-automation-policy-type-card.is-disabled{
+      cursor:not-allowed;
+      opacity:0.68;
+    }
+
     .td-automation-class-picker{
       display:flex;
       flex-direction:column;
       gap:12px;
       padding-top:4px;
+    }
+
+    .td-automation-target-years{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-automation-year-group-options{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .td-automation-year-group-option{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:40px;
+      padding:9px 12px;
+      border:1px solid #dbe3ee;
+      border-radius:10px;
+      background:#fff;
+      color:#0f172a;
+      font-size:0.9rem;
+      font-weight:700;
+      line-height:1.2;
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .td-automation-year-group-option input{
+      margin:0;
+      flex:0 0 auto;
+    }
+
+    .td-automation-year-group-option small{
+      color:#64748b;
+      font-size:0.72rem;
+      font-weight:700;
+      line-height:1.2;
+    }
+
+    .td-automation-year-group-option.is-selected{
+      border-color:#94a3b8;
+      background:var(--wl-accent-tint);
+      box-shadow:inset 0 0 0 1px rgba(148,163,184,0.14);
+    }
+
+    .td-automation-year-group-option.is-partial{
+      border-color:#cbd5e1;
+      background:#f8fafc;
     }
 
     .td-automation-class-picker-head{
@@ -22180,6 +27897,73 @@ function injectStyles() {
       grid-template-columns:repeat(auto-fill,minmax(280px,280px));
       gap:10px;
       justify-content:flex-start;
+    }
+
+    .td-automation-included-form-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+      gap:6px;
+    }
+
+    .td-automation-included-form-group{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:36px;
+      padding:7px 9px;
+      border:1px solid #dbe3ee;
+      border-radius:8px;
+      background:#fff;
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.25;
+      cursor:pointer;
+    }
+
+    .td-automation-included-form-group input{
+      margin:0;
+      flex:0 0 auto;
+    }
+
+    .td-automation-included-form-group span{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
+      width:100%;
+    }
+
+    .td-automation-included-form-group strong{
+      display:block;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:0.86rem;
+      line-height:1.25;
+    }
+
+    .td-automation-included-form-group small{
+      display:block;
+      flex:0 0 auto;
+      color:#64748b;
+      font-size:0.76rem;
+      line-height:1.2;
+      white-space:nowrap;
+    }
+
+    .td-automation-included-form-group.is-selected{
+      border-color:#cbd5e1;
+      background:#f8fafc;
+    }
+
+    .td-automation-target-warning{
+      color:#92400e;
+      background:#fffbeb;
+      border:1px solid #fde68a;
+      border-radius:10px;
+      padding:10px 12px;
     }
 
     .td-automation-class-option{
@@ -22255,6 +28039,232 @@ function injectStyles() {
       color:#0f172a;
       font-size:0.95rem;
       line-height:1.3;
+    }
+
+    .td-automation-review-guidance{
+      color:#334155;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-validation-callout{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      margin-top:2px;
+      padding:12px 14px;
+      border:1px solid #fde68a;
+      border-radius:10px;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-automation-validation-callout strong{
+      color:#92400e;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-validation-callout p{
+      margin:0;
+      color:#78350f;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-automation-review-status-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;
+      margin-top:4px;
+    }
+
+    .td-automation-review-status-grid div{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#f8fafc;
+    }
+
+    .td-automation-review-status-grid span{
+      color:#64748b;
+      font-size:0.74rem;
+      font-weight:800;
+      letter-spacing:0.04em;
+      line-height:1.2;
+      text-transform:uppercase;
+    }
+
+    .td-automation-review-status-grid strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.4;
+    }
+
+    .td-automation-run-outcome{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      margin-top:12px;
+      padding:12px;
+      border:1px solid #dbe3ee;
+      border-radius:8px;
+      background:#fff;
+    }
+
+    .td-automation-run-outcome--success{
+      border-color:#bbf7d0;
+      background:#f0fdf4;
+    }
+
+    .td-automation-run-outcome--warning{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .td-automation-run-outcome--error{
+      border-color:#fecaca;
+      background:#fef2f2;
+    }
+
+    .td-automation-run-outcome--activity{
+      background:#f8fafc;
+    }
+
+    .td-automation-run-outcome-head,
+    .td-automation-run-outcome-summary,
+    .td-automation-run-outcome-class{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+
+    .td-automation-run-outcome-head strong,
+    .td-automation-run-outcome-summary strong,
+    .td-automation-run-outcome-class strong{
+      color:#0f172a;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-automation-run-outcome-head span,
+    .td-automation-run-outcome-class span,
+    .td-automation-run-outcome-more{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.35;
+    }
+
+    .td-automation-run-outcome-summary p,
+    .td-automation-run-outcome--empty p,
+    .td-automation-activity-row p{
+      margin:3px 0 0;
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-automation-outcome-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+    }
+
+    .td-automation-outcome-chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:24px;
+      padding:4px 8px;
+      border:1px solid #dbe3ee;
+      border-radius:999px;
+      background:#fff;
+      color:#334155;
+      font-size:0.74rem;
+      font-weight:800;
+      line-height:1.2;
+      white-space:nowrap;
+    }
+
+    .td-automation-coverage{
+      color:#475569;
+      font-size:0.8rem;
+      line-height:1.4;
+    }
+
+    .td-automation-coverage--warning{
+      color:#92400e;
+    }
+
+    .td-automation-coverage ul{
+      margin:5px 0 0 18px;
+      padding:0;
+    }
+
+    .td-automation-run-outcome-classes{
+      display:grid;
+      gap:6px;
+    }
+
+    .td-automation-activity-list{
+      display:grid;
+      gap:8px;
+    }
+
+    .td-automation-activity-row{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:10px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#fff;
+    }
+
+    .td-automation-activity-row--success{
+      border-color:#bbf7d0;
+    }
+
+    .td-automation-activity-row--warning{
+      border-color:#fde68a;
+    }
+
+    .td-automation-activity-row--error{
+      border-color:#fecaca;
+    }
+
+    .td-automation-activity-head,
+    .td-automation-activity-summary{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .td-automation-activity-head div{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+
+    .td-automation-activity-head strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.25;
+    }
+
+    .td-automation-activity-head span,
+    .td-automation-activity-summary > span{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.35;
     }
 
     .td-automation-policy-actions{
@@ -22352,6 +28362,26 @@ function injectStyles() {
     .td-automation-policy-status-badge.is-draft{
       background:#eef2f7;
       color:#475569;
+    }
+
+    .td-automation-policy-status-badge.is-success{
+      background:#dcfce7;
+      color:#166534;
+    }
+
+    .td-automation-policy-status-badge.is-warning{
+      background:#fef3c7;
+      color:#92400e;
+    }
+
+    .td-automation-policy-status-badge.is-error{
+      background:#fee2e2;
+      color:#991b1b;
+    }
+
+    .td-automation-policy-status-badge.is-info{
+      background:#dbeafe;
+      color:#1d4ed8;
     }
 
     .td-input--textarea{
@@ -22477,6 +28507,29 @@ function injectStyles() {
       line-height:1.45;
     }
 
+    .td-intervention-selection-panel{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-intervention-selection-panel--selected{
+      padding-bottom:2px;
+    }
+
+    .td-intervention-selection-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+
+    .td-intervention-selection-head strong{
+      color:#0f172a;
+      font-size:0.96rem;
+      line-height:1.3;
+    }
+
     .td-intervention-selected-pupils{
       display:flex;
       flex-wrap:wrap;
@@ -22503,14 +28556,72 @@ function injectStyles() {
       background:#f8fafc;
     }
 
-    .td-intervention-pupil-grid{
-      display:grid;
-      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-      gap:10px;
+    .td-intervention-pupil-list{
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      border:1px solid #dbe3ee;
+      border-radius:10px;
+      background:#fff;
     }
 
-    .td-automation-class-option--pupil{
-      min-height:86px;
+    .td-intervention-pupil-row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:42px;
+      padding:8px 10px;
+      border-bottom:1px solid #eef2f7;
+      color:#0f172a;
+      cursor:pointer;
+    }
+
+    .td-intervention-pupil-row:last-child{
+      border-bottom:none;
+    }
+
+    .td-intervention-pupil-row:hover{
+      background:#f8fafc;
+    }
+
+    .td-intervention-pupil-row.is-selected{
+      background:var(--wl-accent-tint);
+    }
+
+    .td-intervention-pupil-row input{
+      flex:0 0 auto;
+      margin:0;
+    }
+
+    .td-intervention-pupil-row-main{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:12px;
+      min-width:0;
+      width:100%;
+    }
+
+    .td-intervention-pupil-row-main strong{
+      min-width:0;
+      overflow:hidden;
+      color:#0f172a;
+      font-size:0.9rem;
+      line-height:1.25;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .td-intervention-pupil-row-main small{
+      flex:0 1 auto;
+      min-width:0;
+      overflow:hidden;
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.2;
+      text-align:right;
+      text-overflow:ellipsis;
+      white-space:nowrap;
     }
 
     .td-form-stack{
@@ -23563,6 +29674,68 @@ function injectStyles() {
       background-color:#f8fafc;
     }
 
+    .td-analytics-export-card{
+      margin-top:12px;
+    }
+
+    .td-analytics-export-card-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+
+    .td-analytics-export-card-head h4{
+      margin:0;
+      font-size:1rem;
+      font-weight:800;
+      color:var(--wl-text);
+    }
+
+    .td-analytics-export-card-head p{
+      margin:3px 0 0;
+      color:var(--wl-text-muted);
+      font-size:0.92rem;
+    }
+
+    .td-analytics-export-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:12px;
+      align-items:end;
+    }
+
+    .td-analytics-export-action{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+    }
+
+    .td-analytics-export-action > span{
+      font-size:0.82rem;
+      line-height:1.25;
+    }
+
+    .td-analytics-export-action .td-btn{
+      min-height:48px;
+    }
+
+    .td-analytics-export-message{
+      margin-top:10px;
+      color:var(--wl-text-muted);
+      font-size:0.9rem;
+    }
+
+    .td-analytics-export-message.is-error{
+      color:var(--wl-error-ink);
+    }
+
+    .td-analytics-export-message.is-success{
+      color:var(--wl-success-ink);
+    }
+
     .td-analytics-bar-title{
       margin:0;
       font-size:1.12rem;
@@ -23795,6 +29968,13 @@ function injectStyles() {
       font-size:0.8rem;
     }
 
+    .td-pupil-lifecycle-actions{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
+    }
+
     .td-import-preview-table-shell{
       border:1px solid #e2e8f0;
       border-radius:14px;
@@ -23986,6 +30166,13 @@ function injectStyles() {
       color:#1d4ed8;
     }
 
+    .td-staff-access-list-summary{
+      margin:-2px 0 10px;
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+    }
+
     .td-staff-access-directory{
       display:flex;
       flex-direction:column;
@@ -24060,6 +30247,42 @@ function injectStyles() {
       gap:6px;
       width:100%;
       min-width:0;
+    }
+
+    .td-staff-lifecycle-status{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
+      margin-top:8px;
+    }
+
+    .td-staff-lifecycle-status--compact{
+      gap:6px;
+      margin-top:4px;
+    }
+
+    .td-staff-lifecycle-status-item{
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      min-width:0;
+      color:#64748b;
+      font-size:0.74rem;
+      line-height:1.25;
+    }
+
+    .td-staff-lifecycle-status-item strong{
+      color:#475569;
+      font-size:0.72rem;
+      font-weight:800;
+      line-height:1.25;
+    }
+
+    .td-staff-lifecycle-status--compact .td-pill{
+      padding:4px 7px;
+      font-size:0.68rem;
+      line-height:1.1;
     }
 
     .td-staff-access-main{
@@ -24169,6 +30392,48 @@ function injectStyles() {
       font-weight:800;
       letter-spacing:.05em;
       text-transform:uppercase;
+    }
+
+    .td-staff-lifecycle-record-card{
+      background:#fff;
+    }
+
+    .td-staff-lifecycle-status-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+    }
+
+    .td-staff-lifecycle-status-card{
+      border:1px solid #e2e8f0;
+      border-radius:10px;
+      background:#f8fafc;
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+    }
+
+    .td-staff-lifecycle-status-card span{
+      color:#64748b;
+      font-size:0.72rem;
+      font-weight:800;
+      line-height:1.25;
+      text-transform:uppercase;
+    }
+
+    .td-staff-lifecycle-status-card strong{
+      color:#0f172a;
+      font-size:0.86rem;
+      line-height:1.3;
+    }
+
+    .td-staff-lifecycle-actions{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:8px;
     }
 
     .td-staff-access-import-detail-list{
@@ -25927,6 +32192,30 @@ function injectStyles() {
       margin-bottom:14px;
     }
 
+    .td-test-library-action-row{
+      display:flex;
+      justify-content:flex-end;
+      margin-bottom:12px;
+    }
+
+    .td-test-bulk-row{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:0 0 14px;
+      color:var(--wl-text-muted);
+      font-size:0.92rem;
+    }
+
+    .td-test-bulk-actions{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+    }
+
     .td-summary-chip{
       display:flex;
       flex-direction:column;
@@ -25942,6 +32231,232 @@ function injectStyles() {
     .td-summary-chip strong{
       color:#0f172a;
       font-size:1.15rem;
+    }
+
+    .td-bank-monitor-panel{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .td-bank-monitor-top{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      padding:16px;
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,0.03);
+    }
+
+    .td-bank-monitor-top h3{
+      margin:0 0 4px;
+      color:#0f172a;
+      font-size:1.05rem;
+      line-height:1.25;
+      font-weight:800;
+    }
+
+    .td-bank-monitor-top p{
+      margin:0;
+      color:#64748b;
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    .td-bank-monitor-status{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+      flex:0 0 auto;
+    }
+
+    .td-bank-monitor-confidence{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:5px 9px;
+      border-radius:999px;
+      border:1px solid #cbd5e1;
+      background:#f8fafc;
+      color:#334155;
+      font-size:0.78rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    .td-bank-monitor-confidence--success{
+      border-color:#86efac;
+      background:#f0fdf4;
+      color:#166534;
+    }
+
+    .td-bank-monitor-confidence--warning{
+      border-color:#fcd34d;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-bank-monitor-confidence--muted{
+      border-color:#cbd5e1;
+      background:#f1f5f9;
+      color:#64748b;
+    }
+
+    .td-bank-monitor-metrics{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:10px;
+    }
+
+    .td-bank-monitor-metric{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+      padding:12px 14px;
+      border:1px solid #dbe3ee;
+      border-radius:16px;
+      background:#f8fafc;
+      color:#475569;
+    }
+
+    .td-bank-monitor-metric span,
+    .td-bank-monitor-metric small{
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:700;
+      line-height:1.3;
+    }
+
+    .td-bank-monitor-metric strong{
+      color:#0f172a;
+      font-size:1.18rem;
+      line-height:1.15;
+    }
+
+    .td-bank-monitor-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:12px;
+    }
+
+    .td-bank-monitor-block{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-width:0;
+      padding:14px;
+      border:1px solid #dbe3ee;
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,0.03);
+    }
+
+    .td-bank-monitor-block--wide{
+      grid-column:1 / -1;
+    }
+
+    .td-bank-monitor-block-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .td-bank-monitor-block-head h4{
+      margin:0;
+      color:#0f172a;
+      font-size:0.92rem;
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-bank-monitor-grapheme-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(74px,1fr));
+      gap:8px;
+    }
+
+    .td-bank-monitor-grapheme{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
+      padding:8px 10px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#334155;
+    }
+
+    .td-bank-monitor-grapheme.is-low{
+      border-color:#fcd34d;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
+    .td-bank-monitor-grapheme span{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      color:inherit;
+      font-size:0.86rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    .td-bank-monitor-grapheme strong{
+      color:inherit;
+      font-size:0.9rem;
+      font-weight:900;
+    }
+
+    .td-bank-monitor-warning-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .td-bank-monitor-warning-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      padding:7px 10px;
+      border:1px solid #fcd34d;
+      border-radius:999px;
+      background:#fffbeb;
+      color:#92400e;
+      font-size:0.82rem;
+      font-weight:800;
+    }
+
+    .td-bank-monitor-breakdown{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-bank-monitor-breakdown-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:8px 10px;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#475569;
+      font-size:0.86rem;
+      font-weight:700;
+    }
+
+    .td-bank-monitor-breakdown-row strong{
+      color:#0f172a;
+      font-size:0.92rem;
+      font-weight:900;
     }
 
     .td-test-groups{
@@ -26028,9 +32543,18 @@ function injectStyles() {
       box-shadow:0 14px 30px rgba(15,23,42,0.06);
     }
 
+    .td-assignment-card--closed-stale-state{
+      background:#fff;
+      box-shadow:0 6px 16px rgba(15,23,42,0.025);
+    }
+
     .td-test-card.is-flash,
     .td-class-card.is-flash{
       animation:tdFlash 2s ease;
+    }
+
+    .td-test-card.is-selected{
+      border-color:rgba(var(--wl-accent-rgb),.42);
     }
 
     @keyframes tdFlash{
@@ -26046,9 +32570,19 @@ function injectStyles() {
       padding:16px;
     }
 
+    .td-assignment-card--closed-stale-state .td-card-row{
+      gap:12px;
+      padding:12px 14px;
+    }
+
     .td-card-main{
       min-width:0;
       flex:1 1 auto;
+    }
+
+    .td-test-select{
+      flex:0 0 auto;
+      margin-top:2px;
     }
 
     .td-card-title{
@@ -26168,11 +32702,162 @@ function injectStyles() {
       color:#1d4ed8;
     }
 
+    .td-assignment-lifecycle-badge{
+      background:#f8fafc;
+      border-color:#cbd5e1;
+      color:#334155;
+    }
+
+    .td-assignment-lifecycle-badge--complete{
+      background:#f0fdf4;
+      border-color:#bbf7d0;
+      color:#166534;
+    }
+
+    .td-assignment-lifecycle-badge--in_progress,
+    .td-assignment-lifecycle-badge--waiting,
+    .td-assignment-lifecycle-badge--no_deadline{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+      color:#1d4ed8;
+    }
+
+    .td-assignment-lifecycle-badge--expired,
+    .td-assignment-lifecycle-badge--stale,
+    .td-assignment-lifecycle-badge--needs_attention{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+
+    .td-assignment-lifecycle-signal{
+      margin-top:8px;
+      color:#92400e;
+      font-size:0.84rem;
+      font-weight:700;
+      line-height:1.35;
+    }
+
+    .td-assignment-secondary-details{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 12px;
+      margin-top:10px;
+      padding-top:10px;
+      border-top:1px solid #eef2f7;
+      color:#64748b;
+      font-size:0.84rem;
+      font-weight:600;
+      line-height:1.35;
+    }
+
+    .td-assignment-lifecycle-note,
+    .td-assignment-lifecycle-status,
+    .td-assignment-duplicate-warning{
+      margin-top:10px;
+      border:1px solid #fde68a;
+      border-radius:12px;
+      background:#fffbeb;
+      color:#92400e;
+      padding:10px 12px;
+      font-size:0.88rem;
+      font-weight:700;
+    }
+
+    .td-assignment-duplicate-warning{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-assignment-duplicate-warning p{
+      margin:0;
+      color:#92400e;
+      font-weight:600;
+    }
+
+    .td-assignment-lifecycle-status{
+      margin:0 0 14px;
+    }
+
+    .td-card-title--with-badges{
+      align-items:flex-start;
+    }
+
+    .td-assignment-source-badge{
+      flex:0 0 auto;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge{
+      background:#f8fafc;
+      border-color:#dbe3ee;
+      color:#475569;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--generated_by_policy{
+      background:#f7fdf9;
+      border-color:#d6eadc;
+      color:#2f6b47;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--legacy_personalised{
+      background:#fffaf0;
+      border-color:#eadbb2;
+      color:#7c5e1f;
+    }
+
+    .td-assignment-card--lifecycle .td-assignment-source-badge--spelling_bee{
+      background:#f8fbff;
+      border-color:#d8e6f7;
+      color:#365f8f;
+    }
+
+    .td-assignment-source-badge--generated_by_policy{
+      background:#f0fdf4;
+      border-color:#bbf7d0;
+      color:#166534;
+    }
+
+    .td-assignment-source-badge--legacy_personalised{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+
+    .td-assignment-source-badge--baseline{
+      background:#eef2f7;
+      border-color:#cbd5e1;
+      color:#334155;
+    }
+
+    .td-assignment-source-badge--teacher_created{
+      background:#fff;
+      border-color:#dbe3ee;
+      color:#475569;
+    }
+
+    .td-assignment-source-badge--spelling_bee{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+      color:#1d4ed8;
+    }
+
     .td-filter-chip-row{
       display:flex;
       flex-wrap:wrap;
       gap:8px;
       margin-bottom:14px;
+    }
+
+    .td-assignment-lifecycle-filters{
+      margin-bottom:6px;
+    }
+
+    .td-assignment-lifecycle-helper{
+      margin:0 0 14px;
+      color:#64748b;
+      font-size:0.86rem;
+      line-height:1.4;
     }
 
     .td-filter-chip{
@@ -26198,6 +32883,12 @@ function injectStyles() {
       border-color:#bfdbfe;
       background:#eff6ff;
       color:#1d4ed8;
+    }
+
+    .td-filter-chip span{
+      margin-left:6px;
+      color:inherit;
+      opacity:.76;
     }
 
     .td-results-grid{
@@ -28090,7 +34781,7 @@ function injectStyles() {
 
     .td-trend-compare{
       display:grid;
-      grid-template-columns:repeat(3,minmax(0,1fr));
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
       gap:10px;
     }
 
@@ -28115,6 +34806,12 @@ function injectStyles() {
     .td-trend-stat strong{
       color:#0f172a;
       font-size:1rem;
+    }
+
+    .td-trend-stat small{
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.4;
     }
 
     .td-trend-change{
@@ -28668,6 +35365,53 @@ function injectStyles() {
       font-size:0.88rem;
     }
 
+    .td-generated-explainability{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      margin-bottom:14px;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:8px;
+      background:#f8fafc;
+    }
+
+    .td-generated-explainability-head,
+    .td-generated-explainability-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 10px;
+      align-items:center;
+    }
+
+    .td-generated-explainability-head span{
+      color:#334155;
+      font-size:0.82rem;
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-generated-explainability p{
+      margin:0;
+      color:#475569;
+      font-size:0.82rem;
+      line-height:1.4;
+    }
+
+    .td-generated-explain-chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:24px;
+      padding:4px 8px;
+      border:1px solid #dbe3ee;
+      border-radius:999px;
+      background:#fff;
+      color:#334155;
+      font-size:0.74rem;
+      font-weight:800;
+      line-height:1.2;
+    }
+
     .td-generated-results-sections{
       display:grid;
       gap:12px;
@@ -29147,14 +35891,20 @@ function injectStyles() {
       .td-automation-policy-toolbar,
       .td-automation-alert,
       .td-automation-policy-actions,
-      .td-automation-selected-summary-head,
-      .td-automation-selected-summary-main{
+      .td-automation-policy-status-row,
+      .td-automation-policy-status-main{
         flex-direction:column;
         align-items:stretch;
       }
 
       .td-automation-policy-actions-group--primary{
         margin-left:0;
+      }
+
+      .td-automation-policy-selector,
+      .td-automation-policy-strip-controls .td-btn--small{
+        width:100%;
+        max-width:none;
       }
 
       .td-field--automation-description{
@@ -29177,13 +35927,18 @@ function injectStyles() {
         grid-template-columns:repeat(auto-fill,minmax(220px,220px));
       }
 
+      .td-automation-included-form-grid{
+        grid-template-columns:1fr;
+      }
+
       .td-automation-summary-grid{
         grid-template-columns:repeat(2,minmax(0,1fr));
       }
 
       .td-staff-access-layout,
       .td-staff-access-summary-grid,
-      .td-staff-access-scope-grid{
+      .td-staff-access-scope-grid,
+      .td-staff-lifecycle-status-grid{
         grid-template-columns:1fr;
       }
 
@@ -29197,6 +35952,10 @@ function injectStyles() {
       }
 
       .td-staff-access-role-actions{
+        grid-template-columns:1fr;
+      }
+
+      .td-bank-monitor-grid{
         grid-template-columns:1fr;
       }
 
@@ -29403,6 +36162,14 @@ function injectStyles() {
         flex:1 1 auto;
       }
 
+      .td-bank-monitor-top{
+        flex-direction:column;
+      }
+
+      .td-bank-monitor-status{
+        justify-content:flex-start;
+      }
+
       .td-btn--ghost{
         width:100%;
       }
@@ -29463,7 +36230,22 @@ function injectStyles() {
         grid-template-columns:1fr;
       }
 
+      .td-intervention-pupil-row-main{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:3px;
+      }
+
+      .td-intervention-pupil-row-main small{
+        text-align:left;
+        white-space:normal;
+      }
+
       .td-automation-summary-grid{
+        grid-template-columns:1fr;
+      }
+
+      .td-automation-review-status-grid{
         grid-template-columns:1fr;
       }
 

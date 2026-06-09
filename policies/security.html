@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Wordloom Security Statement for schools, explaining access controls, school scoping, authentication and shared security responsibilities." />
+  <title>Security Statement | Wordloom</title>
+  <link rel="stylesheet" href="../styles.css?v=1.18" />
+</head>
+<body class="wl-page">
+  <header class="wl-site-header">
+    <a class="wl-wordmark" href="../index.html" aria-label="Wordloom homepage">
+      <span class="wl-wordmark-mark" aria-hidden="true">W</span>
+      <span>WORDLOOM</span>
+    </a>
+    <nav class="wl-nav" aria-label="Policy navigation">
+      <a href="../index.html#safety">Trust and safety</a>
+    </nav>
+    <div class="wl-header-actions">
+      <a class="wl-button wl-button-secondary" href="../index.html">Back to homepage</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="wl-policy-hero" aria-labelledby="wl-policy-title">
+      <div class="wl-section-inner">
+        <div class="wl-section-heading">
+          <span class="wl-eyebrow">Wordloom policy</span>
+          <h1 id="wl-policy-title">Security Statement</h1>
+          <p>Last reviewed: May 2026</p>
+          <p>Wordloom is designed with school-controlled access and data separation in mind. This statement explains security-related product controls, shared responsibilities, known limits, and how schools can report concerns.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="wl-section-inner wl-policy-body">
+      <section class="wl-info-card wl-policy-section" aria-labelledby="purpose">
+        <h2 id="purpose">1. Purpose of this statement</h2>
+        <p>This statement is for schools, staff, pupils, parents and carers who want to understand Wordloom's current security approach.</p>
+        <p>It is not a certification or formal audit. It describes controls that are present in the product where supported, plus responsibilities that remain with schools.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="access-control">
+        <h2 id="access-control">2. Access control</h2>
+        <p>Staff access is intended to be role-based where the product supports this. Staff roles, permissions and approvals may be used to limit access to product areas and school information that are needed for a user's role.</p>
+        <p>Schools should manage staff accounts, access changes and leaver processes in line with their own internal policies.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="school-scoping">
+        <h2 id="school-scoping">3. School scoping and tenant separation</h2>
+        <p>School data is intended to be school-scoped. The app includes active school context, school and tenant scoping, row-level security policies, staff access approvals, and audit or history records where those features are present.</p>
+        <p>These layered controls are designed to reduce access outside the relevant school context, while recognising that no online service can remove every risk.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="authentication">
+        <h2 id="authentication">4. Authentication</h2>
+        <p>Teacher sign-in may use Supabase Auth and Google OAuth. Authentication sessions may be stored in browser storage so users can remain signed in and the app can handle sign-in redirects and session refresh.</p>
+        <p>Server-side helpers and functions are used for some privileged operations. These helpers can check teacher authentication and school access before carrying out supported actions.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="pupil-accounts">
+        <h2 id="pupil-accounts">5. Pupil accounts</h2>
+        <p>Pupil access uses school-managed pupil credentials and server-side authentication or validation. Pupil accounts are intended for assigned spelling activity rather than independent account creation by pupils.</p>
+        <p>Schools remain responsible for managing how pupil credentials are issued, stored, reset and supervised in their own setting.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="ai-controls">
+        <h2 id="ai-controls">6. AI and pupil-facing safety controls</h2>
+        <p>Pupils do not have open AI chat in Wordloom. AI is not called while pupils complete spelling tests.</p>
+        <p>AI-supported features are intended to support teacher preparation or teacher-facing analytics where used. Staff should avoid entering unnecessary pupil personal data into prompts or free-text support requests.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="operational-access">
+        <h2 id="operational-access">7. Operational access and support</h2>
+        <p>Operational or support access should be limited to what is needed to provide, maintain, secure or support the service.</p>
+        <p>Support requests may require Wordloom to review relevant account, school, technical or usage information so that issues can be understood and resolved.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="shared-responsibilities">
+        <h2 id="shared-responsibilities">8. Security responsibilities shared with schools</h2>
+        <p>Security is a shared responsibility. Schools remain responsible for staff accounts, local devices, browser access, network controls, internal policies, safeguarding procedures, and reporting concerns promptly.</p>
+        <p>Schools should use appropriate device management, account review, password or sign-in controls, and staff training for their local environment.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="limitations">
+        <h2 id="limitations">9. Known limitations</h2>
+        <p>No online service can remove every risk. This page does not claim that Wordloom has completed a formal security audit, holds a security certification, or meets a particular security standard.</p>
+        <p>Schools should not rely on this statement as a complete technical security assessment. Product controls, hosting arrangements, suppliers and school requirements may change over time.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="reporting">
+        <h2 id="reporting">10. Reporting security concerns</h2>
+        <p>Schools can contact Wordloom about security concerns, suspected unauthorised access, account issues, or product behaviour that may affect school data or pupil use.</p>
+        <p>When reporting a concern, schools should include the affected school, user or workflow, what happened, when it happened, and any steps already taken. Schools can contact <a href="mailto:hello@wordloom.co.uk?subject=Wordloom%20Security%20Concern">hello@wordloom.co.uk</a>.</p>
+      </section>
+
+      <section class="wl-info-card wl-policy-section" aria-labelledby="updates">
+        <h2 id="updates">11. Updates to this statement</h2>
+        <p>Wordloom may update this statement as product controls, suppliers, security practices, school requirements or support processes change.</p>
+        <p>Future wording should continue to describe what the product actually supports and avoid unsupported security, certification or compliance claims.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="wl-footer">
+    <div class="wl-section-inner wl-footer-inner">
+      <div>
+        <a class="wl-wordmark" href="../index.html" aria-label="Wordloom homepage">
+          <span class="wl-wordmark-mark" aria-hidden="true">W</span>
+          <span>WORDLOOM</span>
+        </a>
+        <p>Teacher-built tests, pupil follow-up practice, and literacy progress insight for schools.</p>
+      </div>
+      <div class="wl-footer-groups">
+        <div class="wl-footer-group">
+          <p class="wl-footer-heading">Policies and safety</p>
+          <div class="wl-footer-links">
+            <a href="./ai-use.html">AI Use Statement</a>
+            <a href="./privacy.html">Privacy Notice</a>
+            <a href="./safeguarding.html">Safeguarding &amp; Pupil Safety Statement</a>
+            <a href="./cookies.html">Cookie Notice</a>
+            <a href="./accessibility.html">Accessibility Statement</a>
+            <a href="./security.html">Security Statement</a>
+            <a href="./terms.html">Terms of Use</a>
+            <a href="./school-data.html">School Data Use Statement</a>
+            <a href="./sub-processors.html">Sub-processors</a>
+            <a href="./dpia-support.html">DPIA Support</a>
+          </div>
+        </div>
+        <div class="wl-footer-group">
+          <p class="wl-footer-heading">Wordloom</p>
+          <div class="wl-footer-links">
+            <a href="../index.html">Homepage</a>
+            <a href="mailto:hello@wordloom.co.uk?subject=Wordloom%20enquiry">Contact</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

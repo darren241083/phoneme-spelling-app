@@ -3,66 +3,303 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Phoneme Spelling</title>
-  <link rel="stylesheet" href="./styles.css?v=1.7" />
+  <meta name="description" content="Wordloom helps schools create classroom spelling tests, present them live, assign pupil follow-up practice, and review useful literacy progress insight." />
+  <title>Wordloom | Classroom spelling, pupil practice, and progress insight</title>
+  <link rel="stylesheet" href="./styles.css?v=1.18" />
 </head>
-<body>
-  <div class="wrap">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brandTitle">Phoneme Spelling</div>
-        <div class="brandSub">Teacher tests, class presentation + pupil practice</div>
-      </div>
-      <div class="topbarRight">
-        <button id="btnSignOut" class="btn secondary" type="button" style="display:none;">Sign out</button>
-      </div>
-    </header>
+<body class="wl-page">
+  <header class="wl-site-header">
+    <a class="wl-wordmark" href="#top" aria-label="Wordloom home">
+      <span class="wl-wordmark-mark" aria-hidden="true">W</span>
+      <span>WORDLOOM</span>
+    </a>
+    <nav class="wl-nav" aria-label="Main navigation">
+      <a href="#product">Product</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#insight">Insight</a>
+      <a href="#practice">Pupil practice</a>
+    </nav>
+    <div class="wl-header-actions">
+      <a class="wl-button wl-button-secondary" href="./login.html" data-homepage-auth-link>Log in</a>
+      <a class="wl-button wl-button-secondary" href="./present.html?demo=focus_sound">Try sample test</a>
+      <a class="wl-button wl-button-primary" href="mailto:hello@wordloom.co.uk?subject=Wordloom%20demo">Book a demo</a>
+    </div>
+  </header>
 
-    <div id="banner" class="banner" style="display:none;"></div>
-
-    <section id="viewRole" class="card">
-      <h2>Choose role</h2>
-      <p class="muted">Teachers create tests, present them to the class, and assign them. Pupils log in with username and PIN.</p>
-      <div class="row">
-        <button id="btnTeacher" class="btn" type="button">I&rsquo;m a teacher</button>
-        <button id="btnPupil" class="btn secondary" type="button">I&rsquo;m a pupil</button>
-        <button id="btnTryLesson" class="btn secondary" type="button">Try live test</button>
-      </div>
-      <p class="muted">Open the live test builder without signing in.</p>
-    </section>
-
-    <section id="viewTeacherAuth" class="card" style="display:none;">
-      <h2>Teacher sign in</h2>
-      <p class="muted">Continue with Google to create tests, classes and assignments.</p>
-      <button id="btnGoogle" class="btn" type="button">Continue with Google</button>
-      <div id="teacherAuthMsg" class="notice" style="display:none;"></div>
-    </section>
-
-    <section id="viewTeacher" class="card" style="display:none;"></section>
-
-    <section id="viewPupilAuth" class="card" style="display:none;">
-      <h2>Pupil login</h2>
-      <p class="muted">Enter your username and PIN.</p>
-      <div class="grid2">
-        <div>
-          <label>Username</label>
-          <input id="pupilClassCode" class="input" placeholder="e.g. honeill1001" />
+  <main id="top">
+    <section class="wl-hero wl-hero-product" aria-labelledby="wl-hero-title">
+      <div class="wl-section-inner wl-hero-product-inner">
+        <div class="wl-hero-copy-block">
+          <span class="wl-eyebrow">Wordloom for schools</span>
+          <h1 id="wl-hero-title">Classroom spelling tests, purposeful follow-up, and progress insight.</h1>
+          <p class="wl-hero-copy">
+            Wordloom helps teachers build spelling tests, present them live, assign pupil practice, and review progress without losing teacher control of the learning.
+          </p>
+          <div class="wl-hero-actions" aria-label="Wordloom actions">
+            <a class="wl-button wl-button-primary" href="mailto:hello@wordloom.co.uk?subject=Wordloom%20demo">Book a demo</a>
+            <a class="wl-button wl-button-secondary" href="./present.html?demo=focus_sound">Try sample test</a>
+            <a class="wl-login-link" href="./login.html">Already using Wordloom? Log in</a>
+          </div>
         </div>
-        <div>
-          <label>PIN</label>
-          <input id="pupilCode" class="input" type="password" placeholder="4 digit PIN" />
-        </div>
+        <figure class="wl-screenshot-shell wl-hero-screenshot">
+          <div class="wl-shotFrame wl-shotFrame--hero wl-shotFrame--spellLoomHero">
+            <img
+              src="./assets/screenshots/test-type-spell-loom-2.png"
+              alt="Wordloom Spell Loom spelling test screen showing a pupil spelling a word with sound controls, tries remaining, and score."
+              width="1719"
+              height="925"
+            />
+          </div>
+          <figcaption>Spell Loom gives pupils a clear, focused spelling test experience.</figcaption>
+        </figure>
       </div>
-      <div class="row">
-        <button id="btnPupilLogin" class="btn" type="button">Login</button>
-        <button id="btnBackFromPupil" class="btn secondary" type="button">Back</button>
-      </div>
-      <div id="pupilAuthMsg" class="notice" style="display:none;"></div>
     </section>
 
-    <section id="viewPupil" class="card" style="display:none;"></section>
-  </div>
+    <section id="product" class="wl-section">
+      <div class="wl-section-inner">
+        <div class="wl-section-heading">
+          <span class="wl-eyebrow">What it does</span>
+          <h2>A calm workflow for spelling teaching and follow-up.</h2>
+          <p>Wordloom keeps the familiar classroom rhythm while making practice and progress evidence easier to manage.</p>
+        </div>
+        <div class="wl-use-grid">
+          <article class="wl-info-card">
+            <span class="wl-card-index">01</span>
+            <h3>Teacher-created tests</h3>
+            <p>Create word lists and focused spelling tests for the lesson, class, or group.</p>
+          </article>
+          <article class="wl-info-card">
+            <span class="wl-card-index">02</span>
+            <h3>Live class presentation</h3>
+            <p>Run clean classroom test sessions without turning the lesson into admin.</p>
+          </article>
+          <article class="wl-info-card">
+            <span class="wl-card-index">03</span>
+            <h3>Pupil follow-up</h3>
+            <p>Assign practice pupils can complete separately, linked to real class activity.</p>
+          </article>
+        </div>
+      </div>
+    </section>
 
-  <script type="module" src="./js/app.js?v=5.87"></script>
+    <section id="workflow" class="wl-section wl-section-muted">
+      <div class="wl-section-inner">
+        <div class="wl-section-heading">
+          <span class="wl-eyebrow">How it works</span>
+          <h2>From lesson planning to the next teaching decision.</h2>
+        </div>
+        <div class="wl-steps">
+          <article>
+            <span>1</span>
+            <h3>Create tests</h3>
+            <p>Build spelling tasks from word lists or focused sound work.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <h3>Present live</h3>
+            <p>Use Wordloom in the classroom for structured whole-class testing.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <h3>Assign follow-up</h3>
+            <p>Send pupils the practice they need after the classroom session.</p>
+          </article>
+          <article>
+            <span>4</span>
+            <h3>Review progress</h3>
+            <p>See useful patterns across pupils, words, and repeated attempts.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="wl-section wl-preview-section" aria-labelledby="wl-builder-title">
+      <div class="wl-section-inner">
+        <div class="wl-section-heading">
+          <span class="wl-eyebrow">Build with control</span>
+          <h2 id="wl-builder-title">Create the spelling work your pupils need.</h2>
+          <p>Teachers stay in control of the word list, test type, and focus of each activity.</p>
+        </div>
+        <div class="wl-screenshot-grid wl-screenshot-grid-two">
+          <figure class="wl-screenshot-card">
+            <div class="wl-shotFrame wl-shotFrame--card wl-shotFrame--wordList">
+              <img
+                src="./assets/screenshots/test-builder-word-list.png"
+                alt="Wordloom test builder showing a teacher entering and organising a spelling word list."
+                width="2533"
+                height="1205"
+                loading="lazy"
+              />
+            </div>
+            <figcaption>
+              <strong>Build from a word list</strong>
+              <span>Create classroom spelling tests from the words you want pupils to practise.</span>
+            </figcaption>
+          </figure>
+          <figure class="wl-screenshot-card">
+            <div class="wl-shotFrame wl-shotFrame--card wl-shotFrame--dashboard">
+              <img
+                src="./assets/screenshots/teacher-dashboard.png"
+                alt="Wordloom teacher dashboard showing classroom tests, pupil progress, and recent activity."
+                width="2558"
+                height="1381"
+                loading="lazy"
+              />
+            </div>
+            <figcaption>
+              <strong>Teacher workspace</strong>
+              <span>Keep tests, assignments, and progress review close to the teaching flow.</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="insight" class="wl-section wl-section-muted">
+      <div class="wl-section-inner wl-insight-layout">
+        <div>
+          <span class="wl-eyebrow">Progress insight</span>
+          <h2>Useful evidence for the next step, not just a score.</h2>
+          <p>Wordloom helps teachers review how pupils are developing over time, compare patterns, and spot where follow-up support may be useful.</p>
+          <ul class="wl-check-list">
+            <li>Progress over repeated attempts</li>
+            <li>Class and group comparison views</li>
+            <li>Word-level and pupil-level evidence</li>
+            <li>Export-friendly review data</li>
+          </ul>
+        </div>
+        <figure class="wl-screenshot-shell wl-insight-feature">
+          <div class="wl-shotFrame wl-shotFrame--feature wl-shotFrame--analyticsTop">
+            <img
+              src="./assets/screenshots/analytics-top.png"
+              alt="Wordloom analytics dashboard showing class progress overview and teacher insight panels."
+              width="2535"
+              height="1331"
+              loading="lazy"
+            />
+          </div>
+          <figcaption>Analytics overview for progress and classroom decision-making.</figcaption>
+        </figure>
+      </div>
+      <div class="wl-section-inner wl-screenshot-grid wl-screenshot-grid-two wl-insight-grid">
+        <figure class="wl-screenshot-card">
+          <div class="wl-shotFrame wl-shotFrame--card wl-shotFrame--analyticsProgress">
+            <img
+              src="./assets/screenshots/analytics-progress-over-time.png"
+              alt="Wordloom analytics showing pupil spelling progress over time."
+              width="2518"
+              height="1341"
+              loading="lazy"
+            />
+          </div>
+          <figcaption>
+            <strong>Progress over time</strong>
+            <span>Review whether practice is becoming more secure across attempts.</span>
+          </figcaption>
+        </figure>
+        <figure class="wl-screenshot-card">
+          <div class="wl-shotFrame wl-shotFrame--card wl-shotFrame--analyticsCompare">
+            <img
+              src="./assets/screenshots/analytics-comparisons.png"
+              alt="Wordloom analytics comparison view showing patterns across groups and pupils."
+              width="2531"
+              height="1340"
+              loading="lazy"
+            />
+          </div>
+          <figcaption>
+            <strong>Comparison views</strong>
+            <span>Look for patterns across groups without losing the classroom context.</span>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="practice" class="wl-section">
+      <div class="wl-section-inner wl-practice-layout">
+        <div>
+          <span class="wl-eyebrow">Pupil follow-up</span>
+          <h2>Assigned tasks give pupils a clear place to continue.</h2>
+          <p>Pupils can log in separately to complete assigned spelling tasks and follow-up practice. Teachers can keep the work connected to classroom teaching rather than treating practice as a separate system.</p>
+          <a class="wl-button wl-button-secondary" href="./login.html">Go to pupil login</a>
+        </div>
+        <figure class="wl-screenshot-shell wl-tall-screenshot">
+          <div class="wl-shotFrame wl-shotFrame--tallCrop wl-shotFrame--assignments">
+            <img
+              src="./assets/screenshots/Upcoming%20Assignments%20All.png"
+              alt="Wordloom pupil assignments view showing upcoming spelling tasks and practice items."
+              width="2561"
+              height="4644"
+              loading="lazy"
+            />
+          </div>
+          <figcaption>Upcoming tasks keep pupil follow-up visible and organised.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="safety" class="wl-section wl-section-muted" aria-labelledby="wl-safety-title">
+      <div class="wl-section-inner">
+        <div class="wl-section-heading">
+          <span class="wl-eyebrow">Trust and safety</span>
+          <h2 id="wl-safety-title">Built for safe school use.</h2>
+          <p>Wordloom is designed around teacher-controlled spelling practice. Pupils do not use open AI chat, and AI is not called while pupils are completing spelling tests.</p>
+          <p>Where AI is used, it supports teacher preparation, such as suggesting short sentences or word meanings. Context support helps pupils understand the word they are spelling without changing the spelling score, and baseline spelling evidence remains separate from optional meaning support.</p>
+          <p>School-edited context support is stored within the school’s Wordloom space. Teachers can review or adjust context support in the test builder before assigning work.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="wl-final-cta">
+      <div class="wl-section-inner">
+        <span class="wl-eyebrow">Start with Wordloom</span>
+        <h2>Bring classroom spelling, pupil practice, and progress review into one calm workflow.</h2>
+        <p>Book a walkthrough, try a sample test, or log in if your school is already using Wordloom.</p>
+        <div class="wl-hero-actions">
+          <a class="wl-button wl-button-primary" href="mailto:hello@wordloom.co.uk?subject=Wordloom%20demo">Book a demo</a>
+          <a class="wl-button wl-button-secondary" href="./present.html?demo=focus_sound">Try sample test</a>
+          <a class="wl-login-link" href="./login.html">Log in</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wl-footer">
+    <div class="wl-section-inner wl-footer-inner">
+      <div>
+        <a class="wl-wordmark" href="#top" aria-label="Wordloom home">
+          <span class="wl-wordmark-mark" aria-hidden="true">W</span>
+          <span>WORDLOOM</span>
+        </a>
+        <p>Teacher-built tests, pupil follow-up practice, and literacy progress insight for schools.</p>
+      </div>
+      <div class="wl-footer-groups">
+        <div class="wl-footer-group">
+          <p class="wl-footer-heading">Policies and safety</p>
+          <div class="wl-footer-links">
+            <a href="./policies/ai-use.html">AI Use Statement</a>
+            <a href="./policies/privacy.html">Privacy Notice</a>
+            <a href="./policies/safeguarding.html">Safeguarding &amp; Pupil Safety Statement</a>
+            <a href="./policies/cookies.html">Cookie Notice</a>
+            <a href="./policies/accessibility.html">Accessibility Statement</a>
+            <a href="./policies/security.html">Security Statement</a>
+            <a href="./policies/terms.html">Terms of Use</a>
+            <a href="./policies/school-data.html">School Data Use Statement</a>
+            <a href="./policies/sub-processors.html">Sub-processors</a>
+            <a href="./policies/dpia-support.html">DPIA Support</a>
+          </div>
+        </div>
+        <div class="wl-footer-group">
+          <p class="wl-footer-heading">Wordloom</p>
+          <div class="wl-footer-links">
+            <a href="mailto:hello@wordloom.co.uk?subject=Wordloom%20enquiry">Contact</a>
+            <a href="./present.html?demo=focus_sound">Try sample test</a>
+            <a href="./login.html">Log in</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+  <script type="module" src="./js/homepageAuth.js?v=1.0"></script>
 </body>
 </html>

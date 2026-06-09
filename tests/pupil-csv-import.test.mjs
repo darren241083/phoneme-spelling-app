@@ -94,7 +94,7 @@ MIS-200,Leo,Brown,7B Tutor`);
   assert.deepEqual(normalizeForAssert(buildPupilImportCommitPayload(preview)), []);
 });
 
-test("duplicate normalized rows in the CSV are blocked", () => {
+test("duplicate normalised rows in the CSV are blocked", () => {
   const preview = buildPreview(`mis_id,first_name,surname,form_class,year_group
 MIS-205,Ava,Khan,7A Tutor,Year 7
 MIS-205 , Ava , Khan , 7A Tutor , Year 7`);

@@ -12,6 +12,7 @@ const btnPupil = document.getElementById("btnPupil");
 const btnTryLesson = document.getElementById("btnTryLesson");
 const btnGoogle = document.getElementById("btnGoogle");
 const btnSignOut = document.getElementById("btnSignOut");
+const btnBackFromTeacher = document.getElementById("btnBackFromTeacher");
 const btnBackFromPupil = document.getElementById("btnBackFromPupil");
 const btnPupilLogin = document.getElementById("btnPupilLogin");
 const pupilUsername = document.getElementById("pupilClassCode");
@@ -35,6 +36,18 @@ let gameRuntimePromise = null;
 let authListenerBound = false;
 let routing = false;
 
+function buildLoginRedirectTo() {
+  const origin = window.location.origin;
+  let path = window.location.pathname || "/";
+
+  if (path.endsWith("/index.html")) {
+    path = path.replace(/index\.html$/, "login.html");
+  } else if (!path.endsWith("/login.html")) {
+    path = path.endsWith("/") ? `${path}login.html` : `${path}/login.html`;
+  }
+
+  return origin + path;
+}
 function getCachedImport(currentPromise, factory, reset) {
   if (!currentPromise) {
     currentPromise = factory().catch((error) => {
@@ -63,7 +76,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=6.74");
+      const module = await import("./teacherView.js?v=7.00");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -77,7 +90,7 @@ function loadPupilView() {
   pupilViewPromise = getCachedImport(
     pupilViewPromise,
     async () => {
-      const module = await import("./pupilView.js?v=3.40");
+      const module = await import("./pupilView.js?v=3.73");
       return module.renderPupilView;
     },
     () => {
@@ -90,7 +103,7 @@ function loadPupilView() {
 function loadPupilAuth() {
   pupilAuthPromise = getCachedImport(
     pupilAuthPromise,
-    () => import("./authPupil.js?v=1.1"),
+    () => import("./authPupil.js?v=1.2"),
     () => {
       pupilAuthPromise = null;
     },
@@ -101,7 +114,7 @@ function loadPupilAuth() {
 function loadGameRuntime() {
   gameRuntimePromise = getCachedImport(
     gameRuntimePromise,
-    () => import("./game.js?v=1.30"),
+    () => import("./game.js?v=1.43"),
     () => {
       gameRuntimePromise = null;
     },
@@ -356,6 +369,14 @@ btnTryLesson?.addEventListener("click", () => {
   window.location.href = url.toString();
 });
 
+btnBackFromTeacher?.addEventListener("click", async () => {
+  clearRole();
+  setBanner("");
+  setNotice(teacherAuthMsg, "");
+  setNotice(pupilAuthMsg, "");
+  await route();
+});
+
 btnBackFromPupil?.addEventListener("click", async () => {
   await stopPupilGameplayAudio();
   try {
@@ -393,15 +414,16 @@ pupilPin?.addEventListener("keydown", async (event) => {
 btnGoogle?.addEventListener("click", async () => {
   try {
     const supabase = await loadSupabase();
-    const origin = window.location.origin;
-    let path = window.location.pathname;
-    if (path.endsWith("/index.html")) path = path.replace("/index.html", "/");
-    if (!path.endsWith("/")) path += "/";
-    const redirectTo = origin + path;
+    const redirectTo = buildLoginRedirectTo();
 
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
     });
   } catch (error) {
     setBanner("Google sign-in is unavailable right now. Please refresh and try again.", "error");
@@ -411,7 +433,32 @@ btnGoogle?.addEventListener("click", async () => {
 });
 
 btnSignOut?.addEventListener("click", async () => {
+  const role = getRole();
   await stopPupilGameplayAudio();
+
+  if (role === "pupil") {
+    try {
+      const { pupilLogout } = await loadPupilAuth();
+      pupilLogout();
+    } catch (error) {
+      console.warn("pupil sign-out unavailable:", error);
+    }
+
+    clearRole();
+    setBanner("");
+    setNotice(pupilAuthMsg, "");
+    setNotice(teacherAuthMsg, "");
+    showRolePicker();
+
+    try {
+      const supabase = await loadSupabase();
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn("pupil Supabase sign-out unavailable:", error);
+    }
+    return;
+  }
+
   try {
     const supabase = await loadSupabase();
     await supabase.auth.signOut();

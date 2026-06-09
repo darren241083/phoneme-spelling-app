@@ -1,5 +1,5 @@
 import { escapeHtml } from "./ui.js";
-import { pupilRecordAttempt } from "./db.js?v=1.17";
+import { pupilRecordAttempt } from "./db.js?v=1.49";
 import { createScrollMode } from "./modes_scroll.js";
 import {
   createSegmentedSpellingModel,
@@ -18,8 +18,16 @@ import {
   buildWordFromGraphemes,
   mapPreviewSegments,
   renderPhonicsPreviewModel,
-} from "./phonicsRenderer.js";
+} from "./phonicsRenderer.js?v=1.6";
+import { shouldBlockDuplicateIncorrectSubmission } from "./pupilAttemptGuard.js?v=1.0";
 import { splitWordToGraphemes } from "./wordParser.js?v=1.5";
+import {
+  getSpellingContextSupport,
+  getVisiblePupilMeaningSupport,
+  getVisiblePupilSentenceSupport,
+  hasMeaningSupport,
+  hasSentenceSupport,
+} from "./spellingContextSupport.js?v=1.3";
 
 const LOOM_DECOY_COUNTS = {
   none: 0,
@@ -74,12 +82,27 @@ export function mountGame({
   assignmentId,
   onExit,
   onComplete,
+  onAbandon,
   onProgress,
   resumeState = null,
   recordAttempts = true,
   presentationMode = false,
 }) {
   cleanupActiveGameplayAudio();
+  const isCompetitionMode = String(testMeta?.competition_mode || testMeta?.competitionMode || "").trim().toLowerCase() === "spelling_bee"
+    || testMeta?.spelling_bee === true
+    || testMeta?.spellingBee === true;
+  const isSampleMode = testMeta?.sample_mode === true || testMeta?.sampleMode === true;
+  const isUntilWrongCompetition = isCompetitionMode
+    && String(testMeta?.bee_length_mode || testMeta?.beeLengthMode || "").trim().toLowerCase() === "until_wrong";
+  const leaveConfirmTitle = isCompetitionMode ? "Leave competition?" : isSampleMode ? "Leave sample test?" : "Leave test?";
+  const leaveConfirmBody = isCompetitionMode
+    ? "Leaving ends your Spelling Bee run."
+    : isSampleMode
+      ? "This demo will close and your progress will not be saved."
+      : "Your progress will be saved and you can continue later.";
+  const leaveContinueLabel = isCompetitionMode ? "Stay in competition" : isSampleMode ? "Stay in sample" : "Continue test";
+  const leaveConfirmLabel = isCompetitionMode ? "End competition" : isSampleMode ? "Leave sample" : "Save and leave";
   const gameplaySessionId = ++activeGameplaySessionId;
   const hasUnlimitedAttempts = false;
   let idx = 0;
@@ -105,9 +128,15 @@ export function mountGame({
   let completionInFlight = false;
   let autoPlayTimer = 0;
   let segmentedRefocusTimer = 0;
+  let competitionAdvanceTimer = 0;
+  let beeTimerInterval = 0;
+  let beeTimerDeadline = 0;
+  let beeTimerDuration = 0;
   let audioPlaybackVersion = 0;
   let gameplaySessionActive = true;
   let currentAudioElement = null;
+  let competitionEnded = false;
+  let competitionAbandonInFlight = false;
 
   host.innerHTML = `
     <style>
@@ -201,6 +230,19 @@ export function mountGame({
         font-size:clamp(18px, 1.7vw, 24px);
         max-width:40ch;
       }
+      .gameContextMeaningLine{
+        max-width:680px;
+        margin:6px auto 0;
+        text-align:center;
+        font-size:15px;
+        line-height:1.45;
+        color:var(--wl-text-muted, #64748b);
+      }
+      .gameContextButton.is-active{
+        border-color:rgba(var(--wl-accent-rgb),.36);
+        background:var(--wl-accent-tint);
+        color:var(--wl-text);
+      }
       .gameShell--present .guidedPrompt{
         font-size:13px;
         font-weight:800;
@@ -232,6 +274,44 @@ export function mountGame({
       }
       .gameShell--present .wordProgress{
         width:min(760px,100%);
+      }
+      .beeTimer{
+        display:none;
+        width:min(520px,100%);
+        margin:0 auto;
+        padding:10px 0 0;
+      }
+      .gameShell--bee .beeTimer{
+        display:block;
+      }
+      .beeTimerTop{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        font-size:14px;
+        font-weight:800;
+        color:#0f172a;
+      }
+      .beeTimerValue{
+        font-variant-numeric:tabular-nums;
+        font-size:20px;
+      }
+      .beeTimerBar{
+        width:100%;
+        height:10px;
+        border-radius:999px;
+        background:#e2e8f0;
+        overflow:hidden;
+        margin-top:8px;
+      }
+      .beeTimerBar span{
+        display:block;
+        width:100%;
+        height:100%;
+        background:#0f172a;
+        transform-origin:left center;
+        transform:scaleX(1);
       }
       .gameShell--present .wordProgressText{
         font-size:16px;
@@ -737,10 +817,10 @@ export function mountGame({
         }
       }
     </style>
-    <div id="gameShell" class="gameShell ${presentationMode ? "gameShell--present" : ""}">
+    <div id="gameShell" class="gameShell ${presentationMode ? "gameShell--present" : ""} ${isCompetitionMode ? "gameShell--bee" : ""}">
     <div class="gameTop gameTop--enhanced">
       <div class="gameTopLeft">
-        <div>Word <b id="wNum">1</b> of <b id="wTot">0</b></div>
+        <div>Word <b id="wNum">1</b>${isUntilWrongCompetition ? "" : ` of <b id="wTot">0</b>`}</div>
         ${!presentationMode && String(testMeta?.title || "").trim() ? `<div id="gameActivityTitle" class="gameActivityTitle">${escapeHtml(String(testMeta.title || "").trim())}</div>` : ""}
       </div>
       <div class="gameTopRight">
@@ -758,10 +838,19 @@ export function mountGame({
     <div class="center">
       <div id="promptLine" class="muted gamePromptLine" style="text-align:center;"></div>
       <div id="sentenceLine" class="muted gameSentenceLine" style="text-align:center; display:none;"></div>
+      <div id="contextMeaningLine" class="muted gameContextMeaningLine" style="display:none;" aria-live="polite"></div>
 
       <div class="wordProgress">
         <div class="wordProgressBar"><span id="wordProgressFill"></span></div>
         <div class="wordProgressText" id="wordProgressText"></div>
+      </div>
+
+      <div id="beeTimer" class="beeTimer" aria-live="polite">
+        <div class="beeTimerTop">
+          <span>Time</span>
+          <strong id="beeTimerValue" class="beeTimerValue">0.0s</strong>
+        </div>
+        <div class="beeTimerBar" aria-hidden="true"><span id="beeTimerFill"></span></div>
       </div>
 
       <div class="attemptDots" id="attemptDots"></div>
@@ -769,7 +858,9 @@ export function mountGame({
       <div id="main"></div>
 
       <div class="row gameActionRow">
-        <button id="btnListen" class="btn secondary" type="button">🔊 Listen</button>
+        <button id="btnListen" class="btn secondary" type="button">Replay word</button>
+        <button id="btnContextSentence" class="btn secondary gameContextButton" type="button" style="display:none;">Sentence</button>
+        <button id="btnContextMeaning" class="btn secondary gameContextButton" type="button" style="display:none;">Meaning</button>
         <button id="btnCheck" class="btn" type="button">Check word</button>
         <button id="btnNext" class="btn secondary" type="button" style="display:none;">Next</button>
       </div>
@@ -779,11 +870,11 @@ export function mountGame({
     </div>
     <div id="leaveConfirm" class="gameModalBackdrop" hidden aria-hidden="true">
       <div class="gameModalCard" role="dialog" aria-modal="true" aria-labelledby="leaveConfirmTitle" aria-describedby="leaveConfirmBody">
-        <h2 id="leaveConfirmTitle" class="gameModalTitle">Leave test?</h2>
-        <p id="leaveConfirmBody" class="gameModalBody">Your progress will be saved and you can continue later.</p>
+        <h2 id="leaveConfirmTitle" class="gameModalTitle">${leaveConfirmTitle}</h2>
+        <p id="leaveConfirmBody" class="gameModalBody">${leaveConfirmBody}</p>
         <div class="gameModalActions">
-          <button id="btnLeaveContinue" class="btn secondary" type="button">Continue test</button>
-          <button id="btnLeaveSave" class="btn" type="button">Save and leave</button>
+          <button id="btnLeaveContinue" class="btn secondary" type="button">${leaveContinueLabel}</button>
+          <button id="btnLeaveSave" class="btn" type="button">${leaveConfirmLabel}</button>
         </div>
       </div>
     </div>
@@ -796,14 +887,20 @@ export function mountGame({
   const modeText = $("modeText");
   const promptLine = $("promptLine");
   const sentenceLine = $("sentenceLine");
+  const contextMeaningLine = $("contextMeaningLine");
   const wordProgressFill = $("wordProgressFill");
   const wordProgressText = $("wordProgressText");
+  const beeTimer = $("beeTimer");
+  const beeTimerValue = $("beeTimerValue");
+  const beeTimerFill = $("beeTimerFill");
   const attemptDots = $("attemptDots");
   const attemptsLeftTop = $("attemptsLeftTop");
   const main = $("main");
   const gameShell = $("gameShell");
   const feedback = $("feedback");
   const btnListen = $("btnListen");
+  const btnContextSentence = $("btnContextSentence");
+  const btnContextMeaning = $("btnContextMeaning");
   const btnCheck = $("btnCheck");
   const btnNext = $("btnNext");
   const btnExit = $("btnExit");
@@ -815,6 +912,23 @@ export function mountGame({
     return gameplaySessionActive
       && expectedSessionId === gameplaySessionId
       && activeGameplaySessionId === gameplaySessionId;
+  }
+
+  function handleCompetitionPageLeave() {
+    if (!isGameplaySessionActive() || !isCompetitionMode) return;
+    abandonCompetitionRun();
+  }
+
+  function bindCompetitionLeaveListeners() {
+    if (!isCompetitionMode) return;
+    window.addEventListener("pagehide", handleCompetitionPageLeave);
+    window.addEventListener("beforeunload", handleCompetitionPageLeave);
+  }
+
+  function removeCompetitionLeaveListeners() {
+    if (!isCompetitionMode) return;
+    window.removeEventListener("pagehide", handleCompetitionPageLeave);
+    window.removeEventListener("beforeunload", handleCompetitionPageLeave);
   }
 
   function teardownGameplayAudio({ dispose = false } = {}) {
@@ -834,12 +948,16 @@ export function mountGame({
   }
 
   function disposeGameplaySessionAudio() {
+    removeCompetitionLeaveListeners();
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
     teardownGameplayAudio({ dispose: true });
   }
 
   activeGameplayAudioCleanup = disposeGameplaySessionAudio;
+  bindCompetitionLeaveListeners();
 
-  wTot.textContent = String(words.length);
+  if (wTot) wTot.textContent = String(words.length);
 
   function currentItem() {
     return words[idx] || null;
@@ -864,7 +982,12 @@ export function mountGame({
 
   function isBaselineDiagnosticItem(item) {
     const choice = getChoice(item);
-    return normalizeChoiceFlag(choice?.baseline_v1)
+    const source = String(choice?.source || "").trim().toLowerCase();
+    const isBaseline = normalizeChoiceFlag(choice?.baseline_v1)
+      || normalizeChoiceFlag(choice?.baseline_v2)
+      || source === "baseline_v1"
+      || source === "baseline_v2";
+    return isBaseline
       && String(choice?.baseline_signal || "").trim().toLowerCase() === "diagnostic";
   }
 
@@ -961,6 +1084,7 @@ export function mountGame({
   }
 
   function resolveQuestionType(item) {
+    if (isCompetitionMode) return "full_recall";
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1008,6 +1132,7 @@ export function mountGame({
   }
 
   function resolveModeKind(item) {
+    if (isCompetitionMode) return "no_support_assessment";
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1062,18 +1187,18 @@ export function mountGame({
 
   function readableQuestionType(item, type = currentModeKind) {
     const choice = getChoice(item);
-    const explicitType = normalizeStoredQuestionType(
-      choice?.question_type
-      ?? choice?.questionType
-      ?? choice?.mode
-      ?? "",
-      {
-        title: testMeta?.title,
-        mode: testMeta?.mode,
-      }
-    );
-    const explicitLabel = explicitType ? getQuestionHeaderLabel(explicitType) : "";
-    if (explicitLabel) return explicitLabel;
+    const explicitTypeValue = choice?.question_type ?? choice?.questionType ?? choice?.mode ?? "";
+    if (String(explicitTypeValue || "").trim()) {
+      const explicitType = normalizeStoredQuestionType(
+        explicitTypeValue,
+        {
+          title: testMeta?.title,
+          mode: testMeta?.mode,
+        }
+      );
+      const explicitLabel = explicitType ? getQuestionHeaderLabel(explicitType) : "";
+      if (explicitLabel) return explicitLabel;
+    }
 
     const modeLabel = getQuestionHeaderLabel(type);
     if (modeLabel) return modeLabel;
@@ -1090,6 +1215,7 @@ export function mountGame({
   }
 
   function getAttemptsAllowedForItem(item = currentItem()) {
+    if (isCompetitionMode) return 1;
     return resolveItemAttemptsAllowed(item, testMeta);
   }
 
@@ -1173,6 +1299,7 @@ export function mountGame({
     completed = false,
     correct = false,
     typed = "",
+    lastSubmittedIncorrectAnswer = null,
     attemptsUsed = 0,
     attemptsAllowed = null,
     questionType = null,
@@ -1207,12 +1334,13 @@ export function mountGame({
       correctSpelling: resolvedWordText,
       questionType: String(questionType || resolveQuestionType(item) || "").trim() || null,
       modeKind: String(modeKind || resolveModeKind(item) || "").trim() || null,
-      wordSource: item?.is_target_word ? "targeted" : "base",
+      wordSource: item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       baseTestWordId: item?.base_test_word_id || item?.id || null,
       assignmentTargetId: item?.assignment_target_id || item?.assignmentTargetId || null,
       focusGrapheme: getResolvedFocusGrapheme(item),
       patternType: choice?.pattern_type || null,
       targetGraphemes: Array.isArray(item?.segments) ? item.segments : [],
+      lastSubmittedIncorrectAnswer: String(lastSubmittedIncorrectAnswer ?? "").trim() || null,
       inputState: cloneProgressInputState(inputState),
       feedbackState: cloneProgressFeedbackState(feedbackState),
     };
@@ -1259,7 +1387,7 @@ export function mountGame({
         : getAttemptsAllowedForItem(item),
       correctSpelling: entry?.correctSpelling || String(item?.word || "").trim(),
       questionType: entry?.questionType || resolveQuestionType(item),
-      wordSource: entry?.wordSource || (item?.is_target_word ? "targeted" : "base"),
+      wordSource: entry?.wordSource || item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       baseTestWordId: entry?.baseTestWordId || item?.base_test_word_id || item?.id || null,
       assignmentTargetId: entry?.assignmentTargetId || item?.assignment_target_id || item?.assignmentTargetId || null,
       focusGrapheme: entry?.focusGrapheme || getResolvedFocusGrapheme(item),
@@ -1336,12 +1464,99 @@ export function mountGame({
     };
   }
 
+  function buildCompetitionPayload({ reason = "completed", rows = results, audioFailed = false } = {}) {
+    const resultRows = Array.isArray(rows) ? rows : [];
+    const correctRows = resultRows.filter((row) => !!row?.correct);
+    const attempts = resultRows.length;
+    return {
+      totalWords: words.length,
+      totalCorrect: correctRows.length,
+      streak: correctRows.length,
+      roundsAttempted: attempts,
+      averageAttempts: attempts ? resultRows.reduce((sum, row) => sum + Math.max(1, Number(row?.attemptsUsed || 1)), 0) / attempts : 0,
+      results: resultRows,
+      attemptsAllowed: 1,
+      testTitle: testMeta?.title || "Spelling Bee",
+      endedReason: reason,
+      audioFailed: audioFailed === true,
+    };
+  }
+
+  async function endCompetitionRun({ reason = "abandoned", typed = "", audioFailed = false } = {}) {
+    if (!isCompetitionMode || competitionEnded || completionInFlight) return;
+    competitionEnded = true;
+    completionInFlight = true;
+    locked = true;
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
+    stopAudioPlayback();
+    btnExit.disabled = true;
+    btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
+    btnCheck.disabled = true;
+    btnNext.disabled = true;
+    const item = currentItem();
+    if (item && (reason === "wrong" || reason === "timeout") && !getProgressEntry(item)?.completed) {
+      const entry = buildStoredProgressEntry(item, {
+        completed: true,
+        correct: false,
+        typed,
+        attemptsUsed: 1,
+        attemptsAllowed: 1,
+        questionType: "full_recall",
+        modeKind: "no_support_assessment",
+        inputState: null,
+        feedbackState: null,
+        index: idx + 1,
+      });
+      progressEntries.set(getItemStateKey(item), entry);
+      upsertCompletedResult(item, entry);
+      rebuildSessionResultState();
+    }
+    const payload = buildCompetitionPayload({ reason, audioFailed });
+    progressClosed = true;
+    try {
+      await onComplete?.(payload);
+      disposeGameplaySessionAudio();
+    } catch (error) {
+      console.warn("finish competition error:", error);
+      feedback.innerHTML = `<span class="badgeBad">Could not finish yet.</span>`;
+    }
+  }
+
+  function abandonCompetitionRun() {
+    if (!isCompetitionMode || competitionEnded || competitionAbandonInFlight || progressClosed) return;
+    competitionAbandonInFlight = true;
+    competitionEnded = true;
+    progressClosed = true;
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
+    stopAudioPlayback();
+    const payload = buildCompetitionPayload({ reason: "abandoned" });
+    void Promise.resolve(onAbandon?.(payload)).catch((error) => {
+      console.warn("abandon competition error:", error);
+    });
+  }
+
+  function failCompetitionAudio() {
+    if (!isCompetitionMode || competitionEnded || completionInFlight || progressClosed) return;
+    feedback.innerHTML = `<span class="badgeBad">Audio could not play.</span> <span class="muted">The competition has stopped for fairness.</span>`;
+    void endCompetitionRun({
+      reason: "abandoned",
+      typed: getCurrentTypedValue(),
+      audioFailed: true,
+    });
+  }
+
   function beginFinishingState() {
     completionInFlight = true;
     locked = true;
     stopAudioPlayback();
     btnExit.disabled = true;
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnNext.disabled = true;
     btnNext.textContent = "Finishing...";
@@ -1418,6 +1633,7 @@ export function mountGame({
       attemptsAllowed: getAttemptsAllowedForItem(item),
       questionType: resolveQuestionType(item),
       modeKind: currentModeKind || resolveModeKind(item),
+      lastSubmittedIncorrectAnswer: existingEntry?.lastSubmittedIncorrectAnswer || null,
       inputState: captureCurrentInputState(),
       feedbackState: null,
       index: idx + 1,
@@ -1512,6 +1728,61 @@ export function mountGame({
     }
   }
 
+  function getCompetitionGraphemeCount(item = currentItem()) {
+    const segments = Array.isArray(item?.segments)
+      ? item.segments.map((segment) => String(segment || "").trim()).filter(Boolean)
+      : [];
+    if (segments.length) return segments.length;
+    return splitWordToGraphemes(String(item?.word || "")).filter(Boolean).length || Math.max(1, String(item?.word || "").length);
+  }
+
+  function getCompetitionTimeLimitMs(item = currentItem()) {
+    const choice = getChoice(item);
+    const explicit = Number(choice?.bee_time_limit_ms ?? choice?.beeTimeLimitMs ?? item?.bee_time_limit_ms ?? item?.beeTimeLimitMs);
+    const rawLimit = Number.isFinite(explicit)
+      ? explicit
+      : 2200 + (850 * getCompetitionGraphemeCount(item));
+    return Math.max(4500, Math.min(11000, Math.round(rawLimit)));
+  }
+
+  function clearCompetitionTimer() {
+    if (beeTimerInterval) {
+      window.clearInterval(beeTimerInterval);
+      beeTimerInterval = 0;
+    }
+  }
+
+  function clearCompetitionAdvanceTimer() {
+    if (competitionAdvanceTimer) {
+      window.clearTimeout(competitionAdvanceTimer);
+      competitionAdvanceTimer = 0;
+    }
+  }
+
+  function updateCompetitionTimerDisplay(remainingMs = beeTimerDeadline - Date.now()) {
+    if (!isCompetitionMode || !beeTimer) return;
+    const safeRemaining = Math.max(0, Number(remainingMs || 0));
+    const ratio = beeTimerDuration > 0 ? Math.max(0, Math.min(1, safeRemaining / beeTimerDuration)) : 0;
+    if (beeTimerValue) beeTimerValue.textContent = `${(safeRemaining / 1000).toFixed(1)}s`;
+    if (beeTimerFill) beeTimerFill.style.transform = `scaleX(${ratio})`;
+  }
+
+  function startCompetitionTimer(item = currentItem()) {
+    if (!isCompetitionMode || !item) return;
+    clearCompetitionTimer();
+    beeTimerDuration = getCompetitionTimeLimitMs(item);
+    beeTimerDeadline = Date.now() + beeTimerDuration;
+    updateCompetitionTimerDisplay(beeTimerDuration);
+    beeTimerInterval = window.setInterval(() => {
+      const remaining = beeTimerDeadline - Date.now();
+      updateCompetitionTimerDisplay(remaining);
+      if (remaining <= 0) {
+        clearCompetitionTimer();
+        void endCompetitionRun({ reason: "timeout", typed: getCurrentTypedValue() });
+      }
+    }, 100);
+  }
+
   function clearSegmentedRefocusTimer() {
     if (segmentedRefocusTimer) {
       window.clearTimeout(segmentedRefocusTimer);
@@ -1569,6 +1840,21 @@ export function mountGame({
   async function exitWithSave() {
     stopAudioPlayback();
     hideLeaveConfirm({ restoreFocus: false });
+    if (isCompetitionMode && !competitionEnded) {
+      competitionEnded = true;
+      competitionAbandonInFlight = true;
+      clearCompetitionTimer();
+      clearCompetitionAdvanceTimer();
+      progressClosed = true;
+      try {
+        await onAbandon?.(buildCompetitionPayload({ reason: "abandoned" }));
+      } catch (error) {
+        console.warn("abandon competition error:", error);
+      }
+      disposeGameplaySessionAudio();
+      onExit?.();
+      return;
+    }
     await flushProgressSync();
     progressClosed = true;
     disposeGameplaySessionAudio();
@@ -1585,20 +1871,15 @@ export function mountGame({
     showLeaveConfirm();
   }
 
-  function isFixedChoiceModeWithDuplicateGuard() {
-    return currentModeKind === "focus_sound" || currentModeKind === "multiple_choice_grapheme_picker";
-  }
-
-  function shouldBlockRepeatedWrongChoice(item, typed) {
-    if (!isFixedChoiceModeWithDuplicateGuard()) return false;
+  function shouldBlockRepeatedIncorrectSubmission(item, typed) {
     const previousEntry = getProgressEntry(item);
     if (!previousEntry || previousEntry.completed || previousEntry.correct) return false;
     if (Math.max(0, Number(previousEntry.attemptsUsed || 0)) < 1) return false;
-
-    const normalizedTyped = String(typed || "").trim().toLowerCase();
-    const normalizedPrevious = String(previousEntry.typed || "").trim().toLowerCase();
-    if (!normalizedTyped || !normalizedPrevious || normalizedTyped !== normalizedPrevious) return false;
-    return !isCurrentCorrect(typed);
+    return shouldBlockDuplicateIncorrectSubmission({
+      previousResultWasIncorrect: true,
+      lastSubmittedIncorrectAnswer: previousEntry?.lastSubmittedIncorrectAnswer || "",
+      currentSubmittedAnswer: typed,
+    });
   }
 
   function seedProgressFromResumeState() {
@@ -1613,6 +1894,7 @@ export function mountGame({
         completed: resumeEntry?.completed === true,
         correct: !!resumeEntry?.correct,
         typed: String(resumeEntry?.typed ?? "").trim(),
+        lastSubmittedIncorrectAnswer: resumeEntry?.lastSubmittedIncorrectAnswer,
         attemptsUsed: resumeEntry?.attemptsUsed,
         attemptsAllowed: resumeEntry?.attemptsAllowed,
         questionType: resumeEntry?.questionType,
@@ -1647,10 +1929,124 @@ export function mountGame({
   }
 
   function isHintsEnabled() {
+    if (isCompetitionMode) return false;
     return testMeta?.hints_enabled !== false && testMeta?.hintsEnabled !== false;
   }
 
+  function shouldUseNativeContextSupport() {
+    return !isSampleMode && !isCompetitionMode && isHintsEnabled();
+  }
+
+  function isBaselineContextSession() {
+    const source = String(
+      testMeta?.attempt_source
+      || testMeta?.attemptSource
+      || testMeta?.assignment_origin
+      || testMeta?.assignmentOrigin
+      || ""
+    ).trim().toLowerCase();
+    return source === "baseline" || source === "baseline_v1" || source === "baseline_v2";
+  }
+
+  function isBaselineContext(context) {
+    return context?.baselineLike === true || isBaselineContextSession();
+  }
+
+  function clearContextMeaningLine() {
+    if (contextMeaningLine) {
+      contextMeaningLine.textContent = "";
+      contextMeaningLine.style.display = "none";
+    }
+    btnContextMeaning?.classList.remove("is-active");
+  }
+
+  function hideNativeContextControls() {
+    if (btnContextSentence) {
+      btnContextSentence.style.display = "none";
+      btnContextSentence.disabled = true;
+      btnContextSentence.title = "";
+    }
+    if (btnContextMeaning) {
+      btnContextMeaning.style.display = "none";
+      btnContextMeaning.disabled = true;
+      btnContextMeaning.title = "";
+    }
+    clearContextMeaningLine();
+  }
+
+  function getVisibleContextSentence(context, item) {
+    return getVisiblePupilSentenceSupport(context?.sentence, context?.word || item?.word || "");
+  }
+
+  function getVisibleContextMeaning(context, item) {
+    return getVisiblePupilMeaningSupport(context?.meaning, context?.word || item?.word || "");
+  }
+
+  function isContextSentenceAllowed(context) {
+    if (!context?.hasSentence) return false;
+    if (!isBaselineContext(context)) return true;
+    return context.explicitSentenceRequired === true;
+  }
+
+  function shouldAutoShowContextSentence(context) {
+    if (!context?.hasSentence) return false;
+    if (isBaselineContext(context)) return context.explicitSentenceRequired === true;
+    return context.sentenceRequired === true;
+  }
+
+  function refreshNativeContextControls(item = currentItem()) {
+    hideNativeContextControls();
+    if (!shouldUseNativeContextSupport() || !item) return;
+
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    const sentenceAvailable = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
+    const meaningAvailable = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
+
+    if (btnContextSentence && sentenceAvailable) {
+      btnContextSentence.style.display = "inline-block";
+      btnContextSentence.disabled = false;
+    }
+
+    if (btnContextMeaning && meaningAvailable) {
+      btnContextMeaning.style.display = "inline-block";
+      btnContextMeaning.disabled = false;
+    }
+
+    if (sentenceAvailable && shouldAutoShowContextSentence(context)) {
+      sentenceLine.textContent = visibleSentence;
+      sentenceLine.style.display = "block";
+    }
+  }
+
+  function showCurrentContextSentence() {
+    if (!shouldUseNativeContextSupport() || locked) return;
+    const item = currentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    if (!hasSentenceSupport(item) || !isContextSentenceAllowed(context) || !visibleSentence) return;
+    sentenceLine.textContent = visibleSentence;
+    sentenceLine.style.display = "block";
+    speak(context.sentence);
+  }
+
+  function showCurrentContextMeaning() {
+    if (!shouldUseNativeContextSupport() || locked) return;
+    const item = currentItem();
+    const context = getSpellingContextSupport(item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    if (!hasMeaningSupport(item) || isBaselineContext(context) || !visibleMeaning) return;
+    if (contextMeaningLine) {
+      contextMeaningLine.textContent = visibleMeaning;
+      contextMeaningLine.style.display = "block";
+    }
+    btnContextMeaning?.classList.add("is-active");
+    speak(visibleMeaning);
+  }
+
   function shouldRevealOnFinalWrong(item) {
+    if (isCompetitionMode) return false;
     if (!presentationMode) return true;
     const choice = getChoice(item);
     if (typeof choice.reveal_on_final_wrong === "boolean") return choice.reveal_on_final_wrong;
@@ -1681,10 +2077,14 @@ export function mountGame({
     return choice?.focus_grapheme || (Array.isArray(choice?.focus_graphemes) ? choice.focus_graphemes[0] : null) || null;
   }
 
-  function speak(text) {
-    if (!isGameplaySessionActive() || !("speechSynthesis" in window) || !text) return;
+  function speak(text, { speechVersion = audioPlaybackVersion, itemKey = getItemStateKey(currentItem()) } = {}) {
+    if (!isGameplaySessionActive() || !text) return;
+    if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance === "undefined") {
+      failCompetitionAudio();
+      return;
+    }
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    const u = new window.SpeechSynthesisUtterance(text);
     u.rate = 0.9;
     const voices = window.speechSynthesis.getVoices?.() || [];
     const preferred =
@@ -1696,7 +2096,18 @@ export function mountGame({
         window.speechSynthesis.cancel();
       }
     };
-    window.speechSynthesis.speak(u);
+    u.onerror = () => {
+      if (!isCompetitionMode) return;
+      if (!isGameplaySessionActive() || progressClosed || completionInFlight) return;
+      if (speechVersion !== audioPlaybackVersion) return;
+      if (itemKey && itemKey !== getItemStateKey(currentItem())) return;
+      failCompetitionAudio();
+    };
+    try {
+      window.speechSynthesis.speak(u);
+    } catch {
+      failCompetitionAudio();
+    }
   }
 
   function playCurrentAudio({
@@ -1710,7 +2121,7 @@ export function mountGame({
     if (!item) return;
     if (scheduledItemKey && scheduledItemKey !== getItemStateKey(item)) return;
     const spoken = item?.word || item?.sentence || "";
-    speak(spoken);
+    speak(spoken, { speechVersion: scheduledVersion, itemKey: scheduledItemKey });
     if (currentModeKind === "segmented_spelling") {
       focusSegmentedController();
       const refocusVersion = scheduledVersion;
@@ -1731,9 +2142,11 @@ export function mountGame({
     attemptsLeftTop.textContent = hasUnlimitedAttempts
       ? "Unlimited"
       : String(Math.max(0, attemptsAllowed - currentAttempt + 1));
-    const pct = words.length ? ((idx) / words.length) * 100 : 0;
+    const pct = isUntilWrongCompetition ? 0 : (words.length ? ((idx) / words.length) * 100 : 0);
     wordProgressFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-    wordProgressText.textContent = `Word ${idx + 1} of ${words.length}`;
+    wordProgressText.textContent = isUntilWrongCompetition
+      ? `Word ${idx + 1}`
+      : `Word ${idx + 1} of ${words.length}`;
   }
 
   function renderAttemptDots() {
@@ -1842,8 +2255,8 @@ export function mountGame({
   function mapTargetSegmentsToLetters(item) {
     const targetParts = getTargetParts(item);
     const displayWord = buildWordFromGraphemes(targetParts);
-    const { letters, segments } = mapPreviewSegments(displayWord, targetParts);
-    return { letters, mapped: segments, targetParts };
+    const { letters, marks, segments } = mapPreviewSegments(displayWord, targetParts);
+    return { letters, marks, mapped: segments, targetParts };
   }
 
   function getSegmentedLetterParts(item, safeWord) {
@@ -1854,6 +2267,7 @@ export function mountGame({
   }
 
   function getSegmentedVisualAidsMode(item) {
+    if (isCompetitionMode) return "none";
     const choice = getChoice(item);
     return String(choice?.visual_aids_mode || choice?.visualAidsMode || "none").trim().toLowerCase() === "phonics"
       ? "phonics"
@@ -1965,7 +2379,8 @@ export function mountGame({
         return `<span class="segmentedMark segmentedMark--silent" style="grid-column:${localStart + 1};"></span>`;
       }
       if (segment.type === "underline" || segment.markType === "underline") {
-        return `<span class="segmentedMark segmentedMark--underline" style="grid-column:${localStart + 1} / ${localEnd + 2};"></span>`;
+        const offsetClass = segment?.offset === "below_dots" ? " segmentedMark--underline-below-dots" : "";
+        return `<span class="segmentedMark segmentedMark--underline${offsetClass}" style="grid-column:${localStart + 1} / ${localEnd + 2};"></span>`;
       }
       return `<span class="segmentedMark segmentedMark--bridge" style="grid-column:${localStart + 1} / ${localEnd + 2};"><span class="segmentedMarkBridgeInner"></span></span>`;
     }).join("");
@@ -2077,6 +2492,8 @@ export function mountGame({
     locked = true;
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -2338,35 +2755,52 @@ export function mountGame({
     return clean || "—";
   }
 
-  function renderMarks(letters, mapped) {
+  function renderMarks(letters, mapped, marks = null) {
     const safeLetters = Array.isArray(letters) ? letters : [];
     if (!safeLetters.length) return "";
 
-    const splitMarks = mapped.filter((segment) => segment.markType === "split");
-    const underlineMarks = mapped.filter((segment) => segment.markType === "underline");
+    const sourceMarks = Array.isArray(marks) && marks.length
+      ? marks
+      : (Array.isArray(mapped) ? mapped.map((segment) => ({
+        type: segment.markType,
+        start: segment.start,
+        end: segment.end,
+      })) : []);
+    const splitMarks = sourceMarks.filter((segment) => segment.type === "split" || segment.markType === "split");
+    const underlineMarks = sourceMarks.filter((segment) => segment.type === "underline" || segment.markType === "underline");
+    const dotMarks = sourceMarks.filter((segment) => segment.type === "dot" || segment.markType === "dot");
+    const silentDotMarks = sourceMarks.filter((segment) => segment.type === "silent_dot" || segment.markType === "silent_dot");
+    const hasExplicitDots = dotMarks.length > 0 || silentDotMarks.length > 0;
 
     const greyDots = new Set();
-    const orangeDots = new Set();
+    const silentDots = new Set();
 
-    for (let i = 0; i < safeLetters.length; i += 1) greyDots.add(i);
-
-    for (const mark of underlineMarks) {
-      for (let i = mark.start; i <= mark.end; i += 1) {
-        greyDots.delete(i);
+    if (hasExplicitDots) {
+      for (const mark of dotMarks) {
+        const index = Number(mark.start);
+        if (Number.isInteger(index)) greyDots.add(index);
       }
+      for (const mark of silentDotMarks) {
+        const index = Number(mark.start);
+        if (Number.isInteger(index)) silentDots.add(index);
+      }
+    } else {
+      for (let i = 0; i < safeLetters.length; i += 1) greyDots.add(i);
     }
 
-    for (const mark of splitMarks) {
-      orangeDots.add(mark.start);
-      orangeDots.add(mark.end);
-      greyDots.delete(mark.start);
-      greyDots.delete(mark.end);
+    if (!hasExplicitDots) {
+      for (const mark of underlineMarks) {
+        for (let i = mark.start; i <= mark.end; i += 1) {
+          greyDots.delete(i);
+        }
+      }
     }
 
     const CELL_W = 28;
     const GAP = 8;
     const DOT_R = 5;
     const DOT_Y = 12;
+    const UNDERLINE_DOT_OFFSET_Y = DOT_Y + DOT_R + 7;
     const BRIDGE_DEPTH = 18;
     const PAD = 6;
     const STROKE = 4;
@@ -2380,16 +2814,17 @@ export function mountGame({
       .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#94a3b8" />`)
       .join("");
 
-    const orangeSvg = [...orangeDots]
+    const silentSvg = [...silentDots]
       .sort((a, b) => a - b)
-      .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#f59e0b" />`)
+      .map((i) => `<circle cx="${centerX(i)}" cy="${DOT_Y}" r="${DOT_R}" fill="#fff" stroke="#94a3b8" stroke-width="3" />`)
       .join("");
 
     const underlineSvg = underlineMarks
       .map((mark) => {
         const x1 = centerX(mark.start) - PAD;
         const x2 = centerX(mark.end) + PAD;
-        return `<line x1="${x1}" y1="${DOT_Y}" x2="${x2}" y2="${DOT_Y}" stroke="#f59e0b" stroke-width="${STROKE}" stroke-linecap="round" />`;
+        const y = mark?.offset === "below_dots" ? UNDERLINE_DOT_OFFSET_Y : DOT_Y;
+        return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#C28A3D" stroke-width="${STROKE}" stroke-linecap="round" />`;
       })
       .join("");
 
@@ -2402,7 +2837,7 @@ export function mountGame({
         return `
           <path
             d="M ${x1} ${y} L ${x1} ${bottom} Q ${x1} ${bottom + 4} ${x1 + 8} ${bottom + 4} L ${x2 - 8} ${bottom + 4} Q ${x2} ${bottom + 4} ${x2} ${bottom} L ${x2} ${y}"
-            stroke="#f59e0b"
+            stroke="#C28A3D"
             stroke-width="${STROKE}"
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -2424,7 +2859,7 @@ export function mountGame({
         ${underlineSvg}
         ${bridgeSvg}
         ${greySvg}
-        ${orangeSvg}
+        ${silentSvg}
       </svg>
     `;
   }
@@ -3329,7 +3764,7 @@ export function mountGame({
       return;
     }
 
-    const { letters, mapped, targetParts } = mapTargetSegmentsToLetters(item);
+    const { letters, marks, mapped, targetParts } = mapTargetSegmentsToLetters(item);
     const cols = Math.max(letters.length, 1);
     const activeIndex = typeof currentScroll.active === "number" ? currentScroll.active : 0;
     const activeSegment = mapped.find((segment) => segment.partIndex === activeIndex);
@@ -3343,7 +3778,7 @@ export function mountGame({
       <div class="fs-letter" style="grid-column:${index + 1};">${escapeHtml(letter)}</div>
     `).join("");
 
-    const marksHtml = renderMarks(letters, mapped);
+    const marksHtml = renderMarks(letters, mapped, marks);
 
     const soundLabelsHtml = mapped.map((segment) => {
       const soundLabel = getSegmentPhoneme(
@@ -3684,6 +4119,8 @@ export function mountGame({
     locked = false;
     completionInFlight = false;
     stopAudioPlayback();
+    clearCompetitionTimer();
+    clearCompetitionAdvanceTimer();
     btnExit.disabled = false;
     feedback.innerHTML = "";
     btnNext.style.display = "none";
@@ -3705,6 +4142,7 @@ export function mountGame({
     promptLine.textContent = "";
     sentenceLine.style.display = "none";
     sentenceLine.textContent = "";
+    hideNativeContextControls();
 
     if (currentModeKind === "focus_sound") {
       promptLine.textContent = presentationMode
@@ -3717,7 +4155,7 @@ export function mountGame({
         : shouldUseFocusOnlyMultipleChoice(item)
           ? "Choose the correct grapheme for the focus sound."
           : "Choose the graphemes to spell the word.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -3726,7 +4164,7 @@ export function mountGame({
       promptLine.textContent = presentationMode
         ? "Build the word."
         : "Listen and build the word on the rail.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -3737,7 +4175,7 @@ export function mountGame({
         : getTargetParts(item).length > 1
           ? "Listen and arrange the graphemes to spell the word."
           : "Listen and type the spelling.";
-      if (isHintsEnabled() && item?.sentence) {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && item?.sentence) {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
@@ -3751,18 +4189,21 @@ export function mountGame({
       promptLine.textContent = presentationMode
         ? "Spell the word you hear."
         : "Listen and type the spelling.";
-      if (isHintsEnabled() && !normalizeTestLevelQuestionType(testMeta?.question_type) && item?.sentence && questionType === "full_recall") {
+      if (!shouldUseNativeContextSupport() && isHintsEnabled() && !normalizeTestLevelQuestionType(testMeta?.question_type) && item?.sentence && questionType === "full_recall") {
         sentenceLine.style.display = "block";
         sentenceLine.textContent = item.sentence;
       }
       renderFullRecall();
     }
 
+    refreshNativeContextControls(item);
+
     if (hasPendingFinalWrongReveal(getProgressEntry(item))) {
       showFinalWrongRevealState(item);
       return;
     }
 
+    if (isCompetitionMode) startCompetitionTimer(item);
     scheduleAutoPlay(item);
   }
 
@@ -3818,11 +4259,12 @@ export function mountGame({
     const resolvedFocusGrapheme = getResolvedFocusGrapheme(item);
     const resolvedWordText = String(item?.word || "").trim()
       || buildWordFromGraphemes(Array.isArray(item?.segments) ? item.segments : []);
+    const resolvedTestId = item?.test_id || item?.testId || testMeta?.id;
     const attemptsAllowed = getAttemptsAllowedForItem(item);
     await pupilRecordAttempt({
       pupilId,
       assignmentId,
-      testId: testMeta?.id,
+      testId: resolvedTestId,
       testWordId: item?.base_test_word_id || item?.id || null,
       assignmentTargetId: item?.assignment_target_id || item?.assignmentTargetId || null,
       mode: resolveQuestionType(item),
@@ -3831,7 +4273,7 @@ export function mountGame({
       attemptNumber: currentAttempt,
       attemptsAllowed: Number.isFinite(attemptsAllowed) ? attemptsAllowed : null,
       wordText: resolvedWordText || null,
-      wordSource: item?.is_target_word ? "targeted" : "base",
+      wordSource: item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
       attemptSource: testMeta?.attempt_source || "test",
       targetGraphemes: Array.isArray(item?.segments) ? item.segments : null,
       focusGrapheme: resolvedFocusGrapheme,
@@ -3841,8 +4283,11 @@ export function mountGame({
 
   function finishWord({ correct, typed }) {
     locked = true;
+    clearCompetitionTimer();
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnContextSentence) btnContextSentence.disabled = true;
+    if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -3880,6 +4325,14 @@ export function mountGame({
 
     if (correct) {
       feedback.innerHTML = `<span class="badgeOk">Correct.</span> <span class="muted">${attemptsUsed} ${attemptsUsed === 1 ? "attempt" : "attempts"}.</span>`;
+      if (isCompetitionMode) {
+        btnNext.style.display = "none";
+        competitionAdvanceTimer = window.setTimeout(() => {
+          competitionAdvanceTimer = 0;
+          if (!isGameplaySessionActive() || competitionEnded || completionInFlight) return;
+          void nextWord();
+        }, 650);
+      }
       return;
     }
 
@@ -3903,12 +4356,17 @@ export function mountGame({
     const typed = getCurrentTypedValue();
     const correct = isCurrentCorrect(typed);
 
-    if (!correct && shouldBlockRepeatedWrongChoice(item, typed)) {
-      feedback.innerHTML = `<strong>Try a different grapheme.</strong>`;
+    if (!correct && shouldBlockRepeatedIncorrectSubmission(item, typed)) {
+      feedback.innerHTML = `<strong>Have another look first. Change your spelling before checking again.</strong>`;
       return;
     }
 
     await logAttempt({ typed, correct });
+
+    if (isCompetitionMode && !correct) {
+      await endCompetitionRun({ reason: "wrong", typed });
+      return;
+    }
 
     if (correct) {
       finishWord({ correct: true, typed });
@@ -3926,6 +4384,7 @@ export function mountGame({
         completed: false,
         correct: false,
         typed,
+        lastSubmittedIncorrectAnswer: typed,
         attemptsUsed: currentAttempt,
         attemptsAllowed,
         questionType: resolveQuestionType(item),
@@ -3968,9 +4427,11 @@ export function mountGame({
 
     const nextIndex = findNextUnfinishedIndex(idx + 1);
     if (nextIndex >= words.length) {
-      const completionPayload = !hasPendingFinalWrongRevealInSession()
-        ? buildCompletionPayload()
-        : null;
+      const completionPayload = isCompetitionMode
+        ? buildCompetitionPayload({ reason: "completed" })
+        : (!hasPendingFinalWrongRevealInSession()
+          ? buildCompletionPayload()
+          : null);
       if (!completionPayload) {
         const unfinishedIndex = findNextUnfinishedIndex(0);
         if (unfinishedIndex < words.length) idx = unfinishedIndex;
@@ -3980,6 +4441,10 @@ export function mountGame({
 
       beginFinishingState();
       try {
+        if (isCompetitionMode) {
+          competitionEnded = true;
+          clearCompetitionTimer();
+        }
         await flushProgressSync();
         if (progressSyncTimer) {
           window.clearTimeout(progressSyncTimer);
@@ -4327,6 +4792,14 @@ export function mountGame({
   btnListen.addEventListener("click", () => {
     stopAudioPlayback();
     playCurrentAudio();
+  });
+  btnContextSentence?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showCurrentContextSentence();
+  });
+  btnContextMeaning?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showCurrentContextMeaning();
   });
   btnCheck.addEventListener("click", check);
   btnNext.addEventListener("click", () => {

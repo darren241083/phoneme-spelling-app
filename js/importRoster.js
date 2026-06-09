@@ -1,5 +1,9 @@
 import { supabase } from "./supabaseClient.js";
-import { readStaffAccessContext } from "./db.js?v=1.28";
+import {
+  applyActiveSchoolFilter,
+  readStaffAccessContext,
+  withActiveSchoolId,
+} from "./db.js?v=1.49";
 
 function makeUsername(firstName, surname, misId) {
   const f = (firstName || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -16,6 +20,20 @@ export async function importRoster(rows, classId) {
     throw new Error("Admin access is required to import a roster.");
   }
 
+  let classQuery = supabase
+    .from("classes")
+    .select("id")
+    .eq("id", classId)
+    .maybeSingle();
+  classQuery = applyActiveSchoolFilter(classQuery, accessContext);
+  const { data: selectedClass, error: classError } = await classQuery;
+  if (classError) {
+    throw new Error(`Could not verify the selected class: ${classError.message}`);
+  }
+  if (!selectedClass?.id) {
+    throw new Error("Choose a class in the current school before importing a roster.");
+  }
+
   for (const r of rows) {
     const misId = String(r.mis_id || "").trim();
     const firstName = String(r.first_name || "").trim();
@@ -27,11 +45,13 @@ export async function importRoster(rows, classId) {
 
     const username = makeUsername(firstName, surname, misId);
 
-    const { data: existingPupil, error: existingError } = await supabase
+    let existingPupilQuery = supabase
       .from("pupils")
       .select("id, mis_id, username")
       .eq("mis_id", misId)
       .maybeSingle();
+    existingPupilQuery = applyActiveSchoolFilter(existingPupilQuery, accessContext);
+    const { data: existingPupil, error: existingError } = await existingPupilQuery;
 
     if (existingError) {
       throw new Error(`Could not check existing pupil (${misId}): ${existingError.message}`);
@@ -42,7 +62,7 @@ export async function importRoster(rows, classId) {
     if (!pupil) {
       const { data: insertedPupil, error: insertError } = await supabase
         .from("pupils")
-        .insert({
+        .insert(withActiveSchoolId({
           mis_id: misId,
           first_name: firstName,
           surname,
@@ -50,7 +70,7 @@ export async function importRoster(rows, classId) {
           pin: "1234",
           must_reset_pin: true,
           is_active: true
-        })
+        }, accessContext))
         .select("id, mis_id, username")
         .single();
 
@@ -75,11 +95,11 @@ export async function importRoster(rows, classId) {
     if (!existingMembership) {
       const { error: membershipInsertError } = await supabase
         .from("pupil_classes")
-        .insert({
+        .insert(withActiveSchoolId({
           pupil_id: pupil.id,
           class_id: classId,
           active: true
-        });
+        }, accessContext));
 
       if (membershipInsertError) {
         throw new Error(`Could not add ${pupil.username} to class: ${membershipInsertError.message}`);

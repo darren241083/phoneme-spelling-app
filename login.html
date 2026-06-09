@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wordloom Login</title>
+  <link rel="stylesheet" href="./styles.css?v=1.17" />
+</head>
+<body class="loginPage">
+  <div class="wrap loginWrap">
+    <header class="topbar loginTopbar">
+      <div class="brand loginBrand">
+        <a class="loginWordmark" href="./index.html" aria-label="Wordloom homepage">
+          <span class="loginWordmarkMark" aria-hidden="true">W</span>
+          <span>Wordloom</span>
+        </a>
+        <div class="brandSub loginBrandSub">Teacher tests, class presentation and pupil practice</div>
+      </div>
+      <div class="topbarRight loginTopbarRight">
+        <a class="loginHomeLink" href="./index.html">&#8592; Back to homepage</a>
+        <button id="btnSignOut" class="btn secondary" type="button" style="display:none;">Sign out</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" style="display:none;"></div>
+
+    <section id="viewRole" class="card loginCard loginRoleCard">
+      <span class="loginEyebrow">Wordloom login</span>
+      <h2>Choose role</h2>
+      <p class="muted loginLead">Choose how you want to use Wordloom today.</p>
+      <div class="row loginActionRow">
+        <button id="btnTeacher" class="btn" type="button">I&rsquo;m a teacher</button>
+        <button id="btnPupil" class="btn secondary" type="button">I&rsquo;m a pupil</button>
+        <button id="btnTryLesson" class="btn secondary" type="button">Try sample test</button>
+      </div>
+      <p class="muted loginHint">Launch a quick sample without signing in.</p>
+    </section>
+
+    <section id="viewTeacherAuth" class="card loginCard" style="display:none;">
+      <span class="loginEyebrow">Teacher access</span>
+      <h2>Teacher sign in</h2>
+      <p class="muted">Continue with Google to create tests, classes and assignments.</p>
+      <div class="row loginActionRow">
+        <button id="btnGoogle" class="btn loginGoogleButton" type="button">
+          <svg class="loginGoogleIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="#4285F4" d="M21.6 12.23c0-.78-.07-1.53-.2-2.23H12v4.22h5.38a4.6 4.6 0 0 1-1.99 3.02v2.51h3.23c1.89-1.74 2.98-4.3 2.98-7.52Z"/>
+            <path fill="#34A853" d="M12 22c2.7 0 4.96-.89 6.62-2.42l-3.23-2.51c-.9.6-2.04.95-3.39.95-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/>
+            <path fill="#FBBC05" d="M6.41 13.9a6 6 0 0 1 0-3.8V7.51H3.07a10 10 0 0 0 0 8.98l3.34-2.59Z"/>
+            <path fill="#EA4335" d="M12 5.98c1.47 0 2.79.51 3.82 1.5l2.87-2.87A9.62 9.62 0 0 0 12 2 10 10 0 0 0 3.07 7.51l3.34 2.59C7.2 7.74 9.4 5.98 12 5.98Z"/>
+          </svg>
+          <span>Continue with Google</span>
+        </button>
+        <button id="btnBackFromTeacher" class="btn secondary" type="button">Back to role choice</button>
+      </div>
+      <div id="teacherAuthMsg" class="notice" style="display:none;"></div>
+    </section>
+
+    <section id="viewTeacher" class="card" style="display:none;"></section>
+
+    <section id="viewPupilAuth" class="card loginCard" style="display:none;">
+      <span class="loginEyebrow">Pupil access</span>
+      <h2>Pupil login</h2>
+      <p class="muted">Enter your username and PIN.</p>
+      <div class="grid2">
+        <div>
+          <label>Username</label>
+          <input id="pupilClassCode" class="input" placeholder="e.g. honeill1001" />
+        </div>
+        <div>
+          <label>PIN</label>
+          <input id="pupilCode" class="input" type="password" placeholder="4 digit PIN" />
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnPupilLogin" class="btn" type="button">Login</button>
+        <button id="btnBackFromPupil" class="btn secondary" type="button">Back to role choice</button>
+      </div>
+      <div id="pupilAuthMsg" class="notice" style="display:none;"></div>
+    </section>
+
+    <section id="viewPupil" class="card" style="display:none;"></section>
+  </div>
+
+  <script src="./vendor/xlsx.full.min.js?v=0.18.5"></script>
+  <script type="module" src="./js/app.js?v=5.129"></script>
+</body>
+</html>

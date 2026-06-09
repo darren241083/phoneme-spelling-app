@@ -32,7 +32,7 @@ The model is based on four strands from the literature:
 
 The app uses a transparent composite rather than a hidden model.
 
-For each word, the score combines five normalized components:
+For each word, the score combines five normalised components:
 
 1. Phonemic length
    Approximate number of phonemes represented by the word's grapheme structure.

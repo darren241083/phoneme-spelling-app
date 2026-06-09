@@ -3,23 +3,30 @@ import { supabase } from "./supabaseClient.js";
 import { DEFAULT_QUESTION_TYPE, normalizeStoredQuestionType } from "./questionTypes.js?v=1.1";
 import {
   buildAssignmentEnginePupilReason,
+  buildGeneratedAssignmentPlan,
   isFullyGeneratedAssignmentWordRows,
-} from "./assignmentEngine.js?v=1.5";
+} from "./assignmentEngine.js?v=1.6";
 import {
   buildBaselinePupilReason,
   isBaselineAssignmentWordRows,
   REQUIRED_BASELINE_STANDARD_KEY,
   resolveBaselineStandardKeyFromWordRows,
-} from "./baselinePlacement.js?v=1.4";
+} from "./baselinePlacement.js?v=1.5";
 import { syncAssignmentPupilTargetWords } from "./assignmentTargets.js";
 import {
   buildDefaultPersonalisedAutomationPolicy,
   getLegacyPersonalisedAutomationPolicyActiveValue,
   getPersonalisedAutomationPolicyLifecycle,
+  isSpellingBeeAutomationPolicy,
   isPersonalisedAutomationPolicyUsable,
+  normalizeSpellingBeeLengthMode,
   normalizeAutoAssignPolicy,
   normalizePersonalisedAutomationPolicy,
-} from "./autoAssignPolicy.js?v=1.7";
+} from "./autoAssignPolicy.js?v=1.9";
+import {
+  buildTestWordContextSnapshot,
+  normalizeContextWord,
+} from "./spellingContextSupport.js?v=1.2";
 
 const ASSIGNMENT_TARGET_TABLE = "assignment_pupil_target_words";
 const ASSIGNMENT_STATUS_TABLE = "assignment_pupil_statuses";
@@ -30,6 +37,8 @@ const PERSONALISED_GENERATION_RUN_PUPIL_TABLE = "personalised_generation_run_pup
 const PERSONALISED_AUTOMATION_POLICY_TABLE = "personalised_automation_policies";
 const PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE = "personalised_automation_policy_targets";
 const PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE = "personalised_automation_policy_events";
+const PERSONALISED_PROVISIONING_FUNCTION = "provision-personalised-assignment";
+const SPELLING_BEE_RESULT_TABLE = "spelling_bee_results";
 const STAFF_PROFILES_TABLE = "staff_profiles";
 const STAFF_IMPORT_BATCH_TABLE = "staff_import_batches";
 const PUPIL_IMPORT_BATCH_TABLE = "pupil_import_batches";
@@ -41,18 +50,77 @@ const STAFF_PROFILE_UPSERT_FUNCTION = "upsert_my_staff_profile";
 const STAFF_IMPORT_FUNCTION = "import_staff_directory_csv";
 const PUPIL_IMPORT_FUNCTION = "import_pupil_roster_csv";
 const PUPIL_IMPORT_PREFLIGHT_FUNCTION = "pupil_directory_duplicate_preflight";
+const PUPIL_ARCHIVE_FUNCTION = "archive_pupil_directory_record";
+const PUPIL_RESTORE_FUNCTION = "restore_pupil_directory_record";
 const PUPIL_MOVE_FORM_FUNCTION = "move_pupil_form_membership";
+const PUPIL_RESET_PIN_FUNCTION = "reset_pupil_login_pin";
 const STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION = "staff_pending_access_duplicate_preflight";
 const STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION = "list_staff_pending_access_summaries";
 const STAFF_PENDING_ACCESS_DETAIL_FUNCTION = "read_staff_pending_access_detail";
 const STAFF_PENDING_ACCESS_SAVE_FUNCTION = "save_staff_pending_access_approval";
 const STAFF_PENDING_ACCESS_CANCEL_FUNCTION = "cancel_staff_pending_access_approval";
+const STAFF_ARCHIVE_FUNCTION = "archive_staff_directory_record";
+const STAFF_RESTORE_FUNCTION = "restore_staff_directory_record";
+const STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION = "revoke_all_staff_live_access";
+const TEACHER_PUPIL_GROUP_VALUES_TABLE = "teacher_pupil_group_values";
+const WORD_CONTEXT_SUPPORT_TABLE = "word_context_support";
+const WORD_CONTEXT_SUPPORT_SELECT = "id, school_id, normalized_word, display_word, context_key, sentence, meaning, sentence_required, meaning_enabled_by_default, sentence_status, meaning_status, source, quality_flags, created_by, updated_by, created_at, updated_at";
+const WORDLOOM_CORE_WORD_TABLE = "wordloom_core_words";
+const WORDLOOM_CORE_WORD_TARGET_TABLE = "wordloom_core_word_targets";
+const WORDLOOM_CORE_FOCUS_TARGET_TABLE = "wordloom_core_focus_targets";
+const WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD = 6;
+const WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT = 10;
+const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
+const WORDLOOM_CORE_APPROVAL_STATUS_ORDER = ["approved", "pending", "rejected", "retired", "unknown"];
+const WORDLOOM_CORE_SUITABILITY_STATUS_ORDER = ["suitable", "caution", "exclude", "unknown"];
 
 export const ASSIGNMENT_AUTOMATION_KIND_PERSONALISED = "personalised";
+export const ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE = "spelling_bee";
 export const ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
+export const EVIDENCE_SOURCE_ASSIGNED_CORE = "assigned_core";
+export const EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
 export const CLASS_TYPE_FORM = "form";
 export const CLASS_TYPE_SUBJECT = "subject";
 export const CLASS_TYPE_INTERVENTION = "intervention";
+
+const INTERVENTION_DIRECTORY_ATTRIBUTE_TYPES = [
+  "pp",
+  "is_pp",
+  "pupil_premium",
+  "pupil premium",
+  "sen",
+  "has_sen",
+  "sen_status",
+  "eal",
+  "has_eal",
+  "gender",
+  "gender_group",
+];
+const INTERVENTION_POSITIVE_PP_VALUES = new Set(["1", "true", "yes", "y", "pp", "pupil_premium", "pupil premium", "premium", "eligible"]);
+const INTERVENTION_POSITIVE_SEN_VALUES = new Set(["1", "true", "yes", "y", "sen", "sen_support", "support", "ehcp", "k", "e"]);
+const INTERVENTION_POSITIVE_EAL_VALUES = new Set(["1", "true", "yes", "y", "eal"]);
+const INTERVENTION_IGNORED_GENDER_VALUES = new Set(["", "unknown", "not_known", "not known", "prefer_not_to_say", "prefer not to say"]);
+const WORD_CONTEXT_SUPPORT_STATUSES = new Set(["ai_generated", "auto_approved", "teacher_entered", "teacher_edited", "hidden", "needs_review"]);
+const WORD_CONTEXT_SUPPORT_SOURCES = new Set(["teacher", "ai", "system", "import"]);
+const PERSONALISED_PROVISIONING_STATUS_VALUES = new Set([
+  "invalid_pupil",
+  "not_ready",
+  "nothing_waiting",
+  "already_active",
+  "already_provisioning",
+  "provisioned",
+  "not_eligible",
+  "not_enough_evidence",
+  "error",
+  "generation_failed",
+]);
+const PERSONALISED_PROVISIONING_SAFE_STATUSES = new Set([
+  "provisioned",
+  "nothing_waiting",
+  "not_ready",
+  "already_active",
+  "already_provisioning",
+]);
 
 let latestStaffProfileSyncNotice = null;
 
@@ -71,6 +139,65 @@ function randomJoinCode(len = 6) {
   let out = "";
   for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
+}
+
+function normalizeSchoolId(value = "") {
+  return String(value || "").trim();
+}
+
+export function isDeveloperSchoolSwitchEnabled() {
+  try {
+    const hostname = String(
+      typeof window !== "undefined" && window?.location?.hostname
+        ? window.location.hostname
+        : (typeof globalThis !== "undefined" && globalThis?.location?.hostname
+          ? globalThis.location.hostname
+          : "")
+    ).trim().toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function getActiveSchoolStorage() {
+  try {
+    if (typeof window !== "undefined" && window?.localStorage) return window.localStorage;
+    if (typeof globalThis !== "undefined" && globalThis?.localStorage) return globalThis.localStorage;
+  } catch (_error) {
+    return null;
+  }
+  return null;
+}
+
+export function readStoredActiveSchoolId() {
+  const storage = getActiveSchoolStorage();
+  if (!storage) return "";
+  try {
+    return normalizeSchoolId(storage.getItem(ACTIVE_SCHOOL_STORAGE_KEY));
+  } catch (_error) {
+    return "";
+  }
+}
+
+export function storeActiveSchoolId(schoolId = "") {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  const storage = getActiveSchoolStorage();
+  if (!storage) return safeSchoolId;
+  try {
+    if (safeSchoolId) {
+      storage.setItem(ACTIVE_SCHOOL_STORAGE_KEY, safeSchoolId);
+    } else {
+      storage.removeItem(ACTIVE_SCHOOL_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // Local storage is only a convenience; the database context is authoritative.
+  }
+  return safeSchoolId;
+}
+
+export function clearStoredActiveSchoolId() {
+  return storeActiveSchoolId("");
 }
 
 function isMissingAssignmentTargetTableError(error) {
@@ -193,7 +320,8 @@ function isMissingPersonalisedGenerationRunColumnError(error) {
   const mentionsColumn =
     message.includes("automation_policy_id")
     || message.includes("policy_snapshot")
-    || message.includes("derived_deadline_at");
+    || message.includes("derived_deadline_at")
+    || message.includes("policy_type");
   return mentionsColumn && (
     code === "42703"
     || code === "PGRST204"
@@ -209,11 +337,36 @@ function isMissingPersonalisedAutomationPolicyTableError(error) {
     || code === "PGRST204"
     || code === "PGRST205"
     || (message.includes(PERSONALISED_AUTOMATION_POLICY_TABLE) && (
-      message.includes("does not exist")
+      (!message.includes("column") && message.includes("does not exist"))
       || message.includes("schema cache")
       || message.includes("could not find the table")
       || message.includes("relation")
     ));
+}
+
+function isPersonalisedAutomationPolicySchoolFilterError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes(`${PERSONALISED_AUTOMATION_POLICY_TABLE}.school_id`)
+    && (
+      code === "42703"
+      || code === "PGRST204"
+      || message.includes("column")
+      || message.includes("schema cache")
+    );
+}
+
+function getPersonalisedAutomationPolicyStorageErrorMessage(error, action = "save") {
+  if (isPersonalisedAutomationPolicySchoolFilterError(error)) {
+    return `Could not ${action} the automation policy because the school filter was rejected. Refresh the app and try again, or contact support.`;
+  }
+  if (
+    isMissingPersonalisedAutomationPolicyTableError(error)
+    || isMissingPersonalisedAutomationPolicyColumnError(error)
+  ) {
+    return "Automation policy storage is not available yet. Run the latest Supabase migration.";
+  }
+  return "";
 }
 
 function isMissingPersonalisedAutomationPolicyTargetTableError(error) {
@@ -253,13 +406,28 @@ function isMissingPersonalisedAutomationPolicyColumnError(error) {
     || message.includes("name")
     || message.includes("description")
     || message.includes("archived_at")
-    || message.includes("archived_by");
+    || message.includes("archived_by")
+    || message.includes("policy_type");
   return mentionsColumn && (
     code === "42703"
     || code === "PGRST204"
     || message.includes("schema cache")
     || message.includes("column")
   );
+}
+
+function isMissingSpellingBeeResultTableError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || (message.includes(SPELLING_BEE_RESULT_TABLE) && (
+      message.includes("does not exist")
+      || message.includes("schema cache")
+      || message.includes("could not find the table")
+      || message.includes("relation")
+    ));
 }
 
 function normalizeTeacherAppRole(value) {
@@ -426,6 +594,23 @@ function isMissingPupilMoveFormFunctionError(error) {
     || message.includes(PUPIL_MOVE_FORM_FUNCTION);
 }
 
+function isMissingPupilLifecycleFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_ARCHIVE_FUNCTION)
+    || message.includes(PUPIL_RESTORE_FUNCTION);
+}
+
+function isMissingPupilResetPinFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes(PUPIL_RESET_PIN_FUNCTION);
+}
+
 function isMissingStaffPendingAccessSupportError(error) {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -442,6 +627,20 @@ function isMissingStaffPendingAccessSupportError(error) {
     || message.includes(STAFF_PENDING_ACCESS_DETAIL_FUNCTION)
     || message.includes(STAFF_PENDING_ACCESS_SAVE_FUNCTION)
     || message.includes(STAFF_PENDING_ACCESS_CANCEL_FUNCTION);
+}
+
+function isMissingStaffLifecycleSupportError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "42883"
+    || code === "PGRST202"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || message.includes(STAFF_ARCHIVE_FUNCTION)
+    || message.includes(STAFF_RESTORE_FUNCTION)
+    || message.includes(STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION)
+    || message.includes("staff_directory_audit_log");
 }
 
 function setLatestStaffProfileSyncNotice(value = null) {
@@ -537,12 +736,374 @@ function buildDefaultStaffAccessContext({
     data_health: {
       unmapped_subject_class_count: 0,
     },
+    active_school_id: null,
+    default_school_id: null,
+    schools: [],
   };
 }
 
 function normalizeTextList(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+export function normalizeSchoolSummary(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const id = normalizeSchoolId(value?.id || value?.school_id || value?.schoolId);
+  const name = String(value?.name || value?.school_name || value?.schoolName || "").trim();
+  const slug = String(value?.slug || value?.school_slug || value?.schoolSlug || "").trim();
+  if (!id && !name && !slug) return null;
+  return {
+    id,
+    slug,
+    name: name || "School",
+    is_legacy_default: !!(value?.is_legacy_default ?? value?.school_is_legacy_default ?? value?.schoolIsLegacyDefault),
+  };
+}
+
+function normalizeSchoolOption(value = {}) {
+  const normalized = normalizeSchoolSummary(value);
+  return normalized?.id ? normalized : null;
+}
+
+export function normalizeAvailableSchools(value = []) {
+  const source = Array.isArray(value) ? value : [];
+  const byId = new Map();
+  for (const item of source) {
+    const normalized = normalizeSchoolOption(item);
+    if (normalized?.id && !byId.has(normalized.id)) {
+      byId.set(normalized.id, normalized);
+    }
+  }
+  return [...byId.values()];
+}
+
+function schoolIdIsAvailable(schoolId = "", schools = []) {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  if (!safeSchoolId) return false;
+  return normalizeAvailableSchools(schools).some((school) => school.id === safeSchoolId);
+}
+
+export function resolveStoredActiveSchoolSelection(accessContext = null, storedSchoolId = readStoredActiveSchoolId()) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const safeStoredSchoolId = normalizeSchoolId(storedSchoolId);
+  const safeActiveSchoolId = normalizeSchoolId(accessContext?.active_school_id);
+  const safeDefaultSchoolId = normalizeSchoolId(accessContext?.default_school_id);
+
+  if (!schools.length) {
+    return {
+      activeSchoolId: safeActiveSchoolId,
+      storedSchoolId: safeStoredSchoolId,
+      shouldClearStored: false,
+    };
+  }
+
+  if (schoolIdIsAvailable(safeStoredSchoolId, schools)) {
+    return {
+      activeSchoolId: safeStoredSchoolId,
+      storedSchoolId: safeStoredSchoolId,
+      shouldClearStored: false,
+    };
+  }
+
+  const fallbackSchoolId = schoolIdIsAvailable(safeActiveSchoolId, schools)
+    ? safeActiveSchoolId
+    : (schoolIdIsAvailable(safeDefaultSchoolId, schools) ? safeDefaultSchoolId : (schools[0]?.id || ""));
+
+  return {
+    activeSchoolId: fallbackSchoolId,
+    storedSchoolId: safeStoredSchoolId,
+    shouldClearStored: !!safeStoredSchoolId,
+  };
+}
+
+export function syncStoredActiveSchoolIdFromContext(accessContext = null, storedSchoolId = readStoredActiveSchoolId()) {
+  const selection = resolveStoredActiveSchoolSelection(accessContext, storedSchoolId);
+  if (selection.shouldClearStored) clearStoredActiveSchoolId();
+  return selection.activeSchoolId;
+}
+
+export function getActiveSchoolIdFromAccessContext(accessContext = null) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const safeActiveSchoolId = normalizeSchoolId(accessContext?.active_school_id);
+  if (!schools.length) return safeActiveSchoolId;
+  if (schoolIdIsAvailable(safeActiveSchoolId, schools)) return safeActiveSchoolId;
+
+  const safeDefaultSchoolId = normalizeSchoolId(accessContext?.default_school_id);
+  if (schoolIdIsAvailable(safeDefaultSchoolId, schools)) return safeDefaultSchoolId;
+  return schools[0]?.id || "";
+}
+
+export function resolveActiveSchoolDetails(accessContext = null) {
+  const schools = normalizeAvailableSchools(accessContext?.schools || []);
+  const activeSchoolId = getActiveSchoolIdFromAccessContext(accessContext);
+  const activeSchool = normalizeSchoolSummary(
+    schools.find((school) => school.id === activeSchoolId)
+    || (activeSchoolId ? { id: activeSchoolId } : null)
+  );
+  return {
+    activeSchoolId,
+    activeSchool,
+    activeSchoolName: String(activeSchool?.name || "").trim() || "School",
+  };
+}
+
+export function withActiveSchoolId(payload = {}, accessContext = null) {
+  const schoolId = typeof accessContext === "string"
+    ? normalizeSchoolId(accessContext)
+    : getActiveSchoolIdFromAccessContext(accessContext);
+  return schoolId ? { ...(payload || {}), school_id: schoolId } : { ...(payload || {}) };
+}
+
+function isLegacyDefaultActiveSchool(accessContext = null, schoolId = "") {
+  if (!accessContext || typeof accessContext === "string") return false;
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  if (!safeSchoolId) return false;
+  const { activeSchool } = resolveActiveSchoolDetails(accessContext);
+  return normalizeSchoolId(activeSchool?.id) === safeSchoolId && !!activeSchool?.is_legacy_default;
+}
+
+export function applyActiveSchoolFilter(query, accessContext = null) {
+  const schoolId = typeof accessContext === "string"
+    ? normalizeSchoolId(accessContext)
+    : getActiveSchoolIdFromAccessContext(accessContext);
+  if (!schoolId || !query || typeof query.eq !== "function") return query;
+  if (isLegacyDefaultActiveSchool(accessContext, schoolId) && typeof query.or === "function") {
+    return query.or(`school_id.eq.${schoolId},school_id.is.null`);
+  }
+  return query.eq("school_id", schoolId);
+}
+
+export function normalizeContextWordForDb(word) {
+  return normalizeContextWord(word);
+}
+
+function normalizeWordContextSupportContextKey(value = "") {
+  return String(value || "default").trim().toLowerCase() || "default";
+}
+
+function normalizeWordContextSupportStatus(value = "", fallback = "hidden", label = "context status") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_") || fallback;
+  if (!WORD_CONTEXT_SUPPORT_STATUSES.has(normalized)) {
+    throw new Error(`Unsupported ${label}: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeWordContextSupportSource(value = "", fallback = "teacher") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_") || fallback;
+  if (!WORD_CONTEXT_SUPPORT_SOURCES.has(normalized)) {
+    throw new Error(`Unsupported context source: ${value}`);
+  }
+  return normalized;
+}
+
+function normalizeWordContextSupportQualityFlags(value, fallback = {}) {
+  if (value === undefined) return fallback && typeof fallback === "object" && !Array.isArray(fallback) ? fallback : {};
+  if (value == null) return {};
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // Fall through to the explicit validation error below.
+    }
+  }
+  throw new Error("Context quality_flags must be a plain object.");
+}
+
+function normalizeWordContextSupportBoolean(value, fallback = false) {
+  if (value === undefined) return !!fallback;
+  if (typeof value === "boolean") return value;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return !!fallback;
+}
+
+function normalizeWordContextSupportText(value, fallback = null) {
+  if (value === undefined) return fallback ?? null;
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function readWordContextSupportPatchValue(source = {}, keys = []) {
+  const object = source && typeof source === "object" ? source : {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(object, key)) return object[key];
+  }
+  return undefined;
+}
+
+function normalizeWordContextSupportRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const normalizedWord = normalizeContextWordForDb(row.normalized_word || row.normalizedWord || row.display_word || row.displayWord);
+  if (!normalizedWord) return null;
+  const contextKey = normalizeWordContextSupportContextKey(row.context_key || row.contextKey || "default");
+  return {
+    id: String(row.id || "").trim(),
+    school_id: normalizeSchoolId(row.school_id || row.schoolId),
+    normalized_word: normalizedWord,
+    display_word: String(row.display_word || row.displayWord || normalizedWord).trim() || normalizedWord,
+    context_key: contextKey,
+    sentence: row.sentence == null ? null : String(row.sentence),
+    meaning: row.meaning == null ? null : String(row.meaning),
+    sentence_required: !!(row.sentence_required ?? row.sentenceRequired),
+    meaning_enabled_by_default: !!(row.meaning_enabled_by_default ?? row.meaningEnabledByDefault),
+    sentence_status: normalizeWordContextSupportStatus(row.sentence_status || row.sentenceStatus, "hidden", "sentence status"),
+    meaning_status: normalizeWordContextSupportStatus(row.meaning_status || row.meaningStatus, "hidden", "meaning status"),
+    source: normalizeWordContextSupportSource(row.source, "teacher"),
+    quality_flags: normalizeWordContextSupportQualityFlags(row.quality_flags ?? row.qualityFlags, {}),
+    created_by: String(row.created_by || row.createdBy || "").trim() || null,
+    updated_by: String(row.updated_by || row.updatedBy || "").trim() || null,
+    created_at: row.created_at || row.createdAt || null,
+    updated_at: row.updated_at || row.updatedAt || null,
+  };
+}
+
+function normalizeWordContextSupportOptions(options = {}) {
+  const source = options && typeof options === "object" ? options : {};
+  return {
+    contextKey: normalizeWordContextSupportContextKey(source.context_key || source.contextKey || "default"),
+    includeUnavailable: source.includeUnavailable === true || source.include_unavailable === true,
+  };
+}
+
+async function requireWordContextSupportActiveSchoolContext() {
+  const context = await getSignedInTeacherContext();
+  const schoolId = normalizeSchoolId(context?.schoolId);
+  if (!schoolId) {
+    throw new Error("Choose an active school before using spelling context support.");
+  }
+  return {
+    ...context,
+    schoolId,
+  };
+}
+
+function hasWordContextSupportWriteAccess(accessContext = null) {
+  return !!accessContext?.roles?.admin
+    || !!accessContext?.roles?.teacher
+    || !!accessContext?.legacy?.is_legacy_central_owner
+    || ["central_owner", "teacher"].includes(String(accessContext?.legacy?.teacher_app_role || "").trim().toLowerCase());
+}
+
+async function readWordContextSupportCacheRow({
+  schoolId = "",
+  normalizedWord = "",
+  contextKey = "default",
+} = {}) {
+  const safeSchoolId = normalizeSchoolId(schoolId);
+  const safeWord = normalizeContextWordForDb(normalizedWord);
+  const safeContextKey = normalizeWordContextSupportContextKey(contextKey);
+  if (!safeSchoolId || !safeWord) return null;
+
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .eq("school_id", safeSchoolId)
+    .eq("normalized_word", safeWord)
+    .eq("context_key", safeContextKey)
+    .maybeSingle();
+
+  if (error) throw error;
+  return normalizeWordContextSupportRow(data);
+}
+
+export async function listWordContextSupportByWords(words, options = {}) {
+  const requestedWords = Array.isArray(words) ? words : [words];
+  const normalizedWords = [...new Set(requestedWords.map((word) => normalizeContextWordForDb(word)).filter(Boolean))];
+  if (!normalizedWords.length) return {};
+
+  const context = await requireWordContextSupportActiveSchoolContext();
+  const { contextKey, includeUnavailable } = normalizeWordContextSupportOptions(options);
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .eq("school_id", context.schoolId)
+    .eq("context_key", contextKey)
+    .in("normalized_word", normalizedWords);
+
+  if (error) throw error;
+
+  const byWord = {};
+  for (const rawRow of data || []) {
+    const row = normalizeWordContextSupportRow(rawRow);
+    if (!row?.normalized_word) continue;
+    if (!includeUnavailable && !buildTestWordContextSnapshot(row.display_word || row.normalized_word, row)) continue;
+    byWord[row.normalized_word] = row;
+  }
+  return byWord;
+}
+
+export async function getWordContextSupport(word, options = {}) {
+  const normalizedWord = normalizeContextWordForDb(word);
+  if (!normalizedWord) return null;
+  const rowsByWord = await listWordContextSupportByWords([word], options);
+  return rowsByWord[normalizedWord] || null;
+}
+
+export async function upsertWordContextSupport(entry, options = {}) {
+  const source = entry && typeof entry === "object" ? entry : {};
+  const context = await requireWordContextSupportActiveSchoolContext();
+  if (!hasWordContextSupportWriteAccess(context.accessContext)) {
+    throw new Error("Teacher or admin access is required to update spelling context support.");
+  }
+
+  const normalizedWord = normalizeContextWordForDb(
+    readWordContextSupportPatchValue(source, ["word", "normalized_word", "normalizedWord", "display_word", "displayWord"])
+  );
+  if (!normalizedWord) throw new Error("A word is required for spelling context support.");
+
+  const optionContextKey = normalizeWordContextSupportOptions(options).contextKey;
+  const contextKey = normalizeWordContextSupportContextKey(
+    readWordContextSupportPatchValue(source, ["context_key", "contextKey"]) || optionContextKey
+  );
+  const existing = await readWordContextSupportCacheRow({
+    schoolId: context.schoolId,
+    normalizedWord,
+    contextKey,
+  });
+  const displayWordPatch = readWordContextSupportPatchValue(source, ["display_word", "displayWord"]);
+  const displayWord = String(displayWordPatch ?? existing?.display_word ?? source.word ?? normalizedWord).trim() || normalizedWord;
+  const sentencePatch = readWordContextSupportPatchValue(source, ["sentence"]);
+  const meaningPatch = readWordContextSupportPatchValue(source, ["meaning"]);
+  const sentenceRequiredPatch = readWordContextSupportPatchValue(source, ["sentence_required", "sentenceRequired"]);
+  const meaningEnabledPatch = readWordContextSupportPatchValue(source, ["meaning_enabled_by_default", "meaningEnabledByDefault"]);
+  const sentenceStatusPatch = readWordContextSupportPatchValue(source, ["sentence_status", "sentenceStatus"]);
+  const meaningStatusPatch = readWordContextSupportPatchValue(source, ["meaning_status", "meaningStatus"]);
+  const sourcePatch = readWordContextSupportPatchValue(source, ["source"]);
+  const qualityFlagsPatch = readWordContextSupportPatchValue(source, ["quality_flags", "qualityFlags"]);
+
+  const payload = {
+    school_id: context.schoolId,
+    normalized_word: normalizedWord,
+    display_word: displayWord,
+    context_key: contextKey,
+    sentence: normalizeWordContextSupportText(sentencePatch, existing?.sentence ?? null),
+    meaning: normalizeWordContextSupportText(meaningPatch, existing?.meaning ?? null),
+    sentence_required: normalizeWordContextSupportBoolean(sentenceRequiredPatch, existing?.sentence_required ?? false),
+    meaning_enabled_by_default: normalizeWordContextSupportBoolean(meaningEnabledPatch, existing?.meaning_enabled_by_default ?? false),
+    sentence_status: normalizeWordContextSupportStatus(sentenceStatusPatch, existing?.sentence_status || "hidden", "sentence status"),
+    meaning_status: normalizeWordContextSupportStatus(meaningStatusPatch, existing?.meaning_status || "hidden", "meaning status"),
+    source: normalizeWordContextSupportSource(sourcePatch, existing?.source || "teacher"),
+    quality_flags: normalizeWordContextSupportQualityFlags(qualityFlagsPatch, existing?.quality_flags || {}),
+    updated_by: context.teacherId,
+  };
+
+  if (!existing?.id) {
+    payload.created_by = context.teacherId;
+  }
+
+  const { data, error } = await supabase
+    .from(WORD_CONTEXT_SUPPORT_TABLE)
+    .upsert([payload], { onConflict: "school_id,normalized_word,context_key" })
+    .select(WORD_CONTEXT_SUPPORT_SELECT)
+    .single();
+
+  if (error) throw error;
+  return normalizeWordContextSupportRow(data || payload);
 }
 
 function normalizeRoleScopes(value = {}, fallback = {}) {
@@ -571,6 +1132,9 @@ function normalizeStaffProfileRow(row = {}) {
     last_import_batch_id: String(row?.last_import_batch_id || "").trim(),
     last_imported_at: String(row?.last_imported_at || "").trim(),
     last_imported_by: String(row?.last_imported_by || "").trim(),
+    archived_at: String(row?.archived_at || "").trim(),
+    archived_by: String(row?.archived_by || "").trim(),
+    archive_reason: String(row?.archive_reason || "").trim(),
     created_at: String(row?.created_at || "").trim(),
     updated_at: String(row?.updated_at || "").trim(),
   };
@@ -611,6 +1175,19 @@ function normalizeStaffAccessAuditRow(row = {}) {
     role: String(row?.role || "").trim().toLowerCase(),
     scope_type: String(row?.scope_type || "").trim().toLowerCase(),
     scope_value: String(row?.scope_value || "").trim(),
+    metadata: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
+    created_at: String(row?.created_at || "").trim(),
+  };
+}
+
+function normalizeStaffDirectoryAuditRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    actor_user_id: String(row?.actor_user_id || "").trim(),
+    target_profile_id: String(row?.target_profile_id || "").trim(),
+    target_user_id: String(row?.target_user_id || "").trim(),
+    action: String(row?.action || "").trim().toLowerCase(),
+    reason: String(row?.reason || "").trim(),
     metadata: row?.metadata && typeof row.metadata === "object" ? row.metadata : {},
     created_at: String(row?.created_at || "").trim(),
   };
@@ -751,6 +1328,18 @@ function normalizePupilImportCredentialRow(row = {}) {
   };
 }
 
+function normalizePupilPinResetResult(row = {}) {
+  return {
+    pupil_id: String(row?.pupil_id || row?.id || "").trim(),
+    first_name: String(row?.first_name || "").trim(),
+    surname: String(row?.surname || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    username: String(row?.username || "").trim().toLowerCase(),
+    pin: String(row?.pin || "").trim(),
+    issued_at: String(row?.issued_at || "").trim(),
+  };
+}
+
 function normalizePupilImportCreatedClassRow(row = {}) {
   return {
     id: String(row?.id || "").trim(),
@@ -789,6 +1378,7 @@ function normalizePupilImportReferencePupilRow(row = {}) {
     surname: String(row?.surname || "").trim(),
     username: String(row?.username || "").trim().toLowerCase(),
     is_active: row?.is_active !== false,
+    archived_at: String(row?.archived_at || "").trim() || null,
   };
 }
 
@@ -801,7 +1391,7 @@ function normalizePupilImportMembershipRow(row = {}) {
   };
 }
 
-function normalizeStaffAccessContext(value, {
+export function normalizeStaffAccessContext(value, {
   userId = "",
   legacyRole = null,
 } = {}) {
@@ -834,6 +1424,14 @@ function normalizeStaffAccessContext(value, {
     can_manage_own_content: !!value?.capabilities?.can_manage_own_content,
     can_view_schoolwide_analytics: !!value?.capabilities?.can_view_schoolwide_analytics,
   };
+  const normalizedSchools = normalizeAvailableSchools(value?.schools || fallback.schools);
+  const normalizedDefaultSchoolId = normalizeSchoolId(value?.default_school_id || fallback.default_school_id);
+  let normalizedActiveSchoolId = normalizeSchoolId(value?.active_school_id || fallback.active_school_id);
+  if (normalizedActiveSchoolId && normalizedSchools.length && !schoolIdIsAvailable(normalizedActiveSchoolId, normalizedSchools)) {
+    normalizedActiveSchoolId = schoolIdIsAvailable(normalizedDefaultSchoolId, normalizedSchools)
+      ? normalizedDefaultSchoolId
+      : (normalizedSchools[0]?.id || "");
+  }
 
   return {
     version: Math.max(1, Number(value?.version || fallback.version) || 1),
@@ -864,6 +1462,9 @@ function normalizeStaffAccessContext(value, {
     data_health: {
       unmapped_subject_class_count: Math.max(0, Number(value?.data_health?.unmapped_subject_class_count || 0)),
     },
+    active_school_id: normalizedActiveSchoolId || null,
+    default_school_id: normalizedDefaultSchoolId || null,
+    schools: normalizedSchools,
   };
 }
 
@@ -976,16 +1577,18 @@ function normalizeIdList(items = []) {
 
 function normalizePersonalisedGenerationRunRow(row) {
   if (!row || typeof row !== "object") return null;
-  return {
+  const normalizedPolicy = normalizeAutoAssignPolicy(row);
+  const normalized = {
     id: String(row?.id || ""),
     teacher_id: String(row?.teacher_id || ""),
     trigger_role: String(row?.trigger_role || "central_owner"),
     run_source: String(row?.run_source || ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW),
     selected_class_ids: normalizeIdList(row?.selected_class_ids),
     automation_policy_id: String(row?.automation_policy_id || "").trim() || null,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: Math.max(0, Number(row?.assignment_length || 0)),
-    support_preset: normalizeAutoAssignPolicy(row).support_preset,
-    allow_starter_fallback: row?.allow_starter_fallback !== false,
+    support_preset: normalizedPolicy.support_preset,
+    allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
     policy_snapshot: row?.policy_snapshot && typeof row.policy_snapshot === "object" ? row.policy_snapshot : {},
     derived_deadline_at: row?.derived_deadline_at || null,
     status: String(row?.status || "running"),
@@ -995,6 +1598,25 @@ function normalizePersonalisedGenerationRunRow(row) {
     summary: row?.summary && typeof row.summary === "object" ? row.summary : {},
     started_at: row?.started_at || null,
     finished_at: row?.finished_at || null,
+    created_at: row?.created_at || null,
+    updated_at: row?.updated_at || null,
+  };
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy)) {
+    normalized.bee_length_mode = normalizeSpellingBeeLengthMode(row?.bee_length_mode || row?.beeLengthMode);
+  }
+  return normalized;
+}
+
+function normalizePersonalisedGenerationRunPupilRow(row) {
+  if (!row || typeof row !== "object") return null;
+  return {
+    id: String(row?.id || ""),
+    run_id: String(row?.run_id || ""),
+    class_id: String(row?.class_id || ""),
+    pupil_id: String(row?.pupil_id || ""),
+    assignment_id: String(row?.assignment_id || "").trim() || null,
+    status: String(row?.status || "skipped").trim().toLowerCase() || "skipped",
+    skip_reason: String(row?.skip_reason || "").trim().toLowerCase() || null,
     created_at: row?.created_at || null,
     updated_at: row?.updated_at || null,
   };
@@ -1025,6 +1647,7 @@ async function getSignedInTeacherContext() {
   return {
     teacherId,
     appRole: deriveTeacherAppRoleFromAccessContext(accessContext),
+    schoolId: getActiveSchoolIdFromAccessContext(accessContext),
     accessContext,
   };
 }
@@ -1049,30 +1672,37 @@ async function readLegacyTeacherAppRoleForTeacherId(teacherId = "") {
   return data?.app_role ? normalizeTeacherAppRole(data.app_role) : null;
 }
 
+async function readStaffAccessContextRpc(requestedSchoolId = "") {
+  const safeRequestedSchoolId = normalizeSchoolId(requestedSchoolId);
+  const args = { requested_school_id: safeRequestedSchoolId || null };
+  const { data, error } = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION, args);
+  if (!error) return data;
+
+  if (isMissingStaffAccessFoundationError(error)) {
+    const retry = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION);
+    if (!retry.error) return retry.data;
+  }
+
+  throw error;
+}
+
 async function readStaffAccessContextForTeacherId(teacherId = "", { user = null } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   const legacyRole = await readLegacyTeacherAppRoleForTeacherId(safeTeacherId);
+  const requestedSchoolId = readStoredActiveSchoolId();
   await ensureMyStaffProfile({
     user,
     teacherId: safeTeacherId,
   });
 
   try {
-    const { data, error } = await supabase.rpc(STAFF_ACCESS_CONTEXT_FUNCTION);
-    if (error) {
-      if (isMissingStaffAccessFoundationError(error)) {
-        return buildDefaultStaffAccessContext({
-          userId: safeTeacherId,
-          legacyRole,
-        });
-      }
-      throw error;
-    }
-
-    return normalizeStaffAccessContext(data, {
+    const data = await readStaffAccessContextRpc(requestedSchoolId);
+    const normalizedContext = normalizeStaffAccessContext(data, {
       userId: safeTeacherId,
       legacyRole,
     });
+    syncStoredActiveSchoolIdFromContext(normalizedContext, requestedSchoolId);
+    return normalizedContext;
   } catch (error) {
     if (isMissingStaffAccessFoundationError(error)) {
       return buildDefaultStaffAccessContext({
@@ -1094,6 +1724,12 @@ async function requireCentralOwnerContext({
   return context;
 }
 
+function hasSpellingBeeAdminAccess(accessContext = null) {
+  return !!accessContext?.roles?.admin
+    || !!accessContext?.legacy?.is_legacy_central_owner
+    || !!accessContext?.capabilities?.can_manage_automation;
+}
+
 async function requireCsvImportContext({
   message = "Admin access is required to import pupils.",
 } = {}) {
@@ -1109,19 +1745,20 @@ async function recordPersonalisedAutomationPolicyEvent({
   policyId = "",
   eventType = "",
   metadata = {},
+  accessContext = null,
 } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   const safePolicyId = String(policyId || "").trim();
   const safeEventType = String(eventType || "").trim().toLowerCase();
   if (!safeTeacherId || !safePolicyId || !safeEventType) return null;
 
-  const payload = {
+  const payload = withActiveSchoolId({
     teacher_id: safeTeacherId,
     policy_id: safePolicyId,
     actor_id: safeTeacherId,
     event_type: safeEventType,
     metadata: metadata && typeof metadata === "object" ? metadata : {},
-  };
+  }, accessContext);
 
   const { error } = await supabase
     .from(PERSONALISED_AUTOMATION_POLICY_EVENT_TABLE)
@@ -1138,7 +1775,7 @@ async function recordPersonalisedAutomationPolicyEvent({
   return payload;
 }
 
-async function validateAutomationEligibleClassIds(teacherId, classIds = []) {
+async function validateAutomationEligibleClassIds(teacherId, classIds = [], accessContext = null) {
   const safeTeacherId = String(teacherId || "").trim();
   const safeClassIds = normalizeIdList(classIds);
   if (!safeTeacherId || !safeClassIds.length) return [];
@@ -1148,33 +1785,38 @@ async function validateAutomationEligibleClassIds(teacherId, classIds = []) {
     .select("id, class_type")
     .eq("teacher_id", safeTeacherId)
     .in("id", safeClassIds);
+  query = applyActiveSchoolFilter(query, accessContext);
 
   let { data, error } = await query;
   if (error && isMissingClassTypeColumnError(error)) {
-    const legacyResult = await supabase
+    let legacyQuery = supabase
       .from("classes")
       .select("id")
       .eq("teacher_id", safeTeacherId)
       .in("id", safeClassIds);
+    legacyQuery = applyActiveSchoolFilter(legacyQuery, accessContext);
+    const legacyResult = await legacyQuery;
     data = legacyResult.data || [];
     error = legacyResult.error || null;
   }
   if (error) throw error;
 
-  const rows = (data || []).map((row) => normalizeClassRow(row, { legacyFallback: CLASS_TYPE_FORM })).filter(Boolean);
+  // Automation policy targets must be explicit form groups. Missing legacy class_type values
+  // are treated as ineligible so subject/intervention groups cannot be accepted by fallback.
+  const rows = (data || []).map((row) => normalizeClassRow(row, { legacyFallback: CLASS_TYPE_SUBJECT })).filter(Boolean);
   if (rows.length !== safeClassIds.length) {
-    throw new Error("Choose only your own form or intervention groups for automation.");
+    throw new Error("Choose only your own form groups for automation.");
   }
 
   const eligibleIds = rows
     .filter((row) => {
-      const classType = normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM });
-      return classType === CLASS_TYPE_FORM || classType === CLASS_TYPE_INTERVENTION;
+      const classType = normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_SUBJECT });
+      return classType === CLASS_TYPE_FORM;
     })
     .map((row) => String(row?.id || "").trim());
 
   if (eligibleIds.length !== safeClassIds.length) {
-    throw new Error("Automated personalised tests can only target form or intervention groups.");
+    throw new Error("Automated personalised tests can only target form groups.");
   }
 
   return safeClassIds.filter((classId) => eligibleIds.includes(classId));
@@ -1397,6 +2039,11 @@ function sanitizeAssignmentResultRows(results = []) {
       targetGraphemes: Array.isArray(entry?.targetGraphemes)
         ? entry.targetGraphemes.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
         : [],
+      lastSubmittedIncorrectAnswer: String(
+        entry?.lastSubmittedIncorrectAnswer
+        ?? entry?.last_submitted_incorrect_answer
+        ?? ""
+      ).trim() || null,
       inputState: sanitizeAssignmentInputState(entry?.inputState),
       feedbackState: sanitizeAssignmentFeedbackState(entry?.feedbackState ?? entry?.feedback_state),
     }))
@@ -1517,6 +2164,808 @@ function normalizeLoadedWordRows(wordRows) {
   return (Array.isArray(wordRows) ? wordRows : []).map((row) => normalizeLoadedWordRow(row));
 }
 
+function normalizeWordloomCoreText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeWordloomCoreTextList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeWordloomCoreText(item)).filter(Boolean);
+  }
+
+  const clean = String(value || "").trim();
+  if (!clean) return [];
+
+  try {
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => normalizeWordloomCoreText(item)).filter(Boolean);
+    }
+  } catch {
+    // Fall through to the generic stored-segment parser below.
+  }
+
+  return normalizeLoadedSegments(clean)
+    .map((item) => normalizeWordloomCoreText(item))
+    .filter(Boolean);
+}
+
+function normalizeWordloomCoreDifficultyLabel(value = "") {
+  const label = String(value || "").trim();
+  const key = label.toLowerCase();
+  if (key.includes("stretch") || key.includes("challenge")) return { key: "challenge", label: label || "Stretch" };
+  if (key.includes("core")) return { key: "core", label: label || "Core" };
+  if (key.includes("easier") || key.includes("foundation")) return { key: "easier", label: label || "Easier" };
+  return { key: "", label };
+}
+
+function buildWordloomCoreDifficultyPayload(row = {}) {
+  const score = Number(row?.difficulty_score ?? row?.difficultyScore);
+  if (!Number.isFinite(score)) return null;
+  const band = normalizeWordloomCoreDifficultyLabel(row?.difficulty_label || row?.difficultyLabel);
+  const reason = String(row?.difficulty_reason || row?.difficultyReason || "").trim();
+  return {
+    version: "wordloom_core",
+    coreScore: Math.round(score),
+    adjustedScore: Math.round(score),
+    score: Math.round(score),
+    band: band.key || "core",
+    coreBand: band.key || "core",
+    label: band.label || "Core",
+    coreLabel: band.label || "Core",
+    reasons: reason ? [reason] : [],
+    modifierReasons: [],
+    flags: {},
+    features: {},
+    components: {},
+    modifiers: {},
+  };
+}
+
+function buildWordloomCoreContextSupport(row = {}) {
+  const sentence = String(row?.sentence || "").trim();
+  const meaning = String(row?.meaning || "").trim();
+  const context = {};
+
+  if (sentence) {
+    context.sentence = sentence;
+    context.sentence_status = "approved";
+    context.sentence_required = false;
+  }
+  if (meaning) {
+    context.meaning = meaning;
+    context.meaning_status = "approved";
+    context.meaning_enabled = true;
+    context.meaning_enabled_by_default = true;
+  }
+
+  return Object.keys(context).length ? context : null;
+}
+
+function normalizeWordloomCoreTargetRow(row = {}) {
+  const focusGrapheme = normalizeWordloomCoreText(row?.focus_grapheme || row?.focusGrapheme);
+  const targetRole = String(row?.target_role || row?.targetRole || "").trim().toLowerCase();
+  if (!focusGrapheme || !["primary", "secondary"].includes(targetRole)) return null;
+  return {
+    id: String(row?.id || "").trim(),
+    word_id: String(row?.word_id || row?.wordId || "").trim(),
+    focus_target_id: String(row?.focus_target_id || row?.focusTargetId || "").trim(),
+    focus_grapheme: focusGrapheme,
+    target_role: targetRole,
+    difficulty_modifier: Number.isFinite(Number(row?.difficulty_modifier ?? row?.difficultyModifier))
+      ? Number(row?.difficulty_modifier ?? row?.difficultyModifier)
+      : 0,
+    pattern_type: String(row?.pattern_type || row?.patternType || "").trim().toLowerCase(),
+  };
+}
+
+function chunkWordloomCoreIds(items = [], size = 100) {
+  const list = Array.isArray(items) ? items : [];
+  const chunks = [];
+  for (let index = 0; index < list.length; index += size) {
+    chunks.push(list.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function normalizeWordloomCoreReadLimit(value = null) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function readPagedWordloomCoreWordRows({
+  selectColumns,
+  applyFilters = (query) => query,
+  applyOrdering = (query) => query,
+  limit = null,
+  pageSize = WORDLOOM_CORE_BANK_PAGE_SIZE,
+} = {}) {
+  const rows = [];
+  const safeLimit = normalizeWordloomCoreReadLimit(limit);
+  const safePageSize = Math.max(1, Math.min(WORDLOOM_CORE_BANK_PAGE_SIZE, Math.round(Number(pageSize) || WORDLOOM_CORE_BANK_PAGE_SIZE)));
+  let from = 0;
+
+  while (safeLimit === null || rows.length < safeLimit) {
+    const remaining = safeLimit === null
+      ? safePageSize
+      : Math.min(safePageSize, safeLimit - rows.length);
+    if (remaining <= 0) break;
+
+    const to = from + remaining - 1;
+    const query = applyOrdering(applyFilters(
+      supabase
+        .from(WORDLOOM_CORE_WORD_TABLE)
+        .select(selectColumns)
+    ));
+    const { data, error } = await query.range(from, to);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = Array.isArray(data) ? data : [];
+    rows.push(...pageRows);
+    if (pageRows.length < remaining) break;
+    from += remaining;
+  }
+
+  return { data: rows, error: null };
+}
+
+export function mapWordloomCoreBankRowsToWordRows({
+  wordRows = [],
+  wordTargetRows = [],
+  focusTargetRows = [],
+} = {}) {
+  const activeTargetIds = new Set(
+    (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+      .filter((row) => row?.is_active !== false && row?.isActive !== false)
+      .map((row) => String(row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const targetRowsByWordId = new Map();
+
+  for (const row of Array.isArray(wordTargetRows) ? wordTargetRows : []) {
+    const target = normalizeWordloomCoreTargetRow(row);
+    if (!target?.word_id) continue;
+    if (!activeTargetIds.has(target.focus_target_id)) continue;
+    const next = targetRowsByWordId.get(target.word_id) || [];
+    next.push(target);
+    targetRowsByWordId.set(target.word_id, next);
+  }
+
+  return (Array.isArray(wordRows) ? wordRows : [])
+    .map((row) => {
+      const id = String(row?.id || "").trim();
+      if (!id) return null;
+      if (row?.is_active === false || row?.isActive === false) return null;
+      if (String(row?.approval_status || row?.approvalStatus || "").trim().toLowerCase() !== "approved") return null;
+      if (String(row?.suitability_status || row?.suitabilityStatus || "").trim().toLowerCase() !== "suitable") return null;
+
+      const targets = (targetRowsByWordId.get(id) || [])
+        .sort((a, b) => {
+          const roleDiff = (a.target_role === "primary" ? 0 : 1) - (b.target_role === "primary" ? 0 : 1);
+          if (roleDiff) return roleDiff;
+          return a.focus_grapheme.localeCompare(b.focus_grapheme);
+        });
+      const focusGraphemes = [...new Set(targets.map((target) => target.focus_grapheme).filter(Boolean))];
+      if (!focusGraphemes.length) return null;
+
+      const word = normalizeWordloomCoreText(row?.normalised_word || row?.normalisedWord || row?.word);
+      const segments = normalizeWordloomCoreTextList(row?.grapheme_segments ?? row?.graphemeSegments);
+      if (!word || !segments.length) return null;
+
+      const primaryFocus = normalizeWordloomCoreText(row?.primary_focus_grapheme || row?.primaryFocusGrapheme);
+      const contextSupport = buildWordloomCoreContextSupport(row);
+      const difficulty = buildWordloomCoreDifficultyPayload(row);
+      const sourceVersion = String(row?.source_version || row?.sourceVersion || "").trim();
+
+      return normalizeLoadedWordRow({
+        id,
+        word,
+        sentence: String(row?.sentence || "").trim() || null,
+        segments,
+        choice: {
+          source: "wordloom_core",
+          source_version: sourceVersion || null,
+          origin_word_source: "wordloom_core",
+          origin_bank_word_id: id,
+          focus_graphemes: focusGraphemes,
+          primary_focus_grapheme: focusGraphemes.includes(primaryFocus) ? primaryFocus : focusGraphemes[0],
+          focus_target_links: targets,
+          selection_suitability: "standard",
+          suitability_status: "suitable",
+          approval_status: "approved",
+          is_active: true,
+          difficulty,
+          difficulty_reason: String(row?.difficulty_reason || row?.difficultyReason || "").trim() || null,
+          context_support: contextSupport,
+        },
+      });
+    })
+    .filter(Boolean);
+}
+
+function normalizeWordloomCoreBankMonitorThreshold(value) {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.min(50, parsed))
+    : WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD;
+}
+
+function normalizeWordloomCoreMonitorStatus(value = "") {
+  return String(value || "").trim().toLowerCase() || "unknown";
+}
+
+function normalizeWordloomCoreMonitorFocusTarget(row = {}) {
+  const id = String(row?.id || "").trim();
+  const focusGrapheme = normalizeWordloomCoreText(row?.focus_grapheme || row?.focusGrapheme);
+  if (!id || !focusGrapheme) return null;
+  const sortOrder = Number(row?.sort_order ?? row?.sortOrder);
+  return {
+    id,
+    focus_grapheme: focusGrapheme,
+    display_label: String(row?.display_label || row?.displayLabel || focusGrapheme).trim() || focusGrapheme,
+    stage_band: String(row?.stage_band || row?.stageBand || "").trim(),
+    challenge_band: String(row?.challenge_band || row?.challengeBand || "").trim(),
+    sort_order: Number.isFinite(sortOrder) ? sortOrder : 9999,
+    is_active: row?.is_active === false || row?.isActive === false ? false : true,
+  };
+}
+
+function isWordloomCoreMonitorWordActive(row = {}) {
+  return row?.is_active === false || row?.isActive === false ? false : true;
+}
+
+function addWordloomCoreBreakdownCount(counts, value = "") {
+  const key = normalizeWordloomCoreMonitorStatus(value);
+  counts.set(key, (counts.get(key) || 0) + 1);
+}
+
+function buildWordloomCoreBreakdownRows(counts, order = []) {
+  const rows = [];
+  const seen = new Set();
+  for (const key of order) {
+    if (!counts.has(key)) continue;
+    seen.add(key);
+    rows.push({ status: key, count: counts.get(key) || 0 });
+  }
+  for (const key of [...counts.keys()].sort((a, b) => a.localeCompare(b))) {
+    if (seen.has(key)) continue;
+    rows.push({ status: key, count: counts.get(key) || 0 });
+  }
+  return rows;
+}
+
+function normalizeWordloomCoreSelectorSmokeWarning(value = {}) {
+  const focusGrapheme = normalizeWordloomCoreText(value?.focusGrapheme || value?.focus_grapheme);
+  const requestedTargetCount = Math.max(0, Math.round(Number(value?.requestedTargetCount ?? value?.requested_target_count ?? 0)));
+  const selectedTargetCount = Math.max(0, Math.round(Number(value?.selectedTargetCount ?? value?.selected_target_count ?? 0)));
+  if (!focusGrapheme || requestedTargetCount <= 0 || selectedTargetCount >= requestedTargetCount) return null;
+  return {
+    type: "target_coverage_low",
+    focusGrapheme,
+    selectedTargetCount,
+    requestedTargetCount,
+    fallbackCount: Math.max(0, requestedTargetCount - selectedTargetCount),
+  };
+}
+
+function normalizeWordloomCoreSelectorSmokeWarnings(values = []) {
+  const rows = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const row = normalizeWordloomCoreSelectorSmokeWarning(value);
+    if (!row) continue;
+    if (seen.has(row.focusGrapheme)) continue;
+    seen.add(row.focusGrapheme);
+    rows.push(row);
+  }
+  return rows.sort((a, b) => a.focusGrapheme.localeCompare(b.focusGrapheme));
+}
+
+function buildWordloomCoreCoverageConfidence({
+  available = true,
+  totalCoreWordCount = 0,
+  activeFocusGraphemeCount = 0,
+  usableActiveWordCount = 0,
+  belowThresholdCount = 0,
+  selectorWarningCount = 0,
+  missingContextCount = 0,
+} = {}) {
+  if (!available) {
+    return {
+      key: "unavailable",
+      label: "Monitor unavailable",
+      tone: "muted",
+      summary: "Core bank tables could not be read in this environment.",
+    };
+  }
+  if (!totalCoreWordCount || !activeFocusGraphemeCount) {
+    return {
+      key: "empty",
+      label: "No core bank data",
+      tone: "warning",
+      summary: "No active core bank targets or words are available to monitor yet.",
+    };
+  }
+  if (!usableActiveWordCount) {
+    return {
+      key: "no_usable_words",
+      label: "No usable words",
+      tone: "warning",
+      summary: "Core words exist, but none currently pass the selector-ready checks.",
+    };
+  }
+  if (belowThresholdCount || selectorWarningCount || missingContextCount) {
+    return {
+      key: "needs_expansion",
+      label: "Needs expansion",
+      tone: "warning",
+      summary: "The proof bank is usable, with a few focus targets or context fields to strengthen.",
+    };
+  }
+  return {
+    key: "healthy",
+    label: "Healthy",
+    tone: "success",
+    summary: "The active core bank is covering the monitored launch targets.",
+  };
+}
+
+export function buildWordloomCoreBankMonitorModel({
+  focusTargetRows = [],
+  wordRows = [],
+  wordTargetRows = [],
+  selectorSmokeWarnings = [],
+  threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD,
+  available = true,
+  message = "",
+} = {}) {
+  const safeThreshold = normalizeWordloomCoreBankMonitorThreshold(threshold);
+  const safeMessage = String(message || "").trim();
+  if (!available) {
+    return {
+      available: false,
+      message: safeMessage || "Core bank monitor data is unavailable.",
+      threshold: safeThreshold,
+      totalCoreWordCount: 0,
+      usableActiveWordCount: 0,
+      activeFocusGraphemeCount: 0,
+      inactiveWordCount: 0,
+      missingSentenceCount: 0,
+      missingMeaningCount: 0,
+      approvalStatusBreakdown: [],
+      suitabilityStatusBreakdown: [],
+      graphemes: [],
+      belowThresholdGraphemes: [],
+      selectorSmokeWarnings: [],
+      coverageConfidence: buildWordloomCoreCoverageConfidence({ available: false }),
+    };
+  }
+
+  const normalizedFocusTargets = (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+    .map((row) => normalizeWordloomCoreMonitorFocusTarget(row))
+    .filter(Boolean)
+    .sort((a, b) => a.sort_order - b.sort_order || a.focus_grapheme.localeCompare(b.focus_grapheme));
+  const activeFocusTargets = normalizedFocusTargets.filter((row) => row.is_active);
+  const activeTargetIds = new Set(activeFocusTargets.map((row) => row.id));
+  const activeTargetsById = new Map(activeFocusTargets.map((row) => [row.id, row]));
+  const wordList = Array.isArray(wordRows) ? wordRows : [];
+  const activeWordRows = wordList.filter((row) => isWordloomCoreMonitorWordActive(row));
+  const approvalCounts = new Map();
+  const suitabilityCounts = new Map();
+
+  for (const row of wordList) {
+    addWordloomCoreBreakdownCount(approvalCounts, row?.approval_status || row?.approvalStatus);
+    addWordloomCoreBreakdownCount(suitabilityCounts, row?.suitability_status || row?.suitabilityStatus);
+  }
+
+  const usableWordRows = mapWordloomCoreBankRowsToWordRows({
+    wordRows: wordList,
+    wordTargetRows,
+    focusTargetRows: normalizedFocusTargets,
+  });
+  const usableWordIds = new Set(
+    usableWordRows
+      .map((row) => String(row?.choice?.origin_bank_word_id || row?.id || "").trim())
+      .filter(Boolean)
+  );
+  const primaryWordIdsByFocus = new Map(activeFocusTargets.map((row) => [row.focus_grapheme, new Set()]));
+
+  for (const rawTargetRow of Array.isArray(wordTargetRows) ? wordTargetRows : []) {
+    const target = normalizeWordloomCoreTargetRow(rawTargetRow);
+    if (!target || target.target_role !== "primary") continue;
+    if (!activeTargetIds.has(target.focus_target_id)) continue;
+    if (!usableWordIds.has(target.word_id)) continue;
+    const focusTarget = activeTargetsById.get(target.focus_target_id);
+    const focusGrapheme = focusTarget?.focus_grapheme || target.focus_grapheme;
+    if (!focusGrapheme) continue;
+    const set = primaryWordIdsByFocus.get(focusGrapheme) || new Set();
+    set.add(target.word_id);
+    primaryWordIdsByFocus.set(focusGrapheme, set);
+  }
+
+  const graphemes = activeFocusTargets.map((target) => {
+    const usablePrimaryWordCount = primaryWordIdsByFocus.get(target.focus_grapheme)?.size || 0;
+    return {
+      focusGrapheme: target.focus_grapheme,
+      displayLabel: target.display_label,
+      stageBand: target.stage_band,
+      challengeBand: target.challenge_band,
+      sortOrder: target.sort_order,
+      usablePrimaryWordCount,
+      belowThreshold: usablePrimaryWordCount < safeThreshold,
+    };
+  });
+  const belowThresholdGraphemes = graphemes.filter((row) => row.belowThreshold);
+  const normalizedSelectorWarnings = normalizeWordloomCoreSelectorSmokeWarnings(selectorSmokeWarnings);
+  const missingSentenceCount = activeWordRows.filter((row) => !String(row?.sentence || "").trim()).length;
+  const missingMeaningCount = activeWordRows.filter((row) => !String(row?.meaning || "").trim()).length;
+
+  return {
+    available: true,
+    message: safeMessage,
+    threshold: safeThreshold,
+    totalCoreWordCount: wordList.length,
+    usableActiveWordCount: usableWordRows.length,
+    activeFocusGraphemeCount: activeFocusTargets.length,
+    inactiveWordCount: wordList.filter((row) => !isWordloomCoreMonitorWordActive(row)).length,
+    missingSentenceCount,
+    missingMeaningCount,
+    approvalStatusBreakdown: buildWordloomCoreBreakdownRows(approvalCounts, WORDLOOM_CORE_APPROVAL_STATUS_ORDER),
+    suitabilityStatusBreakdown: buildWordloomCoreBreakdownRows(suitabilityCounts, WORDLOOM_CORE_SUITABILITY_STATUS_ORDER),
+    graphemes,
+    belowThresholdGraphemes,
+    selectorSmokeWarnings: normalizedSelectorWarnings,
+    coverageConfidence: buildWordloomCoreCoverageConfidence({
+      available: true,
+      totalCoreWordCount: wordList.length,
+      activeFocusGraphemeCount: activeFocusTargets.length,
+      usableActiveWordCount: usableWordRows.length,
+      belowThresholdCount: belowThresholdGraphemes.length,
+      selectorWarningCount: normalizedSelectorWarnings.length,
+      missingContextCount: missingSentenceCount + missingMeaningCount,
+    }),
+  };
+}
+
+function buildWordloomCoreMonitorSampleProfile(target, allTargets) {
+  const fallbackTargets = allTargets
+    .filter((item) => item.focusGrapheme !== target.focusGrapheme)
+    .map((item) => item.focusGrapheme);
+
+  return {
+    concernRows: [{
+      target: target.focusGrapheme,
+      total: 4,
+      securityBand: "insecure",
+    }],
+    secureRows: fallbackTargets.map((focusGrapheme) => ({
+      target: focusGrapheme,
+      total: 4,
+      securityBand: "secure",
+    })),
+    developingRows: fallbackTargets.map((focusGrapheme) => ({
+      target: focusGrapheme,
+      total: 3,
+      securityBand: "nearly_secure",
+    })),
+    confusionByTarget: new Map(),
+    placementMeta: {
+      targetChallengeLevel: target.challengeBand || "secure_expected",
+    },
+  };
+}
+
+function buildWordloomCoreBankMonitorSelectorSmokeWarnings({
+  focusTargetRows = [],
+  wordRows = [],
+  wordTargetRows = [],
+  assignmentWordCount = WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT,
+} = {}) {
+  if (typeof buildGeneratedAssignmentPlan !== "function") return [];
+  const activeTargets = (Array.isArray(focusTargetRows) ? focusTargetRows : [])
+    .map((row) => normalizeWordloomCoreMonitorFocusTarget(row))
+    .filter((row) => row?.is_active);
+  if (!activeTargets.length) return [];
+
+  const assignmentRows = mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows,
+    focusTargetRows,
+  });
+  if (!assignmentRows.length) return [];
+
+  const targets = activeTargets.map((target) => ({
+    focusGrapheme: target.focus_grapheme,
+    challengeBand: target.challenge_band || "secure_expected",
+  }));
+  const teacherTests = [{
+    id: "wordloom-core-bank-monitor",
+    title: "Wordloom Core Bank Monitor",
+    test_words: assignmentRows,
+  }];
+  const warnings = [];
+
+  for (const target of targets) {
+    const pupilId = `bank-monitor-${target.focusGrapheme}`;
+    const plan = buildGeneratedAssignmentPlan({
+      pupilIds: [pupilId],
+      teacherTests,
+      attempts: [],
+      totalWords: assignmentWordCount,
+      currentProfiles: {
+        [pupilId]: buildWordloomCoreMonitorSampleProfile(target, targets),
+      },
+    });
+    for (const warning of plan?.coverageWarnings || []) {
+      if (warning?.type !== "target_coverage_low") continue;
+      if (normalizeWordloomCoreText(warning?.focusGrapheme) !== target.focusGrapheme) continue;
+      warnings.push(warning);
+    }
+  }
+
+  return normalizeWordloomCoreSelectorSmokeWarnings(warnings);
+}
+
+function isMissingWordloomCoreBankError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42P01"
+    || code === "PGRST204"
+    || code === "PGRST205"
+    || message.includes(WORDLOOM_CORE_WORD_TABLE)
+    || message.includes(WORDLOOM_CORE_WORD_TARGET_TABLE)
+    || message.includes(WORDLOOM_CORE_FOCUS_TARGET_TABLE);
+}
+
+function buildUnavailableWordloomCoreBankMonitorModel(error = null, threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD) {
+  const message = String(error?.message || "").trim();
+  return buildWordloomCoreBankMonitorModel({
+    available: false,
+    threshold,
+    message: message || "Core bank monitor data is unavailable.",
+  });
+}
+
+export async function readWordloomCoreBankMonitor({
+  threshold = WORDLOOM_CORE_BANK_MONITOR_DEFAULT_THRESHOLD,
+  assignmentWordCount = WORDLOOM_CORE_BANK_MONITOR_ASSIGNMENT_WORD_COUNT,
+} = {}) {
+  const safeThreshold = normalizeWordloomCoreBankMonitorThreshold(threshold);
+  try {
+    const { data: focusTargetRows, error: focusError } = await supabase
+      .from(WORDLOOM_CORE_FOCUS_TARGET_TABLE)
+      .select("id, focus_grapheme, display_label, stage_band, challenge_band, sort_order, is_active")
+      .order("sort_order", { ascending: true })
+      .order("focus_grapheme", { ascending: true });
+
+    if (focusError) return buildUnavailableWordloomCoreBankMonitorModel(focusError, safeThreshold);
+
+    const { data: wordRows, error: wordError } = await readPagedWordloomCoreWordRows({
+      selectColumns: "id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active",
+      applyOrdering: (query) => query
+        .order("primary_focus_grapheme", { ascending: true })
+        .order("normalised_word", { ascending: true }),
+    });
+
+    if (wordError) return buildUnavailableWordloomCoreBankMonitorModel(wordError, safeThreshold);
+
+    const safeWordRows = Array.isArray(wordRows) ? wordRows : [];
+    const wordIds = safeWordRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+    const wordTargetRows = [];
+
+    for (const chunk of chunkWordloomCoreIds(wordIds, 200)) {
+      const { data, error: targetError } = await supabase
+        .from(WORDLOOM_CORE_WORD_TARGET_TABLE)
+        .select("id, word_id, focus_target_id, focus_grapheme, target_role, pattern_type, difficulty_modifier")
+        .in("word_id", chunk);
+
+      if (targetError) return buildUnavailableWordloomCoreBankMonitorModel(targetError, safeThreshold);
+      wordTargetRows.push(...(Array.isArray(data) ? data : []));
+    }
+
+    const selectorSmokeWarnings = buildWordloomCoreBankMonitorSelectorSmokeWarnings({
+      focusTargetRows: focusTargetRows || [],
+      wordRows: safeWordRows,
+      wordTargetRows,
+      assignmentWordCount,
+    });
+
+    return buildWordloomCoreBankMonitorModel({
+      focusTargetRows: focusTargetRows || [],
+      wordRows: safeWordRows,
+      wordTargetRows,
+      selectorSmokeWarnings,
+      threshold: safeThreshold,
+    });
+  } catch (error) {
+    return buildUnavailableWordloomCoreBankMonitorModel(error, safeThreshold);
+  }
+}
+
+export async function listWordloomCoreSpellingBankWordRows({
+  limit = null,
+} = {}) {
+  const { data: wordRows, error: wordError } = await readPagedWordloomCoreWordRows({
+    selectColumns: "id, word, normalised_word, grapheme_segments, focus_graphemes, primary_focus_grapheme, stage_band, difficulty_score, difficulty_label, difficulty_reason, sentence, meaning, suitability_status, approval_status, source, source_version, is_active",
+    limit,
+    applyFilters: (query) => query
+      .eq("is_active", true)
+      .eq("approval_status", "approved")
+      .eq("suitability_status", "suitable"),
+    applyOrdering: (query) => query
+      .order("primary_focus_grapheme", { ascending: true })
+      .order("difficulty_score", { ascending: true })
+      .order("normalised_word", { ascending: true }),
+  });
+
+  if (wordError) {
+    if (isMissingWordloomCoreBankError(wordError)) return [];
+    throw wordError;
+  }
+
+  const safeWordRows = Array.isArray(wordRows) ? wordRows : [];
+  const wordIds = safeWordRows.map((row) => String(row?.id || "").trim()).filter(Boolean);
+  if (!wordIds.length) return [];
+
+  const wordTargetRows = [];
+  for (const chunk of chunkWordloomCoreIds(wordIds)) {
+    const { data, error: targetError } = await supabase
+      .from(WORDLOOM_CORE_WORD_TARGET_TABLE)
+      .select("id, word_id, focus_target_id, focus_grapheme, target_role, pattern_type, difficulty_modifier")
+      .in("word_id", chunk)
+      .in("target_role", ["primary", "secondary"]);
+
+    if (targetError) {
+      if (isMissingWordloomCoreBankError(targetError)) return [];
+      throw targetError;
+    }
+    wordTargetRows.push(...(Array.isArray(data) ? data : []));
+  }
+
+  const focusTargetIds = [...new Set(
+    wordTargetRows
+      .map((row) => String(row?.focus_target_id || "").trim())
+      .filter(Boolean)
+  )];
+  if (!focusTargetIds.length) return [];
+
+  const { data: focusTargetRows, error: focusError } = await supabase
+    .from(WORDLOOM_CORE_FOCUS_TARGET_TABLE)
+    .select("id, focus_grapheme, is_active")
+    .in("id", focusTargetIds)
+    .eq("is_active", true);
+
+  if (focusError) {
+    if (isMissingWordloomCoreBankError(focusError)) return [];
+    throw focusError;
+  }
+
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows: safeWordRows,
+    wordTargetRows: wordTargetRows || [],
+    focusTargetRows: focusTargetRows || [],
+  });
+}
+
+function normalizeBeeEndedReason(value) {
+  const reason = String(value || "").trim().toLowerCase();
+  return ["wrong", "timeout", "completed", "abandoned"].includes(reason) ? reason : "abandoned";
+}
+
+function isRankableSpellingBeeResult(row = null) {
+  return !!row?.completed_at && String(row?.ended_reason || "").trim().toLowerCase() !== "abandoned";
+}
+
+function formatSpellingBeePupilDisplayName(pupil = null) {
+  const firstName = String(pupil?.first_name || "").trim();
+  const surname = String(pupil?.surname || "").trim();
+  if (firstName && surname) return `${firstName} ${surname.slice(0, 1).toUpperCase()}.`;
+  if (firstName) return firstName;
+  return String(pupil?.username || "Pupil").trim() || "Pupil";
+}
+
+function normalizeSpellingBeeResultRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const resultJson = Array.isArray(row?.result_json ?? row?.resultJson)
+    ? (row?.result_json ?? row?.resultJson)
+    : [];
+  return {
+    id: String(row?.id || "").trim(),
+    teacher_id: String(row?.teacher_id || row?.teacherId || "").trim(),
+    run_id: String(row?.run_id || row?.runId || "").trim(),
+    assignment_id: String(row?.assignment_id || row?.assignmentId || "").trim(),
+    test_id: String(row?.test_id || row?.testId || "").trim(),
+    class_id: String(row?.class_id || row?.classId || "").trim(),
+    pupil_id: String(row?.pupil_id || row?.pupilId || "").trim(),
+    streak: Math.max(0, Number(row?.streak || 0)),
+    rounds_attempted: Math.max(0, Number(row?.rounds_attempted ?? row?.roundsAttempted ?? 0)),
+    max_rounds: Math.max(0, Number(row?.max_rounds ?? row?.maxRounds ?? 0)),
+    bee_length_mode: normalizeSpellingBeeLengthMode(row?.bee_length_mode || row?.beeLengthMode),
+    ended_reason: String(row?.ended_reason || row?.endedReason || "").trim().toLowerCase() || null,
+    result_json: resultJson,
+    snapshot_year_group: String(row?.snapshot_year_group || row?.snapshotYearGroup || "").trim() || null,
+    snapshot_form_class_id: String(row?.snapshot_form_class_id || row?.snapshotFormClassId || "").trim() || null,
+    snapshot_form_class_name: String(row?.snapshot_form_class_name || row?.snapshotFormClassName || "").trim() || null,
+    snapshot_form_year_group: String(row?.snapshot_form_year_group || row?.snapshotFormYearGroup || "").trim() || null,
+    started_at: row?.started_at || row?.startedAt || null,
+    completed_at: row?.completed_at || row?.completedAt || null,
+    created_at: row?.created_at || row?.createdAt || null,
+    updated_at: row?.updated_at || row?.updatedAt || null,
+  };
+}
+
+function buildRankedSpellingBeeRows(rows = []) {
+  const sortedRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const normalized = normalizeSpellingBeeResultRow(row);
+      return normalized ? { ...row, ...normalized } : null;
+    })
+    .filter((row) => !!row?.id || (!!row?.run_id && !!row?.pupil_id))
+    .sort((a, b) =>
+      Number(isRankableSpellingBeeResult(b)) - Number(isRankableSpellingBeeResult(a))
+      || Number(b.streak || 0) - Number(a.streak || 0)
+      || Number(a.rounds_attempted || 0) - Number(b.rounds_attempted || 0)
+      || String(a.completed_at || a.started_at || "").localeCompare(String(b.completed_at || b.started_at || ""))
+      || String(a.pupil_id || "").localeCompare(String(b.pupil_id || ""))
+    );
+
+  let lastStreak = null;
+  let lastRank = 0;
+  let rankableIndex = 0;
+  return sortedRows.map((row) => {
+    if (!isRankableSpellingBeeResult(row)) {
+      return {
+        ...row,
+        rank: null,
+      };
+    }
+    rankableIndex += 1;
+    if (lastStreak == null || Number(row.streak || 0) !== lastStreak) {
+      lastRank = rankableIndex;
+      lastStreak = Number(row.streak || 0);
+    }
+    return {
+      ...row,
+      rank: lastRank,
+    };
+  });
+}
+
+function addScopedSpellingBeeRanks(rows = []) {
+  const ranked = buildRankedSpellingBeeRows(rows);
+  const yearGroups = new Map();
+  const formGroups = new Map();
+  for (const row of ranked) {
+    const yearKey = String(row.snapshot_year_group || row.snapshot_form_year_group || "").trim();
+    if (yearKey) yearGroups.set(yearKey, [...(yearGroups.get(yearKey) || []), row]);
+    const formKey = String(row.snapshot_form_class_id || row.snapshot_form_class_name || "").trim();
+    if (formKey) formGroups.set(formKey, [...(formGroups.get(formKey) || []), row]);
+  }
+  const scopedByPupil = new Map(ranked.map((row) => [String(row.pupil_id || ""), { year_rank: null, form_rank: null }]));
+  for (const groupRows of yearGroups.values()) {
+    for (const row of buildRankedSpellingBeeRows(groupRows)) {
+      if (!row.rank) continue;
+      const entry = scopedByPupil.get(String(row.pupil_id || "")) || {};
+      entry.year_rank = row.rank;
+      scopedByPupil.set(String(row.pupil_id || ""), entry);
+    }
+  }
+  for (const groupRows of formGroups.values()) {
+    for (const row of buildRankedSpellingBeeRows(groupRows)) {
+      if (!row.rank) continue;
+      const entry = scopedByPupil.get(String(row.pupil_id || "")) || {};
+      entry.form_rank = row.rank;
+      scopedByPupil.set(String(row.pupil_id || ""), entry);
+    }
+  }
+  return ranked.map((row) => ({
+    ...row,
+    ...(scopedByPupil.get(String(row.pupil_id || "")) || {}),
+  }));
+}
+
 function normalizeBaselineGateAssignmentPayload(payload) {
   const assignment = payload && typeof payload === "object" ? payload : null;
   if (!assignment) return null;
@@ -1571,7 +3020,8 @@ function normalizeBaselineGateStatePayload(payload, {
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {
   const state = payload && typeof payload === "object" ? payload : {};
-  const normalizedStatus = String(state?.status || "waiting").trim().toLowerCase();
+  const rawStatus = String(state?.status || "waiting").trim().toLowerCase();
+  const normalizedStatus = rawStatus === "complete" || rawStatus === "completed" ? "ready" : rawStatus;
   const status = BASELINE_GATE_STATUS_VALUES.has(normalizedStatus) ? normalizedStatus : "waiting";
   const assignmentId = String(
     state?.assignment_id
@@ -1622,6 +3072,43 @@ function isMissingPupilBaselineGateReadFunctionError(error) {
   return code === "42883"
     || code === "PGRST202"
     || message.includes("read_pupil_baseline_gate_state");
+}
+
+function isMissingBaselineProvisionFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("ensure_form_class_baseline_assignments");
+}
+
+function normalizeBaselineProvisionResultPayload(payload, {
+  formClassIds = [],
+  standardKey = REQUIRED_BASELINE_STANDARD_KEY,
+  ok = true,
+  error = "",
+} = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const results = Array.isArray(source?.results) ? source.results : [];
+  const createdCount = Math.max(0, Number(source?.created_count ?? source?.createdCount ?? 0));
+  const normalizedStandardKey = String(
+    source?.standard_key
+    || source?.standardKey
+    || standardKey
+  ).trim().toLowerCase() || standardKey;
+  const normalizedStatus = String(source?.status || (ok ? "ok" : "error")).trim().toLowerCase() || (ok ? "ok" : "error");
+  return {
+    ok: ok && normalizedStatus !== "error",
+    status: normalizedStatus,
+    createdCount,
+    created_count: createdCount,
+    results,
+    standardKey: normalizedStandardKey,
+    standard_key: normalizedStandardKey,
+    formClassIds: normalizeIdList(formClassIds),
+    form_class_ids: normalizeIdList(formClassIds),
+    error: String(error || source?.error || "").trim(),
+  };
 }
 
 function isMissingPupilRuntimeAccessFunctionError(error) {
@@ -1858,6 +3345,324 @@ export async function markAssignmentComplete({
   return statusRow;
 }
 
+async function readBeeClassSnapshot(classId = "") {
+  const safeClassId = String(classId || "").trim();
+  if (!safeClassId) return null;
+  let result = await supabase
+    .from("classes")
+    .select("id, name, year_group, class_type")
+    .eq("id", safeClassId)
+    .maybeSingle();
+  if (result.error && isMissingClassTypeColumnError(result.error)) {
+    result = await supabase
+      .from("classes")
+      .select("id, name, year_group")
+      .eq("id", safeClassId)
+      .maybeSingle();
+  }
+  if (result.error) throw result.error;
+  return normalizeClassRow(result.data, { legacyFallback: CLASS_TYPE_FORM });
+}
+
+async function readBeeFormClassSnapshot({ pupilId = "", fallbackClass = null } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (normalizeClassType(fallbackClass?.class_type, { legacyFallback: CLASS_TYPE_INTERVENTION }) === CLASS_TYPE_FORM) {
+    return fallbackClass;
+  }
+  if (!safePupilId) return null;
+
+  let result = await supabase
+    .from("pupil_classes")
+    .select(`
+      class_id,
+      classes (
+        id,
+        name,
+        year_group,
+        class_type
+      )
+    `)
+    .eq("pupil_id", safePupilId)
+    .eq("active", true);
+  if (result.error && isMissingClassTypeColumnError(result.error)) {
+    result = await supabase
+      .from("pupil_classes")
+      .select(`
+        class_id,
+        classes (
+          id,
+          name,
+          year_group
+        )
+      `)
+      .eq("pupil_id", safePupilId)
+      .eq("active", true);
+  }
+  if (result.error) throw result.error;
+
+  const rows = (result.data || [])
+    .map((row) => normalizeClassRow(
+      Array.isArray(row?.classes) ? row.classes[0] : row?.classes,
+      { legacyFallback: CLASS_TYPE_FORM },
+    ))
+    .filter(Boolean);
+  return rows.find((row) => normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
+    || rows[0]
+    || null;
+}
+
+async function readSpellingBeeAssignmentStartContext(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return null;
+  let result = await supabase
+    .from("assignments_v2")
+    .select("id, teacher_id, test_id, class_id, end_at, automation_kind")
+    .eq("id", safeAssignmentId)
+    .maybeSingle();
+  if (result.error && isMissingAutomationMetadataColumnError(result.error)) {
+    result = await supabase
+      .from("assignments_v2")
+      .select("id, teacher_id, test_id, class_id, end_at")
+      .eq("id", safeAssignmentId)
+      .maybeSingle();
+  }
+  if (result.error) throw result.error;
+  return result.data || null;
+}
+
+export async function readSpellingBeeResultsForAssignments({
+  assignmentIds = [],
+  pupilId = "",
+} = {}) {
+  const safeAssignmentIds = normalizeIdList(assignmentIds);
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeAssignmentIds.length || !safePupilId) return [];
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .in("assignment_id", safeAssignmentIds)
+    .eq("pupil_id", safePupilId);
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) return [];
+    throw error;
+  }
+
+  return (data || []).map(normalizeSpellingBeeResultRow).filter(Boolean);
+}
+
+export async function startSpellingBeeResult({
+  teacherId = "",
+  runId = "",
+  assignmentId = "",
+  testId = "",
+  classId = "",
+  pupilId = "",
+  maxRounds = 0,
+  beeLengthMode = "",
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeRunId || !safeAssignmentId || !safePupilId) {
+    throw new Error("Could not start the Spelling Bee.");
+  }
+
+  const assignmentContext = await readSpellingBeeAssignmentStartContext(safeAssignmentId);
+  if (!assignmentContext?.id) throw new Error("Could not find this Spelling Bee assignment.");
+  const assignmentKind = String(assignmentContext?.automation_kind || ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE).trim().toLowerCase();
+  if (assignmentKind && assignmentKind !== ASSIGNMENT_AUTOMATION_KIND_SPELLING_BEE) {
+    throw new Error("This assignment is not a Spelling Bee competition.");
+  }
+  const closesAtMs = assignmentContext?.end_at ? new Date(assignmentContext.end_at).getTime() : 0;
+  if (!Number.isFinite(closesAtMs) || closesAtMs <= 0) {
+    throw new Error("This Spelling Bee does not have a competition close time.");
+  }
+
+  const existingRes = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .maybeSingle();
+  if (existingRes.error && !isMissingSpellingBeeResultTableError(existingRes.error)) throw existingRes.error;
+  if (existingRes.data) {
+    return {
+      ...normalizeSpellingBeeResultRow(existingRes.data),
+      already_started: true,
+    };
+  }
+  if (closesAtMs <= Date.now()) {
+    throw new Error("This Spelling Bee has closed.");
+  }
+
+  const resolvedTeacherId = String(teacherId || assignmentContext?.teacher_id || "").trim();
+  const resolvedTestId = String(testId || assignmentContext?.test_id || "").trim();
+  const resolvedClassId = String(classId || assignmentContext?.class_id || "").trim();
+  const classSnapshot = await readBeeClassSnapshot(resolvedClassId);
+  const formSnapshot = await readBeeFormClassSnapshot({
+    pupilId: safePupilId,
+    fallbackClass: classSnapshot,
+  });
+  const nowIso = new Date().toISOString();
+  const payload = {
+    teacher_id: resolvedTeacherId || null,
+    run_id: safeRunId,
+    assignment_id: safeAssignmentId,
+    test_id: resolvedTestId || null,
+    class_id: resolvedClassId || null,
+    pupil_id: safePupilId,
+    streak: 0,
+    rounds_attempted: 0,
+    max_rounds: Math.max(0, Number(maxRounds || 0)),
+    bee_length_mode: normalizeSpellingBeeLengthMode(beeLengthMode),
+    ended_reason: null,
+    result_json: [],
+    snapshot_year_group: String(classSnapshot?.year_group || formSnapshot?.year_group || "").trim() || null,
+    snapshot_form_class_id: String(formSnapshot?.id || "").trim() || null,
+    snapshot_form_class_name: String(formSnapshot?.name || "").trim() || null,
+    snapshot_form_year_group: String(formSnapshot?.year_group || "").trim() || null,
+    started_at: nowIso,
+    completed_at: null,
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .insert([payload])
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) {
+      throw new Error("Spelling Bee result storage is not available yet. Run the latest Supabase migration.");
+    }
+    const code = String(error?.code || "").trim();
+    if (code === "23505") {
+      const retry = await supabase
+        .from(SPELLING_BEE_RESULT_TABLE)
+        .select("*")
+        .eq("run_id", safeRunId)
+        .eq("pupil_id", safePupilId)
+        .maybeSingle();
+      if (retry.error) throw retry.error;
+      return {
+        ...normalizeSpellingBeeResultRow(retry.data),
+        already_started: true,
+      };
+    }
+    throw error;
+  }
+
+  return {
+    ...normalizeSpellingBeeResultRow(data || payload),
+    just_started: true,
+  };
+}
+
+export async function finalizeSpellingBeeResult({
+  runId = "",
+  pupilId = "",
+  endedReason = "abandoned",
+  result = null,
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safePupilId = String(pupilId || "").trim();
+  if (!safeRunId || !safePupilId) return null;
+
+  const resultRows = sanitizeAssignmentResultRows(result?.results || result?.itemStates || []);
+  const correctRows = resultRows.filter((row) => row.correct);
+  const reason = normalizeBeeEndedReason(endedReason || result?.endedReason || result?.ended_reason);
+  const totalWords = Math.max(0, Number(result?.totalWords || result?.maxRounds || resultRows.length || 0));
+  const payload = {
+    streak: Math.max(0, Number(result?.streak ?? result?.totalCorrect ?? correctRows.length ?? 0)),
+    rounds_attempted: Math.max(0, Number(result?.roundsAttempted ?? result?.rounds_attempted ?? resultRows.length ?? 0)),
+    max_rounds: totalWords,
+    ended_reason: reason,
+    result_json: resultRows,
+    completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .update(payload)
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .is("completed_at", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) {
+      throw new Error("Spelling Bee result storage is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  if (data) return normalizeSpellingBeeResultRow(data);
+
+  const current = await supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select("*")
+    .eq("run_id", safeRunId)
+    .eq("pupil_id", safePupilId)
+    .maybeSingle();
+  if (current.error) {
+    if (isMissingSpellingBeeResultTableError(current.error)) return null;
+    throw current.error;
+  }
+  return normalizeSpellingBeeResultRow(current.data);
+}
+
+export async function listSpellingBeeResultsForRun({
+  runId = "",
+  assignmentId = "",
+} = {}) {
+  const safeRunId = String(runId || "").trim();
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeRunId && !safeAssignmentId) return [];
+
+  let query = supabase
+    .from(SPELLING_BEE_RESULT_TABLE)
+    .select(`
+      *,
+      pupils (
+        first_name,
+        surname,
+        username
+      ),
+      classes (
+        name
+      )
+    `);
+  if (safeRunId) query = query.eq("run_id", safeRunId);
+  else query = query.eq("assignment_id", safeAssignmentId);
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingSpellingBeeResultTableError(error)) return [];
+    throw error;
+  }
+
+  const rows = (data || [])
+    .map((row) => {
+      const normalized = normalizeSpellingBeeResultRow(row);
+      if (!normalized) return null;
+      const pupil = Array.isArray(row?.pupils) ? row.pupils[0] : row?.pupils;
+      const classRow = Array.isArray(row?.classes) ? row.classes[0] : row?.classes;
+      return {
+        ...normalized,
+        pupil_name: formatSpellingBeePupilDisplayName(pupil),
+        class_name: String(classRow?.name || "").trim() || null,
+      };
+    })
+    .filter(Boolean);
+
+  return addScopedSpellingBeeRanks(rows);
+}
+
 /* ---------------------------
    Classes
 ---------------------------- */
@@ -1892,7 +3697,7 @@ export async function createClass({
 
     const { data, error } = await supabase
       .from("classes")
-      .insert([payload])
+      .insert([withActiveSchoolId(payload, context.accessContext)])
       .select("*")
       .single();
 
@@ -1906,12 +3711,12 @@ export async function createClass({
 
       const { data: legacyData, error: legacyError } = await supabase
         .from("classes")
-        .insert([{
+        .insert([withActiveSchoolId({
           teacher_id: teacherId,
           name: className,
           join_code,
           year_group: yearGroup,
-        }])
+        }, context.accessContext)])
         .select("*")
         .single();
 
@@ -1930,10 +3735,13 @@ export async function createClass({
 }
 
 export async function listClasses() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("classes")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select("*");
+  query = applyActiveSchoolFilter(query, context.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data || [])
@@ -1967,11 +3775,11 @@ export async function createInterventionGroup({
     const { error: membershipError } = await supabase
       .from("pupil_classes")
       .insert(
-        selectedPupilIds.map((pupilId) => ({
+        selectedPupilIds.map((pupilId) => withActiveSchoolId({
           pupil_id: pupilId,
           class_id: createdClassId,
           active: true,
-        }))
+        }, context.accessContext))
       );
 
     if (membershipError) {
@@ -2000,6 +3808,128 @@ export async function createInterventionGroup({
   }
 }
 
+function normalizeInterventionDirectoryAttributeType(value = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (normalized === "pp" || normalized === "is pp" || normalized === "pupil premium") return "pp";
+  if (normalized === "sen" || normalized === "has sen" || normalized === "sen status") return "sen";
+  if (normalized === "eal" || normalized === "has eal") return "eal";
+  if (normalized === "gender" || normalized === "gender group") return "gender";
+  return "";
+}
+
+function normalizeInterventionDirectoryAttributeValue(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/[-_]+/g, "_").replace(/\s+/g, "_");
+}
+
+function getInterventionDirectoryAttributeValues(attributes = {}, type = "") {
+  const safeType = normalizeInterventionDirectoryAttributeType(type);
+  if (!safeType) return [];
+  const value = attributes?.[safeType];
+  return [...new Set(
+    (Array.isArray(value) ? value : (value ? [value] : []))
+      .map((item) => normalizeInterventionDirectoryAttributeValue(item))
+      .filter(Boolean)
+  )];
+}
+
+function hasPositiveInterventionDirectoryAttribute(attributes = {}, type = "") {
+  const safeType = normalizeInterventionDirectoryAttributeType(type);
+  const values = getInterventionDirectoryAttributeValues(attributes, safeType);
+  if (!values.length) return false;
+  if (safeType === "pp") return values.some((item) => INTERVENTION_POSITIVE_PP_VALUES.has(item) || INTERVENTION_POSITIVE_PP_VALUES.has(item.replace(/_/g, " ")));
+  if (safeType === "sen") return values.some((item) => INTERVENTION_POSITIVE_SEN_VALUES.has(item) || INTERVENTION_POSITIVE_SEN_VALUES.has(item.replace(/_/g, " ")));
+  if (safeType === "eal") return values.some((item) => INTERVENTION_POSITIVE_EAL_VALUES.has(item) || INTERVENTION_POSITIVE_EAL_VALUES.has(item.replace(/_/g, " ")));
+  return false;
+}
+
+function normalizeInterventionDirectoryStatusFilter(value = "") {
+  const [rawType = "", rawValue = ""] = String(value || "").trim().toLowerCase().split(":");
+  const type = normalizeInterventionDirectoryAttributeType(rawType);
+  const statusValue = normalizeInterventionDirectoryAttributeValue(rawValue);
+  if (!type) return null;
+  if (["pp", "sen", "eal"].includes(type)) return { type, value: "positive" };
+  if (type === "gender" && statusValue && !INTERVENTION_IGNORED_GENDER_VALUES.has(statusValue)) {
+    return { type, value: statusValue };
+  }
+  return null;
+}
+
+function doesInterventionDirectoryPupilMatchStatus(attributes = {}, statusFilter = null) {
+  if (!statusFilter?.type) return true;
+  if (["pp", "sen", "eal"].includes(statusFilter.type)) {
+    return hasPositiveInterventionDirectoryAttribute(attributes, statusFilter.type);
+  }
+  if (statusFilter.type === "gender") {
+    return getInterventionDirectoryAttributeValues(attributes, "gender").includes(statusFilter.value);
+  }
+  return true;
+}
+
+function buildInterventionDirectoryAttributesByPupil(rows = []) {
+  const byPupil = new Map();
+  for (const row of rows || []) {
+    const pupilId = String(row?.pupil_id || "").trim();
+    const type = normalizeInterventionDirectoryAttributeType(row?.group_type);
+    const value = normalizeInterventionDirectoryAttributeValue(row?.group_value);
+    if (!pupilId || !type || !value) continue;
+    const attributes = byPupil.get(pupilId) || {};
+    const values = Array.isArray(attributes[type]) ? attributes[type] : [];
+    if (!values.includes(value)) values.push(value);
+    attributes[type] = values.sort((a, b) => a.localeCompare(b));
+    byPupil.set(pupilId, attributes);
+  }
+  return byPupil;
+}
+
+function buildInterventionDirectoryStatusOptions(attributesByPupil = new Map()) {
+  let ppCount = 0;
+  let senCount = 0;
+  let ealCount = 0;
+  const genderCounts = new Map();
+
+  for (const attributes of attributesByPupil.values()) {
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "pp")) ppCount += 1;
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "sen")) senCount += 1;
+    if (hasPositiveInterventionDirectoryAttribute(attributes, "eal")) ealCount += 1;
+    for (const value of getInterventionDirectoryAttributeValues(attributes, "gender")) {
+      if (INTERVENTION_IGNORED_GENDER_VALUES.has(value) || INTERVENTION_IGNORED_GENDER_VALUES.has(value.replace(/_/g, " "))) continue;
+      genderCounts.set(value, (genderCounts.get(value) || 0) + 1);
+    }
+  }
+
+  const options = [];
+  if (ppCount > 0) options.push({ value: "pp:positive", group_type: "pp", group_value: "positive", count: ppCount });
+  if (senCount > 0) options.push({ value: "sen:positive", group_type: "sen", group_value: "positive", count: senCount });
+  if (ealCount > 0) options.push({ value: "eal:positive", group_type: "eal", group_value: "positive", count: ealCount });
+  for (const [value, count] of [...genderCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    options.push({ value: `gender:${value}`, group_type: "gender", group_value: value, count });
+  }
+  return options;
+}
+
+async function loadInterventionDirectoryGroupValueRows({ pupilIds = [], teacherId = "", accessContext = null } = {}) {
+  const safePupilIds = normalizeIdList(pupilIds);
+  const safeTeacherId = String(teacherId || "").trim();
+  if (!safePupilIds.length || !safeTeacherId) return [];
+
+  const rows = [];
+  for (let index = 0; index < safePupilIds.length; index += 200) {
+    const chunk = safePupilIds.slice(index, index + 200);
+    let query = supabase
+      .from(TEACHER_PUPIL_GROUP_VALUES_TABLE)
+      .select("pupil_id, group_type, group_value")
+      .eq("teacher_id", safeTeacherId)
+      .in("pupil_id", chunk)
+      .in("group_type", INTERVENTION_DIRECTORY_ATTRIBUTE_TYPES);
+    query = applyActiveSchoolFilter(query, accessContext);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows;
+}
+
 export async function listTeacherPupilDirectoryForInterventionGroups() {
   const context = await requireCentralOwnerContext({
     message: "Admin access is required to view the intervention group directory.",
@@ -2011,13 +3941,21 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
   const safeYearGroup = String(options?.year_group || "").trim();
   const safeSourceClassId = String(options?.source_class_id || "").trim();
   const safeSearch = String(options?.search || "").trim();
+  const statusFilter = normalizeInterventionDirectoryStatusFilter(options?.status || "");
+  const includeStatusOptions = options?.include_status_options === true || options?.metadata_only === true;
+  const metadataOnly = options?.metadata_only === true;
+  const allowBroad = options?.allow_broad === true;
+  const resultLimit = Math.max(1, Math.min(500, Number(options?.limit || 100)));
   const teacherId = context.teacherId;
 
-  if (!safeYearGroup && !safeSourceClassId && !safeSearch) {
+  if (!safeYearGroup && !safeSourceClassId && !safeSearch && !statusFilter && !includeStatusOptions && !metadataOnly && !allowBroad) {
     return {
       classes: [],
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2045,6 +3983,9 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
       classes: [],
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2061,6 +4002,31 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
       classes: candidateClasses,
       pupils: [],
       resultCount: 0,
+      statusOptions: [],
+      displayLimit: resultLimit,
+      isLimited: false,
+    };
+  }
+
+  const shouldLoadGroupValues = includeStatusOptions || metadataOnly || !!statusFilter;
+  const groupValueRows = shouldLoadGroupValues
+    ? await loadInterventionDirectoryGroupValueRows({
+        pupilIds: candidatePupilIds,
+        teacherId,
+        accessContext: context.accessContext,
+      })
+    : [];
+  const attributesByPupil = buildInterventionDirectoryAttributesByPupil(groupValueRows);
+  const statusOptions = shouldLoadGroupValues ? buildInterventionDirectoryStatusOptions(attributesByPupil) : [];
+
+  if (metadataOnly) {
+    return {
+      classes: candidateClasses,
+      pupils: [],
+      resultCount: 0,
+      statusOptions,
+      displayLimit: resultLimit,
+      isLimited: false,
     };
   }
 
@@ -2126,8 +4092,10 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
         display_name: displayName,
         year_groups: yearGroups,
         classes: memberships,
+        attributes: attributesByPupil.get(pupilId) || {},
       };
     })
+    .filter((pupil) => doesInterventionDirectoryPupilMatchStatus(pupil?.attributes || {}, statusFilter))
     .filter((pupil) => {
       if (!safeSearch) return true;
       const haystack = [
@@ -2139,10 +4107,16 @@ export async function listTeacherPupilDirectoryForInterventionGroups() {
     })
     .sort((a, b) => String(a?.display_name || "").localeCompare(String(b?.display_name || "")));
 
+  const resultCount = directory.length;
+  const limitedDirectory = directory.slice(0, resultLimit);
+
   return {
     classes: candidateClasses,
-    pupils: directory,
-    resultCount: directory.length,
+    pupils: limitedDirectory,
+    resultCount,
+    statusOptions,
+    displayLimit: resultLimit,
+    isLimited: resultCount > limitedDirectory.length,
   };
 }
 
@@ -2168,11 +4142,14 @@ export function consumeLatestStaffProfileSyncNotice() {
 }
 
 export async function listStaffProfiles() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(STAFF_PROFILES_TABLE)
-    .select("id, user_id, email, display_name, external_staff_id, notes, profile_source, import_metadata, last_import_batch_id, last_imported_at, last_imported_by, created_at, updated_at")
+    .select("id, user_id, email, display_name, external_staff_id, notes, profile_source, import_metadata, last_import_batch_id, last_imported_at, last_imported_by, archived_at, archived_by, archive_reason, created_at, updated_at")
     .order("display_name", { ascending: true })
     .order("email", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffProfilesSupportError(error)) {
@@ -2187,12 +4164,15 @@ export async function listStaffProfiles() {
 }
 
 export async function listActiveStaffRoleAssignments() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("id, user_id, role, active, granted_by, created_at, updated_at")
     .eq("active", true)
     .order("user_id", { ascending: true })
     .order("role", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2210,12 +4190,15 @@ export async function listStaffRoleAssignments(targetUserId = "") {
   const safeTargetUserId = String(targetUserId || "").trim();
   if (!safeTargetUserId) return [];
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("id, user_id, role, active, granted_by, created_at, updated_at")
     .eq("user_id", safeTargetUserId)
     .eq("active", true)
     .order("role", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2233,7 +4216,8 @@ export async function listStaffScopeAssignments(targetUserId = "") {
   const safeTargetUserId = String(targetUserId || "").trim();
   if (!safeTargetUserId) return [];
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_scope_assignments")
     .select("id, user_id, role, scope_type, scope_value, active, granted_by, created_at, updated_at")
     .eq("user_id", safeTargetUserId)
@@ -2241,6 +4225,8 @@ export async function listStaffScopeAssignments(targetUserId = "") {
     .order("role", { ascending: true })
     .order("scope_type", { ascending: true })
     .order("scope_value", { ascending: true });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2259,12 +4245,15 @@ export async function listStaffAccessAuditEntries(targetUserId = "", { limit = 1
   if (!safeTargetUserId) return [];
 
   const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_access_audit_log")
     .select("id, actor_user_id, target_user_id, action, role, scope_type, scope_value, metadata, created_at")
     .eq("target_user_id", safeTargetUserId)
     .order("created_at", { ascending: false })
     .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2278,12 +4267,42 @@ export async function listStaffAccessAuditEntries(targetUserId = "", { limit = 1
     .filter((row) => row.target_user_id);
 }
 
+export async function listStaffDirectoryAuditEntries(profileId = "", { limit = 10 } = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const safeLimit = Math.max(1, Math.min(25, Number(limit) || 10));
+  const context = await getSignedInTeacherContext();
+  let query = supabase
+    .from("staff_directory_audit_log")
+    .select("id, actor_user_id, target_profile_id, target_user_id, action, reason, metadata, created_at")
+    .eq("target_profile_id", safeProfileId)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
+
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle audit history is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return (data || [])
+    .map((row) => normalizeStaffDirectoryAuditRow(row))
+    .filter((row) => row.target_profile_id);
+}
+
 export async function listActiveAdminUserIds() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from("staff_role_assignments")
     .select("user_id")
     .eq("role", "admin")
     .eq("active", true);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2296,7 +4315,10 @@ export async function listActiveAdminUserIds() {
 }
 
 export async function readStaffPendingAccessDuplicatePreflight() {
-  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION);
+  const context = await getSignedInTeacherContext();
+  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_PREFLIGHT_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
       return normalizeStaffPendingAccessDuplicatePreflight({});
@@ -2307,7 +4329,10 @@ export async function readStaffPendingAccessDuplicatePreflight() {
 }
 
 export async function listStaffPendingAccessSummaries() {
-  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION);
+  const context = await getSignedInTeacherContext();
+  const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SUMMARIES_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) return [];
     throw error;
@@ -2323,8 +4348,10 @@ export async function readStaffPendingAccessDetail(profileId = "") {
     return normalizeStaffPendingAccessDetail({});
   }
 
+  const context = await getSignedInTeacherContext();
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_DETAIL_FUNCTION, {
     target_profile_id: safeProfileId,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2345,11 +4372,13 @@ export async function saveStaffPendingAccessApproval(profileId = "", {
 } = {}) {
   const safeProfileId = String(profileId || "").trim();
   if (!safeProfileId) throw new Error("Choose a pending staff record first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_SAVE_FUNCTION, {
     target_profile_id: safeProfileId,
     requested_roles: Array.isArray(roles) ? roles : [],
     requested_scopes: Array.isArray(scopes) ? scopes : [],
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2365,9 +4394,11 @@ export async function saveStaffPendingAccessApproval(profileId = "", {
 export async function cancelStaffPendingAccessApproval(profileId = "") {
   const safeProfileId = String(profileId || "").trim();
   if (!safeProfileId) throw new Error("Choose a pending staff record first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc(STAFF_PENDING_ACCESS_CANCEL_FUNCTION, {
     target_profile_id: safeProfileId,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffPendingAccessSupportError(error)) {
@@ -2385,10 +4416,12 @@ export async function grantStaffRole(targetUserId = "", role = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("grant_staff_role", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2404,14 +4437,79 @@ export async function revokeStaffRole(targetUserId = "", role = "") {
   const safeRole = String(role || "").trim().toLowerCase();
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("revoke_staff_role", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
       throw new Error("Staff role changes are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function revokeAllStaffLiveAccess({
+  userId = "",
+  reason = "",
+} = {}) {
+  const safeUserId = String(userId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeUserId) throw new Error("Choose a linked staff account first.");
+
+  const { data, error } = await supabase.rpc(STAFF_REVOKE_ALL_LIVE_ACCESS_FUNCTION, {
+    target_user_id: safeUserId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function archiveStaffDirectoryRecord({
+  profileId = "",
+  reason = "",
+} = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const { data, error } = await supabase.rpc(STAFF_ARCHIVE_FUNCTION, {
+    target_profile_id: safeProfileId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+  return data || null;
+}
+
+export async function restoreStaffDirectoryRecord({
+  profileId = "",
+  reason = "",
+} = {}) {
+  const safeProfileId = String(profileId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safeProfileId) throw new Error("Choose a staff record first.");
+
+  const { data, error } = await supabase.rpc(STAFF_RESTORE_FUNCTION, {
+    target_profile_id: safeProfileId,
+    requested_reason: safeReason || null,
+  });
+  if (error) {
+    if (isMissingStaffLifecycleSupportError(error)) {
+      throw new Error("Staff lifecycle actions are not available yet. Run the latest Supabase migration.");
     }
     throw error;
   }
@@ -2426,12 +4524,14 @@ export async function grantStaffScope(targetUserId = "", role = "", scopeType = 
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
   if (!safeScopeType || !safeScopeValue) throw new Error("Choose a scope before adding it.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("grant_staff_scope", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
     requested_scope_type: safeScopeType,
     requested_scope_value: safeScopeValue,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2450,12 +4550,14 @@ export async function revokeStaffScope(targetUserId = "", role = "", scopeType =
   if (!safeTargetUserId) throw new Error("Choose a staff member first.");
   if (!safeRole) throw new Error("Choose a role first.");
   if (!safeScopeType || !safeScopeValue) throw new Error("Choose a scope before removing it.");
+  const context = await getSignedInTeacherContext();
 
   const { data, error } = await supabase.rpc("revoke_staff_scope", {
     target_user_id: safeTargetUserId,
     requested_role: safeRole,
     requested_scope_type: safeScopeType,
     requested_scope_value: safeScopeValue,
+    requested_school_id: context.schoolId || null,
   });
   if (error) {
     if (isMissingStaffAccessFoundationError(error)) {
@@ -2471,6 +4573,9 @@ export async function importStaffDirectoryCsv({
   fileName = "",
   previewSummary = {},
 } = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required before importing staff.",
+  });
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) {
     throw new Error("Choose at least one valid CSV row before importing staff.");
@@ -2480,6 +4585,7 @@ export async function importStaffDirectoryCsv({
     import_rows: safeRows,
     import_file_name: String(fileName || "").trim() || null,
     preview_summary: previewSummary && typeof previewSummary === "object" ? previewSummary : {},
+    requested_school_id: context.schoolId || null,
   });
 
   if (error) {
@@ -2496,9 +4602,10 @@ export async function readPupilImportDuplicatePreflight() {
   const context = await requireCsvImportContext({
     message: "Admin access is required to review pupil import data health.",
   });
-  void context;
 
-  const { data, error } = await supabase.rpc(PUPIL_IMPORT_PREFLIGHT_FUNCTION);
+  const { data, error } = await supabase.rpc(PUPIL_IMPORT_PREFLIGHT_FUNCTION, {
+    requested_school_id: context.schoolId || null,
+  });
   if (error) {
     if (isMissingPupilImportSupportError(error)) {
       return normalizePupilImportDuplicatePreflight({});
@@ -2514,7 +4621,6 @@ export async function readPupilImportReferenceData({
   const context = await requireCsvImportContext({
     message: "Admin access is required to prepare pupil CSV import previews.",
   });
-  void context;
 
   const safeFormClassIds = normalizeIdList(formClassIds);
   const pupils = [];
@@ -2522,11 +4628,13 @@ export async function readPupilImportReferenceData({
 
   for (let from = 0; ; from += pupilPageSize) {
     const to = from + pupilPageSize - 1;
-    const { data, error } = await supabase
+    let query = supabase
       .from("pupils")
-      .select("id, mis_id, first_name, surname, username, is_active")
+      .select("id, mis_id, first_name, surname, username, is_active, archived_at")
       .order("id", { ascending: true })
       .range(from, to);
+    query = applyActiveSchoolFilter(query, context.accessContext);
+    const { data, error } = await query;
     if (error) throw error;
     const normalizedRows = (data || [])
       .map((row) => normalizePupilImportReferencePupilRow(row))
@@ -2540,12 +4648,14 @@ export async function readPupilImportReferenceData({
     const membershipPageSize = 1000;
     for (let from = 0; ; from += membershipPageSize) {
       const to = from + membershipPageSize - 1;
-      const { data, error } = await supabase
+      let query = supabase
         .from("pupil_classes")
         .select("id, pupil_id, class_id, active")
         .in("class_id", safeFormClassIds)
         .order("id", { ascending: true })
         .range(from, to);
+      query = applyActiveSchoolFilter(query, context.accessContext);
+      const { data, error } = await query;
       if (error) throw error;
       const normalizedRows = (data || [])
         .map((row) => normalizePupilImportMembershipRow(row))
@@ -2566,6 +4676,9 @@ export async function importPupilRosterCsv({
   fileName = "",
   previewSummary = {},
 } = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required before importing pupils.",
+  });
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) {
     throw new Error("Choose at least one safe CSV row before importing pupils.");
@@ -2575,6 +4688,7 @@ export async function importPupilRosterCsv({
     import_rows: safeRows,
     import_file_name: String(fileName || "").trim() || null,
     preview_summary: previewSummary && typeof previewSummary === "object" ? previewSummary : {},
+    requested_school_id: context.schoolId || null,
   });
 
   if (error) {
@@ -2585,6 +4699,101 @@ export async function importPupilRosterCsv({
   }
 
   return normalizePupilImportResult(data || {});
+}
+
+export async function archivePupilDirectoryRecord({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to archive a pupil record.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_ARCHIVE_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilLifecycleFunctionError(error)) {
+      throw new Error("Pupil lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return data || null;
+}
+
+export async function restorePupilDirectoryRecord({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to restore a pupil record.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_RESTORE_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilLifecycleFunctionError(error)) {
+      throw new Error("Pupil lifecycle actions are not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  return data || null;
+}
+
+export async function resetPupilLoginPin({
+  pupilId = "",
+  reason = "",
+} = {}) {
+  const context = await requireCsvImportContext({
+    message: "Admin access is required to reset a pupil PIN.",
+  });
+  void context;
+
+  const safePupilId = String(pupilId || "").trim();
+  const safeReason = String(reason || "").trim();
+  if (!safePupilId) {
+    throw new Error("Choose a pupil record first.");
+  }
+
+  const { data, error } = await supabase.rpc(PUPIL_RESET_PIN_FUNCTION, {
+    target_pupil_id: safePupilId,
+    requested_reason: safeReason || null,
+  });
+
+  if (error) {
+    if (isMissingPupilResetPinFunctionError(error)) {
+      throw new Error("Pupil PIN reset is not available yet. Run the latest Supabase migration.");
+    }
+    throw error;
+  }
+
+  const result = normalizePupilPinResetResult(data || {});
+  if (!result.pupil_id || !result.username || !result.pin) {
+    throw new Error("Pupil PIN reset did not return one-time credential details.");
+  }
+
+  return result;
 }
 
 export async function movePupilFormMembership({
@@ -2648,6 +4857,7 @@ function sortPersonalisedAutomationPolicies(rows = []) {
 async function readPersonalisedAutomationPoliciesInternal({
   teacherId = "",
   includeArchived = true,
+  accessContext = null,
 } = {}) {
   const safeTeacherId = String(teacherId || "").trim();
   if (!safeTeacherId) return [];
@@ -2657,6 +4867,7 @@ async function readPersonalisedAutomationPoliciesInternal({
     .select("*")
     .eq("teacher_id", safeTeacherId)
     .order("updated_at", { ascending: false });
+  query = applyActiveSchoolFilter(query, accessContext);
 
   if (!includeArchived) {
     query = query.is("archived_at", null);
@@ -2677,11 +4888,13 @@ async function readPersonalisedAutomationPoliciesInternal({
   const policyIds = normalizeIdList(policyRows.map((row) => row?.id));
   if (!policyIds.length) return [];
 
-  const { data: targetRows, error: targetError } = await supabase
+  let targetQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
     .select("policy_id, class_id")
     .eq("teacher_id", safeTeacherId)
     .in("policy_id", policyIds);
+  targetQuery = applyActiveSchoolFilter(targetQuery, accessContext);
+  const { data: targetRows, error: targetError } = await targetQuery;
 
   if (targetError) {
     if (isMissingPersonalisedAutomationPolicyTargetTableError(targetError)) {
@@ -2717,6 +4930,7 @@ export async function listPersonalisedAutomationPolicies({ includeArchived = tru
   return readPersonalisedAutomationPoliciesInternal({
     teacherId: context.teacherId,
     includeArchived,
+    accessContext: context.accessContext,
   });
 }
 
@@ -2732,7 +4946,9 @@ export async function upsertPersonalisedAutomationPolicy({
   name = "",
   description = "",
   active = false,
+  policy_type,
   assignment_length,
+  bee_length_mode,
   support_preset,
   allow_starter_fallback,
   frequency,
@@ -2754,7 +4970,9 @@ export async function upsertPersonalisedAutomationPolicy({
     name,
     description,
     active,
+    policy_type,
     assignment_length,
+    bee_length_mode,
     support_preset,
     allow_starter_fallback,
     frequency,
@@ -2767,7 +4985,14 @@ export async function upsertPersonalisedAutomationPolicy({
     archived_at,
     archived_by,
   });
-  const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, normalizedPolicy.target_class_ids);
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy) && !hasSpellingBeeAdminAccess(context.accessContext)) {
+    throw new Error("Admin access is required to save Spelling Bee policies.");
+  }
+  const validatedClassIds = await validateAutomationEligibleClassIds(
+    context.teacherId,
+    normalizedPolicy.target_class_ids,
+    context.accessContext,
+  );
   const safePolicyId = String(normalizedPolicy.id || "").trim();
   const safeDuplicateSourcePolicyId = String(duplicate_source_policy_id || "").trim();
   const legacyActive = getLegacyPersonalisedAutomationPolicyActiveValue(normalizedPolicy);
@@ -2791,6 +5016,12 @@ export async function upsertPersonalisedAutomationPolicy({
   if (normalizedPolicy.end_date && normalizedPolicy.end_date < normalizedPolicy.start_date) {
     throw new Error("The automation policy end date must be on or after the start date.");
   }
+  if (safePolicyId) {
+    const existingPolicy = await readPersonalisedAutomationPolicy(safePolicyId);
+    if (!existingPolicy) {
+      throw new Error("Choose a saved automation policy first.");
+    }
+  }
 
   const nowIso = new Date().toISOString();
   const basePayload = {
@@ -2798,6 +5029,7 @@ export async function upsertPersonalisedAutomationPolicy({
     name: normalizedPolicy.name,
     description: normalizedPolicy.description || null,
     active: legacyActive,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
@@ -2812,39 +5044,39 @@ export async function upsertPersonalisedAutomationPolicy({
     updated_by: context.teacherId,
     updated_at: nowIso,
   };
+  basePayload.bee_length_mode = isSpellingBeeAutomationPolicy(normalizedPolicy)
+    ? normalizedPolicy.bee_length_mode
+    : null;
 
   let data = null;
   let error = null;
   if (safePolicyId) {
-    const result = await supabase
+    let resultQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
       .update(basePayload)
       .eq("id", safePolicyId)
-      .eq("teacher_id", context.teacherId)
-      .select("id, teacher_id, name, description, active, assignment_length, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
+      .eq("teacher_id", context.teacherId);
+    const result = await resultQuery
+      .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
     error = result.error;
   } else {
     const result = await supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
-      .insert([{
+      .insert([withActiveSchoolId({
         ...basePayload,
         created_by: context.teacherId,
-      }])
-      .select("id, teacher_id, name, description, active, assignment_length, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
+      }, context.accessContext)])
+      .select("id, teacher_id, name, description, active, policy_type, assignment_length, bee_length_mode, support_preset, allow_starter_fallback, frequency, selected_weekdays, selected_weekdays_week_1, selected_weekdays_week_2, start_date, end_date, archived_at, archived_by, created_by, updated_by, created_at, updated_at")
       .single();
     data = result.data;
     error = result.error;
   }
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "save");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
@@ -2853,11 +5085,13 @@ export async function upsertPersonalisedAutomationPolicy({
     throw new Error("Could not save the automation policy.");
   }
 
-  const { data: existingTargetRows, error: existingTargetError } = await supabase
+  let existingTargetQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
     .select("class_id")
     .eq("teacher_id", context.teacherId)
     .eq("policy_id", policyId);
+  existingTargetQuery = applyActiveSchoolFilter(existingTargetQuery, context.accessContext);
+  const { data: existingTargetRows, error: existingTargetError } = await existingTargetQuery;
 
   if (existingTargetError) {
     if (isMissingPersonalisedAutomationPolicyTargetTableError(existingTargetError)) {
@@ -2867,12 +5101,12 @@ export async function upsertPersonalisedAutomationPolicy({
   }
 
   if (validatedClassIds.length) {
-    const targetPayload = validatedClassIds.map((classId) => ({
+    const targetPayload = validatedClassIds.map((classId) => withActiveSchoolId({
       policy_id: policyId,
       teacher_id: context.teacherId,
       class_id: classId,
       updated_at: nowIso,
-    }));
+    }, context.accessContext));
 
     const { error: targetError } = await supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
@@ -2889,12 +5123,14 @@ export async function upsertPersonalisedAutomationPolicy({
   const existingIds = normalizeIdList((existingTargetRows || []).map((row) => row?.class_id));
   const idsToDelete = existingIds.filter((classId) => !validatedClassIds.includes(classId));
   if (idsToDelete.length) {
-    const { error: deleteError } = await supabase
+    let deleteQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TARGET_TABLE)
       .delete()
       .eq("teacher_id", context.teacherId)
       .eq("policy_id", policyId)
       .in("class_id", idsToDelete);
+    deleteQuery = applyActiveSchoolFilter(deleteQuery, context.accessContext);
+    const { error: deleteError } = await deleteQuery;
 
     if (deleteError && !isMissingPersonalisedAutomationPolicyTargetTableError(deleteError)) {
       throw deleteError;
@@ -2909,9 +5145,11 @@ export async function upsertPersonalisedAutomationPolicy({
       eventType: safePolicyId
         ? "updated"
         : (safeDuplicateSourcePolicyId ? "duplicated" : "created"),
+      accessContext: context.accessContext,
       metadata: {
         name: normalizedPolicy.name,
         active: legacyActive,
+        policy_type: normalizedPolicy.policy_type,
         archived_at: normalizedPolicy.archived_at || null,
         target_class_ids: validatedClassIds,
         duplicate_source_policy_id: safeDuplicateSourcePolicyId || null,
@@ -2952,19 +5190,16 @@ export async function setPersonalisedAutomationPolicyArchived({
     updated_at: nowIso,
   };
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
     .update(payload)
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
+  const { error } = await updateQuery;
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "update");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
@@ -2977,6 +5212,7 @@ export async function setPersonalisedAutomationPolicyArchived({
       teacherId: context.teacherId,
       policyId: safePolicyId,
       eventType: archived ? "archived" : "restored",
+      accessContext: context.accessContext,
       metadata: {
         archived,
       },
@@ -2999,19 +5235,16 @@ export async function deletePersonalisedAutomationPolicy(policyId = "") {
     throw new Error("Choose a saved automation policy first.");
   }
 
-  const { error } = await supabase
+  let deleteQuery = supabase
     .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
     .delete()
     .eq("id", safePolicyId)
     .eq("teacher_id", context.teacherId);
+  const { error } = await deleteQuery;
 
   if (error) {
-    if (
-      isMissingPersonalisedAutomationPolicyTableError(error)
-      || isMissingPersonalisedAutomationPolicyColumnError(error)
-    ) {
-      throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
-    }
+    const storageErrorMessage = getPersonalisedAutomationPolicyStorageErrorMessage(error, "delete");
+    if (storageErrorMessage) throw new Error(storageErrorMessage);
     throw error;
   }
 
@@ -3019,10 +5252,13 @@ export async function deletePersonalisedAutomationPolicy(policyId = "") {
 }
 
 export async function listClassAutoAssignPolicies() {
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .select("*")
     .order("updated_at", { ascending: false });
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query;
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) return [];
@@ -3038,11 +5274,13 @@ export async function getClassAutoAssignPolicy(classId) {
   const safeClassId = String(classId || "").trim();
   if (!safeClassId) return null;
 
-  const { data, error } = await supabase
+  const context = await getSignedInTeacherContext();
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .select("*")
-    .eq("class_id", safeClassId)
-    .maybeSingle();
+    .eq("class_id", safeClassId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) return null;
@@ -3061,23 +5299,22 @@ export async function upsertClassAutoAssignPolicy({
   const safeClassId = String(class_id || "").trim();
   if (!safeClassId) throw new Error("Choose a class before saving an auto-assign policy.");
 
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
   const normalizedPolicy = normalizeAutoAssignPolicy({
     assignment_length,
     support_preset,
     allow_starter_fallback,
   });
   const nowIso = new Date().toISOString();
-  const payload = {
+  const payload = withActiveSchoolId({
     teacher_id: teacherId,
     class_id: safeClassId,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
     updated_at: nowIso,
-  };
+  }, context.accessContext);
 
   const { data, error } = await supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
@@ -3099,15 +5336,16 @@ export async function deleteClassAutoAssignPolicy(classId) {
   const safeClassId = String(classId || "").trim();
   if (!safeClassId) return;
 
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
-  const { error } = await supabase
+  let query = supabase
     .from(CLASS_AUTO_ASSIGN_POLICY_TABLE)
     .delete()
     .eq("teacher_id", teacherId)
     .eq("class_id", safeClassId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  const { error } = await query;
 
   if (error) {
     if (isMissingClassAutoAssignPolicyTableError(error)) {
@@ -3122,16 +5360,24 @@ export async function createPersonalisedGenerationRun({
   automationPolicyId = "",
   policySnapshot = null,
   derivedDeadlineAt = null,
+  policy_type,
   assignment_length,
+  bee_length_mode,
   support_preset,
   allow_starter_fallback,
 } = {}) {
   const context = await requireCentralOwnerContext({
     message: "Central-owner access is required to run personalised automation.",
   });
-  const validatedClassIds = await validateAutomationEligibleClassIds(context.teacherId, selectedClassIds);
-  const normalizedPolicy = normalizeAutoAssignPolicy({
+  const validatedClassIds = await validateAutomationEligibleClassIds(
+    context.teacherId,
+    selectedClassIds,
+    context.accessContext,
+  );
+  let normalizedPolicy = normalizeAutoAssignPolicy({
+    policy_type,
     assignment_length,
+    bee_length_mode,
     support_preset,
     allow_starter_fallback,
   });
@@ -3139,12 +5385,14 @@ export async function createPersonalisedGenerationRun({
   let resolvedPolicyId = null;
 
   if (safePolicyId) {
-    const { data: policyRow, error: policyError } = await supabase
+    let policyQuery = supabase
       .from(PERSONALISED_AUTOMATION_POLICY_TABLE)
-      .select("id, archived_at, start_date, end_date")
+      .select("id, archived_at, start_date, end_date, policy_type")
       .eq("id", safePolicyId)
       .eq("teacher_id", context.teacherId)
       .maybeSingle();
+    policyQuery = applyActiveSchoolFilter(policyQuery, context.accessContext);
+    const { data: policyRow, error: policyError } = await policyQuery;
     if (policyError) {
       if (isMissingPersonalisedAutomationPolicyTableError(policyError)) {
         throw new Error("Automation policy storage is not available yet. Run the latest Supabase migration.");
@@ -3164,7 +5412,14 @@ export async function createPersonalisedGenerationRun({
     if (!isPersonalisedAutomationPolicyUsable(policyRow)) {
       throw new Error(`This automation policy is scheduled to start on ${String(policyRow?.start_date || "").trim() || "its start date"}.`);
     }
+    normalizedPolicy = normalizeAutoAssignPolicy({
+      ...normalizedPolicy,
+      policy_type: policyRow.policy_type || normalizedPolicy.policy_type,
+    });
     resolvedPolicyId = String(policyRow.id);
+  }
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy) && !hasSpellingBeeAdminAccess(context.accessContext)) {
+    throw new Error("Admin access is required to run Spelling Bee competitions.");
   }
   const nowIso = new Date().toISOString();
   const payload = {
@@ -3173,6 +5428,7 @@ export async function createPersonalisedGenerationRun({
     run_source: ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
     selected_class_ids: validatedClassIds,
     automation_policy_id: resolvedPolicyId,
+    policy_type: normalizedPolicy.policy_type,
     assignment_length: normalizedPolicy.assignment_length,
     support_preset: normalizedPolicy.support_preset,
     allow_starter_fallback: normalizedPolicy.allow_starter_fallback,
@@ -3188,10 +5444,13 @@ export async function createPersonalisedGenerationRun({
     created_at: nowIso,
     updated_at: nowIso,
   };
+  if (isSpellingBeeAutomationPolicy(normalizedPolicy)) {
+    payload.bee_length_mode = normalizedPolicy.bee_length_mode;
+  }
 
   const { data, error } = await supabase
     .from(PERSONALISED_GENERATION_RUN_TABLE)
-    .insert([payload])
+    .insert([withActiveSchoolId(payload, context.accessContext)])
     .select("*")
     .single();
 
@@ -3208,10 +5467,13 @@ export async function createPersonalisedGenerationRun({
         teacherId: context.teacherId,
         policyId: resolvedPolicyId,
         eventType: "run_started",
+        accessContext: context.accessContext,
         metadata: {
           run_id: String(data?.id || "").trim() || null,
           selected_class_ids: validatedClassIds,
           derived_deadline_at: derivedDeadlineAt || null,
+          policy_type: normalizedPolicy.policy_type,
+          ...(isSpellingBeeAutomationPolicy(normalizedPolicy) ? { bee_length_mode: normalizedPolicy.bee_length_mode } : {}),
         },
       });
     } catch (eventError) {
@@ -3248,11 +5510,13 @@ export async function updatePersonalisedGenerationRun({
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  let updateQuery = supabase
     .from(PERSONALISED_GENERATION_RUN_TABLE)
     .update(payload)
     .eq("id", safeRunId)
-    .eq("teacher_id", context.teacherId)
+    .eq("teacher_id", context.teacherId);
+  updateQuery = applyActiveSchoolFilter(updateQuery, context.accessContext);
+  const { data, error } = await updateQuery
     .select("*")
     .single();
 
@@ -3266,6 +5530,72 @@ export async function updatePersonalisedGenerationRun({
   return normalizePersonalisedGenerationRunRow(data || { id: safeRunId, teacher_id: context.teacherId, ...payload });
 }
 
+export async function listRecentPersonalisedGenerationRuns({
+  limit = 10,
+  automationPolicyId = "",
+  includePupilRows = true,
+} = {}) {
+  const context = await requireCentralOwnerContext({
+    message: "Central-owner access is required to view personalised automation run outcomes.",
+  });
+  const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit || 10))));
+  const safePolicyId = String(automationPolicyId || "").trim();
+
+  let query = supabase
+    .from(PERSONALISED_GENERATION_RUN_TABLE)
+    .select("*")
+    .eq("teacher_id", context.teacherId)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+  if (safePolicyId) {
+    query = query.eq("automation_policy_id", safePolicyId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    if (isMissingPersonalisedGenerationRunTableError(error) || isMissingPersonalisedGenerationRunColumnError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const runs = (Array.isArray(data) ? data : [])
+    .map(normalizePersonalisedGenerationRunRow)
+    .filter(Boolean);
+  if (!includePupilRows || !runs.length) return runs.map((run) => ({ ...run, pupilRows: [] }));
+
+  const runIds = runs.map((run) => String(run?.id || "").trim()).filter(Boolean);
+  let pupilQuery = supabase
+    .from(PERSONALISED_GENERATION_RUN_PUPIL_TABLE)
+    .select("id, run_id, class_id, pupil_id, assignment_id, status, skip_reason, created_at, updated_at")
+    .in("run_id", runIds)
+    .order("created_at", { ascending: true });
+  pupilQuery = applyActiveSchoolFilter(pupilQuery, context.accessContext);
+
+  const { data: pupilData, error: pupilError } = await pupilQuery;
+  if (pupilError) {
+    if (isMissingPersonalisedGenerationRunPupilTableError(pupilError)) {
+      return runs.map((run) => ({ ...run, pupilRows: [] }));
+    }
+    throw pupilError;
+  }
+
+  const rowsByRunId = new Map();
+  for (const row of Array.isArray(pupilData) ? pupilData : []) {
+    const normalized = normalizePersonalisedGenerationRunPupilRow(row);
+    if (!normalized?.run_id) continue;
+    const next = rowsByRunId.get(normalized.run_id) || [];
+    next.push(normalized);
+    rowsByRunId.set(normalized.run_id, next);
+  }
+
+  return runs.map((run) => ({
+    ...run,
+    pupilRows: rowsByRunId.get(String(run?.id || "")) || [],
+  }));
+}
+
 export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
   const normalizedRows = (Array.isArray(rows) ? rows : [])
     .map((row) => {
@@ -3273,8 +5603,9 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
       const classId = String(row?.class_id || row?.classId || "").trim();
       const pupilId = String(row?.pupil_id || row?.pupilId || "").trim();
       if (!runId || !classId || !pupilId) return null;
-      const status = String(row?.status || "").trim().toLowerCase() === "included" ? "included" : "skipped";
-      const skipReason = status === "skipped"
+      const rawStatus = String(row?.status || "").trim().toLowerCase();
+      const status = rawStatus === "included" || rawStatus === "waiting" ? rawStatus : "skipped";
+      const skipReason = status !== "included"
         ? String(row?.skip_reason || row?.skipReason || "").trim().toLowerCase() || null
         : null;
       return {
@@ -3294,7 +5625,7 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
   });
   const nowIso = new Date().toISOString();
 
-  const payload = normalizedRows.map((row) => ({
+  const payload = normalizedRows.map((row) => withActiveSchoolId({
     teacher_id: context.teacherId,
     run_id: row.run_id,
     class_id: row.class_id,
@@ -3304,7 +5635,7 @@ export async function upsertPersonalisedGenerationRunPupilRows(rows = []) {
     skip_reason: row.skip_reason,
     created_at: nowIso,
     updated_at: nowIso,
-  }));
+  }, context.accessContext));
 
   const { data, error } = await supabase
     .from(PERSONALISED_GENERATION_RUN_PUPIL_TABLE)
@@ -3405,57 +5736,64 @@ function compareBaselineGateAssignments(a, b) {
   return bCreated - aCreated;
 }
 
-export async function readPupilBaselineGateState({
-  pupilId = "",
+function isMissingPupilRuntimeAssignmentsReadFunctionError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "42883"
+    || code === "PGRST202"
+    || message.includes("read_pupil_runtime_assignments");
+}
+
+function getBaselineGateAssignmentStandardKey(assignment = null) {
+  const wordRows = normalizeLoadedWordRows(assignment?.words || [])
+    .filter((row) => String(row?.word || "").trim())
+    .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
+  if (!wordRows.length || !isBaselineAssignmentWordRows(wordRows)) return "";
+  return resolveBaselineStandardKeyFromWordRows(wordRows);
+}
+
+function hasCompletedRuntimeAssignment(assignment = null) {
+  const status = String(assignment?.assignmentStatus || assignment?.assignment_status || "").trim().toLowerCase();
+  return !!assignment?.completed
+    || !!assignment?.completed_at
+    || !!assignment?.completedAt
+    || status === "completed";
+}
+
+function hasStartedRuntimeAssignment(assignment = null) {
+  const status = String(assignment?.assignmentStatus || assignment?.assignment_status || "").trim().toLowerCase();
+  return hasCompletedRuntimeAssignment(assignment)
+    || !!assignment?.started_at
+    || !!assignment?.startedAt
+    || status === "started"
+    || (Array.isArray(assignment?.result_json) && assignment.result_json.length > 0)
+    || (Array.isArray(assignment?.resultJson) && assignment.resultJson.length > 0);
+}
+
+function compareBaselineGateRuntimeAssignments(a, b) {
+  const aRank = hasCompletedRuntimeAssignment(a) ? 0 : hasStartedRuntimeAssignment(a) ? 1 : 2;
+  const bRank = hasCompletedRuntimeAssignment(b) ? 0 : hasStartedRuntimeAssignment(b) ? 1 : 2;
+  if (aRank !== bRank) return aRank - bRank;
+  return compareBaselineGateAssignments(a, b);
+}
+
+function normalizeAssignmentEvidenceSource(value = "") {
+  const key = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+  if (key === EVIDENCE_SOURCE_EXTRA_CHALLENGE) return EVIDENCE_SOURCE_EXTRA_CHALLENGE;
+  return EVIDENCE_SOURCE_ASSIGNED_CORE;
+}
+
+async function buildBaselineGateStateFromRuntimeAssignments({
+  runtimePayload = null,
   requiredStandardKey = REQUIRED_BASELINE_STANDARD_KEY,
 } = {}) {
-  const safePupilId = String(pupilId || "").trim();
   const safeRequiredKey = String(requiredStandardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase();
-
-  if (!safePupilId) {
-    return normalizeBaselineGateStatePayload({
-      status: "waiting",
-      requiredStandardKey: safeRequiredKey,
-      waiting_reason: null,
-      class_ids: [],
-      form_class_ids: [],
-      assignment: null,
-    }, { requiredStandardKey: safeRequiredKey });
-  }
-
-  const { data: rpcData, error: rpcError } = await supabase.rpc("read_pupil_baseline_gate_state", {
-    requested_pupil_id: safePupilId,
-    requested_standard_key: safeRequiredKey,
-  });
-  if (!rpcError) {
-    if (rpcData && typeof rpcData === "object" && rpcData?.status) {
-      return normalizeBaselineGateStatePayload(rpcData, {
-        requiredStandardKey: safeRequiredKey,
-      });
-    }
-  } else if (!isMissingPupilBaselineGateReadFunctionError(rpcError)) {
-    throw rpcError;
-  }
-
-  let canAccessRuntime = null;
-  try {
-    const { data: runtimeData, error: runtimeError } = await supabase.rpc("can_access_pupil_runtime", {
-      requested_pupil_id: safePupilId,
-    });
-    if (runtimeError) {
-      if (!isMissingPupilRuntimeAccessFunctionError(runtimeError)) {
-        throw runtimeError;
-      }
-    } else {
-      canAccessRuntime = runtimeData === true;
-    }
-  } catch (error) {
-    if (!isMissingPupilRuntimeAccessFunctionError(error)) {
-      console.warn("Could not read pupil runtime access for baseline gate fallback:", error);
-    }
-  }
-
-  if (canAccessRuntime === false) {
+  const safePupilId = String(runtimePayload?.pupilId || runtimePayload?.pupil_id || "").trim();
+  const runtimeStatus = String(runtimePayload?.status || "").trim().toLowerCase();
+  if (runtimeStatus && runtimeStatus !== "ok") {
     return normalizeBaselineGateStatePayload({
       status: "waiting",
       waiting_reason: "runtime_inactive",
@@ -3466,91 +5804,20 @@ export async function readPupilBaselineGateState({
     }, { requiredStandardKey: safeRequiredKey });
   }
 
-  const { data: memberships, error: membershipError } = await supabase
-    .from("pupil_classes")
-    .select("class_id")
-    .eq("pupil_id", safePupilId)
-    .eq("active", true);
-  if (membershipError) throw membershipError;
-
+  const assignments = Array.isArray(runtimePayload?.assignments) ? runtimePayload.assignments : [];
+  const requiredBaselineAssignments = assignments
+    .filter((assignment) => {
+      if (!assignment?.id) return false;
+      if (!assignment?.isBaseline && getBaselineGateAssignmentStandardKey(assignment) !== safeRequiredKey) return false;
+      return getBaselineGateAssignmentStandardKey(assignment) === safeRequiredKey;
+    })
+    .sort(compareBaselineGateRuntimeAssignments);
   const classIds = normalizeIdList(
-    (memberships || [])
-      .map((row) => String(row?.class_id || "").trim())
+    assignments
+      .map((assignment) => assignment?.class_id || assignment?.classId)
       .filter(Boolean)
   );
-  let formClassIds = [];
-  if (classIds.length) {
-    try {
-      const { data: classRows, error: classError } = await supabase
-        .from("classes")
-        .select("id, class_type")
-        .in("id", classIds);
-      if (classError) {
-        throw classError;
-      }
-      formClassIds = normalizeIdList(
-        (classRows || [])
-          .filter((row) => normalizeClassType(row?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM)
-          .map((row) => row?.id)
-      );
-    } catch (error) {
-      console.warn("Could not refine active form memberships for baseline gate fallback:", error);
-      formClassIds = [...classIds];
-    }
-  }
-
-  if (!formClassIds.length) {
-    return normalizeBaselineGateStatePayload({
-      status: "waiting",
-      waiting_reason: "no_active_form_membership",
-      required_standard_key: safeRequiredKey,
-      class_ids: classIds,
-      form_class_ids: formClassIds,
-      assignment: null,
-    }, { requiredStandardKey: safeRequiredKey });
-  }
-
-  const { data: assignmentRows, error: assignmentError } = await supabase
-    .from("assignments_v2")
-    .select(`
-      id,
-      class_id,
-      end_at,
-      created_at,
-      tests (
-        id,
-        test_words (
-          id,
-          position,
-          word,
-          sentence,
-          segments,
-          choice
-        )
-      )
-    `)
-    .in("class_id", classIds)
-    .order("end_at", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: false });
-  if (assignmentError) throw assignmentError;
-
-  const requiredBaselineAssignments = (assignmentRows || [])
-    .map((assignment) => {
-      const wordRows = normalizeLoadedWordRows(assignment?.tests?.test_words)
-        .filter((row) => String(row?.word || "").trim())
-        .sort((a, b) => Number(a?.position || 0) - Number(b?.position || 0));
-      if (!isBaselineAssignmentWordRows(wordRows)) return null;
-      const standardKey = resolveBaselineStandardKeyFromWordRows(wordRows);
-      if (standardKey !== safeRequiredKey) return null;
-      return {
-        id: String(assignment?.id || "").trim(),
-        class_id: String(assignment?.class_id || "").trim(),
-        end_at: assignment?.end_at || null,
-        created_at: assignment?.created_at || null,
-      };
-    })
-    .filter((assignment) => !!assignment?.id)
-    .sort(compareBaselineGateAssignments);
+  const formClassIds = classIds;
 
   if (!requiredBaselineAssignments.length) {
     return normalizeBaselineGateStatePayload({
@@ -3599,19 +5866,370 @@ export async function readPupilBaselineGateState({
       required_standard_key: safeRequiredKey,
       class_ids: classIds,
       form_class_ids: formClassIds,
-      assignment: null,
+      assignment: resumableAssignment,
     }, { requiredStandardKey: safeRequiredKey });
   }
 
+  const startAssignment = requiredBaselineAssignments[0] || null;
   return normalizeBaselineGateStatePayload({
     status: "start",
     waiting_reason: null,
-    assignment_id: requiredBaselineAssignments[0]?.id || "",
+    assignment_id: startAssignment?.id || "",
     required_standard_key: safeRequiredKey,
     class_ids: classIds,
     form_class_ids: formClassIds,
-    assignment: null,
+    assignment: startAssignment,
   }, { requiredStandardKey: safeRequiredKey });
+}
+
+function normalizePupilRuntimeAssignmentRow(row = {}) {
+  const source = row && typeof row === "object" ? row : {};
+  const title = String(source?.title || "").trim() || "Untitled test";
+  const isSpellingBee = !!(source?.isSpellingBee ?? source?.is_spelling_bee);
+  const isGenerated = !!(source?.isGenerated ?? source?.is_generated);
+  const isBaseline = !!(source?.isBaseline ?? source?.is_baseline);
+  const evidenceSource = normalizeAssignmentEvidenceSource(
+    source?.evidence_source
+    || source?.evidenceSource
+    || source?.assignment_source
+    || source?.assignmentSource
+  );
+  const isExtraChallenge = evidenceSource === EVIDENCE_SOURCE_EXTRA_CHALLENGE;
+  const spellingBeeResult = normalizeSpellingBeeResultRow(
+    source?.spellingBeeResult ?? source?.spelling_bee_result
+  );
+
+  return {
+    ...source,
+    id: String(source?.id || "").trim(),
+    teacher_id: String(source?.teacher_id || source?.teacherId || "").trim(),
+    class_id: String(source?.class_id || source?.classId || "").trim(),
+    test_id: String(source?.test_id || source?.testId || "").trim(),
+    title,
+    question_type: isSpellingBee
+      ? "no_support_assessment"
+      : normalizeStoredQuestionType(source?.question_type, { title }),
+    mode: String(source?.mode || "test").trim() || "test",
+    max_attempts: source?.max_attempts == null ? null : Number(source.max_attempts),
+    audio_enabled: source?.audio_enabled !== false,
+    hints_enabled: isSpellingBee ? false : source?.hints_enabled !== false,
+    automation_kind: String(source?.automation_kind || source?.automationKind || "").trim() || null,
+    automation_source: String(source?.automation_source || source?.automationSource || "").trim() || null,
+    automation_run_id: String(source?.automation_run_id || source?.automationRunId || "").trim() || null,
+    automation_triggered_by: String(source?.automation_triggered_by || source?.automationTriggeredBy || "").trim() || null,
+    evidence_source: evidenceSource,
+    evidenceSource,
+    assignment_source: evidenceSource,
+    assignmentSource: evidenceSource,
+    end_at: source?.end_at || source?.endAt || null,
+    created_at: source?.created_at || source?.createdAt || null,
+    analytics_target_words_enabled: !!(source?.analytics_target_words_enabled ?? source?.analyticsTargetWordsEnabled),
+    analytics_target_words_per_pupil: Math.max(0, Number(source?.analytics_target_words_per_pupil ?? source?.analyticsTargetWordsPerPupil ?? 0)),
+    attempt_source: isExtraChallenge
+      ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
+      : String(source?.attempt_source || source?.attemptSource || "teacher_assigned").trim(),
+    assignmentOrigin: isExtraChallenge
+      ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
+      : String(source?.assignmentOrigin || source?.assignment_origin || source?.attempt_source || "teacher_assigned").trim(),
+    isSpellingBee,
+    isGenerated,
+    isBaseline,
+    isExtraChallenge,
+    assignmentStatus: String(source?.assignmentStatus || source?.assignment_status || "assigned").trim() || "assigned",
+    spellingBeeLengthMode: isSpellingBee
+      ? normalizeSpellingBeeLengthMode(source?.spellingBeeLengthMode || source?.spelling_bee_length_mode)
+      : null,
+    started_at: source?.started_at || source?.startedAt || null,
+    completed_at: source?.completed_at || source?.completedAt || null,
+    total_words: Math.max(0, Number(source?.total_words ?? source?.totalWords ?? 0)),
+    correct_words: Math.max(0, Number(source?.correct_words ?? source?.correctWords ?? 0)),
+    average_attempts: Number.isFinite(Number(source?.average_attempts ?? source?.averageAttempts))
+      ? Number(source?.average_attempts ?? source?.averageAttempts)
+      : 0,
+    score_rate: Number.isFinite(Number(source?.score_rate ?? source?.scoreRate))
+      ? Number(source?.score_rate ?? source?.scoreRate)
+      : 0,
+    result_json: Array.isArray(source?.result_json ?? source?.resultJson)
+      ? (source?.result_json ?? source?.resultJson)
+      : [],
+    completed: !!source?.completed,
+    isLocked: !!(source?.isLocked ?? source?.is_locked),
+    spellingBeeResult,
+    spellingBeeEventClosed: !!(source?.spellingBeeEventClosed ?? source?.spelling_bee_event_closed),
+    pupilTitle: String(source?.pupilTitle || source?.pupil_title || title).trim() || title,
+    pupilReason: String(source?.pupilReason || source?.pupil_reason || "").trim(),
+    pupilWordCount: source?.pupilWordCount ?? source?.pupil_word_count ?? null,
+    words: normalizeLoadedWordRows(source?.words || []),
+  };
+}
+
+async function readPupilRuntimeAssignmentsPayload({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return {
+      status: "runtime_inactive",
+      pupilId: "",
+      assignments: [],
+    };
+  }
+
+  const { data, error } = await supabase.rpc("read_pupil_runtime_assignments", {
+    requested_pupil_id: safePupilId,
+  });
+  if (error) throw error;
+
+  const rows = Array.isArray(data?.assignments)
+    ? data.assignments
+    : Array.isArray(data)
+      ? data
+      : [];
+
+  return {
+    status: String(data?.status || "ok").trim().toLowerCase() || "ok",
+    pupilId: String(data?.pupil_id || data?.pupilId || safePupilId).trim(),
+    assignments: rows
+      .map((row) => normalizePupilRuntimeAssignmentRow(row))
+      .filter((row) => row?.id),
+  };
+}
+
+export async function readPupilBaselineGateState({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizeBaselineGateStatePayload({
+      status: "waiting",
+      waiting_reason: "runtime_inactive",
+      required_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+      class_ids: [],
+      form_class_ids: [],
+      assignment: null,
+    });
+  }
+
+  const { data, error } = await supabase.rpc("read_pupil_baseline_gate_state", {
+    requested_pupil_id: safePupilId,
+    requested_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+  });
+
+  if (!error) {
+    return normalizeBaselineGateStatePayload(data);
+  }
+
+  if (!isMissingPupilBaselineGateReadFunctionError(error)) {
+    throw error;
+  }
+
+  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId: safePupilId });
+  return buildBaselineGateStateFromRuntimeAssignments({ runtimePayload });
+}
+
+export async function ensureFormClassBaselineAssignments({
+  formClassIds = [],
+  standardKey = REQUIRED_BASELINE_STANDARD_KEY,
+} = {}) {
+  const safeFormClassIds = normalizeIdList(formClassIds);
+  const safeStandardKey = String(standardKey || REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase()
+    || REQUIRED_BASELINE_STANDARD_KEY;
+  if (!safeFormClassIds.length) {
+    return normalizeBaselineProvisionResultPayload(null, {
+      formClassIds: [],
+      standardKey: safeStandardKey,
+      ok: false,
+      error: "No eligible form groups were available for baseline provisioning.",
+    });
+  }
+
+  const { data, error } = await supabase.rpc("ensure_form_class_baseline_assignments", {
+    requested_class_ids: safeFormClassIds,
+    requested_standard_key: safeStandardKey,
+  });
+
+  if (error) {
+    return normalizeBaselineProvisionResultPayload(null, {
+      formClassIds: safeFormClassIds,
+      standardKey: safeStandardKey,
+      ok: false,
+      error: isMissingBaselineProvisionFunctionError(error)
+        ? "Automatic baseline provisioning is not available until the latest database migration is applied."
+        : (error.message || "Could not provision the standard baseline."),
+    });
+  }
+
+  return normalizeBaselineProvisionResultPayload(data, {
+    formClassIds: safeFormClassIds,
+    standardKey: safeStandardKey,
+    ok: true,
+  });
+}
+
+export async function ensureBaselineAssignmentsForGate({ gateState = null } = {}) {
+  const formClassIds = normalizeIdList(gateState?.formClassIds ?? gateState?.form_class_ids);
+  const standardKey = String(
+    gateState?.requiredStandardKey
+    || gateState?.required_standard_key
+    || REQUIRED_BASELINE_STANDARD_KEY
+  ).trim().toLowerCase() || REQUIRED_BASELINE_STANDARD_KEY;
+  return ensureFormClassBaselineAssignments({
+    formClassIds,
+    standardKey,
+  });
+}
+
+export async function readPupilRuntimeAssignments({ pupilId = "" } = {}) {
+  const runtimePayload = await readPupilRuntimeAssignmentsPayload({ pupilId });
+  return runtimePayload.assignments;
+}
+
+function parseSupabaseFunctionPayload(payload) {
+  if (typeof payload !== "string") return payload;
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return { status: payload };
+  }
+}
+
+async function extractSupabaseFunctionErrorMessage(error) {
+  if (!error) return "";
+  if (error.context && typeof error.context.text === "function") {
+    const rawText = await error.context.text().catch(() => "");
+    if (rawText) {
+      try {
+        const payload = JSON.parse(rawText);
+        const direct = [
+          payload?.error,
+          payload?.message,
+          payload?.msg,
+          payload?.error_description,
+          payload?.details,
+        ].find((value) => typeof value === "string" && value.trim());
+        if (direct) return direct.trim();
+      } catch {
+        return rawText;
+      }
+    }
+  }
+  return String(error?.message || error || "").trim();
+}
+
+function normalizePersonalisedProvisioningResult(payload, fallback = {}) {
+  const data = parseSupabaseFunctionPayload(payload);
+  const row = data && typeof data === "object" ? data : {};
+  const rawStatus = String(row?.status || fallback.status || "generation_failed").trim().toLowerCase()
+    || "generation_failed";
+  const status = PERSONALISED_PROVISIONING_STATUS_VALUES.has(rawStatus) ? rawStatus : "generation_failed";
+  const assignmentId = status === "provisioned"
+    ? String(row?.assignmentId || row?.assignment_id || fallback.assignmentId || "").trim()
+    : "";
+  const ok = PERSONALISED_PROVISIONING_SAFE_STATUSES.has(status);
+  const error = ok ? "" : String(fallback.error || `Personalised provisioning returned ${status}.`).trim();
+  return {
+    ok,
+    status,
+    provisioned: status === "provisioned",
+    assignmentId,
+    error,
+  };
+}
+
+const EXTRA_CHALLENGE_PROVISIONING_STATUS_VALUES = new Set([
+  "provisioned",
+  "already_active",
+  "not_eligible",
+  "not_enough_evidence",
+  "error",
+]);
+
+function normalizeExtraChallengeProvisioningResult(payload, fallback = {}) {
+  const data = parseSupabaseFunctionPayload(payload);
+  const row = data && typeof data === "object" ? data : {};
+  const rawStatus = String(row?.status || fallback.status || "error").trim().toLowerCase() || "error";
+  const status = EXTRA_CHALLENGE_PROVISIONING_STATUS_VALUES.has(rawStatus)
+    ? rawStatus
+    : (rawStatus === "generation_failed" ? "error" : "error");
+  const assignmentId = (status === "provisioned" || status === "already_active")
+    ? String(row?.assignmentId || row?.assignment_id || fallback.assignmentId || "").trim()
+    : "";
+  const ok = status === "provisioned" || status === "already_active";
+  const error = ok
+    ? ""
+    : String(
+      row?.error
+      || row?.message
+      || fallback.error
+      || `Extra challenge provisioning returned ${status}.`
+    ).trim();
+  return {
+    ok,
+    status,
+    provisioned: status === "provisioned",
+    alreadyActive: status === "already_active",
+    assignmentId,
+    error,
+  };
+}
+
+export async function provisionWaitingPersonalisedAssignmentAfterBaseline({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizePersonalisedProvisioningResult(null, {
+      status: "invalid_pupil",
+      error: "Missing pupil id.",
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke(PERSONALISED_PROVISIONING_FUNCTION, {
+      body: { pupilId: safePupilId },
+    });
+
+    if (error) {
+      return normalizePersonalisedProvisioningResult(null, {
+        status: "generation_failed",
+        error: await extractSupabaseFunctionErrorMessage(error) || "Personalised provisioning request failed.",
+      });
+    }
+
+    return normalizePersonalisedProvisioningResult(data);
+  } catch (error) {
+    return normalizePersonalisedProvisioningResult(null, {
+      status: "generation_failed",
+      error: String(error?.message || error || "Personalised provisioning request failed.").trim(),
+    });
+  }
+}
+
+export async function provisionExtraChallengeAssignment({ pupilId = "" } = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) {
+    return normalizeExtraChallengeProvisioningResult(null, {
+      status: "not_eligible",
+      error: "Missing pupil id.",
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke(PERSONALISED_PROVISIONING_FUNCTION, {
+      body: {
+        action: "extra_challenge",
+        pupilId: safePupilId,
+      },
+    });
+
+    if (error) {
+      return normalizeExtraChallengeProvisioningResult(null, {
+        status: "error",
+        error: await extractSupabaseFunctionErrorMessage(error) || "Extra challenge request failed.",
+      });
+    }
+
+    return normalizeExtraChallengeProvisioningResult(data);
+  } catch (error) {
+    return normalizeExtraChallengeProvisioningResult(null, {
+      status: "error",
+      error: String(error?.message || error || "Extra challenge request failed.").trim(),
+    });
+  }
 }
 
 /* ---------------------------
@@ -3619,16 +6237,15 @@ export async function readPupilBaselineGateState({
 ---------------------------- */
 
 export async function createTest({ title, question_type = DEFAULT_QUESTION_TYPE }) {
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
   const testTitle = (title || "").trim() || "New test";
   const safeQuestionType = normalizeStoredQuestionType(question_type, { title: testTitle });
 
   const { data, error } = await supabase
     .from("tests")
-    .insert([{ teacher_id: teacherId, title: testTitle, question_type: safeQuestionType }])
+    .insert([withActiveSchoolId({ teacher_id: teacherId, title: testTitle, question_type: safeQuestionType }, context.accessContext)])
     .select("*")
     .single();
 
@@ -3637,15 +6254,16 @@ export async function createTest({ title, question_type = DEFAULT_QUESTION_TYPE 
 }
 
 export async function listTests() {
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  const teacherId = requireUserId(userRes?.user);
+  const context = await getSignedInTeacherContext();
+  const teacherId = context.teacherId;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("tests")
     .select("id, title, created_at, question_type")
-    .eq("teacher_id", teacherId)
-    .order("created_at", { ascending: false });
+    .eq("teacher_id", teacherId);
+  query = applyActiveSchoolFilter(query, context.accessContext);
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data || []).map((item) => ({
@@ -3956,6 +6574,64 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
       };
     })
     .filter(Boolean);
+}
+
+function normalizePracticeEvidenceAttemptRow(row = {}) {
+  return {
+    id: String(row?.id || "").trim(),
+    test_word_id: String(row?.test_word_id || "").trim(),
+    test_id: String(row?.test_id || "").trim(),
+    correct: row?.correct === true,
+    typed: String(row?.typed ?? "").trim(),
+    mode: String(row?.mode || "").trim(),
+    pattern_type: String(row?.pattern_type || "").trim().toLowerCase(),
+    focus_grapheme: String(row?.focus_grapheme || "").trim().toLowerCase(),
+    target_graphemes: normalizeLoadedSegments(row?.target_graphemes),
+    word_text: String(row?.word_text || row?.word || "").trim(),
+    attempt_source: String(row?.attempt_source || "").trim().toLowerCase(),
+    created_at: String(row?.created_at || "").trim(),
+  };
+}
+
+export async function listPupilPracticeEvidenceAttempts({
+  pupilId = "",
+  limit = 80,
+} = {}) {
+  const safePupilId = String(pupilId || "").trim();
+  if (!safePupilId) return [];
+
+  const safeLimit = Math.max(20, Math.min(100, Number(limit) || 80));
+  const { data, error } = await supabase
+    .from("attempts")
+    .select("id, test_word_id, test_id, correct, typed, mode, pattern_type, focus_grapheme, target_graphemes, word_text, word, attempt_source, created_at")
+    .eq("pupil_id", safePupilId)
+    .eq("correct", false)
+    .not("attempt_source", "in", '("practice","baseline","extra_challenge")')
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) throw error;
+  return (data || []).map((row) => normalizePracticeEvidenceAttemptRow(row));
+}
+
+export async function listApprovedPracticeWordBankRows({
+  focusGrapheme = "",
+  limit = 50,
+} = {}) {
+  const safeFocus = String(focusGrapheme || "").trim().toLowerCase().replace(/[^a-z-]/g, "");
+  if (!safeFocus) return [];
+
+  const safeLimit = Math.max(5, Math.min(100, Number(limit) || 50));
+  const { data, error } = await supabase
+    .from("test_words")
+    .select("id, test_id, word, sentence, segments, choice")
+    .contains("choice", { source: "teacher", focus_graphemes: [safeFocus] })
+    .order("word", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(safeLimit);
+
+  if (error) throw error;
+  return normalizeLoadedWordRows(data || []);
 }
 
 export async function pupilRecordAttempt({

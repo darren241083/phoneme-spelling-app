@@ -87,6 +87,7 @@ export const PHONICS_PREVIEW_GAP = 8;
 const PHONICS_PREVIEW_DOT_R = 6;
 const PHONICS_PREVIEW_STROKE = 4;
 const PHONICS_PREVIEW_DOT_Y = 14;
+const PHONICS_PREVIEW_UNDERLINE_DOT_OFFSET_Y = PHONICS_PREVIEW_DOT_Y + PHONICS_PREVIEW_DOT_R + 7;
 const PHONICS_PREVIEW_BRIDGE_DEPTH = 18;
 const PHONICS_PREVIEW_PAD = 6;
 
@@ -98,6 +99,70 @@ function findTokenRange(letters, token, fromIndex) {
   const start = fromIndex + rel;
   const end = start + token.length - 1;
   return { start, end };
+}
+
+function getImplicitSilentLetterIndices(letters) {
+  const safeLetters = Array.isArray(letters) ? letters : [];
+  const word = safeLetters.join("").toLowerCase();
+  const indices = new Set();
+
+  if (/^(kn|wr|gn|ps)/.test(word)) {
+    indices.add(0);
+  }
+
+  if (/mb$/.test(word)) {
+    indices.add(word.length - 1);
+  }
+
+  return indices;
+}
+
+function getTokenSilentLocalIndices(entry, range, implicitSilentIndices) {
+  const indices = new Set(
+    Array.isArray(entry?.silentLocalIndices)
+      ? entry.silentLocalIndices.map((value) => Number(value)).filter(Number.isInteger)
+      : []
+  );
+  const safeRange = range || {};
+  const start = Number(safeRange.start);
+  const end = Number(safeRange.end);
+
+  if (Number.isInteger(start) && Number.isInteger(end) && implicitSilentIndices instanceof Set) {
+    for (let index = start; index <= end; index += 1) {
+      if (implicitSilentIndices.has(index)) {
+        indices.add(index - start);
+      }
+    }
+  }
+
+  return [...indices]
+    .filter((value) => value >= 0 && Number.isInteger(value))
+    .sort((a, b) => a - b);
+}
+
+function pushPerLetterMarks(marks, range, silentLocalIndices, partIndex) {
+  const silentSet = new Set(Array.isArray(silentLocalIndices) ? silentLocalIndices : []);
+  for (let index = range.start; index <= range.end; index += 1) {
+    const localIndex = index - range.start;
+    marks.push({
+      type: silentSet.has(localIndex) ? "silent_dot" : "dot",
+      start: index,
+      end: index,
+      partIndex,
+    });
+  }
+}
+
+function shouldUnderlineSilentToken(token, silentLocalIndices) {
+  const clean = cleanToken(token);
+  const silentSet = new Set(Array.isArray(silentLocalIndices) ? silentLocalIndices : []);
+  const letterCount = getLocalTokenLetters(clean).length;
+
+  if (!letterCount || silentSet.size >= letterCount) return false;
+  if (["kn", "wr", "gn", "ps"].includes(clean) && silentSet.has(0)) return false;
+  if (clean === "mb" && silentSet.has(1)) return false;
+  if (clean === "gh" && silentSet.has(0) && silentSet.has(1)) return false;
+  return true;
 }
 
 export function buildWordFromGraphemes(graphemes) {
@@ -135,6 +200,7 @@ export function mapPreviewSegments(word, graphemes) {
   if (!letters.length) return { letters, marks, segments };
 
   const tokens = normaliseGraphemes(graphemes);
+  const implicitSilentIndices = getImplicitSilentLetterIndices(letters);
   let cursor = 0;
 
   for (let partIndex = 0; partIndex < tokens.length; partIndex += 1) {
@@ -160,7 +226,13 @@ export function mapPreviewSegments(word, graphemes) {
           };
           marks.push(mark);
           marks.push({
-            type: "silent_dot",
+            type: "dot",
+            start: baseRange.start,
+            end: baseRange.start,
+            partIndex,
+          });
+          marks.push({
+            type: "dot",
             start: end,
             end,
             partIndex,
@@ -181,7 +253,33 @@ export function mapPreviewSegments(word, graphemes) {
     const range = findTokenRange(letters, token, cursor);
     if (!range) continue;
 
-    const singleLetterSilent = token.length === 1 && entry?.silentLocalIndices?.includes(0);
+    const silentLocalIndices = getTokenSilentLocalIndices(entry, range, implicitSilentIndices);
+    const hasSilentLetters = silentLocalIndices.length > 0;
+    if (hasSilentLetters && token.length > 1) {
+      const shouldUnderline = shouldUnderlineSilentToken(token, silentLocalIndices);
+      if (shouldUnderline) {
+        marks.push({
+          type: "underline",
+          start: range.start,
+          end: range.end,
+          offset: "below_dots",
+          partIndex,
+        });
+      }
+      pushPerLetterMarks(marks, range, silentLocalIndices, partIndex);
+      segments.push({
+        token,
+        partIndex,
+        start: range.start,
+        end: range.end,
+        markType: shouldUnderline ? "underline" : "silent_group",
+        silentLocalIndices,
+      });
+      cursor = range.end + 1;
+      continue;
+    }
+
+    const singleLetterSilent = token.length === 1 && silentLocalIndices.includes(0);
     const mark = {
       type: token.length > 1 ? "underline" : (singleLetterSilent ? "silent_dot" : "dot"),
       start: range.start,
@@ -195,6 +293,7 @@ export function mapPreviewSegments(word, graphemes) {
       start: mark.start,
       end: mark.end,
       markType: mark.type,
+      silentLocalIndices,
     });
 
     cursor = range.end + 1;
@@ -258,7 +357,8 @@ function renderPreviewMarkup(letters, marks) {
     .map((m) => {
       const x1 = centerX(m.start) - PHONICS_PREVIEW_PAD;
       const x2 = centerX(m.end) + PHONICS_PREVIEW_PAD;
-      return `<line x1="${x1}" y1="${PHONICS_PREVIEW_DOT_Y}" x2="${x2}" y2="${PHONICS_PREVIEW_DOT_Y}" class="pr-stroke" />`;
+      const y = m?.offset === "below_dots" ? PHONICS_PREVIEW_UNDERLINE_DOT_OFFSET_Y : PHONICS_PREVIEW_DOT_Y;
+      return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" class="pr-stroke" />`;
     })
     .join("");
 
@@ -336,7 +436,7 @@ function injectStyles() {
       font-weight:800;
       font-size:16px;
       line-height:1;
-      color:#0f172a;
+      color:var(--wl-text, #1C1C1C);
       flex:0 0 auto;
     }
 
@@ -350,7 +450,7 @@ function injectStyles() {
     }
 
     .pr-orange-fill{
-      fill:#f59e0b;
+      fill:var(--wl-warning, #C28A3D);
     }
 
     .pr-silent-dot{
@@ -360,7 +460,7 @@ function injectStyles() {
     }
 
     .pr-stroke{
-      stroke:#f59e0b;
+      stroke:var(--wl-warning, #C28A3D);
       stroke-width:4;
       stroke-linecap:round;
       stroke-linejoin:round;
