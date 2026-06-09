@@ -1573,6 +1573,23 @@ function runUsageProbeReport() {
       })],
     ]),
   });
+  const recentAssignedAvoided = selectApprovedTargetWords({
+    focusGrapheme: "ph",
+    challengeLevel: "needs_support",
+    count: 1,
+    candidates: [phone, phase],
+    usageByWord: new Map([
+      ["phone", usageMeta({
+        word: "phone",
+        count: 0,
+        assignedCount: 1,
+        recentlySeen: true,
+        recentlyAssigned: true,
+        lastSeenAt: 2000,
+        lastAssignedAt: 2000,
+      })],
+    ]),
+  });
   const sourcePriorityBeforeUsage = selectApprovedTargetWords({
     focusGrapheme: "ph",
     challengeLevel: "needs_support",
@@ -1618,6 +1635,11 @@ function runUsageProbeReport() {
       selectedWords: selectedWords(recentSecureFallbackEligible),
       status: recentSecureFallbackEligible.status,
       interpretation: "Recently secure words remain eligible when no equivalent alternative exists.",
+    },
+    recentAssignedAvoided: {
+      selectedWords: selectedWords(recentAssignedAvoided),
+      status: recentAssignedAvoided.status,
+      interpretation: "Recently assigned words lose priority when equivalent alternatives exist.",
     },
     sourcePriorityBeforeUsage: {
       selectedWords: selectedWords(sourcePriorityBeforeUsage),
@@ -2025,7 +2047,7 @@ test("audit output includes source, fallback, support ladder, and stretch qualit
   }
 
   assert.ok((allSourceCounts.wordloom_core || 0) > 0);
-  assert.ok((allSourceCounts.teacher_legacy || 0) > 0);
+  assert.equal(allSourceCounts.unknown || 0, 0);
   assert.equal(AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").fallback.used, true);
   assert.ok(
     (AUDIT_REPORT.profiles.find((profile) => profile.id === "needs_support").supportLadder.questionTypes.focus_sound || 0) >= 1
@@ -2174,6 +2196,7 @@ test("usage probes document recent secure, incorrect, fallback, and source-prior
   assertJsonEqual(AUDIT_REPORT.usageProbes.recentSecureAvoided.selectedWords, ["phase"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.incorrectPreferred.selectedWords, ["phone"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.recentSecureFallbackEligible.selectedWords, ["phone"]);
+  assertJsonEqual(AUDIT_REPORT.usageProbes.recentAssignedAvoided.selectedWords, ["phase"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.sourcePriorityBeforeUsage.selectedWords, ["phase"]);
   assertJsonEqual(AUDIT_REPORT.usageProbes.neutralSourcePriority.selectedWords, ["phone"]);
   assert.equal(AUDIT_REPORT.observedConcerns.some((concern) => concern.id === "source_priority_before_usage"), false);
@@ -2186,21 +2209,21 @@ test("contextual v3A preserves selector v2 invariant word signatures", () => {
   assert.equal(JSON.stringify(projection).includes("effectiveScore"), false);
 
   const expectedProfileWords = {
-    needs_support: ["yellow", "grow", "crow", "snow", "phone", "photo", "chain", "brain", "queen", "snail"],
-    core_developing: ["three", "thin", "yellow", "grow", "shape", "shop", "wish", "shadow", "think", "path"],
+    needs_support: ["queen", "snail", "paint", "sleep", "phone", "photo", "chain", "brain", "green", "train"],
+    core_developing: ["three", "thin", "chain", "brain", "shape", "shop", "wish", "shadow", "think", "path"],
     secure_expected: ["bridge", "badge", "storm", "edge", "motion", "station", "fiction", "action", "question", "mention"],
     early_stretch: ["badge", "bridge", "edge", "citrus", "belief", "shield", "brief", "achieve", "cinema", "picture"],
   };
   const expectedRepeatWords = {
     needs_support: [
-      ["yellow", "grow", "crow", "snow", "phone", "photo", "chain", "brain", "queen", "snail"],
-      ["train", "rain", "yellow", "grow", "phone", "photo", "paint", "sleep", "crow", "snow"],
-      ["chain", "brain", "snail", "train", "phone", "photo", "green", "seed", "rain", "paint"],
+      ["queen", "snail", "paint", "sleep", "phone", "photo", "chain", "brain", "green", "train"],
+      ["yellow", "grow", "crow", "snow", "phone", "photo", "rain", "seed", "three", "queen"],
+      ["sleep", "chain", "brain", "green", "phone", "photo", "snail", "paint", "train", "yellow"],
     ],
     core_developing: [
-      ["three", "thin", "yellow", "grow", "shape", "shop", "wish", "shadow", "think", "path"],
-      ["crow", "snow", "chain", "brain", "shower", "shell", "shape", "shop", "three", "thin"],
-      ["snail", "paint", "train", "rain", "wish", "shadow", "shower", "shell", "think", "path"],
+      ["three", "thin", "chain", "brain", "shape", "shop", "wish", "shadow", "think", "path"],
+      ["snail", "paint", "train", "rain", "shower", "shell", "shape", "shop", "three", "thin"],
+      ["queen", "sleep", "green", "seed", "wish", "shadow", "shower", "shell", "think", "path"],
     ],
     secure_expected: [
       ["bridge", "badge", "storm", "edge", "motion", "station", "fiction", "action", "question", "mention"],

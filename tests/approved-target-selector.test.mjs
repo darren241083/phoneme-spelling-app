@@ -140,6 +140,25 @@ function usageAttempt({
   };
 }
 
+function assignmentTargetRow({
+  pupilId = "pupil-1",
+  word,
+  createdAt = "2026-05-02T10:00:00.000Z",
+} = {}) {
+  return {
+    id: `${pupilId}-${word}-target`,
+    assignment_id: `${pupilId}-generated-assignment`,
+    pupil_id: pupilId,
+    test_word_id: `${pupilId}-${word}-word`,
+    target_source: "assignment_engine_v1",
+    created_at: createdAt,
+    test_words: {
+      id: `${pupilId}-${word}-word`,
+      word,
+    },
+  };
+}
+
 function usageAwareProfile() {
   return {
     concernRows: [{ target: "ph", total: 3, securityBand: "insecure" }],
@@ -524,6 +543,77 @@ test("recently secure words are reduced in priority but remain eligible as fallb
         correct: true,
         attemptNumber: 1,
         segments: ["ph", "o", "n", "e"],
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("generated assignment avoids recently assigned approved words when equivalent alternatives exist", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [],
+    assignmentTargetRows: [
+      assignmentTargetRow({
+        word: "phone",
+        createdAt: "2026-05-02T10:00:00.000Z",
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phase"]);
+});
+
+test("generated assignment prefers incorrect words over recent assignment spacing", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      usageAttempt({
+        word: "phone",
+        correct: false,
+        attemptNumber: 2,
+        segments: ["ph", "o", "n", "e"],
+        createdAt: "2026-05-02T10:00:00.000Z",
+      }),
+    ],
+    assignmentTargetRows: [
+      assignmentTargetRow({
+        word: "phase",
+        createdAt: "2026-05-03T10:00:00.000Z",
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("recently assigned words are reduced in priority but remain eligible as fallback", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests({ includePhase: false }),
+    attempts: [],
+    assignmentTargetRows: [
+      assignmentTargetRow({
+        word: "phone",
+        createdAt: "2026-05-02T10:00:00.000Z",
       }),
     ],
     totalWords: 4,

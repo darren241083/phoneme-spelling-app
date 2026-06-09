@@ -12114,6 +12114,43 @@ async function readCompletedBaselineStatusRows({ assignmentIds = [], pupilIds = 
   return (data || []).filter((row) => isCompletedAssignmentStatusRow(row));
 }
 
+async function readPriorGeneratedAssignmentTargetRowsForPupils(pupilIds = [], { limit = 1000 } = {}) {
+  const safePupilIds = normalizeIdList(pupilIds);
+  if (!safePupilIds.length) return [];
+  const safeLimit = Math.max(200, Math.min(4000, Number(limit) || 1000));
+
+  const { data, error } = await supabase
+    .from("assignment_pupil_target_words")
+    .select(`
+      id,
+      assignment_id,
+      pupil_id,
+      test_word_id,
+      focus_grapheme,
+      target_source,
+      target_reason,
+      created_at,
+      test_words (
+        id,
+        word,
+        sentence,
+        segments,
+        choice
+      )
+    `)
+    .in("pupil_id", safePupilIds)
+    .eq("target_source", ASSIGNMENT_ENGINE_TARGET_SOURCE)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (error) {
+    if (isMissingAssignmentTargetTableError(error)) return [];
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
 function buildPlacementCurrentProfiles({
   pupilIds = [],
   attempts = [],
@@ -12299,6 +12336,9 @@ async function buildPersonalisedPlanForClass({
   const nonBaselineAttempts = (attemptRows || []).filter(
     (attempt) => !isBaselineAttemptRow(attempt, baselineAssignmentMetaById) && !isPracticeAttemptRow(attempt)
   );
+  const assignmentTargetRows = await readPriorGeneratedAssignmentTargetRowsForPupils(safePupilIds, {
+    limit: historyLimit,
+  });
   const wordloomCoreWordRows = await listWordloomCoreSpellingBankWordRows();
   const wordloomCoreTests = wordloomCoreWordRows.length
     ? [{
@@ -12312,6 +12352,7 @@ async function buildPersonalisedPlanForClass({
     pupilIds: safePupilIds,
     teacherTests: personalisedSourceTests,
     attempts: nonBaselineAttempts,
+    assignmentTargetRows,
     totalWords: effectivePolicy.assignment_length,
     currentProfiles,
     resolvedWordMap,
@@ -12323,6 +12364,7 @@ async function buildPersonalisedPlanForClass({
       pupilIds: safePupilIds,
       teacherTests: [...personalisedSourceTests, ...buildStarterCatalogVirtualTests()],
       attempts: nonBaselineAttempts,
+      assignmentTargetRows,
       totalWords: effectivePolicy.assignment_length,
       currentProfiles,
       resolvedWordMap,

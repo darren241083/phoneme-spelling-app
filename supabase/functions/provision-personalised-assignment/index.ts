@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
+  ASSIGNMENT_ENGINE_TARGET_SOURCE,
   AUTOMATION_KIND_PERSONALISED,
   AUTOMATION_SOURCE_MANUAL_RUN_NOW,
   WORDLOOM_CORE_FOCUS_TARGET_TABLE,
@@ -392,6 +393,49 @@ async function readAttemptsForPupil(
   return (data || []).filter((row: Record<string, unknown>) =>
     String(row?.attempt_source || row?.attemptSource || "").trim().toLowerCase() !== EVIDENCE_SOURCE_EXTRA_CHALLENGE
   );
+}
+
+async function readPriorGeneratedAssignmentTargetRowsForPupil(
+  serviceClient: ServiceClient,
+  { pupilId, schoolId }: { pupilId: string; schoolId: string },
+) {
+  let query = serviceClient
+    .from("assignment_pupil_target_words")
+    .select(`
+      id,
+      assignment_id,
+      pupil_id,
+      test_word_id,
+      focus_grapheme,
+      target_source,
+      target_reason,
+      created_at,
+      test_words (
+        id,
+        word,
+        sentence,
+        segments,
+        choice
+      )
+    `)
+    .eq("pupil_id", pupilId)
+    .eq("target_source", ASSIGNMENT_ENGINE_TARGET_SOURCE);
+
+  const safeSchoolId = normalizeId(schoolId);
+  if (safeSchoolId) {
+    query = query.or(`school_id.eq.${safeSchoolId},school_id.is.null`);
+  }
+
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    if (isMissingTableError(error, "assignment_pupil_target_words")) return [];
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
 }
 
 async function readTeacherTests(
@@ -1087,6 +1131,7 @@ Deno.serve(async (req) => {
       completedBaselineAssignments,
       classBaselineAssignments,
       wordloomCoreWordRows,
+      assignmentTargetRows,
     ] = await Promise.all([
       readAttemptsForPupil(serviceClient, {
         pupilId: context.pupilId,
@@ -1105,6 +1150,10 @@ Deno.serve(async (req) => {
         schoolId: context.schoolId,
       }),
       readWordloomCoreSpellingBankWordRows(serviceClient),
+      readPriorGeneratedAssignmentTargetRowsForPupil(serviceClient, {
+        pupilId: context.pupilId,
+        schoolId: context.schoolId,
+      }),
     ]);
     const baselineAssignments = mergeBaselineAssignments(completedBaselineAssignments, classBaselineAssignments);
 
@@ -1139,6 +1188,7 @@ Deno.serve(async (req) => {
       baselineAttemptCount,
       teacherTestCount: Array.isArray(teacherTests) ? teacherTests.length : 0,
       wordloomCoreWordCount: Array.isArray(wordloomCoreWordRows) ? wordloomCoreWordRows.length : 0,
+      generatedTargetRowCount: Array.isArray(assignmentTargetRows) ? assignmentTargetRows.length : 0,
     });
 
     const { plan } = buildProvisioningPlan({
@@ -1148,6 +1198,7 @@ Deno.serve(async (req) => {
       baselineAssignments,
       baselineStatusRows: effectiveBaselineStatusRows,
       wordloomCoreWordRows,
+      assignmentTargetRows,
       policy: buildProvisioningPolicy(context.runRow),
       resolvedWordMap: null,
     });

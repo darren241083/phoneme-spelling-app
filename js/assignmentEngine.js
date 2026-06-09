@@ -488,24 +488,60 @@ function getAttemptSeenAt(attempt) {
   return Number.isFinite(seenAt) ? seenAt : 0;
 }
 
+function getAssignmentTargetRowPupilId(row) {
+  return String(row?.pupil_id || row?.pupilId || "").trim();
+}
+
+function getJoinedAssignmentTargetWordRow(row) {
+  const joined = row?.test_words
+    || row?.testWords
+    || row?.test_word
+    || row?.testWord
+    || null;
+  if (Array.isArray(joined)) return joined[0] || null;
+  return joined && typeof joined === "object" ? joined : null;
+}
+
+function getAssignmentTargetRowWordText(row) {
+  const direct = normalizeWord(row?.word_text || row?.word || "");
+  if (direct) return direct;
+  const wordRow = getJoinedAssignmentTargetWordRow(row);
+  return normalizeWord(wordRow?.word || wordRow?.word_text || "");
+}
+
+function getAssignmentTargetAssignedAt(row) {
+  const assignedAt = new Date(
+    row?.created_at
+    || row?.createdAt
+    || row?.assignment_created_at
+    || row?.assignmentCreatedAt
+    || 0
+  ).getTime();
+  return Number.isFinite(assignedAt) ? assignedAt : 0;
+}
+
 function buildDefaultUsageMeta(word = "") {
   return {
     word,
     count: 0,
+    assignedCount: 0,
     correctCount: 0,
     incorrectCount: 0,
     lastSeenAt: 0,
+    lastAttemptAt: 0,
+    lastAssignedAt: 0,
     lastCorrectAt: 0,
     lastIncorrectAt: 0,
     latestCorrect: null,
     latestAttemptNumber: 0,
     recentlySeen: false,
+    recentlyAssigned: false,
     recentlySecure: false,
     reviewDue: false,
   };
 }
 
-function buildWordUsageStats(attempts) {
+function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
   const usage = new Map();
   const events = [];
 
@@ -518,6 +554,7 @@ function buildWordUsageStats(attempts) {
     const seenAt = getAttemptSeenAt(attempt);
 
     current.count += 1;
+    current.lastAttemptAt = Math.max(current.lastAttemptAt, seenAt);
     if (correct) {
       current.correctCount += 1;
       current.lastCorrectAt = Math.max(current.lastCorrectAt, seenAt);
@@ -534,16 +571,36 @@ function buildWordUsageStats(attempts) {
     events.push({ word, seenAt });
   }
 
+  for (const row of assignmentTargetRows || []) {
+    const word = getAssignmentTargetRowWordText(row);
+    if (!word) continue;
+    const assignedAt = getAssignmentTargetAssignedAt(row);
+    if (!assignedAt) continue;
+    const current = usage.get(word) || buildDefaultUsageMeta(word);
+    current.assignedCount += 1;
+    current.lastAssignedAt = Math.max(current.lastAssignedAt, assignedAt);
+    if (assignedAt > current.lastSeenAt) {
+      current.lastSeenAt = assignedAt;
+    }
+    usage.set(word, current);
+    events.push({ word, seenAt: assignedAt });
+  }
+
   const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
   const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - USAGE_RECENT_WINDOW_MS : 0;
 
   for (const current of usage.values()) {
+    const assignmentIsLatest = current.assignedCount > 0 && current.lastAssignedAt >= current.lastSeenAt;
+    current.recentlyAssigned = current.lastAssignedAt > 0 && current.lastAssignedAt >= recentCutoff;
     current.recentlySeen = current.lastSeenAt > 0 && current.lastSeenAt >= recentCutoff;
     current.recentlySecure = current.recentlySeen
+      && !assignmentIsLatest
       && current.latestCorrect === true
       && current.latestAttemptNumber <= 1
       && current.incorrectCount === 0;
-    current.reviewDue = current.count > 0 && current.lastSeenAt > 0 && !current.recentlySeen;
+    current.reviewDue = current.assignedCount > 0
+      ? current.count > 0 && current.lastAttemptAt > 0 && current.lastAttemptAt < recentCutoff
+      : current.count > 0 && current.lastSeenAt > 0 && !current.recentlySeen;
   }
 
   return usage;
@@ -704,7 +761,7 @@ function mergeCandidates(existing, candidate) {
   };
 }
 
-function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null }) {
+function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null, assignmentTargetRows = [] }) {
   const pool = new Map();
 
   for (const test of teacherTests || []) {
@@ -724,7 +781,7 @@ function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null }) 
 
   return {
     candidates: Array.from(pool.values()),
-    usageByWord: buildWordUsageStats(attempts),
+    usageByWord: buildWordUsageStats(attempts, { assignmentTargetRows }),
   };
 }
 
@@ -1260,7 +1317,7 @@ function getUsageMeta(candidate, usageByWord) {
 
 function getUsageSpacingTier(usage = {}) {
   if (Number(usage?.incorrectCount || 0) > 0 || !!usage?.reviewDue) return 0;
-  if (!Number(usage?.count || 0)) return 1;
+  if (!Number(usage?.count || 0) && !Number(usage?.assignedCount || 0)) return 1;
   if (usage?.recentlySecure) return 3;
   if (usage?.recentlySeen) return 2;
   return 1;
@@ -2587,6 +2644,11 @@ function extractAttemptsForPupil(attempts, pupilId) {
   return (Array.isArray(attempts) ? attempts : []).filter((attempt) => String(attempt?.pupil_id || "") === key);
 }
 
+function extractAssignmentTargetRowsForPupil(rows, pupilId) {
+  const key = String(pupilId || "");
+  return (Array.isArray(rows) ? rows : []).filter((row) => getAssignmentTargetRowPupilId(row) === key);
+}
+
 function normalizePupilList(pupilIds) {
   return [...new Set(
     (Array.isArray(pupilIds) ? pupilIds : [])
@@ -2647,6 +2709,8 @@ export function buildGeneratedAssignmentPlan({
   pupilIds = [],
   teacherTests = [],
   attempts = [],
+  assignmentTargetRows = [],
+  priorAssignmentTargetRows = [],
   totalWords = ASSIGNMENT_ENGINE_DEFAULT_LENGTH,
   currentProfiles = null,
   resolvedWordMap = null,
@@ -2661,10 +2725,15 @@ export function buildGeneratedAssignmentPlan({
   const composition = buildAutoAssignmentComposition(normalizedPolicy.assignment_length);
   const sortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
     .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+  const sortedAssignmentTargetRows = [
+    ...(Array.isArray(assignmentTargetRows) ? assignmentTargetRows : []),
+    ...(Array.isArray(priorAssignmentTargetRows) ? priorAssignmentTargetRows : []),
+  ].sort((a, b) => getAssignmentTargetAssignedAt(a) - getAssignmentTargetAssignedAt(b));
   const pool = buildCandidatePool({
     teacherTests,
     attempts: sortedAttempts,
     resolvedWordMap,
+    assignmentTargetRows: sortedAssignmentTargetRows,
   });
 
   // Future baseline placement can inject a richer profile object here without changing the planner shape.
@@ -2676,6 +2745,7 @@ export function buildGeneratedAssignmentPlan({
 
   for (const pupilId of pupils) {
     const pupilAttempts = extractAttemptsForPupil(sortedAttempts, pupilId);
+    const pupilAssignmentTargetRows = extractAssignmentTargetRowsForPupil(sortedAssignmentTargetRows, pupilId);
     const providedProfile = currentProfiles && typeof currentProfiles === "object"
       ? currentProfiles[pupilId] || currentProfiles[String(pupilId)] || null
       : null;
@@ -2690,7 +2760,7 @@ export function buildGeneratedAssignmentPlan({
       composition,
       pool,
       engineOptions,
-      usageByWord: buildWordUsageStats(pupilAttempts),
+      usageByWord: buildWordUsageStats(pupilAttempts, { assignmentTargetRows: pupilAssignmentTargetRows }),
     });
 
     if (plan?.error) errors.push(plan.error);

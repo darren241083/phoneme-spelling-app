@@ -415,6 +415,36 @@ const usageAwareTargetWords = provisionedWithUsageAwareSelection.plan.pupilPlans
   .map((word) => word.word);
 assert.deepEqual(usageAwareTargetWords, ["motion"]);
 
+const provisionedWithAssignedTargetSpacing = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: baselineAttemptRows,
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  assignmentTargetRows: [{
+    id: "target-action",
+    assignment_id: "generated-assignment",
+    pupil_id: "pupil-one",
+    test_word_id: "generated-action",
+    target_source: "assignment_engine_v1",
+    created_at: "2026-05-10T12:10:00.000Z",
+    test_words: {
+      id: "generated-action",
+      word: "action",
+    },
+  }],
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+});
+const assignedTargetSpacingWords = provisionedWithAssignedTargetSpacing.plan.pupilPlans[0].words
+  .filter((word) => word.assignmentRole === "target")
+  .map((word) => word.word);
+assert.deepEqual(assignedTargetSpacingWords, ["motion"]);
+
 const provisionedWithoutExtraChallengeUsage = buildProvisioningPlan({
   pupilId: "pupil-one",
   teacherTests: [],
@@ -469,6 +499,18 @@ const provisionedWithLowCoverageFallback = buildProvisioningPlan({
   baselineAssignments: [baselineAssignment],
   baselineStatusRows: [baselineStatusWithResultJson],
   wordloomCoreWordRows: buildLowCoverageCoreBankRowsForProvisioning(),
+  assignmentTargetRows: [{
+    id: "target-action-low-coverage",
+    assignment_id: "generated-low-coverage",
+    pupil_id: "pupil-one",
+    test_word_id: "generated-low-coverage-action",
+    target_source: "assignment_engine_v1",
+    created_at: "2026-05-10T12:10:00.000Z",
+    test_words: {
+      id: "generated-low-coverage-action",
+      word: "action",
+    },
+  }],
   policy: {
     assignment_length: 10,
     support_preset: "balanced",

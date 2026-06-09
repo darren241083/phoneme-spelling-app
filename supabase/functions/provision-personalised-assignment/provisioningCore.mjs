@@ -16,6 +16,8 @@ import {
 import { normalizeAutoAssignPolicy } from "./pure/autoAssignPolicy.js";
 import { getQuestionEvidenceTier } from "./pure/questionTypes.js";
 
+export { ASSIGNMENT_ENGINE_TARGET_SOURCE };
+
 export const AUTOMATION_KIND_PERSONALISED = "personalised";
 export const AUTOMATION_SOURCE_MANUAL_RUN_NOW = "manual_run_now";
 export const WORDLOOM_CORE_WORD_TABLE = "wordloom_core_words";
@@ -576,6 +578,7 @@ export function buildProvisioningPlan({
   baselineAssignments = [],
   baselineStatusRows = [],
   wordloomCoreWordRows = [],
+  assignmentTargetRows = [],
   policy = null,
   resolvedWordMap = null,
 } = {}) {
@@ -611,6 +614,7 @@ export function buildProvisioningPlan({
     pupilIds: [safePupilId],
     teacherTests: personalisedSourceTests,
     attempts: nonBaselineAttempts,
+    assignmentTargetRows,
     totalWords: effectivePolicy.assignment_length,
     currentProfiles,
     resolvedWordMap,
@@ -622,6 +626,7 @@ export function buildProvisioningPlan({
       pupilIds: [safePupilId],
       teacherTests: [...personalisedSourceTests, ...buildStarterCatalogVirtualTests()],
       attempts: nonBaselineAttempts,
+      assignmentTargetRows,
       totalWords: effectivePolicy.assignment_length,
       currentProfiles,
       resolvedWordMap,
