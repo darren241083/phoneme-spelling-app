@@ -162,12 +162,14 @@ import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+  buildAssignmentDueDateEditModel,
   buildAssignmentLifecycleFilterCounts,
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
   doesAssignmentMatchLifecycleFilter,
   groupAssignmentLifecycleInputs,
-} from "./assignmentLifecycleView.js?v=1.0";
+  validateAssignmentDueDateExtension,
+} from "./assignmentLifecycleView.js?v=1.1";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -743,6 +745,7 @@ const state = {
     status: "idle",
     message: "",
     manualAssignClassByTestId: {},
+    dueDateEditByAssignmentId: {},
   },
   classResultsUi: {
     rangeByClass: {},
@@ -5385,6 +5388,10 @@ async function loadDashboardData() {
     Object.entries(state.analyticsByAssignment || {})
       .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
   );
+  state.assignmentLifecycle.dueDateEditByAssignmentId = Object.fromEntries(
+    Object.entries(state.assignmentLifecycle.dueDateEditByAssignmentId || {})
+      .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
+  );
   await refreshVisualAnalyticsSummary();
   if (state.visualAnalytics.summaryOpen) {
     openVisualSummaryForScope(state.analyticsAssistant.scopeType, state.analyticsAssistant.scopeId);
@@ -9805,6 +9812,19 @@ function onRootInput(event) {
     return;
   }
 
+  if (target.matches('[data-field="assignment-due-date-input"]')) {
+    const assignmentId = String(target.dataset.assignmentId || "").trim();
+    if (assignmentId) {
+      const current = getAssignmentDueDateEditState(assignmentId) || {};
+      setAssignmentDueDateEditState(assignmentId, {
+        ...current,
+        value: target.value || "",
+        error: "",
+      });
+    }
+    return;
+  }
+
   if (target.matches('[data-field="visual-pupil-search"]')) {
     const nextValue = target.value || "";
     const selectionStart = typeof target.selectionStart === "number" ? target.selectionStart : nextValue.length;
@@ -11565,6 +11585,32 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "edit-assignment-due-date") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    const anchorEl = button.closest(".td-assignment-card") || rootEl;
+    preserveScrollAround(anchorEl, () => {
+      if (getAssignmentDueDateEditState(assignmentId)) {
+        clearAssignmentDueDateEditState(assignmentId);
+      } else {
+        openAssignmentDueDateEdit(assignmentId);
+      }
+      paint();
+    });
+    return;
+  }
+
+  if (action === "cancel-assignment-due-date") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    const anchorEl = button.closest(".td-assignment-card") || rootEl;
+    preserveScrollAround(anchorEl, () => {
+      clearAssignmentDueDateEditState(assignmentId);
+      paint();
+    });
+    return;
+  }
+
   if (action === "jump-assignment-results") {
     const assignmentId = button.dataset.assignmentId;
     if (!assignmentId) return;
@@ -11688,6 +11734,11 @@ async function onRootSubmit(event) {
 
   if (form.matches('[data-form="assign-test"]')) {
     await handleAssignTest(form);
+    return;
+  }
+
+  if (form.matches('[data-form="assignment-due-date"]')) {
+    await handleAssignmentDueDateForm(form);
     return;
   }
 
@@ -13845,6 +13896,75 @@ async function handleAssignTest(form) {
   state.activePanel = null;
   showNotice("Test assigned successfully.", "success");
   paint();
+}
+
+async function handleAssignmentDueDateForm(form) {
+  const fd = new FormData(form);
+  const assignmentId = String(fd.get("assignment_id") || "").trim();
+  const dueDateRaw = String(fd.get("due_date") || "").trim();
+  const assignment = findAssignmentRecord(assignmentId);
+  const lifecycle = getAssignmentLifecycleModel(assignment);
+  const editModel = buildAssignmentDueDateEditModelForRecord(assignment);
+
+  if (!assignmentId || !assignment || !editModel.canEdit) {
+    showNotice(getAssignmentDueDateEditBlockedMessage(editModel), "error");
+    paint();
+    return;
+  }
+
+  const validation = validateAssignmentDueDateExtension({
+    assignment,
+    lifecycle,
+    currentDueAt: editModel.currentDueAt,
+    nextDueAt: dueDateRaw,
+    now: new Date(),
+  });
+
+  if (!validation.ok) {
+    setAssignmentDueDateEditState(assignmentId, {
+      value: dueDateRaw,
+      status: "idle",
+      error: validation.error,
+    });
+    paint();
+    return;
+  }
+
+  setAssignmentDueDateEditState(assignmentId, {
+    value: dueDateRaw,
+    status: "saving",
+    error: "",
+  });
+  paint();
+
+  try {
+    let query = supabase
+      .from("assignments_v2")
+      .update({ end_at: validation.nextDueAt })
+      .eq("id", assignmentId)
+      .eq("teacher_id", state.user.id);
+    query = applyActiveSchoolFilter(query, state.accessContext);
+    query = query.select("id, end_at").maybeSingle();
+
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data?.id) throw new Error("No assignment row was updated.");
+
+    clearAssignmentDueDateEditState(assignmentId);
+    await loadDashboardData();
+    openDashboardSection("upcoming");
+    showNotice("Due date updated. Existing pupil work and completed results were not reset.", "success");
+    paint();
+  } catch (error) {
+    console.error("assignment due date update error:", error);
+    setAssignmentDueDateEditState(assignmentId, {
+      value: dueDateRaw,
+      status: "idle",
+      error: error?.message || "Could not update this due date.",
+    });
+    showNotice("Could not update the assignment due date.", "error");
+    paint();
+  }
 }
 
 async function handleEditClass(form) {
@@ -23874,6 +23994,84 @@ function getAssignmentLifecycleModel(item) {
     });
 }
 
+function findAssignmentRecord(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return null;
+  return (state.assignments || []).find((item) => String(item?.id || "") === safeAssignmentId) || null;
+}
+
+function getAssignmentDueDateEditState(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  return safeAssignmentId ? state.assignmentLifecycle.dueDateEditByAssignmentId?.[safeAssignmentId] || null : null;
+}
+
+function setAssignmentDueDateEditState(assignmentId = "", nextState = {}) {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return;
+  state.assignmentLifecycle.dueDateEditByAssignmentId = {
+    ...(state.assignmentLifecycle.dueDateEditByAssignmentId || {}),
+    [safeAssignmentId]: {
+      value: "",
+      status: "idle",
+      error: "",
+      ...nextState,
+    },
+  };
+}
+
+function clearAssignmentDueDateEditState(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return;
+  const next = { ...(state.assignmentLifecycle.dueDateEditByAssignmentId || {}) };
+  delete next[safeAssignmentId];
+  state.assignmentLifecycle.dueDateEditByAssignmentId = next;
+}
+
+function toAssignmentDueDateInputValue(value = "") {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const localMs = date.getTime() - date.getTimezoneOffset() * 60 * 1000;
+  return new Date(localMs).toISOString().slice(0, 16);
+}
+
+function getAssignmentDueDateEditBlockedMessage(model = null) {
+  const reason = String(model?.reason || "").trim();
+  if (reason === "complete") return "Completed assignments keep their historical due date.";
+  if (reason === "protected_source") {
+    return "Baseline, Spelling Bee, and Extra Challenge deadlines are locked here.";
+  }
+  if (reason === "not_owner") return "You can only change due dates for assignments you own.";
+  return "This assignment due date cannot be changed from the dashboard.";
+}
+
+function buildAssignmentDueDateEditModelForRecord(item) {
+  const lifecycle = getAssignmentLifecycleModel(item);
+  const source = getAssignmentSourceView(item);
+  return buildAssignmentDueDateEditModel({
+    assignment: item,
+    lifecycle,
+    sourceKey: source?.key,
+    canManage: canManageAssignmentRecord(item),
+    now: new Date(),
+  });
+}
+
+function openAssignmentDueDateEdit(assignmentId = "") {
+  const assignment = findAssignmentRecord(assignmentId);
+  const editModel = buildAssignmentDueDateEditModelForRecord(assignment);
+  if (!editModel.canEdit) {
+    showNotice(getAssignmentDueDateEditBlockedMessage(editModel), "error");
+    return;
+  }
+
+  setAssignmentDueDateEditState(editModel.assignmentId, {
+    value: toAssignmentDueDateInputValue(editModel.currentDueAt),
+    status: "idle",
+    error: "",
+  });
+}
+
 function getAssignmentLifecycleFilter() {
   const current = String(state.assignmentLifecycle.filter || "all");
   return ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === current)
@@ -26106,6 +26304,61 @@ function renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics = 
   `;
 }
 
+function renderAssignmentDueDateEditPanel(item, editModel) {
+  const assignmentId = String(item?.id || "").trim();
+  const editState = getAssignmentDueDateEditState(assignmentId);
+  if (!assignmentId || !editState || !editModel?.canEdit) return "";
+
+  const currentCopy = editModel.currentDueAt
+    ? `Current due date: ${formatDate(editModel.currentDueAt)}`
+    : "This assignment does not have a due date yet.";
+  const saveLabel = editState.status === "saving" ? "Saving..." : "Save due date";
+
+  return `
+    <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm td-assignment-due-date-panel">
+      <form class="td-assignment-due-date-form" data-form="assignment-due-date">
+        <input type="hidden" name="assignment_id" value="${escapeAttr(assignmentId)}" />
+
+        <label class="td-field td-field--compact td-assignment-due-date-field">
+          <span>New due date</span>
+          <input
+            class="td-input"
+            type="datetime-local"
+            name="due_date"
+            data-field="assignment-due-date-input"
+            data-assignment-id="${escapeAttr(assignmentId)}"
+            value="${escapeAttr(editState.value || "")}"
+            min="${escapeAttr(toAssignmentDueDateInputValue(editModel.minDueAt))}"
+            required
+          />
+        </label>
+
+        <div class="td-assignment-due-date-copy">
+          <strong>${escapeHtml(currentCopy)}</strong>
+          <span>${escapeHtml(editModel.helperText || "")}</span>
+        </div>
+
+        ${editState.error ? `<div class="td-assignment-due-date-error" role="alert">${escapeHtml(editState.error)}</div>` : ""}
+
+        <div class="td-form-actions td-assignment-due-date-actions">
+          <button
+            class="td-btn td-btn--ghost"
+            type="button"
+            data-action="cancel-assignment-due-date"
+            data-assignment-id="${escapeAttr(assignmentId)}"
+            ${editState.status === "saving" ? "disabled" : ""}
+          >
+            Cancel
+          </button>
+          <button class="td-btn td-btn--primary" type="submit" ${editState.status === "saving" ? "disabled" : ""}>
+            ${escapeHtml(saveLabel)}
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
 function renderAssignmentCardCompact(item) {
   const assignmentId = String(item.id);
   const title = item.tests?.title || "Untitled test";
@@ -26124,6 +26377,8 @@ function renderAssignmentCardCompact(item) {
   const dueAt = lifecycle?.dueAt || item.deadline || item.end_at || item.endAt || "";
   const dueLabel = dueAt ? `Due ${formatDate(dueAt)}` : "No due date";
   const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
+  const dueDateEditModel = buildAssignmentDueDateEditModelForRecord(item);
+  const dueDateEditState = getAssignmentDueDateEditState(assignmentId);
   const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
   const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
   const cardClasses = [
@@ -26154,6 +26409,16 @@ function renderAssignmentCardCompact(item) {
         </div>
 
         <div class="td-card-actions">
+          ${dueDateEditModel.canEdit ? `
+          <button
+            class="td-btn td-btn--ghost"
+            type="button"
+            data-action="edit-assignment-due-date"
+            data-assignment-id="${escapeAttr(assignmentId)}"
+          >
+            ${escapeHtml(dueDateEditState ? "Close due date" : dueDateEditModel.actionLabel)}
+          </button>
+          ` : ""}
           <button
             class="td-btn td-btn--ghost"
             type="button"
@@ -26165,6 +26430,7 @@ function renderAssignmentCardCompact(item) {
         </div>
       </div>
 
+      ${renderAssignmentDueDateEditPanel(item, dueDateEditModel)}
       ${isResultsOpen ? renderAssignmentResultsPanelCalm(item) : ""}
     </article>
   `;
@@ -32751,6 +33017,44 @@ function injectStyles() {
       line-height:1.35;
     }
 
+    .td-assignment-due-date-panel{
+      display:block;
+    }
+
+    .td-assignment-due-date-form{
+      display:grid;
+      grid-template-columns:minmax(220px,280px) minmax(0,1fr);
+      gap:12px;
+      align-items:end;
+    }
+
+    .td-assignment-due-date-copy{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      color:#64748b;
+      font-size:0.88rem;
+      line-height:1.4;
+    }
+
+    .td-assignment-due-date-copy strong{
+      color:#334155;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-assignment-due-date-error{
+      grid-column:1 / -1;
+      color:#b91c1c;
+      font-size:0.84rem;
+      font-weight:700;
+      line-height:1.4;
+    }
+
+    .td-assignment-due-date-actions{
+      grid-column:1 / -1;
+    }
+
     .td-assignment-lifecycle-note,
     .td-assignment-lifecycle-status,
     .td-assignment-duplicate-warning{
@@ -36152,6 +36456,10 @@ function injectStyles() {
       .td-card-actions{
         display:grid;
         grid-template-columns:1fr 1fr;
+      }
+
+      .td-assignment-due-date-form{
+        grid-template-columns:1fr;
       }
 
       .td-action-button-shell{

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  buildAssignmentDueDateEditModel,
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
   groupAssignmentLifecycleInputs,
+  validateAssignmentDueDateExtension,
 } = await loadBrowserModule("../js/assignmentLifecycleView.js", import.meta.url);
 
 const NOW = new Date("2026-05-26T12:00:00.000Z");
@@ -200,6 +202,125 @@ test("duplicate manual assignment warning finds the latest matching assignment",
     hasDuplicate: true,
     assignmentId: "newer",
     message: "This class already has an assignment for this test. You can still assign it again, but check the existing assignment first.",
+  });
+});
+
+test("due date edit model allows owned teacher-created assignment without a due date", () => {
+  const model = buildAssignmentDueDateEditModel({
+    assignment: assignment({ end_at: null }),
+    lifecycle: { key: "no_deadline", completedCount: 0, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+
+  assert.equal(model.canEdit, true);
+  assert.equal(model.reason, "editable");
+  assert.equal(model.actionLabel, "Add due date");
+});
+
+test("due date edit model allows owned personalised assignment with a due date", () => {
+  const model = buildAssignmentDueDateEditModel({
+    assignment: assignment({ end_at: "2026-06-01T09:00:00.000Z" }),
+    lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2 },
+    sourceKey: "generated_by_policy",
+    canManage: true,
+    now: NOW,
+  });
+
+  assert.equal(model.canEdit, true);
+  assert.equal(model.reason, "editable");
+  assert.equal(model.actionLabel, "Extend due date");
+  assert.equal(model.currentDueAt, "2026-06-01T09:00:00.000Z");
+});
+
+test("due date edit model blocks protected assignment sources", () => {
+  for (const sourceKey of ["baseline", "spelling_bee", "extra_challenge"]) {
+    const model = buildAssignmentDueDateEditModel({
+      assignment: assignment(),
+      lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2 },
+      sourceKey,
+      canManage: true,
+      now: NOW,
+    });
+
+    assert.equal(model.canEdit, false);
+    assert.equal(model.reason, "protected_source");
+  }
+});
+
+test("due date edit model blocks completed and non-owned assignments", () => {
+  const completed = buildAssignmentDueDateEditModel({
+    assignment: assignment(),
+    lifecycle: { key: "complete", completedCount: 2, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+  const notOwned = buildAssignmentDueDateEditModel({
+    assignment: assignment(),
+    lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: false,
+    now: NOW,
+  });
+
+  assert.equal(completed.canEdit, false);
+  assert.equal(completed.reason, "complete");
+  assert.equal(notOwned.canEdit, false);
+  assert.equal(notOwned.reason, "not_owner");
+});
+
+test("due date validation rejects missing, past, and shortened future dates", () => {
+  assert.deepEqual(plain(validateAssignmentDueDateExtension({
+    assignment: assignment(),
+    nextDueAt: "",
+    now: NOW,
+  })), {
+    ok: false,
+    error: "Choose a valid future due date.",
+  });
+
+  assert.deepEqual(plain(validateAssignmentDueDateExtension({
+    assignment: assignment(),
+    nextDueAt: "2026-05-25T09:00:00.000Z",
+    now: NOW,
+  })), {
+    ok: false,
+    error: "Choose a due date in the future.",
+  });
+
+  assert.deepEqual(plain(validateAssignmentDueDateExtension({
+    assignment: assignment({ end_at: "2026-06-01T09:00:00.000Z" }),
+    nextDueAt: "2026-05-30T09:00:00.000Z",
+    now: NOW,
+  })), {
+    ok: false,
+    error: "Choose a date later than the current due date.",
+  });
+});
+
+test("due date validation allows adding or extending to a future date", () => {
+  const added = validateAssignmentDueDateExtension({
+    assignment: assignment({ end_at: null }),
+    nextDueAt: "2026-05-27T09:00:00.000Z",
+    now: NOW,
+  });
+  const extendedExpired = validateAssignmentDueDateExtension({
+    assignment: assignment({ end_at: "2026-05-25T09:00:00.000Z" }),
+    nextDueAt: "2026-05-27T09:00:00.000Z",
+    now: NOW,
+  });
+
+  assert.deepEqual(plain(added), {
+    ok: true,
+    error: "",
+    nextDueAt: "2026-05-27T09:00:00.000Z",
+  });
+  assert.deepEqual(plain(extendedExpired), {
+    ok: true,
+    error: "",
+    nextDueAt: "2026-05-27T09:00:00.000Z",
   });
 });
 
