@@ -8,6 +8,12 @@ export const ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_DUE_DATE_STEP_MS = 60 * 1000;
+const ASSIGNMENT_DUE_DATE_EDITABLE_SOURCE_KEYS = new Set([
+  "teacher_created",
+  "generated_by_policy",
+  "legacy_personalised",
+]);
 
 const STATE_META = {
   needs_attention: {
@@ -121,6 +127,103 @@ function getAssignmentDueAt(assignment = {}) {
 
 function getAssignmentCreatedAt(assignment = {}) {
   return assignment.created_at || assignment.createdAt || null;
+}
+
+function normalizeSourceKey(sourceKey = "") {
+  return String(sourceKey || "").trim().toLowerCase();
+}
+
+function normalizeLifecycleKey(lifecycle = null) {
+  return String(lifecycle?.key || "").trim().toLowerCase();
+}
+
+function isLifecycleComplete(lifecycle = null) {
+  const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
+  const completed = Math.max(0, Number(lifecycle?.completedCount || 0));
+  return normalizeLifecycleKey(lifecycle) === "complete" || (total > 0 && completed >= total);
+}
+
+export function buildAssignmentDueDateEditModel({
+  assignment = null,
+  lifecycle = null,
+  sourceKey = "",
+  canManage = false,
+  now = new Date(),
+} = {}) {
+  const safeAssignment = assignment && typeof assignment === "object" ? assignment : {};
+  const assignmentId = cleanId(safeAssignment.id);
+  const normalizedSourceKey = normalizeSourceKey(sourceKey);
+  const dueAt = lifecycle?.dueAt || getAssignmentDueAt(safeAssignment);
+  const dueMs = parseTime(dueAt);
+  const nowMs = parseTime(now) || Date.now();
+  const currentDueAt = dueMs != null ? new Date(dueMs).toISOString() : null;
+  const minDueAt = new Date(Math.max(nowMs, dueMs || 0) + MIN_DUE_DATE_STEP_MS).toISOString();
+
+  const baseModel = {
+    assignmentId,
+    canEdit: false,
+    reason: "unknown",
+    sourceKey: normalizedSourceKey,
+    currentDueAt,
+    minDueAt,
+    actionLabel: currentDueAt ? "Extend due date" : "Add due date",
+    helperText: "Only the due date changes. Pupil work, completed results, and target words stay as they are.",
+  };
+
+  if (!assignmentId) return { ...baseModel, reason: "missing_assignment" };
+  if (!canManage) return { ...baseModel, reason: "not_owner" };
+  if (!ASSIGNMENT_DUE_DATE_EDITABLE_SOURCE_KEYS.has(normalizedSourceKey)) {
+    return { ...baseModel, reason: "protected_source" };
+  }
+  if (isLifecycleComplete(lifecycle)) return { ...baseModel, reason: "complete" };
+
+  return {
+    ...baseModel,
+    canEdit: true,
+    reason: "editable",
+  };
+}
+
+export function validateAssignmentDueDateExtension({
+  assignment = null,
+  lifecycle = null,
+  currentDueAt = "",
+  nextDueAt = "",
+  now = new Date(),
+} = {}) {
+  const safeAssignment = assignment && typeof assignment === "object" ? assignment : {};
+  const rawNextDueAt = typeof nextDueAt === "string" ? nextDueAt.trim() : nextDueAt;
+  const nextMs = parseTime(rawNextDueAt);
+
+  if (!rawNextDueAt || nextMs == null) {
+    return {
+      ok: false,
+      error: "Choose a valid future due date.",
+    };
+  }
+
+  const nowMs = parseTime(now) || Date.now();
+  if (nextMs <= nowMs) {
+    return {
+      ok: false,
+      error: "Choose a due date in the future.",
+    };
+  }
+
+  const currentRaw = currentDueAt || lifecycle?.dueAt || getAssignmentDueAt(safeAssignment);
+  const currentMs = parseTime(currentRaw);
+  if (currentMs != null && currentMs > nowMs && nextMs <= currentMs) {
+    return {
+      ok: false,
+      error: "Choose a date later than the current due date.",
+    };
+  }
+
+  return {
+    ok: true,
+    error: "",
+    nextDueAt: new Date(nextMs).toISOString(),
+  };
 }
 
 function getStateMeta(key) {
