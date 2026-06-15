@@ -197,6 +197,12 @@ function isIsoDate(value) {
   return Number.isFinite(parsed.getTime());
 }
 
+function sameInstant(left, right) {
+  const leftTime = new Date(left || "").getTime();
+  const rightTime = new Date(right || "").getTime();
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime === rightTime;
+}
+
 function requireRemoteReadEnv(env) {
   const missing = [];
   if (!env.supabaseUrl) missing.push("WORDLOOM_SUPABASE_URL");
@@ -514,7 +520,7 @@ async function inspectFixture(client, config) {
     row.class_id === config.ids.class &&
     row.test_id === config.ids.test
   );
-  if (rows.assignment && rows.assignment.end_at !== config.baselineEndAt) {
+  if (rows.assignment && !sameInstant(rows.assignment.end_at, config.baselineEndAt)) {
     drift.push(`assignment end_at is ${rows.assignment.end_at || "null"}, expected ${config.baselineEndAt}`);
   }
   if (rows.assignment && rows.assignment.evidence_source !== "assigned_core") {
