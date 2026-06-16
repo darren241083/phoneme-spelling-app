@@ -755,6 +755,19 @@ async function loadAssignments(pupilId) {
   });
 }
 
+function shouldRefreshBeforeOpeningAssignedTask(item = null) {
+  return !!item?.class_id
+    && !item?.completed
+    && !item?.isSpellingBee
+    && !isExtraChallengeAssignmentSource(item);
+}
+
+function isEndedIncompleteAssignedTask(item = null) {
+  if (!shouldRefreshBeforeOpeningAssignedTask(item)) return false;
+  const dueAtMs = parseDateMs(item?.end_at);
+  return !!dueAtMs && dueAtMs <= Date.now();
+}
+
 function formatPracticeFocusLabel(focus) {
   const clean = String(focus || "").trim().toLowerCase();
   if (!clean || clean === "general") return "Mixed";
@@ -2690,14 +2703,36 @@ function attachDashboardEvents(containerEl, session, assignments, practiceModel,
     ? dashboardOptions.allAssignments
     : assignments;
   containerEl.querySelectorAll("[data-assignment]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (button.dataset.starting === "true") return;
       button.dataset.starting = "true";
       button.disabled = true;
       const assignmentId = button.getAttribute("data-assignment");
-      const assignment = assignments.find((item) => String(item.id) === String(assignmentId));
-      if (!assignment) return;
-      openSession(containerEl, session, assignment, assignments, practicePacks);
+      let assignment = assignments.find((item) => String(item.id) === String(assignmentId));
+      let sessionAssignments = assignments;
+      if (!assignment) {
+        button.dataset.starting = "false";
+        button.disabled = false;
+        return;
+      }
+      if (shouldRefreshBeforeOpeningAssignedTask(assignment)) {
+        const refreshedAssignments = await loadAssignments(session?.pupil_id).catch((error) => {
+          console.warn("refresh assignment before open error:", error);
+          return null;
+        });
+        if (!Array.isArray(refreshedAssignments)) {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+          return;
+        }
+        const refreshedAssignment = refreshedAssignments.find((item) => String(item.id) === String(assignmentId));
+        if (!refreshedAssignment || isEndedIncompleteAssignedTask(refreshedAssignment)) {
+          await renderPupilHome(containerEl, session, { autoOpenBaseline: false });
+          return;
+        }
+        assignment = refreshedAssignment;
+        sessionAssignments = refreshedAssignments;
+      }
+      openSession(containerEl, session, assignment, sessionAssignments, practicePacks);
     });
   });
 

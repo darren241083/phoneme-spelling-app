@@ -5,7 +5,7 @@ create extension if not exists pgtap with schema extensions;
 
 set local search_path = public, extensions;
 
-select plan(26);
+select plan(33);
 
 create temporary table runtime_assignment_ids (
   name text primary key,
@@ -72,10 +72,16 @@ from unnest(array[
   'inactive_pupil',
   'test_a',
   'test_b',
+  'test_mixed_baseline',
   'word_a',
   'word_b',
+  'word_mixed_baseline',
+  'word_mixed_teacher',
   'assignment_a',
   'assignment_b',
+  'closed_incomplete_assignment',
+  'closed_completed_assignment',
+  'closed_mixed_baseline_assignment',
   'extra_assignment_unlinked',
   'extra_assignment_target_linked',
   'extra_assignment_status_linked'
@@ -93,10 +99,16 @@ declare
   inactive_pupil_id uuid := (select id from runtime_assignment_ids where name = 'inactive_pupil');
   test_a_id uuid := (select id from runtime_assignment_ids where name = 'test_a');
   test_b_id uuid := (select id from runtime_assignment_ids where name = 'test_b');
+  test_mixed_baseline_id uuid := (select id from runtime_assignment_ids where name = 'test_mixed_baseline');
   word_a_id uuid := (select id from runtime_assignment_ids where name = 'word_a');
   word_b_id uuid := (select id from runtime_assignment_ids where name = 'word_b');
+  word_mixed_baseline_id uuid := (select id from runtime_assignment_ids where name = 'word_mixed_baseline');
+  word_mixed_teacher_id uuid := (select id from runtime_assignment_ids where name = 'word_mixed_teacher');
   assignment_a_id uuid := (select id from runtime_assignment_ids where name = 'assignment_a');
   assignment_b_id uuid := (select id from runtime_assignment_ids where name = 'assignment_b');
+  closed_incomplete_assignment_id uuid := (select id from runtime_assignment_ids where name = 'closed_incomplete_assignment');
+  closed_completed_assignment_id uuid := (select id from runtime_assignment_ids where name = 'closed_completed_assignment');
+  closed_mixed_baseline_assignment_id uuid := (select id from runtime_assignment_ids where name = 'closed_mixed_baseline_assignment');
   extra_assignment_unlinked_id uuid := (select id from runtime_assignment_ids where name = 'extra_assignment_unlinked');
   extra_assignment_target_linked_id uuid := (select id from runtime_assignment_ids where name = 'extra_assignment_target_linked');
   extra_assignment_status_linked_id uuid := (select id from runtime_assignment_ids where name = 'extra_assignment_status_linked');
@@ -139,12 +151,15 @@ begin
   insert into public.tests (id, teacher_id, title, status, question_type)
   values
     (test_a_id, teacher_a_id, 'pgTAP Runtime Test A', 'published', 'full_recall'),
-    (test_b_id, teacher_b_id, 'pgTAP Runtime Test B', 'published', 'full_recall');
+    (test_b_id, teacher_b_id, 'pgTAP Runtime Test B', 'published', 'full_recall'),
+    (test_mixed_baseline_id, teacher_a_id, 'pgTAP Runtime Mixed Baseline Test', 'published', 'full_recall');
 
   insert into public.test_words (id, test_id, position, word, sentence, segments, choice)
   values
     (word_a_id, test_a_id, 1, 'phase', 'A phase sentence.', '["ph","a","se"]'::jsonb, '{"source":"teacher"}'::jsonb),
-    (word_b_id, test_b_id, 1, 'scope', 'A scope sentence.', '["s","c","o","pe"]'::jsonb, '{"source":"teacher"}'::jsonb);
+    (word_b_id, test_b_id, 1, 'scope', 'A scope sentence.', '["s","c","o","pe"]'::jsonb, '{"source":"teacher"}'::jsonb),
+    (word_mixed_baseline_id, test_mixed_baseline_id, 1, 'plain', 'A mixed baseline sentence.', '["pl","ai","n"]'::jsonb, '{"source":"baseline_v2","baseline_standard_key":"core_v2"}'::jsonb),
+    (word_mixed_teacher_id, test_mixed_baseline_id, 2, 'train', 'A mixed teacher sentence.', '["tr","ai","n"]'::jsonb, '{"source":"teacher"}'::jsonb);
 
   insert into public.pupils (
     id,
@@ -173,6 +188,12 @@ begin
   values
     (assignment_a_id, teacher_a_id, class_a_id, test_a_id, 'practice', 2, timezone('utc', now())),
     (assignment_b_id, teacher_b_id, class_b_id, test_b_id, 'practice', 2, timezone('utc', now()));
+
+  insert into public.assignments_v2 (id, teacher_id, class_id, test_id, mode, max_attempts, end_at, created_at)
+  values
+    (closed_incomplete_assignment_id, teacher_a_id, class_a_id, test_a_id, 'practice', 2, timezone('utc', now()) - interval '1 hour', timezone('utc', now()) - interval '2 hours'),
+    (closed_completed_assignment_id, teacher_a_id, class_a_id, test_a_id, 'practice', 2, timezone('utc', now()) - interval '1 hour', timezone('utc', now()) - interval '2 hours'),
+    (closed_mixed_baseline_assignment_id, teacher_a_id, class_a_id, test_mixed_baseline_id, 'practice', 2, timezone('utc', now()) - interval '1 hour', timezone('utc', now()) - interval '2 hours');
 
   insert into public.assignments_v2 (
     id,
@@ -223,6 +244,37 @@ begin
     test_a_id,
     pupil_a_id,
     'assigned'
+  );
+
+  insert into public.assignment_pupil_statuses (
+    teacher_id,
+    assignment_id,
+    class_id,
+    test_id,
+    pupil_id,
+    status,
+    started_at,
+    completed_at,
+    total_words,
+    correct_words,
+    average_attempts,
+    score_rate,
+    result_json
+  )
+  values (
+    teacher_a_id,
+    closed_completed_assignment_id,
+    class_a_id,
+    test_a_id,
+    pupil_a_id,
+    'completed',
+    timezone('utc', now()) - interval '90 minutes',
+    timezone('utc', now()) - interval '75 minutes',
+    1,
+    1,
+    1,
+    1,
+    '[{"word":"phase","correct":true}]'::jsonb
   );
 end;
 $$;
@@ -329,6 +381,27 @@ values
       (select id from runtime_assignment_ids where name = 'pupil_c'),
       (select id from runtime_assignment_ids where name = 'extra_assignment_target_linked')
     )
+  ),
+  (
+    'can_access_closed_incomplete',
+    public.can_access_pupil_assignment_runtime(
+      (select id from runtime_assignment_ids where name = 'pupil_a'),
+      (select id from runtime_assignment_ids where name = 'closed_incomplete_assignment')
+    )
+  ),
+  (
+    'can_access_closed_completed',
+    public.can_access_pupil_assignment_runtime(
+      (select id from runtime_assignment_ids where name = 'pupil_a'),
+      (select id from runtime_assignment_ids where name = 'closed_completed_assignment')
+    )
+  ),
+  (
+    'can_access_closed_mixed_baseline',
+    public.can_access_pupil_assignment_runtime(
+      (select id from runtime_assignment_ids where name = 'pupil_a'),
+      (select id from runtime_assignment_ids where name = 'closed_mixed_baseline_assignment')
+    )
   );
 
 reset role;
@@ -378,6 +451,41 @@ select ok(
     where assignment_row.value ->> 'id' = (select id::text from runtime_assignment_ids where name = 'assignment_b')
   ),
   'active pupil payload does not include another class assignment'
+);
+select ok(
+  not exists (
+    select 1
+    from jsonb_array_elements((select json_value -> 'assignments' from runtime_assignment_checks where name = 'pupil_a_payload')) as assignment_row(value)
+    where assignment_row.value ->> 'id' = (select id::text from runtime_assignment_ids where name = 'closed_incomplete_assignment')
+  ),
+  'ended incomplete assigned-core assignment is hidden from pupil runtime payload'
+);
+select ok(
+  not exists (
+    select 1
+    from jsonb_array_elements((select json_value -> 'assignments' from runtime_assignment_checks where name = 'pupil_a_payload')) as assignment_row(value)
+    where assignment_row.value ->> 'id' = (select id::text from runtime_assignment_ids where name = 'closed_mixed_baseline_assignment')
+  ),
+  'ended mixed baseline ordinary assignment is hidden from pupil runtime payload'
+);
+select ok(
+  exists (
+    select 1
+    from jsonb_array_elements((select json_value -> 'assignments' from runtime_assignment_checks where name = 'pupil_a_payload')) as assignment_row(value)
+    where assignment_row.value ->> 'id' = (select id::text from runtime_assignment_ids where name = 'closed_completed_assignment')
+  ),
+  'ended completed assigned-core assignment remains visible in pupil runtime payload'
+);
+select ok(
+  exists (
+    select 1
+    from jsonb_array_elements((select json_value -> 'assignments' from runtime_assignment_checks where name = 'pupil_a_payload')) as assignment_row(value)
+    where assignment_row.value ->> 'id' = (select id::text from runtime_assignment_ids where name = 'closed_completed_assignment')
+      and (assignment_row.value ->> 'completed')::boolean is true
+      and (assignment_row.value ->> 'isLocked')::boolean is true
+      and assignment_row.value ->> 'assignmentStatus' = 'completed'
+  ),
+  'ended completed assigned-core assignment keeps completed result state'
 );
 select ok(
   not exists (
@@ -435,6 +543,9 @@ select ok(
 select ok(not (select bool_value from runtime_assignment_checks where name = 'can_access_extra_unlinked'), 'RLS helper denies broad extra challenge access without pupil link');
 select ok((select bool_value from runtime_assignment_checks where name = 'can_access_extra_target_linked'), 'RLS helper allows linked extra challenge access for owning pupil');
 select ok(not (select bool_value from runtime_assignment_checks where name = 'can_access_extra_target_linked_other_pupil'), 'RLS helper denies linked extra challenge access for another pupil');
+select ok(not (select bool_value from runtime_assignment_checks where name = 'can_access_closed_incomplete'), 'RLS helper denies ended incomplete assigned-core access');
+select ok((select bool_value from runtime_assignment_checks where name = 'can_access_closed_completed'), 'RLS helper allows ended completed assigned-core access');
+select ok(not (select bool_value from runtime_assignment_checks where name = 'can_access_closed_mixed_baseline'), 'RLS helper denies ended mixed baseline ordinary access');
 select is((select json_value ->> 'status' from runtime_assignment_checks where name = 'inactive_pupil_payload'), 'runtime_inactive', 'inactive pupil runtime assignment RPC is blocked');
 select is(jsonb_array_length((select json_value -> 'assignments' from runtime_assignment_checks where name = 'inactive_pupil_payload')), 0, 'inactive pupil receives no assignments');
 

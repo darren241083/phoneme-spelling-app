@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  buildAssignmentCloseModel,
   buildAssignmentDueDateEditModel,
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
@@ -269,6 +270,88 @@ test("due date edit model blocks completed and non-owned assignments", () => {
   assert.equal(completed.reason, "complete");
   assert.equal(notOwned.canEdit, false);
   assert.equal(notOwned.reason, "not_owner");
+});
+
+test("close model allows owned live teacher-created and personalised assignments", () => {
+  const teacherCreated = buildAssignmentCloseModel({
+    assignment: assignment({ end_at: "2026-06-01T09:00:00.000Z" }),
+    lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2, dueAt: "2026-06-01T09:00:00.000Z" },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+  const personalised = buildAssignmentCloseModel({
+    assignment: assignment({ end_at: null }),
+    lifecycle: { key: "in_progress", completedCount: 1, totalPupilCount: 3 },
+    sourceKey: "generated_by_policy",
+    canManage: true,
+    now: NOW,
+  });
+
+  assert.equal(teacherCreated.canClose, true);
+  assert.equal(teacherCreated.reason, "closable");
+  assert.equal(teacherCreated.actionLabel, "End assignment");
+  assert.equal(personalised.canClose, true);
+  assert.equal(personalised.reason, "closable");
+});
+
+test("close model blocks completed, already ended, and non-owned assignments", () => {
+  const completed = buildAssignmentCloseModel({
+    assignment: assignment(),
+    lifecycle: { key: "complete", completedCount: 2, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+  const expired = buildAssignmentCloseModel({
+    assignment: assignment({ end_at: "2026-05-25T09:00:00.000Z" }),
+    lifecycle: { key: "expired", completedCount: 1, totalPupilCount: 2, dueAt: "2026-05-25T09:00:00.000Z" },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+  const notOwned = buildAssignmentCloseModel({
+    assignment: assignment(),
+    lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: false,
+    now: NOW,
+  });
+
+  assert.equal(completed.canClose, false);
+  assert.equal(completed.reason, "complete");
+  assert.equal(expired.canClose, false);
+  assert.equal(expired.reason, "already_ended");
+  assert.equal(notOwned.canClose, false);
+  assert.equal(notOwned.reason, "not_owner");
+});
+
+test("close model allows stale assignments when otherwise safe", () => {
+  const stale = buildAssignmentCloseModel({
+    assignment: assignment({ end_at: null }),
+    lifecycle: { key: "stale", completedCount: 0, totalPupilCount: 2 },
+    sourceKey: "teacher_created",
+    canManage: true,
+    now: NOW,
+  });
+
+  assert.equal(stale.canClose, true);
+  assert.equal(stale.reason, "closable");
+});
+
+test("close model blocks protected assignment sources", () => {
+  for (const sourceKey of ["baseline", "spelling_bee", "extra_challenge"]) {
+    const model = buildAssignmentCloseModel({
+      assignment: assignment(),
+      lifecycle: { key: "waiting", completedCount: 0, totalPupilCount: 2 },
+      sourceKey,
+      canManage: true,
+      now: NOW,
+    });
+
+    assert.equal(model.canClose, false);
+    assert.equal(model.reason, "protected_source");
+  }
 });
 
 test("due date validation rejects missing, past, and shortened future dates", () => {

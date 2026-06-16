@@ -14,6 +14,11 @@ const ASSIGNMENT_DUE_DATE_EDITABLE_SOURCE_KEYS = new Set([
   "generated_by_policy",
   "legacy_personalised",
 ]);
+const ASSIGNMENT_CLOSE_ALLOWED_SOURCE_KEYS = new Set([
+  "teacher_created",
+  "generated_by_policy",
+  "legacy_personalised",
+]);
 
 const STATE_META = {
   needs_attention: {
@@ -181,6 +186,50 @@ export function buildAssignmentDueDateEditModel({
     ...baseModel,
     canEdit: true,
     reason: "editable",
+  };
+}
+
+export function buildAssignmentCloseModel({
+  assignment = null,
+  lifecycle = null,
+  sourceKey = "",
+  canManage = false,
+  now = new Date(),
+} = {}) {
+  const safeAssignment = assignment && typeof assignment === "object" ? assignment : {};
+  const assignmentId = cleanId(safeAssignment.id);
+  const normalizedSourceKey = normalizeSourceKey(sourceKey);
+  const dueAt = lifecycle?.dueAt || getAssignmentDueAt(safeAssignment);
+  const dueMs = parseTime(dueAt);
+  const nowMs = parseTime(now) || Date.now();
+  const currentDueAt = dueMs != null ? new Date(dueMs).toISOString() : null;
+
+  const baseModel = {
+    assignmentId,
+    canClose: false,
+    reason: "unknown",
+    sourceKey: normalizedSourceKey,
+    currentDueAt,
+    actionLabel: "End assignment",
+    confirmLabel: "End assignment",
+    helperText: "This will stop pupils from opening this assignment. Existing results and evidence will be kept.",
+  };
+
+  if (!assignmentId) return { ...baseModel, reason: "missing_assignment" };
+  if (!canManage) return { ...baseModel, reason: "not_owner" };
+  if (!ASSIGNMENT_CLOSE_ALLOWED_SOURCE_KEYS.has(normalizedSourceKey)) {
+    return { ...baseModel, reason: "protected_source" };
+  }
+  if (isLifecycleComplete(lifecycle)) return { ...baseModel, reason: "complete" };
+
+  const lifecycleKey = normalizeLifecycleKey(lifecycle);
+  if (lifecycleKey === "expired") return { ...baseModel, reason: "already_ended" };
+  if (dueMs != null && dueMs <= nowMs) return { ...baseModel, reason: "already_ended" };
+
+  return {
+    ...baseModel,
+    canClose: true,
+    reason: "closable",
   };
 }
 

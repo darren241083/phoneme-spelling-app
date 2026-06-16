@@ -162,6 +162,7 @@ import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+  buildAssignmentCloseModel,
   buildAssignmentDueDateEditModel,
   buildAssignmentLifecycleFilterCounts,
   buildAssignmentLifecycleModel,
@@ -746,6 +747,7 @@ const state = {
     message: "",
     manualAssignClassByTestId: {},
     dueDateEditByAssignmentId: {},
+    closeConfirmByAssignmentId: {},
   },
   classResultsUi: {
     rangeByClass: {},
@@ -5390,6 +5392,10 @@ async function loadDashboardData() {
   );
   state.assignmentLifecycle.dueDateEditByAssignmentId = Object.fromEntries(
     Object.entries(state.assignmentLifecycle.dueDateEditByAssignmentId || {})
+      .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
+  );
+  state.assignmentLifecycle.closeConfirmByAssignmentId = Object.fromEntries(
+    Object.entries(state.assignmentLifecycle.closeConfirmByAssignmentId || {})
       .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
   );
   await refreshVisualAnalyticsSummary();
@@ -11611,6 +11617,39 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "open-assignment-close") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    const anchorEl = button.closest(".td-assignment-card") || rootEl;
+    preserveScrollAround(anchorEl, () => {
+      if (getAssignmentCloseConfirmState(assignmentId)) {
+        clearAssignmentCloseConfirmState(assignmentId);
+      } else {
+        openAssignmentCloseConfirm(assignmentId);
+      }
+      paint();
+    });
+    return;
+  }
+
+  if (action === "cancel-assignment-close") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    const anchorEl = button.closest(".td-assignment-card") || rootEl;
+    preserveScrollAround(anchorEl, () => {
+      clearAssignmentCloseConfirmState(assignmentId);
+      paint();
+    });
+    return;
+  }
+
+  if (action === "confirm-assignment-close") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    await handleAssignmentCloseConfirm(assignmentId);
+    return;
+  }
+
   if (action === "jump-assignment-results") {
     const assignmentId = button.dataset.assignmentId;
     if (!assignmentId) return;
@@ -13963,6 +14002,53 @@ async function handleAssignmentDueDateForm(form) {
       error: error?.message || "Could not update this due date.",
     });
     showNotice("Could not update the assignment due date.", "error");
+    paint();
+  }
+}
+
+async function handleAssignmentCloseConfirm(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  const assignment = findAssignmentRecord(safeAssignmentId);
+  const closeModel = buildAssignmentCloseModelForRecord(assignment);
+
+  if (!safeAssignmentId || !assignment || !closeModel.canClose) {
+    showNotice(getAssignmentCloseBlockedMessage(closeModel), "error");
+    paint();
+    return;
+  }
+
+  const closedAt = new Date().toISOString();
+  setAssignmentCloseConfirmState(safeAssignmentId, {
+    status: "saving",
+    error: "",
+  });
+  paint();
+
+  try {
+    let query = supabase
+      .from("assignments_v2")
+      .update({ end_at: closedAt })
+      .eq("id", safeAssignmentId)
+      .eq("teacher_id", state.user.id);
+    query = applyActiveSchoolFilter(query, state.accessContext);
+    query = query.select("id, end_at").maybeSingle();
+
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data?.id) throw new Error("No assignment row was updated.");
+
+    clearAssignmentCloseConfirmState(safeAssignmentId);
+    await loadDashboardData();
+    openDashboardSection("upcoming");
+    showNotice("Assignment ended. Existing pupil work and completed results were kept.", "success");
+    paint();
+  } catch (error) {
+    console.error("assignment close update error:", error);
+    setAssignmentCloseConfirmState(safeAssignmentId, {
+      status: "idle",
+      error: error?.message || "Could not end this assignment.",
+    });
+    showNotice("Could not end the assignment.", "error");
     paint();
   }
 }
@@ -24005,6 +24091,11 @@ function getAssignmentDueDateEditState(assignmentId = "") {
   return safeAssignmentId ? state.assignmentLifecycle.dueDateEditByAssignmentId?.[safeAssignmentId] || null : null;
 }
 
+function getAssignmentCloseConfirmState(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  return safeAssignmentId ? state.assignmentLifecycle.closeConfirmByAssignmentId?.[safeAssignmentId] || null : null;
+}
+
 function setAssignmentDueDateEditState(assignmentId = "", nextState = {}) {
   const safeAssignmentId = String(assignmentId || "").trim();
   if (!safeAssignmentId) return;
@@ -24027,6 +24118,27 @@ function clearAssignmentDueDateEditState(assignmentId = "") {
   state.assignmentLifecycle.dueDateEditByAssignmentId = next;
 }
 
+function setAssignmentCloseConfirmState(assignmentId = "", nextState = {}) {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return;
+  state.assignmentLifecycle.closeConfirmByAssignmentId = {
+    ...(state.assignmentLifecycle.closeConfirmByAssignmentId || {}),
+    [safeAssignmentId]: {
+      status: "idle",
+      error: "",
+      ...nextState,
+    },
+  };
+}
+
+function clearAssignmentCloseConfirmState(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return;
+  const next = { ...(state.assignmentLifecycle.closeConfirmByAssignmentId || {}) };
+  delete next[safeAssignmentId];
+  state.assignmentLifecycle.closeConfirmByAssignmentId = next;
+}
+
 function toAssignmentDueDateInputValue(value = "") {
   if (!value) return "";
   const date = new Date(value);
@@ -24045,10 +24157,34 @@ function getAssignmentDueDateEditBlockedMessage(model = null) {
   return "This assignment due date cannot be changed from the dashboard.";
 }
 
+function getAssignmentCloseBlockedMessage(model = null) {
+  const reason = String(model?.reason || "").trim();
+  if (reason === "complete") return "This assignment is already complete.";
+  if (reason === "already_ended") return "This assignment has already ended.";
+  if (reason === "stale") return "Stale assignments are already treated as inactive here.";
+  if (reason === "protected_source") {
+    return "Baseline, Spelling Bee, and Extra Challenge assignments are not ended from this card.";
+  }
+  if (reason === "not_owner") return "You can only end assignments you own.";
+  return "This assignment cannot be ended from the dashboard.";
+}
+
 function buildAssignmentDueDateEditModelForRecord(item) {
   const lifecycle = getAssignmentLifecycleModel(item);
   const source = getAssignmentSourceView(item);
   return buildAssignmentDueDateEditModel({
+    assignment: item,
+    lifecycle,
+    sourceKey: source?.key,
+    canManage: canManageAssignmentRecord(item),
+    now: new Date(),
+  });
+}
+
+function buildAssignmentCloseModelForRecord(item) {
+  const lifecycle = getAssignmentLifecycleModel(item);
+  const source = getAssignmentSourceView(item);
+  return buildAssignmentCloseModel({
     assignment: item,
     lifecycle,
     sourceKey: source?.key,
@@ -24067,6 +24203,22 @@ function openAssignmentDueDateEdit(assignmentId = "") {
 
   setAssignmentDueDateEditState(editModel.assignmentId, {
     value: toAssignmentDueDateInputValue(editModel.currentDueAt),
+    status: "idle",
+    error: "",
+  });
+  clearAssignmentCloseConfirmState(editModel.assignmentId);
+}
+
+function openAssignmentCloseConfirm(assignmentId = "") {
+  const assignment = findAssignmentRecord(assignmentId);
+  const closeModel = buildAssignmentCloseModelForRecord(assignment);
+  if (!closeModel.canClose) {
+    showNotice(getAssignmentCloseBlockedMessage(closeModel), "error");
+    return;
+  }
+
+  clearAssignmentDueDateEditState(closeModel.assignmentId);
+  setAssignmentCloseConfirmState(closeModel.assignmentId, {
     status: "idle",
     error: "",
   });
@@ -26359,6 +26511,46 @@ function renderAssignmentDueDateEditPanel(item, editModel) {
   `;
 }
 
+function renderAssignmentCloseConfirmPanel(item, closeModel) {
+  const assignmentId = String(item?.id || "").trim();
+  const closeState = getAssignmentCloseConfirmState(assignmentId);
+  if (!assignmentId || !closeState || !closeModel?.canClose) return "";
+
+  const saveLabel = closeState.status === "saving" ? "Ending..." : closeModel.confirmLabel || "End assignment";
+
+  return `
+    <div class="td-inline-panel td-inline-panel--attached td-inline-panel--calm td-assignment-close-panel">
+      <div class="td-assignment-close-copy">
+        <strong>End this assignment?</strong>
+        <span>${escapeHtml(closeModel.helperText || "This will stop pupils from opening this assignment. Existing results and evidence will be kept.")}</span>
+      </div>
+
+      ${closeState.error ? `<div class="td-assignment-close-error" role="alert">${escapeHtml(closeState.error)}</div>` : ""}
+
+      <div class="td-form-actions td-assignment-close-actions">
+        <button
+          class="td-btn td-btn--ghost"
+          type="button"
+          data-action="cancel-assignment-close"
+          data-assignment-id="${escapeAttr(assignmentId)}"
+          ${closeState.status === "saving" ? "disabled" : ""}
+        >
+          Cancel
+        </button>
+        <button
+          class="td-btn td-btn--primary"
+          type="button"
+          data-action="confirm-assignment-close"
+          data-assignment-id="${escapeAttr(assignmentId)}"
+          ${closeState.status === "saving" ? "disabled" : ""}
+        >
+          ${escapeHtml(saveLabel)}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderAssignmentCardCompact(item) {
   const assignmentId = String(item.id);
   const title = item.tests?.title || "Untitled test";
@@ -26379,6 +26571,8 @@ function renderAssignmentCardCompact(item) {
   const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
   const dueDateEditModel = buildAssignmentDueDateEditModelForRecord(item);
   const dueDateEditState = getAssignmentDueDateEditState(assignmentId);
+  const closeModel = buildAssignmentCloseModelForRecord(item);
+  const closeState = getAssignmentCloseConfirmState(assignmentId);
   const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
   const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
   const cardClasses = [
@@ -26419,6 +26613,16 @@ function renderAssignmentCardCompact(item) {
             ${escapeHtml(dueDateEditState ? "Close due date" : dueDateEditModel.actionLabel)}
           </button>
           ` : ""}
+          ${closeModel.canClose ? `
+          <button
+            class="td-btn td-btn--ghost"
+            type="button"
+            data-action="open-assignment-close"
+            data-assignment-id="${escapeAttr(assignmentId)}"
+          >
+            ${escapeHtml(closeState ? "Cancel end" : closeModel.actionLabel)}
+          </button>
+          ` : ""}
           <button
             class="td-btn td-btn--ghost"
             type="button"
@@ -26431,6 +26635,7 @@ function renderAssignmentCardCompact(item) {
       </div>
 
       ${renderAssignmentDueDateEditPanel(item, dueDateEditModel)}
+      ${renderAssignmentCloseConfirmPanel(item, closeModel)}
       ${isResultsOpen ? renderAssignmentResultsPanelCalm(item) : ""}
     </article>
   `;
@@ -33021,6 +33226,12 @@ function injectStyles() {
       display:block;
     }
 
+    .td-assignment-close-panel{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
     .td-assignment-due-date-form{
       display:grid;
       grid-template-columns:minmax(220px,280px) minmax(0,1fr);
@@ -33037,7 +33248,22 @@ function injectStyles() {
       line-height:1.4;
     }
 
+    .td-assignment-close-copy{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      color:#64748b;
+      font-size:0.88rem;
+      line-height:1.4;
+    }
+
     .td-assignment-due-date-copy strong{
+      color:#334155;
+      font-size:0.9rem;
+      line-height:1.3;
+    }
+
+    .td-assignment-close-copy strong{
       color:#334155;
       font-size:0.9rem;
       line-height:1.3;
@@ -33045,6 +33271,13 @@ function injectStyles() {
 
     .td-assignment-due-date-error{
       grid-column:1 / -1;
+      color:#b91c1c;
+      font-size:0.84rem;
+      font-weight:700;
+      line-height:1.4;
+    }
+
+    .td-assignment-close-error{
       color:#b91c1c;
       font-size:0.84rem;
       font-weight:700;
