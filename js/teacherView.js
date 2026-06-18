@@ -13982,7 +13982,6 @@ async function handleAssignmentDueDateForm(form) {
       .update({ end_at: validation.nextDueAt })
       .eq("id", assignmentId)
       .eq("teacher_id", state.user.id);
-    query = applyActiveSchoolFilter(query, state.accessContext);
     query = query.select("id, end_at").maybeSingle();
 
     const { data, error } = await query;
@@ -14030,7 +14029,6 @@ async function handleAssignmentCloseConfirm(assignmentId = "") {
       .update({ end_at: closedAt })
       .eq("id", safeAssignmentId)
       .eq("teacher_id", state.user.id);
-    query = applyActiveSchoolFilter(query, state.accessContext);
     query = query.select("id, end_at").maybeSingle();
 
     const { data, error } = await query;
