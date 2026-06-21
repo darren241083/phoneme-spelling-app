@@ -9,6 +9,14 @@ export const ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS = [
   { key: "all", label: "All" },
 ];
 
+const ASSIGNMENT_LIFECYCLE_FILTER_HELPERS = {
+  live: "Live includes assignments pupils can still open, including assignments with no due date.",
+  needs_attention: "Needs attention includes stale assignments and assignments whose pupil data needs checking.",
+  ended: "Ended includes assignments that are no longer available to pupils.",
+  completed: "Completed includes assignments finished by all known pupils.",
+  all: "All shows every assignment lifecycle state in one view.",
+};
+
 export const ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS = [
   { key: "stale", label: "Stale" },
   { key: "check_assignment_data", label: "Check assignment data" },
@@ -495,6 +503,12 @@ export function getAssignmentLifecycleFilterKey(model = null) {
     return "needs_attention";
   }
   return "live";
+}
+
+export function getAssignmentLifecycleFilterHelper(filterKey = "live") {
+  const key = String(filterKey || "").trim().toLowerCase();
+  return ASSIGNMENT_LIFECYCLE_FILTER_HELPERS[key]
+    || "Choose a lifecycle view to review assignments.";
 }
 
 export function doesAssignmentMatchLifecycleFilter(model = null, filterKey = "all") {

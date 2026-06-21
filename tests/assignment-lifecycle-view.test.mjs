@@ -11,6 +11,7 @@ const {
   doesAssignmentMatchLifecycleFilter,
   getAssignmentLifecycleDisplayMeta,
   getAssignmentLifecycleFilterKey,
+  getAssignmentLifecycleFilterHelper,
   getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
@@ -229,6 +230,33 @@ test("lifecycle tabs map live attention ended completed and all states", () => {
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "needs_attention"), false);
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "ended"), true);
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "complete" }, "all"), true);
+});
+
+test("lifecycle tabs provide filter-specific helper copy with a safe fallback", () => {
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("live"),
+    "Live includes assignments pupils can still open, including assignments with no due date."
+  );
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("needs_attention"),
+    "Needs attention includes stale assignments and assignments whose pupil data needs checking."
+  );
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("ended"),
+    "Ended includes assignments that are no longer available to pupils."
+  );
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("completed"),
+    "Completed includes assignments finished by all known pupils."
+  );
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("all"),
+    "All shows every assignment lifecycle state in one view."
+  );
+  assert.equal(
+    getAssignmentLifecycleFilterHelper("not-a-filter"),
+    "Choose a lifecycle view to review assignments."
+  );
 });
 
 test("ending-soon section includes the 48-hour boundary", () => {

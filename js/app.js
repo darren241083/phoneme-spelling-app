@@ -35,6 +35,7 @@ let accessibilityPromise = null;
 let gameRuntimePromise = null;
 let authListenerBound = false;
 let routing = false;
+let displayedTeacherUserId = "";
 
 function buildLoginRedirectTo() {
   const origin = window.location.origin;
@@ -76,7 +77,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=7.00");
+      const module = await import("./teacherView.js?v=7.01");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -151,11 +152,36 @@ async function stopPupilGameplayAudio() {
   }
 }
 
+function shouldSkipAuthRouteForEvent({
+  authEvent = "",
+  sessionUserId = "",
+  role = "",
+  currentTeacherUserId = "",
+  teacherDashboardVisible = false,
+} = {}) {
+  const event = String(authEvent || "").trim().toUpperCase();
+  if (event === "TOKEN_REFRESHED") return true;
+  return event === "SIGNED_IN"
+    && String(role || "") === "teacher"
+    && teacherDashboardVisible === true
+    && !!String(currentTeacherUserId || "").trim()
+    && String(sessionUserId || "").trim() === String(currentTeacherUserId || "").trim();
+}
+
 async function bindAuthStateListener() {
   if (authListenerBound) return;
   try {
     const supabase = await loadSupabase();
-    supabase.auth.onAuthStateChange(() => {
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (shouldSkipAuthRouteForEvent({
+        authEvent: event,
+        sessionUserId: session?.user?.id,
+        role: getRole(),
+        currentTeacherUserId: displayedTeacherUserId,
+        teacherDashboardVisible: !!viewTeacher && viewTeacher.style.display !== "none",
+      })) {
+        return;
+      }
       void route();
     });
     authListenerBound = true;
@@ -275,6 +301,7 @@ async function route() {
     const role = getRole();
 
     if (!role) {
+      displayedTeacherUserId = "";
       setBanner("");
       setNotice(pupilAuthMsg, "");
       setNotice(teacherAuthMsg, "");
@@ -283,6 +310,7 @@ async function route() {
     }
 
     if (role === "pupil") {
+      displayedTeacherUserId = "";
       setBanner("");
       showPupilAuth();
 
@@ -313,6 +341,7 @@ async function route() {
     }
 
     setNotice(teacherAuthMsg, "");
+    displayedTeacherUserId = "";
     setBanner("Checking sign-in...", "info");
     showRolePicker();
 
@@ -334,6 +363,7 @@ async function route() {
 
     const session = sessionRes?.data?.session || null;
     if (!session?.user) {
+      displayedTeacherUserId = "";
       setBanner("");
       showTeacherAuth();
       return;
@@ -345,7 +375,9 @@ async function route() {
     try {
       const renderTeacherDashboard = await withTimeout(loadTeacherDashboard(), 5000, "load teacher dashboard");
       await withTimeout(renderTeacherDashboard(viewTeacher), 8000, "renderTeacherDashboard");
+      displayedTeacherUserId = String(session.user.id || "").trim();
     } catch (error) {
+      displayedTeacherUserId = "";
       viewTeacher.innerHTML = buildTeacherLoadError(error);
     }
   } finally {

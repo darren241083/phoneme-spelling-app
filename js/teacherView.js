@@ -169,10 +169,11 @@ import {
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
   doesAssignmentMatchLifecycleFilter,
+  getAssignmentLifecycleFilterHelper,
   getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
-} from "./assignmentLifecycleView.js?v=1.2";
+} from "./assignmentLifecycleView.js?v=1.3";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -11559,19 +11560,29 @@ async function onRootClick(event) {
 
   if (action === "set-assignment-lifecycle-filter") {
     const filterKey = String(button.dataset.filterKey || "live");
-    state.assignmentLifecycle.filter = ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === filterKey)
+    const nextFilter = ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === filterKey)
       ? filterKey
       : "live";
-    paint();
+    if (nextFilter === getAssignmentLifecycleFilter()) return;
+    state.assignmentLifecycle.filter = nextFilter;
+    refreshAssignmentLifecycleUi({
+      focusAction: "set-assignment-lifecycle-filter",
+      focusKey: nextFilter,
+    });
     return;
   }
 
   if (action === "set-assignment-source-filter") {
     const filterKey = String(button.dataset.filterKey || "all");
-    state.assignmentLifecycle.sourceFilter = getAssignmentSourceFilterOptions().some((option) => option.key === filterKey)
+    const nextFilter = getAssignmentSourceFilterOptions().some((option) => option.key === filterKey)
       ? filterKey
       : "all";
-    paint();
+    if (nextFilter === getAssignmentSourceFilter()) return;
+    state.assignmentLifecycle.sourceFilter = nextFilter;
+    refreshAssignmentLifecycleUi({
+      focusAction: "set-assignment-source-filter",
+      focusKey: nextFilter,
+    });
     return;
   }
 
@@ -24246,16 +24257,6 @@ function getAssignmentLifecycleEntries() {
   }));
 }
 
-function getFilteredAssignmentLifecycleEntries() {
-  const lifecycleFilter = getAssignmentLifecycleFilter();
-  const sourceFilter = getAssignmentSourceFilter();
-  return getAssignmentLifecycleEntries()
-    .filter(({ lifecycle, source }) =>
-      doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
-      && doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
-    );
-}
-
 function getAssignmentLifecycleSectionCopy(sectionKey = "") {
   if (sectionKey === "stale") return "Live assignments with no recorded pupil activity in the last 14 days.";
   if (sectionKey === "check_assignment_data") return "Assignments where pupil or participant information needs checking.";
@@ -24271,8 +24272,9 @@ function groupAssignmentLifecycleEntries(entries = []) {
   const entriesBySection = new Map(
     ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS.map((section) => [section.key, []])
   );
+  const now = new Date();
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const sectionKey = getAssignmentLifecycleSectionKey(entry?.lifecycle, { now: new Date() });
+    const sectionKey = getAssignmentLifecycleSectionKey(entry?.lifecycle, { now });
     const sectionEntries = entriesBySection.get(sectionKey);
     if (sectionEntries) sectionEntries.push(entry);
   }
@@ -24284,8 +24286,8 @@ function groupAssignmentLifecycleEntries(entries = []) {
     .filter((section) => section.entries.length);
 }
 
-function renderAssignmentLifecycleGroups(entries = []) {
-  return groupAssignmentLifecycleEntries(entries)
+function renderAssignmentLifecycleGroups(sections = []) {
+  return (Array.isArray(sections) ? sections : [])
     .map((section) => {
       const headingId = `assignment-lifecycle-section-${section.key}`;
       return `
@@ -24347,15 +24349,15 @@ function getAssignmentLifecycleEmptyState({
   };
 }
 
-function renderAssignmentLifecycleFilters() {
-  const filter = getAssignmentLifecycleFilter();
+function buildAssignmentLifecycleRenderModel() {
+  const lifecycleFilter = getAssignmentLifecycleFilter();
   const sourceFilter = getAssignmentSourceFilter();
   const entries = getAssignmentLifecycleEntries();
   const sourceMatchedEntries = entries.filter(({ source }) =>
     doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
   );
   const lifecycleMatchedEntries = entries.filter(({ lifecycle }) =>
-    doesAssignmentMatchLifecycleFilter(lifecycle, filter)
+    doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
   );
   const lifecycleCounts = buildAssignmentLifecycleFilterCounts(
     sourceMatchedEntries.map(({ lifecycle }) => lifecycle)
@@ -24363,7 +24365,37 @@ function renderAssignmentLifecycleFilters() {
   const sourceCounts = buildAssignmentSourceFilterCounts(
     lifecycleMatchedEntries.map(({ source }) => source?.key)
   );
-  const sourceOptions = getAssignmentSourceFilterOptions();
+  const visibleEntries = entries.filter(({ lifecycle, source }) =>
+    doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
+    && doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
+  );
+
+  return {
+    lifecycleFilter,
+    sourceFilter,
+    lifecycleCounts,
+    sourceCounts,
+    sourceOptions: getAssignmentSourceFilterOptions(),
+    visibleEntries,
+    groupedSections: groupAssignmentLifecycleEntries(visibleEntries),
+    emptyState: getAssignmentLifecycleEmptyState({
+      lifecycleFilter,
+      sourceFilter,
+      lifecycleMatchCount: lifecycleMatchedEntries.length,
+    }),
+    helperCopy: getAssignmentLifecycleFilterHelper(lifecycleFilter),
+  };
+}
+
+function renderAssignmentLifecycleFilters(model) {
+  const {
+    lifecycleFilter,
+    sourceFilter,
+    lifecycleCounts,
+    sourceCounts,
+    sourceOptions,
+    helperCopy,
+  } = model;
 
   return `
     <div class="td-assignment-filter-group">
@@ -24372,11 +24404,11 @@ function renderAssignmentLifecycleFilters() {
         ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
           <button
             type="button"
-            class="td-filter-chip ${filter === option.key ? "is-active" : ""}"
+            class="td-filter-chip ${lifecycleFilter === option.key ? "is-active" : ""}"
             data-action="set-assignment-lifecycle-filter"
             data-filter-key="${escapeAttr(option.key)}"
             role="tab"
-            aria-selected="${filter === option.key ? "true" : "false"}"
+            aria-selected="${lifecycleFilter === option.key ? "true" : "false"}"
           >
             ${escapeHtml(option.label)}
             <span>${escapeHtml(String(lifecycleCounts[option.key] || 0))}</span>
@@ -24402,7 +24434,7 @@ function renderAssignmentLifecycleFilters() {
         `).join("")}
       </div>
     </div>
-    <p class="td-assignment-lifecycle-helper">Needs attention includes stale assignments and assignments whose pupil data needs checking.</p>
+    <p class="td-assignment-lifecycle-helper">${escapeHtml(helperCopy)}</p>
   `;
 }
 
@@ -24415,20 +24447,55 @@ function renderAssignmentLifecycleStatusMessage() {
   `;
 }
 
+function renderAssignmentLifecycleBody(model = buildAssignmentLifecycleRenderModel()) {
+  return `
+    ${state.assignments.length ? renderAssignmentLifecycleFilters(model) : ""}
+    ${renderAssignmentLifecycleStatusMessage()}
+    ${
+      state.assignments.length
+        ? model.visibleEntries.length
+          ? `<div class="td-assignment-lifecycle-groups">${renderAssignmentLifecycleGroups(model.groupedSections)}</div>`
+          : `
+      <div class="td-empty">
+        <strong>${escapeHtml(model.emptyState.title)}</strong>
+        <p>${escapeHtml(model.emptyState.detail)}</p>
+      </div>
+    `
+        : `
+      <div class="td-empty">
+        <strong>No assignments yet.</strong>
+        <p>Create a test, then assign it to a class to see activity here.</p>
+      </div>
+    `
+    }
+  `;
+}
+
+function refreshAssignmentLifecycleUi({
+  focusAction = "",
+  focusKey = "",
+} = {}) {
+  const body = rootEl?.querySelector('[data-role="assignment-lifecycle-body"]');
+  if (!(body instanceof HTMLElement)) return false;
+
+  body.innerHTML = renderAssignmentLifecycleBody(buildAssignmentLifecycleRenderModel());
+  syncTableScrollShells();
+  syncTargetPopoverLayouts();
+
+  if (focusAction && focusKey) {
+    requestAnimationFrame(() => {
+      const focusTarget = body.querySelector(
+        `[data-action="${focusAction}"][data-filter-key="${focusKey}"]`
+      );
+      if (focusTarget instanceof HTMLElement) focusTarget.focus();
+    });
+  }
+  return true;
+}
+
 function renderSectionUpcomingAssignments() {
   const isOpen = state.sections.upcoming;
-  const lifecycleFilter = getAssignmentLifecycleFilter();
-  const sourceFilter = getAssignmentSourceFilter();
-  const lifecycleEntries = getAssignmentLifecycleEntries();
-  const lifecycleMatchCount = lifecycleEntries
-    .filter(({ lifecycle }) => doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter))
-    .length;
-  const visibleEntries = getFilteredAssignmentLifecycleEntries();
-  const emptyState = getAssignmentLifecycleEmptyState({
-    lifecycleFilter,
-    sourceFilter,
-    lifecycleMatchCount,
-  });
+  const renderModel = isOpen ? buildAssignmentLifecycleRenderModel() : null;
 
   return `
     <section class="td-section td-section--upcoming">
@@ -24441,26 +24508,8 @@ function renderSectionUpcomingAssignments() {
       ${
         isOpen
           ? `
-        <div class="td-section-body">
-          ${state.assignments.length ? renderAssignmentLifecycleFilters() : ""}
-          ${renderAssignmentLifecycleStatusMessage()}
-          ${
-            state.assignments.length
-              ? visibleEntries.length
-                ? `<div class="td-assignment-lifecycle-groups">${renderAssignmentLifecycleGroups(visibleEntries)}</div>`
-                : `
-            <div class="td-empty">
-              <strong>${escapeHtml(emptyState.title)}</strong>
-              <p>${escapeHtml(emptyState.detail)}</p>
-            </div>
-          `
-              : `
-            <div class="td-empty">
-              <strong>No assignments yet.</strong>
-              <p>Create a test, then assign it to a class to see activity here.</p>
-            </div>
-          `
-          }
+        <div class="td-section-body" data-role="assignment-lifecycle-body">
+          ${renderAssignmentLifecycleBody(renderModel)}
         </div>
       `
           : ""
