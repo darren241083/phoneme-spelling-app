@@ -161,6 +161,7 @@ import {
 import { isCoreProgressAttemptSource } from "./evidenceSources.js?v=1.0";
 import {
   ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
+  ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS,
   ASSIGNMENT_LIFECYCLE_STALE_DAYS,
   buildAssignmentCloseModel,
   buildAssignmentDueDateEditModel,
@@ -168,9 +169,10 @@ import {
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
   doesAssignmentMatchLifecycleFilter,
+  getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
-} from "./assignmentLifecycleView.js?v=1.1";
+} from "./assignmentLifecycleView.js?v=1.2";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -740,7 +742,7 @@ const state = {
     expandedPupilRows: {},
   },
   assignmentLifecycle: {
-    filter: "all",
+    filter: "live",
     sourceFilter: "all",
     summariesByAssignmentId: {},
     status: "idle",
@@ -11556,10 +11558,10 @@ async function onRootClick(event) {
   }
 
   if (action === "set-assignment-lifecycle-filter") {
-    const filterKey = String(button.dataset.filterKey || "all");
+    const filterKey = String(button.dataset.filterKey || "live");
     state.assignmentLifecycle.filter = ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === filterKey)
       ? filterKey
-      : "all";
+      : "live";
     paint();
     return;
   }
@@ -24223,10 +24225,10 @@ function openAssignmentCloseConfirm(assignmentId = "") {
 }
 
 function getAssignmentLifecycleFilter() {
-  const current = String(state.assignmentLifecycle.filter || "all");
+  const current = String(state.assignmentLifecycle.filter || "live");
   return ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.some((option) => option.key === current)
     ? current
-    : "all";
+    : "live";
 }
 
 function getAssignmentSourceFilter() {
@@ -24244,15 +24246,105 @@ function getAssignmentLifecycleEntries() {
   }));
 }
 
-function getFilteredAssignmentLifecycleItems() {
+function getFilteredAssignmentLifecycleEntries() {
   const lifecycleFilter = getAssignmentLifecycleFilter();
   const sourceFilter = getAssignmentSourceFilter();
   return getAssignmentLifecycleEntries()
     .filter(({ lifecycle, source }) =>
       doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter)
       && doesAssignmentSourceMatchFilter(source?.key, sourceFilter)
-    )
-    .map(({ item }) => item);
+    );
+}
+
+function getAssignmentLifecycleSectionCopy(sectionKey = "") {
+  if (sectionKey === "stale") return "Live assignments with no recorded pupil activity in the last 14 days.";
+  if (sectionKey === "check_assignment_data") return "Assignments where pupil or participant information needs checking.";
+  if (sectionKey === "ending_soon") return "Live assignments ending within the next 48 hours.";
+  if (sectionKey === "due_later") return "Live assignments with more than 48 hours remaining.";
+  if (sectionKey === "no_due_date") return "Live assignments that remain available until you add a due date or end them.";
+  if (sectionKey === "ended") return "Assignments that are no longer available to pupils.";
+  if (sectionKey === "completed") return "Assignments completed by all known pupils.";
+  return "";
+}
+
+function groupAssignmentLifecycleEntries(entries = []) {
+  const entriesBySection = new Map(
+    ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS.map((section) => [section.key, []])
+  );
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const sectionKey = getAssignmentLifecycleSectionKey(entry?.lifecycle, { now: new Date() });
+    const sectionEntries = entriesBySection.get(sectionKey);
+    if (sectionEntries) sectionEntries.push(entry);
+  }
+  return ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS
+    .map((section) => ({
+      ...section,
+      entries: entriesBySection.get(section.key) || [],
+    }))
+    .filter((section) => section.entries.length);
+}
+
+function renderAssignmentLifecycleGroups(entries = []) {
+  return groupAssignmentLifecycleEntries(entries)
+    .map((section) => {
+      const headingId = `assignment-lifecycle-section-${section.key}`;
+      return `
+        <section class="td-assignment-lifecycle-group" aria-labelledby="${escapeAttr(headingId)}">
+          <div class="td-assignment-lifecycle-group-head">
+            <div>
+              <h4 id="${escapeAttr(headingId)}">${escapeHtml(section.label)}</h4>
+              <p>${escapeHtml(getAssignmentLifecycleSectionCopy(section.key))}</p>
+            </div>
+            <span class="td-assignment-lifecycle-group-count">${escapeHtml(String(section.entries.length))}</span>
+          </div>
+          <div class="td-list">
+            ${section.entries.map(({ item }) => renderAssignmentCardCompact(item)).join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+}
+
+function getAssignmentLifecycleEmptyState({
+  lifecycleFilter = "live",
+  sourceFilter = "all",
+  lifecycleMatchCount = 0,
+} = {}) {
+  if (sourceFilter !== "all" && lifecycleMatchCount > 0) {
+    return {
+      title: "No assignments from this source.",
+      detail: "The source filter may be hiding assignments in the selected lifecycle view.",
+    };
+  }
+  if (lifecycleFilter === "live") {
+    return {
+      title: "No live assignments.",
+      detail: "New and current assignments will appear here.",
+    };
+  }
+  if (lifecycleFilter === "needs_attention") {
+    return {
+      title: "Nothing needs attention.",
+      detail: "There are no stale assignments or assignment-data issues in this view.",
+    };
+  }
+  if (lifecycleFilter === "ended") {
+    return {
+      title: "No ended assignments.",
+      detail: "Assignments appear here after their end time has passed.",
+    };
+  }
+  if (lifecycleFilter === "completed") {
+    return {
+      title: "No completed assignments.",
+      detail: "Assignments appear here when all known pupils have completed them.",
+    };
+  }
+  return {
+    title: "No assignments in this view.",
+    detail: "Try another lifecycle or source filter.",
+  };
 }
 
 function renderAssignmentLifecycleFilters() {
@@ -24274,37 +24366,43 @@ function renderAssignmentLifecycleFilters() {
   const sourceOptions = getAssignmentSourceFilterOptions();
 
   return `
-    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
-      ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
-        <button
-          type="button"
-          class="td-filter-chip ${filter === option.key ? "is-active" : ""}"
-          data-action="set-assignment-lifecycle-filter"
-          data-filter-key="${escapeAttr(option.key)}"
-          role="tab"
-          aria-selected="${filter === option.key ? "true" : "false"}"
-        >
-          ${escapeHtml(option.label)}
-          <span>${escapeHtml(String(lifecycleCounts[option.key] || 0))}</span>
-        </button>
-      `).join("")}
+    <div class="td-assignment-filter-group">
+      <span class="td-assignment-filter-label">Status</span>
+      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
+        ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
+          <button
+            type="button"
+            class="td-filter-chip ${filter === option.key ? "is-active" : ""}"
+            data-action="set-assignment-lifecycle-filter"
+            data-filter-key="${escapeAttr(option.key)}"
+            role="tab"
+            aria-selected="${filter === option.key ? "true" : "false"}"
+          >
+            ${escapeHtml(option.label)}
+            <span>${escapeHtml(String(lifecycleCounts[option.key] || 0))}</span>
+          </button>
+        `).join("")}
+      </div>
     </div>
-    <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment source filters">
-      ${sourceOptions.map((option) => `
-        <button
-          type="button"
-          class="td-filter-chip ${sourceFilter === option.key ? "is-active" : ""}"
-          data-action="set-assignment-source-filter"
-          data-filter-key="${escapeAttr(option.key)}"
-          role="tab"
-          aria-selected="${sourceFilter === option.key ? "true" : "false"}"
-        >
-          ${escapeHtml(option.label)}
-          <span>${escapeHtml(String(sourceCounts[option.key] || 0))}</span>
-        </button>
-      `).join("")}
+    <div class="td-assignment-filter-group td-assignment-filter-group--source">
+      <span class="td-assignment-filter-label">Source</span>
+      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment source filters">
+        ${sourceOptions.map((option) => `
+          <button
+            type="button"
+            class="td-filter-chip td-filter-chip--secondary ${sourceFilter === option.key ? "is-active" : ""}"
+            data-action="set-assignment-source-filter"
+            data-filter-key="${escapeAttr(option.key)}"
+            role="tab"
+            aria-selected="${sourceFilter === option.key ? "true" : "false"}"
+          >
+            ${escapeHtml(option.label)}
+            <span>${escapeHtml(String(sourceCounts[option.key] || 0))}</span>
+          </button>
+        `).join("")}
+      </div>
     </div>
-    <p class="td-assignment-lifecycle-helper">Needs attention includes expired, stale, unknown, or assignments missing participant data.</p>
+    <p class="td-assignment-lifecycle-helper">Needs attention includes stale assignments and assignments whose pupil data needs checking.</p>
   `;
 }
 
@@ -24319,7 +24417,18 @@ function renderAssignmentLifecycleStatusMessage() {
 
 function renderSectionUpcomingAssignments() {
   const isOpen = state.sections.upcoming;
-  const visibleAssignments = getFilteredAssignmentLifecycleItems();
+  const lifecycleFilter = getAssignmentLifecycleFilter();
+  const sourceFilter = getAssignmentSourceFilter();
+  const lifecycleEntries = getAssignmentLifecycleEntries();
+  const lifecycleMatchCount = lifecycleEntries
+    .filter(({ lifecycle }) => doesAssignmentMatchLifecycleFilter(lifecycle, lifecycleFilter))
+    .length;
+  const visibleEntries = getFilteredAssignmentLifecycleEntries();
+  const emptyState = getAssignmentLifecycleEmptyState({
+    lifecycleFilter,
+    sourceFilter,
+    lifecycleMatchCount,
+  });
 
   return `
     <section class="td-section td-section--upcoming">
@@ -24337,12 +24446,12 @@ function renderSectionUpcomingAssignments() {
           ${renderAssignmentLifecycleStatusMessage()}
           ${
             state.assignments.length
-              ? visibleAssignments.length
-                ? `<div class="td-list">${visibleAssignments.map(renderAssignmentCardCompact).join("")}</div>`
+              ? visibleEntries.length
+                ? `<div class="td-assignment-lifecycle-groups">${renderAssignmentLifecycleGroups(visibleEntries)}</div>`
                 : `
             <div class="td-empty">
-              <strong>No assignments in this view.</strong>
-              <p>Try another lifecycle or source filter to see the rest of the assignment history.</p>
+              <strong>${escapeHtml(emptyState.title)}</strong>
+              <p>${escapeHtml(emptyState.detail)}</p>
             </div>
           `
               : `
@@ -26412,9 +26521,9 @@ function renderAssignmentLifecycleBadge(lifecycle) {
 
 function getAssignmentLifecycleSignalText(lifecycle) {
   const key = String(lifecycle?.key || "").trim().toLowerCase();
-  if (key === "expired") return "Expired - deadline passed";
-  if (key === "stale") return "Stale - no recent activity";
-  if (key === "needs_attention") return "Needs attention - participant data missing";
+  if (key === "expired") return "This assignment is no longer available. Its end time has passed.";
+  if (key === "stale") return `Still live, but no recent activity has been recorded for ${ASSIGNMENT_LIFECYCLE_STALE_DAYS} days.`;
+  if (key === "needs_attention" || key === "unknown") return "Wordloom could not confirm the assignment participants from the current data.";
   return "";
 }
 
@@ -26565,13 +26674,15 @@ function renderAssignmentCardCompact(item) {
   const analyticsReady = state.analyticsByAssignment[assignmentId]?.status === "ready";
   const analytics = analyticsReady ? state.analyticsByAssignment[assignmentId].data.current : null;
   const dueAt = lifecycle?.dueAt || item.deadline || item.end_at || item.endAt || "";
-  const dueLabel = dueAt ? `Due ${formatDate(dueAt)}` : "No due date";
+  const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
+  const dueLabel = dueAt
+    ? `${lifecycleKey === "expired" ? "Ended" : "Due"} ${formatDate(dueAt)}`
+    : "No due date";
   const progressLabel = formatAssignmentLifecycleProgressLabel(lifecycle, analytics);
   const dueDateEditModel = buildAssignmentDueDateEditModelForRecord(item);
   const dueDateEditState = getAssignmentDueDateEditState(assignmentId);
   const closeModel = buildAssignmentCloseModelForRecord(item);
   const closeState = getAssignmentCloseConfirmState(assignmentId);
-  const lifecycleKey = String(lifecycle?.key || "unknown").replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
   const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
   const cardClasses = [
     "td-assignment-card",
@@ -33384,15 +33495,87 @@ function injectStyles() {
       margin-bottom:14px;
     }
 
+    .td-assignment-filter-group{
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      min-width:0;
+    }
+
+    .td-assignment-filter-group--source{
+      margin-top:2px;
+    }
+
+    .td-assignment-filter-label{
+      flex:0 0 48px;
+      padding-top:8px;
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:800;
+      letter-spacing:.04em;
+      line-height:1.2;
+      text-transform:uppercase;
+    }
+
     .td-assignment-lifecycle-filters{
+      min-width:0;
       margin-bottom:6px;
     }
 
     .td-assignment-lifecycle-helper{
-      margin:0 0 14px;
+      margin:2px 0 18px 60px;
       color:#64748b;
       font-size:0.86rem;
       line-height:1.4;
+    }
+
+    .td-assignment-lifecycle-groups{
+      display:flex;
+      flex-direction:column;
+      gap:22px;
+    }
+
+    .td-assignment-lifecycle-group{
+      min-width:0;
+    }
+
+    .td-assignment-lifecycle-group-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:10px;
+      padding:0 2px;
+    }
+
+    .td-assignment-lifecycle-group-head h4{
+      margin:0;
+      color:#1e293b;
+      font-size:0.98rem;
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .td-assignment-lifecycle-group-head p{
+      margin:3px 0 0;
+      color:#64748b;
+      font-size:0.84rem;
+      line-height:1.4;
+    }
+
+    .td-assignment-lifecycle-group-count{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:28px;
+      min-height:28px;
+      padding:3px 8px;
+      border:1px solid #e2e8f0;
+      border-radius:999px;
+      background:#f8fafc;
+      color:#475569;
+      font-size:0.82rem;
+      font-weight:800;
     }
 
     .td-filter-chip{
@@ -33418,6 +33601,19 @@ function injectStyles() {
       border-color:#bfdbfe;
       background:#eff6ff;
       color:#1d4ed8;
+    }
+
+    .td-filter-chip--secondary{
+      padding:7px 10px;
+      border-color:#e2e8f0;
+      color:#64748b;
+      font-size:0.84rem;
+      font-weight:650;
+    }
+
+    .td-filter-chip:focus-visible{
+      outline:3px solid rgba(37,99,235,.24);
+      outline-offset:2px;
     }
 
     .td-filter-chip span{
@@ -36682,6 +36878,24 @@ function injectStyles() {
 
       .td-form-grid--assign{
         grid-template-columns:1fr;
+      }
+
+      .td-assignment-filter-group{
+        flex-direction:column;
+        gap:5px;
+      }
+
+      .td-assignment-filter-label{
+        flex-basis:auto;
+        padding-top:0;
+      }
+
+      .td-assignment-lifecycle-helper{
+        margin-left:0;
+      }
+
+      .td-assignment-lifecycle-group-head{
+        gap:8px;
       }
 
       .td-card-actions{

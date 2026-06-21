@@ -1,13 +1,26 @@
 export const ASSIGNMENT_LIFECYCLE_STALE_DAYS = 14;
+export const ASSIGNMENT_LIFECYCLE_DUE_SOON_HOURS = 48;
 
 export const ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS = [
+  { key: "live", label: "Live" },
   { key: "needs_attention", label: "Needs attention" },
-  { key: "active", label: "Active" },
+  { key: "ended", label: "Ended" },
   { key: "completed", label: "Completed" },
   { key: "all", label: "All" },
 ];
 
+export const ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS = [
+  { key: "stale", label: "Stale" },
+  { key: "check_assignment_data", label: "Check assignment data" },
+  { key: "ending_soon", label: "Ending soon" },
+  { key: "due_later", label: "Due later" },
+  { key: "no_due_date", label: "No due date" },
+  { key: "ended", label: "Ended" },
+  { key: "completed", label: "Completed" },
+];
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 const MIN_DUE_DATE_STEP_MS = 60 * 1000;
 const ASSIGNMENT_DUE_DATE_EDITABLE_SOURCE_KEYS = new Set([
   "teacher_created",
@@ -23,13 +36,13 @@ const ASSIGNMENT_CLOSE_ALLOWED_SOURCE_KEYS = new Set([
 const STATE_META = {
   needs_attention: {
     key: "needs_attention",
-    label: "Needs attention",
+    label: "Check assignment data",
     tone: "warning",
     detail: "Wordloom could not confirm who this assignment is for from the current data.",
   },
   waiting: {
     key: "waiting",
-    label: "Waiting",
+    label: "Not started",
     tone: "neutral",
     detail: "No pupils have started yet.",
   },
@@ -41,31 +54,31 @@ const STATE_META = {
   },
   complete: {
     key: "complete",
-    label: "Complete",
+    label: "Completed",
     tone: "success",
     detail: "All known pupils have completed this assignment.",
   },
   expired: {
     key: "expired",
-    label: "Expired",
+    label: "Ended",
     tone: "warning",
-    detail: "Derived display signal: the deadline has passed before everyone completed.",
+    detail: "This assignment is no longer available. Its end time has passed.",
   },
   stale: {
     key: "stale",
     label: "Stale",
     tone: "warning",
-    detail: "Derived display signal: no recent pupil activity was found.",
+    detail: `Still live, but no recent activity has been recorded for ${ASSIGNMENT_LIFECYCLE_STALE_DAYS} days.`,
   },
   no_deadline: {
     key: "no_deadline",
-    label: "No deadline",
+    label: "No due date",
     tone: "neutral",
     detail: "This assignment has no due date.",
   },
   unknown: {
     key: "unknown",
-    label: "Unknown",
+    label: "Check assignment data",
     tone: "neutral",
     detail: "Wordloom does not have enough lifecycle data to classify this assignment.",
   },
@@ -279,6 +292,20 @@ function getStateMeta(key) {
   return STATE_META[key] || STATE_META.unknown;
 }
 
+export function getAssignmentLifecycleDisplayMeta(modelOrKey = null, {
+  staleDays = ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+} = {}) {
+  const key = typeof modelOrKey === "string"
+    ? String(modelOrKey || "").trim().toLowerCase()
+    : String(modelOrKey?.key || "").trim().toLowerCase();
+  const meta = getStateMeta(key);
+  if (key !== "stale") return { ...meta };
+  return {
+    ...meta,
+    detail: `Still live, but no recent activity has been recorded for ${Math.max(1, Number(staleDays || ASSIGNMENT_LIFECYCLE_STALE_DAYS))} days.`,
+  };
+}
+
 function countKnownPupils({ rosterPupilIds, targetPupilIds, statusPupilIds }) {
   if (targetPupilIds.length) return targetPupilIds.length;
   if (rosterPupilIds.length) return rosterPupilIds.length;
@@ -377,7 +404,7 @@ export function buildAssignmentLifecycleModel({
   else if (!dueMs) key = "no_deadline";
   else if (waitingCount > 0) key = "waiting";
 
-  const meta = getStateMeta(key);
+  const meta = getAssignmentLifecycleDisplayMeta(key, { staleDays });
   return {
     assignmentId,
     classId,
@@ -463,10 +490,11 @@ export function groupAssignmentLifecycleInputs({
 export function getAssignmentLifecycleFilterKey(model = null) {
   const key = String(model?.key || "unknown");
   if (key === "complete") return "completed";
-  if (key === "expired" || key === "stale" || key === "needs_attention" || key === "unknown") {
+  if (key === "expired") return "ended";
+  if (key === "stale" || key === "needs_attention" || key === "unknown") {
     return "needs_attention";
   }
-  return "active";
+  return "live";
 }
 
 export function doesAssignmentMatchLifecycleFilter(model = null, filterKey = "all") {
@@ -477,8 +505,9 @@ export function doesAssignmentMatchLifecycleFilter(model = null, filterKey = "al
 
 export function buildAssignmentLifecycleFilterCounts(models = []) {
   const counts = {
+    live: 0,
     needs_attention: 0,
-    active: 0,
+    ended: 0,
     completed: 0,
     all: 0,
   };
@@ -488,6 +517,25 @@ export function buildAssignmentLifecycleFilterCounts(models = []) {
     if (Object.prototype.hasOwnProperty.call(counts, key)) counts[key] += 1;
   }
   return counts;
+}
+
+export function getAssignmentLifecycleSectionKey(model = null, {
+  now = new Date(),
+  dueSoonHours = ASSIGNMENT_LIFECYCLE_DUE_SOON_HOURS,
+} = {}) {
+  const key = String(model?.key || "unknown").trim().toLowerCase();
+  if (key === "stale") return "stale";
+  if (key === "needs_attention" || key === "unknown") return "check_assignment_data";
+  if (key === "expired") return "ended";
+  if (key === "complete") return "completed";
+
+  const dueMs = parseTime(model?.dueAt);
+  if (dueMs == null) return "no_due_date";
+
+  const nowMs = parseTime(now) || Date.now();
+  const safeDueSoonHours = Math.max(1, Number(dueSoonHours || ASSIGNMENT_LIFECYCLE_DUE_SOON_HOURS));
+  if (dueMs <= nowMs + safeDueSoonHours * HOUR_MS) return "ending_soon";
+  return "due_later";
 }
 
 export function buildDuplicateManualAssignmentWarningModel({

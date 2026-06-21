@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS,
   buildAssignmentCloseModel,
   buildAssignmentDueDateEditModel,
+  buildAssignmentLifecycleFilterCounts,
   buildAssignmentLifecycleModel,
   buildDuplicateManualAssignmentWarningModel,
+  doesAssignmentMatchLifecycleFilter,
+  getAssignmentLifecycleDisplayMeta,
+  getAssignmentLifecycleFilterKey,
+  getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
 } = await loadBrowserModule("../js/assignmentLifecycleView.js", import.meta.url);
@@ -106,7 +112,24 @@ test("overdue incomplete assignment is marked expired", () => {
   });
 
   assert.equal(model.key, "expired");
+  assert.equal(model.label, "Ended");
+  assert.equal(model.detail, "This assignment is no longer available. Its end time has passed.");
   assert.match(model.warning, /deadline has passed/);
+});
+
+test("completed assignment outranks a past end date", () => {
+  const model = buildAssignmentLifecycleModel({
+    assignment: assignment({ end_at: "2026-05-25T09:00:00.000Z" }),
+    rosterPupilIds: ["pupil-1", "pupil-2"],
+    statusRows: [
+      status("pupil-1", { status: "completed", completed_at: "2026-05-24T09:00:00.000Z" }),
+      status("pupil-2", { status: "completed", completed_at: "2026-05-24T10:00:00.000Z" }),
+    ],
+    now: NOW,
+  });
+
+  assert.equal(model.key, "complete");
+  assert.equal(model.label, "Completed");
 });
 
 test("old incomplete assignment with no recent activity is marked stale", () => {
@@ -166,6 +189,107 @@ test("missing participant data is marked needs attention", () => {
   });
 
   assert.equal(model.key, "needs_attention");
+  assert.equal(model.label, "Check assignment data");
+});
+
+test("lifecycle tabs map live attention ended completed and all states", () => {
+  const models = [
+    { key: "waiting" },
+    { key: "in_progress" },
+    { key: "no_deadline" },
+    { key: "stale" },
+    { key: "needs_attention" },
+    { key: "unknown" },
+    { key: "expired" },
+    { key: "complete" },
+  ];
+
+  assert.deepEqual(
+    plain(ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => option.key)),
+    ["live", "needs_attention", "ended", "completed", "all"]
+  );
+  assert.deepEqual(models.map(getAssignmentLifecycleFilterKey), [
+    "live",
+    "live",
+    "live",
+    "needs_attention",
+    "needs_attention",
+    "needs_attention",
+    "ended",
+    "completed",
+  ]);
+  assert.deepEqual(plain(buildAssignmentLifecycleFilterCounts(models)), {
+    live: 3,
+    needs_attention: 3,
+    ended: 1,
+    completed: 1,
+    all: 8,
+  });
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "waiting" }, "live"), true);
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "needs_attention"), false);
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "ended"), true);
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "complete" }, "all"), true);
+});
+
+test("ending-soon section includes the 48-hour boundary", () => {
+  const atBoundary = getAssignmentLifecycleSectionKey({
+    key: "waiting",
+    dueAt: "2026-05-28T12:00:00.000Z",
+  }, { now: NOW });
+  const afterBoundary = getAssignmentLifecycleSectionKey({
+    key: "waiting",
+    dueAt: "2026-05-28T12:00:00.001Z",
+  }, { now: NOW });
+
+  assert.equal(atBoundary, "ending_soon");
+  assert.equal(afterBoundary, "due_later");
+});
+
+test("lifecycle sections classify due no-date attention ended and completed states", () => {
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "waiting",
+    dueAt: "2026-06-10T12:00:00.000Z",
+  }, { now: NOW }), "due_later");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "in_progress",
+    dueAt: null,
+  }, { now: NOW }), "no_due_date");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "stale",
+    dueAt: "2026-06-10T12:00:00.000Z",
+  }, { now: NOW }), "stale");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "needs_attention",
+    dueAt: "2026-06-10T12:00:00.000Z",
+  }, { now: NOW }), "check_assignment_data");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "unknown",
+  }, { now: NOW }), "check_assignment_data");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "expired",
+    dueAt: "2026-05-25T09:00:00.000Z",
+  }, { now: NOW }), "ended");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "complete",
+    dueAt: "2026-05-25T09:00:00.000Z",
+  }, { now: NOW }), "completed");
+});
+
+test("teacher-facing display metadata distinguishes ended stale completed and waiting copy", () => {
+  assert.deepEqual(plain(getAssignmentLifecycleDisplayMeta("expired")), {
+    key: "expired",
+    label: "Ended",
+    tone: "warning",
+    detail: "This assignment is no longer available. Its end time has passed.",
+  });
+  assert.equal(
+    getAssignmentLifecycleDisplayMeta("stale", { staleDays: 14 }).detail,
+    "Still live, but no recent activity has been recorded for 14 days."
+  );
+  assert.equal(getAssignmentLifecycleDisplayMeta("complete").label, "Completed");
+  assert.equal(getAssignmentLifecycleDisplayMeta("no_deadline").label, "No due date");
+  assert.equal(getAssignmentLifecycleDisplayMeta("waiting").label, "Not started");
+  assert.equal(getAssignmentLifecycleDisplayMeta("unknown").label, "Check assignment data");
 });
 
 test("grouped lifecycle inputs return models by assignment id", () => {
