@@ -1,3 +1,5 @@
+import { isExtraChallengeAssignmentSource } from "./evidenceSources.js?v=1.0";
+
 export const ASSIGNMENT_LIFECYCLE_STALE_DAYS = 14;
 export const ASSIGNMENT_LIFECYCLE_DUE_SOON_HOURS = 48;
 
@@ -23,6 +25,7 @@ export const ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS = [
   { key: "ending_soon", label: "Ending soon" },
   { key: "due_later", label: "Due later" },
   { key: "no_due_date", label: "No due date" },
+  { key: "optional_practice", label: "Optional practice" },
   { key: "ended", label: "Ended" },
   { key: "completed", label: "Completed" },
 ];
@@ -91,6 +94,12 @@ const STATE_META = {
     label: "No due date",
     tone: "neutral",
     detail: "This assignment has no due date.",
+  },
+  optional_practice: {
+    key: "optional_practice",
+    label: "Optional practice",
+    tone: "info",
+    detail: "Optional extra challenges are pupil-led practice. No teacher follow-up is needed.",
   },
   unknown: {
     key: "unknown",
@@ -278,8 +287,14 @@ function buildPupilFollowUpRow({
   };
 }
 
-function getPupilFollowUpDecisionHint(lifecycle = null, counts = {}) {
+function getPupilFollowUpDecisionHint(lifecycle = null, counts = {}, assignment = null) {
   const key = normalizeLifecycleKey(lifecycle);
+  if (lifecycle?.isOptionalPractice || key === "optional_practice" || isExtraChallengeAssignmentSource(assignment)) {
+    return {
+      key: "optional_practice",
+      text: "This was an optional extra challenge. No follow-up is needed.",
+    };
+  }
   if (key === "needs_attention" || key === "unknown" || Number(counts.check_data || 0) > 0) {
     return {
       key: "check_data",
@@ -410,7 +425,7 @@ export function buildAssignmentPupilFollowUpModel({
     groups,
     counts,
     totalKnownParticipants: counts.total,
-    decisionHint: getPupilFollowUpDecisionHint(lifecycle, counts),
+    decisionHint: getPupilFollowUpDecisionHint(lifecycle, counts, safeAssignment),
   };
 }
 
@@ -617,6 +632,7 @@ export function buildAssignmentLifecycleModel({
   const dueMs = parseTime(dueAt);
   const createdMs = parseTime(createdAt);
   const nowMs = parseTime(now) || Date.now();
+  const isOptionalPractice = isExtraChallengeAssignmentSource(safeAssignment);
 
   const filteredStatusRows = (Array.isArray(statusRows) ? statusRows : [])
     .filter((row) => !assignmentId || getRowAssignmentId(row) === assignmentId);
@@ -665,6 +681,7 @@ export function buildAssignmentLifecycleModel({
   const isExpired = !isComplete && dueMs != null && dueMs < nowMs;
   const staleBeforeMs = nowMs - Math.max(1, Number(staleDays || ASSIGNMENT_LIFECYCLE_STALE_DAYS)) * DAY_MS;
   const isStale = !isComplete
+    && !isOptionalPractice
     && totalPupilCount > 0
     && lastActivityMs != null
     && lastActivityMs < staleBeforeMs
@@ -674,6 +691,7 @@ export function buildAssignmentLifecycleModel({
   if (!totalPupilCount) key = "needs_attention";
   else if (isComplete) key = "complete";
   else if (isExpired) key = "expired";
+  else if (isOptionalPractice) key = "optional_practice";
   else if (isStale) key = "stale";
   else if (inProgressCount > 0) key = "in_progress";
   else if (!dueMs) key = "no_deadline";
@@ -700,6 +718,7 @@ export function buildAssignmentLifecycleModel({
     statusPupilCount: statusPupilIds.length,
     rosterPupilCount: safeRosterPupilIds.length,
     hasCounts: totalPupilCount > 0,
+    isOptionalPractice,
     isDerivedDisplaySignal: key === "expired" || key === "stale",
   };
 }
@@ -821,6 +840,7 @@ export function getAssignmentLifecycleSectionKey(model = null, {
   if (key === "needs_attention" || key === "unknown") return "check_assignment_data";
   if (key === "expired") return "ended";
   if (key === "complete") return "completed";
+  if (key === "optional_practice") return "optional_practice";
 
   const dueMs = parseTime(model?.dueAt);
   if (dueMs == null) return "no_due_date";

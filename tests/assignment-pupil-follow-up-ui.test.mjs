@@ -214,6 +214,17 @@ test("fully completed assignments show completed pupils directly", () => {
   assert.match(panel, /Ada/);
 });
 
+test("optional Extra Challenge panel shows no-follow-up guidance", () => {
+  const optionalPractice = lifecycleFixture({
+    hint: "This was an optional extra challenge. No follow-up is needed.",
+  });
+  const panel = renderAssignmentPupilFollowUpPanel("assignment-extra", optionalPractice, true);
+
+  assert.match(panel, /This was an optional extra challenge\. No follow-up is needed\./);
+  assert.doesNotMatch(panel, /\b(extend|chase|leave alone)\b/i);
+  assert.doesNotMatch(panel, /before deciding whether to end/i);
+});
+
 test("missing follow-up data keeps the generic card fallback and omits disclosure", () => {
   const model = buildAssignmentPupilFollowUpDisplayModel({ completedCount: 1, totalPupilCount: 2 });
   assert.equal(model.available, false);

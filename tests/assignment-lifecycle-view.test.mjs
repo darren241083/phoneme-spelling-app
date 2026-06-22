@@ -176,6 +176,89 @@ test("old incomplete assignment with no recent activity is marked stale", () => 
   assert.match(model.warning, /no pupil activity/);
 });
 
+test("old current Extra Challenge is optional practice instead of stale via evidence source", () => {
+  const model = buildAssignmentLifecycleModel({
+    assignment: assignment({
+      evidence_source: "extra_challenge",
+      created_at: "2026-05-01T09:00:00.000Z",
+      end_at: "2026-06-15T09:00:00.000Z",
+    }),
+    rosterPupilIds: ["pupil-1"],
+    statusRows: [status("pupil-1", {
+      created_at: "2026-05-01T09:00:00.000Z",
+      updated_at: "2026-05-01T09:00:00.000Z",
+    })],
+    now: NOW,
+    staleDays: 14,
+  });
+
+  assert.equal(model.key, "optional_practice");
+  assert.equal(model.label, "Optional practice");
+  assert.equal(model.isOptionalPractice, true);
+  assert.equal(model.warning, "");
+});
+
+test("Extra Challenge is detected through assignment source", () => {
+  const model = buildAssignmentLifecycleModel({
+    assignment: assignment({
+      assignment_source: "extra_challenge",
+      created_at: "2026-05-01T09:00:00.000Z",
+      end_at: null,
+    }),
+    rosterPupilIds: ["pupil-1"],
+    statusRows: [],
+    now: NOW,
+  });
+
+  assert.equal(model.key, "optional_practice");
+  assert.equal(model.isOptionalPractice, true);
+});
+
+test("completed and expired Extra Challenges keep lifecycle precedence", () => {
+  const completed = buildAssignmentLifecycleModel({
+    assignment: assignment({
+      evidence_source: "extra_challenge",
+      end_at: "2026-05-25T09:00:00.000Z",
+    }),
+    rosterPupilIds: ["pupil-1"],
+    statusRows: [status("pupil-1", {
+      status: "completed",
+      completed_at: "2026-05-24T09:00:00.000Z",
+    })],
+    now: NOW,
+  });
+  const expired = buildAssignmentLifecycleModel({
+    assignment: assignment({
+      evidence_source: "extra_challenge",
+      end_at: "2026-05-25T09:00:00.000Z",
+    }),
+    rosterPupilIds: ["pupil-1"],
+    statusRows: [status("pupil-1")],
+    now: NOW,
+  });
+
+  assert.equal(completed.key, "complete");
+  assert.equal(completed.label, "Completed");
+  assert.equal(expired.key, "expired");
+  assert.equal(expired.label, "Ended");
+});
+
+test("Extra Challenge with missing participants still needs data checking", () => {
+  const model = buildAssignmentLifecycleModel({
+    assignment: assignment({
+      evidence_source: "extra_challenge",
+      created_at: "2026-05-01T09:00:00.000Z",
+    }),
+    rosterPupilIds: [],
+    statusRows: [],
+    targetRows: [],
+    now: NOW,
+  });
+
+  assert.equal(model.key, "needs_attention");
+  assert.equal(model.isOptionalPractice, true);
+});
+
 test("recent no-deadline assignment is marked no deadline", () => {
   const model = buildAssignmentLifecycleModel({
     assignment: assignment({ end_at: null, created_at: "2026-05-25T09:00:00.000Z" }),
@@ -222,6 +305,7 @@ test("lifecycle tabs map live attention ended completed and all states", () => {
     { key: "waiting" },
     { key: "in_progress" },
     { key: "no_deadline" },
+    { key: "optional_practice" },
     { key: "stale" },
     { key: "needs_attention" },
     { key: "unknown" },
@@ -237,6 +321,7 @@ test("lifecycle tabs map live attention ended completed and all states", () => {
     "live",
     "live",
     "live",
+    "live",
     "needs_attention",
     "needs_attention",
     "needs_attention",
@@ -244,12 +329,15 @@ test("lifecycle tabs map live attention ended completed and all states", () => {
     "completed",
   ]);
   assert.deepEqual(plain(buildAssignmentLifecycleFilterCounts(models)), {
-    live: 3,
+    live: 4,
     needs_attention: 3,
     ended: 1,
     completed: 1,
-    all: 8,
+    all: 9,
   });
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "optional_practice" }, "live"), true);
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "optional_practice" }, "needs_attention"), false);
+  assert.equal(doesAssignmentMatchLifecycleFilter({ key: "optional_practice" }, "all"), true);
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "waiting" }, "live"), true);
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "needs_attention"), false);
   assert.equal(doesAssignmentMatchLifecycleFilter({ key: "expired" }, "ended"), true);
@@ -325,6 +413,10 @@ test("lifecycle sections classify due no-date attention ended and completed stat
     key: "complete",
     dueAt: "2026-05-25T09:00:00.000Z",
   }, { now: NOW }), "completed");
+  assert.equal(getAssignmentLifecycleSectionKey({
+    key: "optional_practice",
+    dueAt: null,
+  }, { now: NOW }), "optional_practice");
 });
 
 test("teacher-facing display metadata distinguishes ended stale completed and waiting copy", () => {
@@ -340,6 +432,12 @@ test("teacher-facing display metadata distinguishes ended stale completed and wa
   );
   assert.equal(getAssignmentLifecycleDisplayMeta("complete").label, "Completed");
   assert.equal(getAssignmentLifecycleDisplayMeta("no_deadline").label, "No due date");
+  assert.deepEqual(plain(getAssignmentLifecycleDisplayMeta("optional_practice")), {
+    key: "optional_practice",
+    label: "Optional practice",
+    tone: "info",
+    detail: "Optional extra challenges are pupil-led practice. No teacher follow-up is needed.",
+  });
   assert.equal(getAssignmentLifecycleDisplayMeta("waiting").label, "Not started");
   assert.equal(getAssignmentLifecycleDisplayMeta("unknown").label, "Check assignment data");
 });
@@ -520,6 +618,24 @@ test("pupil follow-up provides calm lifecycle decision hints", () => {
     });
     assert.equal(model.decisionHint.key, hintKey);
     assert.match(model.decisionHint.text, copyPattern);
+  }
+});
+
+test("Extra Challenge pupil follow-up hint always uses optional-practice copy", () => {
+  for (const lifecycleKey of ["optional_practice", "stale", "no_deadline", "needs_attention"]) {
+    const model = buildAssignmentPupilFollowUpModel({
+      assignment: assignment({ evidence_source: "extra_challenge" }),
+      lifecycle: { key: lifecycleKey, isOptionalPractice: true },
+      rosterRows: [membership("pupil-1")],
+      statusRows: [],
+    });
+
+    assert.equal(model.decisionHint.key, "optional_practice");
+    assert.equal(
+      model.decisionHint.text,
+      "This was an optional extra challenge. No follow-up is needed."
+    );
+    assert.doesNotMatch(model.decisionHint.text, /\b(extend|end|chase|leave alone)\b/i);
   }
 });
 

@@ -173,7 +173,7 @@ import {
   getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
-} from "./assignmentLifecycleView.js?v=1.4";
+} from "./assignmentLifecycleView.js?v=1.5";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -24463,6 +24463,7 @@ function getAssignmentLifecycleSectionCopy(sectionKey = "") {
   if (sectionKey === "ending_soon") return "Live assignments ending within the next 48 hours.";
   if (sectionKey === "due_later") return "Live assignments with more than 48 hours remaining.";
   if (sectionKey === "no_due_date") return "Live assignments that remain available until you add a due date or end them.";
+  if (sectionKey === "optional_practice") return "Optional extra challenges are pupil-led practice. No teacher follow-up is needed.";
   if (sectionKey === "ended") return "Assignments that are no longer available to pupils.";
   if (sectionKey === "completed") return "Assignments completed by all known pupils.";
   return "";
@@ -33739,7 +33740,8 @@ function injectStyles() {
 
     .td-assignment-lifecycle-badge--in_progress,
     .td-assignment-lifecycle-badge--waiting,
-    .td-assignment-lifecycle-badge--no_deadline{
+    .td-assignment-lifecycle-badge--no_deadline,
+    .td-assignment-lifecycle-badge--optional_practice{
       background:#eff6ff;
       border-color:#bfdbfe;
       color:#1d4ed8;
