@@ -6686,18 +6686,54 @@ async function refreshAssignmentLifecycleSummaries() {
   try {
     const statusQuery = supabase
       .from("assignment_pupil_statuses")
-      .select("assignment_id, pupil_id, status, started_at, completed_at, last_opened_at, last_activity_at, total_words, updated_at, created_at")
+      .select(`
+        assignment_id,
+        pupil_id,
+        status,
+        started_at,
+        completed_at,
+        last_opened_at,
+        last_activity_at,
+        total_words,
+        updated_at,
+        created_at,
+        pupils (
+          id,
+          first_name,
+          surname,
+          username
+        )
+      `)
       .in("assignment_id", assignmentIds);
 
     const targetQuery = supabase
       .from("assignment_pupil_target_words")
-      .select("assignment_id, pupil_id, created_at")
+      .select(`
+        assignment_id,
+        pupil_id,
+        created_at,
+        pupils (
+          id,
+          first_name,
+          surname,
+          username
+        )
+      `)
       .in("assignment_id", assignmentIds);
 
     let membershipQuery = classIds.length
       ? supabase
         .from("pupil_classes")
-        .select("class_id, pupil_id")
+        .select(`
+          class_id,
+          pupil_id,
+          pupils (
+            id,
+            first_name,
+            surname,
+            username
+          )
+        `)
         .in("class_id", classIds)
         .eq("active", true)
       : Promise.resolve({ data: [], error: null });
@@ -6726,18 +6762,11 @@ async function refreshAssignmentLifecycleSummaries() {
     state.assignmentLifecycle.status = "ready";
   } catch (error) {
     console.warn("assignment lifecycle summary error:", error);
-    state.assignmentLifecycle.summariesByAssignmentId = Object.fromEntries(
-      assignments
-        .filter((assignment) => assignment?.id)
-        .map((assignment) => [
-          String(assignment.id),
-          buildAssignmentLifecycleModel({
-            assignment,
-            now: new Date(),
-            staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
-          }),
-        ])
-    );
+    state.assignmentLifecycle.summariesByAssignmentId = groupAssignmentLifecycleInputs({
+      assignments,
+      now: new Date(),
+      staleDays: ASSIGNMENT_LIFECYCLE_STALE_DAYS,
+    });
     state.assignmentLifecycle.status = "error";
     state.assignmentLifecycle.message = "Lifecycle counts are partially unavailable.";
   }

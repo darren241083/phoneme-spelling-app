@@ -7,6 +7,7 @@ const {
   buildAssignmentDueDateEditModel,
   buildAssignmentLifecycleFilterCounts,
   buildAssignmentLifecycleModel,
+  buildAssignmentPupilFollowUpModel,
   buildDuplicateManualAssignmentWarningModel,
   doesAssignmentMatchLifecycleFilter,
   getAssignmentLifecycleDisplayMeta,
@@ -41,6 +42,7 @@ function status(pupilId, overrides = {}) {
     status: "assigned",
     created_at: "2026-05-20T09:00:00.000Z",
     updated_at: "2026-05-20T09:00:00.000Z",
+    pupils: pupilId ? pupil(pupilId) : null,
     ...overrides,
   };
 }
@@ -50,6 +52,28 @@ function target(pupilId, overrides = {}) {
     assignment_id: "assignment-1",
     pupil_id: pupilId,
     created_at: "2026-05-20T09:00:00.000Z",
+    pupils: pupilId ? pupil(pupilId) : null,
+    ...overrides,
+  };
+}
+
+function pupil(pupilId, overrides = {}) {
+  const suffix = String(pupilId || "").split("-").pop() || "1";
+  return {
+    id: pupilId,
+    first_name: `Pupil ${suffix}`,
+    surname: "Example",
+    username: `pupil${suffix}`,
+    ...overrides,
+  };
+}
+
+function membership(pupilId, overrides = {}) {
+  return {
+    class_id: "class-a",
+    pupil_id: pupilId,
+    active: true,
+    pupils: pupilId ? pupil(pupilId) : null,
     ...overrides,
   };
 }
@@ -324,8 +348,8 @@ test("grouped lifecycle inputs return models by assignment id", () => {
   const grouped = groupAssignmentLifecycleInputs({
     assignments: [assignment({ id: "assignment-1" })],
     membershipRows: [
-      { class_id: "class-a", pupil_id: "pupil-1" },
-      { class_id: "class-a", pupil_id: "pupil-2" },
+      membership("pupil-1"),
+      membership("pupil-2"),
     ],
     statusRows: [status("pupil-1", { completed_at: "2026-05-24T09:00:00.000Z" })],
     targetRows: [],
@@ -334,6 +358,169 @@ test("grouped lifecycle inputs return models by assignment id", () => {
 
   assert.equal(grouped["assignment-1"].totalPupilCount, 2);
   assert.equal(grouped["assignment-1"].completedCount, 1);
+  assert.equal(grouped["assignment-1"].pupilFollowUp.counts.completed, 1);
+  assert.equal(grouped["assignment-1"].pupilFollowUp.counts.not_started, 1);
+});
+
+test("pupil follow-up uses targeted pupils before roster and status pupils", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "in_progress" },
+    targetRows: [target("pupil-1"), target("pupil-2")],
+    rosterRows: [membership("pupil-1"), membership("pupil-2"), membership("pupil-3")],
+    statusRows: [
+      status("pupil-1", { status: "completed", completed_at: "2026-05-24T09:00:00.000Z" }),
+      status("pupil-3", { status: "started", started_at: "2026-05-25T09:00:00.000Z" }),
+    ],
+  });
+
+  assert.equal(model.participantSource, "target");
+  assert.equal(model.totalKnownParticipants, 2);
+  assert.deepEqual(plain(model.groups.completed.map((row) => row.pupilId)), ["pupil-1"]);
+  assert.deepEqual(plain(model.groups.not_started.map((row) => row.pupilId)), ["pupil-2"]);
+  assert.equal(model.groups.in_progress.length, 0);
+});
+
+test("pupil follow-up uses active roster when no target rows exist", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "in_progress" },
+    rosterRows: [
+      membership("pupil-1"),
+      membership("pupil-2"),
+      membership("pupil-3", { active: false }),
+    ],
+    statusRows: [
+      status("pupil-1", { status: "started", started_at: "2026-05-25T09:00:00.000Z" }),
+      status("pupil-3", { status: "completed", completed_at: "2026-05-25T10:00:00.000Z" }),
+    ],
+  });
+
+  assert.equal(model.participantSource, "roster");
+  assert.equal(model.totalKnownParticipants, 2);
+  assert.deepEqual(plain(model.groups.in_progress.map((row) => row.pupilId)), ["pupil-1"]);
+  assert.deepEqual(plain(model.groups.not_started.map((row) => row.pupilId)), ["pupil-2"]);
+});
+
+test("pupil follow-up falls back to status-row pupils", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "in_progress" },
+    statusRows: [
+      status("pupil-1", { status: "started", started_at: "2026-05-25T09:00:00.000Z" }),
+      status("pupil-2", { status: "completed", completed_at: "2026-05-25T10:00:00.000Z" }),
+    ],
+  });
+
+  assert.equal(model.participantSource, "status");
+  assert.equal(model.counts.in_progress, 1);
+  assert.equal(model.counts.completed, 1);
+});
+
+test("pupil follow-up deduplicates repeated target and status rows", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "in_progress" },
+    targetRows: [
+      target("pupil-1"),
+      target("pupil-1", { created_at: "2026-05-21T09:00:00.000Z" }),
+    ],
+    statusRows: [
+      status("pupil-1", { status: "started", started_at: "2026-05-25T09:00:00.000Z" }),
+      status("pupil-1", { status: "in_progress", last_activity_at: "2026-05-25T10:00:00.000Z" }),
+    ],
+  });
+
+  assert.equal(model.totalKnownParticipants, 1);
+  assert.equal(model.counts.in_progress, 1);
+  assert.equal(model.groups.in_progress[0].lastActivityAt, "2026-05-25T10:00:00.000Z");
+});
+
+test("pupil follow-up groups invalid, unnamed, and inconsistent records for checking", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "in_progress" },
+    rosterRows: [
+      membership("pupil-1"),
+      membership("pupil-2", { pupils: pupil("pupil-2", { first_name: "", surname: "" }) }),
+      membership("pupil-3"),
+      membership(null, { pupils: null }),
+    ],
+    statusRows: [
+      status("pupil-1", { status: "paused" }),
+      status("pupil-3", { status: "started", started_at: "2026-05-25T09:00:00.000Z" }),
+      status("pupil-3", { status: "completed", completed_at: "2026-05-25T10:00:00.000Z" }),
+    ],
+  });
+
+  assert.equal(model.counts.check_data, 4);
+  assert.deepEqual(
+    plain(model.groups.check_data.map((row) => row.reason).sort()),
+    [
+      "inconsistent_status_rows",
+      "missing_pupil_id",
+      "missing_pupil_identity",
+      "unexpected_status",
+    ]
+  );
+  assert.equal(
+    model.groups.check_data.some((row) => row.displayName === "Pupil record unavailable"),
+    true
+  );
+});
+
+test("pupil follow-up treats mismatched embedded identity as inconsistent data", () => {
+  const model = buildAssignmentPupilFollowUpModel({
+    assignment: assignment(),
+    lifecycle: { key: "waiting" },
+    rosterRows: [
+      membership("pupil-1", {
+        pupils: pupil("pupil-other", { first_name: "Wrong", surname: "Pupil" }),
+      }),
+    ],
+  });
+
+  assert.equal(model.counts.check_data, 1);
+  assert.equal(model.groups.check_data[0].reason, "inconsistent_pupil_identity");
+});
+
+test("pupil follow-up grouping is independent from lifecycle state", () => {
+  const inputs = {
+    assignment: assignment(),
+    rosterRows: [membership("pupil-1"), membership("pupil-2")],
+    statusRows: [status("pupil-1", {
+      status: "completed",
+      completed_at: "2026-05-25T09:00:00.000Z",
+    })],
+  };
+  const waiting = buildAssignmentPupilFollowUpModel({ ...inputs, lifecycle: { key: "waiting" } });
+  const ended = buildAssignmentPupilFollowUpModel({ ...inputs, lifecycle: { key: "expired" } });
+
+  assert.deepEqual(plain(waiting.groups), plain(ended.groups));
+});
+
+test("pupil follow-up provides calm lifecycle decision hints", () => {
+  const cases = [
+    ["complete", "completed", /No follow-up is needed/],
+    ["expired", "ended_incomplete", /Extending it would make it available again/],
+    ["stale", "stale", /extend, end, or leave/],
+    ["no_deadline", "no_due_date", /no due-date pressure/],
+    ["waiting", "not_started", /still need the assignment/],
+    ["needs_attention", "check_data", /Check the pupil information/],
+  ];
+
+  for (const [lifecycleKey, hintKey, copyPattern] of cases) {
+    const model = buildAssignmentPupilFollowUpModel({
+      assignment: assignment(),
+      lifecycle: { key: lifecycleKey },
+      rosterRows: [membership("pupil-1")],
+      statusRows: lifecycleKey === "complete"
+        ? [status("pupil-1", { status: "completed", completed_at: "2026-05-25T09:00:00.000Z" })]
+        : [],
+    });
+    assert.equal(model.decisionHint.key, hintKey);
+    assert.match(model.decisionHint.text, copyPattern);
+  }
 });
 
 test("duplicate manual assignment warning finds the latest matching assignment", () => {

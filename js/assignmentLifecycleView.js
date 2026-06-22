@@ -30,6 +30,14 @@ export const ASSIGNMENT_LIFECYCLE_SECTION_OPTIONS = [
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MIN_DUE_DATE_STEP_MS = 60 * 1000;
+const PUPIL_FOLLOW_UP_FALLBACK_LABEL = "Pupil record unavailable";
+const PUPIL_FOLLOW_UP_STATUS_KEYS = new Set([
+  "assigned",
+  "started",
+  "in_progress",
+  "completed",
+  "complete",
+]);
 const ASSIGNMENT_DUE_DATE_EDITABLE_SOURCE_KEYS = new Set([
   "teacher_created",
   "generated_by_policy",
@@ -122,6 +130,26 @@ function getRowPupilId(row = {}) {
   return cleanId(row.pupil_id || row.pupilId);
 }
 
+function getRowPupilRecord(row = {}) {
+  const record = row.pupils || row.pupil || row.pupil_record || row.pupilRecord || null;
+  return Array.isArray(record) ? record[0] || null : record;
+}
+
+function getPupilRecordId(record = {}) {
+  return cleanId(record?.id || record?.pupil_id || record?.pupilId);
+}
+
+function getPupilDisplayName(record = {}) {
+  return [
+    String(record?.first_name || record?.firstName || "").trim(),
+    String(record?.surname || record?.last_name || record?.lastName || "").trim(),
+  ].filter(Boolean).join(" ");
+}
+
+function getPupilUsername(record = {}) {
+  return String(record?.username || "").trim();
+}
+
 function isStatusComplete(row = {}) {
   return !!(row.completed_at || row.completedAt)
     || String(row.status || "").trim().toLowerCase() === "completed"
@@ -145,6 +173,245 @@ function latestStatusTime(row = {}) {
     parseTime(row.updated_at || row.updatedAt) || 0,
     parseTime(row.created_at || row.createdAt) || 0,
   ) || null;
+}
+
+function filterAssignmentRows(rows = [], assignmentId = "") {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => !assignmentId || getRowAssignmentId(row) === assignmentId);
+}
+
+function filterRosterRows(rows = [], classId = "") {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.active !== false)
+    .filter((row) => !classId || getRowClassId(row) === classId);
+}
+
+function getPupilIdentityCandidates(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(getRowPupilRecord)
+    .filter((record) => record && typeof record === "object");
+}
+
+function buildPupilFollowUpRow({
+  pupilId = "",
+  participantSource = "unknown",
+  participantRows = [],
+  statusRows = [],
+  forceCheckReason = "",
+} = {}) {
+  const safePupilId = cleanId(pupilId);
+  const identityCandidates = getPupilIdentityCandidates([
+    ...(Array.isArray(participantRows) ? participantRows : []),
+    ...(Array.isArray(statusRows) ? statusRows : []),
+  ]);
+  const identityRecord = identityCandidates.find((record) => getPupilDisplayName(record))
+    || identityCandidates[0]
+    || null;
+  const displayName = getPupilDisplayName(identityRecord);
+  const username = getPupilUsername(identityRecord);
+  const relatedIdentityIds = uniqueIds(identityCandidates.map(getPupilRecordId));
+  const relatedDisplayNames = uniqueIds(
+    identityCandidates.map((record) => getPupilDisplayName(record).toLowerCase())
+  );
+  const relatedUsernames = uniqueIds(
+    identityCandidates.map((record) => getPupilUsername(record).toLowerCase())
+  );
+  const rawStatuses = (Array.isArray(statusRows) ? statusRows : [])
+    .map((row) => String(row?.status || "").trim().toLowerCase());
+  const normalizedStatuses = uniqueIds(rawStatuses);
+  const invalidStatus = rawStatuses.find((status) => !PUPIL_FOLLOW_UP_STATUS_KEYS.has(status));
+  const statusGroupKeys = new Set(
+    (Array.isArray(statusRows) ? statusRows : [])
+      .map((row) => {
+        if (isStatusComplete(row)) return "completed";
+        if (isStatusStarted(row)) return "in_progress";
+        return "not_started";
+      })
+  );
+  const hasIdentityMismatch = relatedIdentityIds.some((id) => safePupilId && id !== safePupilId)
+    || relatedIdentityIds.length > 1
+    || relatedDisplayNames.length > 1
+    || relatedUsernames.length > 1;
+  const hasConflictingStatuses = statusGroupKeys.size > 1;
+  const latestActivityMs = Math.max(
+    0,
+    ...(Array.isArray(statusRows) ? statusRows : []).map((row) => latestStatusTime(row) || 0),
+  ) || null;
+
+  let groupKey = "not_started";
+  let reason = statusRows.length ? "assigned_not_started" : "no_status_row";
+  if (forceCheckReason) {
+    groupKey = "check_data";
+    reason = forceCheckReason;
+  } else if (!safePupilId) {
+    groupKey = "check_data";
+    reason = "missing_pupil_id";
+  } else if (!identityRecord || !displayName) {
+    groupKey = "check_data";
+    reason = "missing_pupil_identity";
+  } else if (hasIdentityMismatch) {
+    groupKey = "check_data";
+    reason = "inconsistent_pupil_identity";
+  } else if (invalidStatus) {
+    groupKey = "check_data";
+    reason = "unexpected_status";
+  } else if (hasConflictingStatuses) {
+    groupKey = "check_data";
+    reason = "inconsistent_status_rows";
+  } else if (statusGroupKeys.has("completed")) {
+    groupKey = "completed";
+    reason = "completed_status";
+  } else if (statusGroupKeys.has("in_progress")) {
+    groupKey = "in_progress";
+    reason = "active_status";
+  }
+
+  return {
+    pupilId: safePupilId || null,
+    displayName: displayName || PUPIL_FOLLOW_UP_FALLBACK_LABEL,
+    username: username || null,
+    groupKey,
+    reason,
+    participantSource,
+    status: normalizedStatuses[0] || null,
+    lastActivityAt: latestActivityMs ? new Date(latestActivityMs).toISOString() : null,
+  };
+}
+
+function getPupilFollowUpDecisionHint(lifecycle = null, counts = {}) {
+  const key = normalizeLifecycleKey(lifecycle);
+  if (key === "needs_attention" || key === "unknown" || Number(counts.check_data || 0) > 0) {
+    return {
+      key: "check_data",
+      text: "Check the pupil information before deciding whether to extend or end this assignment.",
+    };
+  }
+  if (key === "complete") {
+    return {
+      key: "completed",
+      text: "Everyone has completed this assignment. No follow-up is needed.",
+    };
+  }
+  if (key === "expired") {
+    return {
+      key: "ended_incomplete",
+      text: "Some pupils were incomplete when this assignment ended. Extending it would make it available again.",
+    };
+  }
+  if (key === "stale") {
+    return {
+      key: "stale",
+      text: "Incomplete pupils may need follow-up before you decide whether to extend, end, or leave this assignment alone.",
+    };
+  }
+  if (key === "no_deadline") {
+    return {
+      key: "no_due_date",
+      text: "Pupils may still be working. There is no due-date pressure on this assignment.",
+    };
+  }
+  if (key === "waiting") {
+    return {
+      key: "not_started",
+      text: "No pupils have started yet. Check whether they still need the assignment before ending it.",
+    };
+  }
+  return {
+    key: "in_progress",
+    text: "Review the pupils still working or waiting before deciding whether to change this assignment.",
+  };
+}
+
+export function buildAssignmentPupilFollowUpModel({
+  assignment = null,
+  lifecycle = null,
+  statusRows = [],
+  targetRows = [],
+  rosterRows = [],
+} = {}) {
+  const safeAssignment = assignment && typeof assignment === "object" ? assignment : {};
+  const assignmentId = cleanId(safeAssignment.id);
+  const classId = cleanId(safeAssignment.class_id || safeAssignment.classId);
+  const filteredStatusRows = filterAssignmentRows(statusRows, assignmentId);
+  const filteredTargetRows = filterAssignmentRows(targetRows, assignmentId);
+  const filteredRosterRows = filterRosterRows(rosterRows, classId);
+
+  let participantSource = "status";
+  let participantRows = filteredStatusRows;
+  if (filteredTargetRows.length) {
+    participantSource = "target";
+    participantRows = filteredTargetRows;
+  } else if (filteredRosterRows.length) {
+    participantSource = "roster";
+    participantRows = filteredRosterRows;
+  }
+
+  const participantRowsByPupil = new Map();
+  const anonymousParticipantRows = [];
+  for (const row of participantRows) {
+    const pupilId = getRowPupilId(row);
+    if (!pupilId) {
+      anonymousParticipantRows.push(row);
+      continue;
+    }
+    const next = participantRowsByPupil.get(pupilId) || [];
+    next.push(row);
+    participantRowsByPupil.set(pupilId, next);
+  }
+
+  const statusRowsByPupil = new Map();
+  for (const row of filteredStatusRows) {
+    const pupilId = getRowPupilId(row);
+    if (!pupilId) continue;
+    const next = statusRowsByPupil.get(pupilId) || [];
+    next.push(row);
+    statusRowsByPupil.set(pupilId, next);
+  }
+
+  const groups = {
+    completed: [],
+    in_progress: [],
+    not_started: [],
+    check_data: [],
+  };
+  for (const [pupilId, rows] of participantRowsByPupil.entries()) {
+    const followUpRow = buildPupilFollowUpRow({
+      pupilId,
+      participantSource,
+      participantRows: rows,
+      statusRows: statusRowsByPupil.get(pupilId) || [],
+    });
+    groups[followUpRow.groupKey].push(followUpRow);
+  }
+  for (const row of anonymousParticipantRows) {
+    groups.check_data.push(buildPupilFollowUpRow({
+      participantSource,
+      participantRows: [row],
+      forceCheckReason: "missing_pupil_id",
+    }));
+  }
+
+  for (const rows of Object.values(groups)) {
+    rows.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  const counts = {
+    completed: groups.completed.length,
+    in_progress: groups.in_progress.length,
+    not_started: groups.not_started.length,
+    check_data: groups.check_data.length,
+  };
+  counts.total = counts.completed + counts.in_progress + counts.not_started + counts.check_data;
+
+  return {
+    assignmentId,
+    classId,
+    participantSource: participantRows.length ? participantSource : "none",
+    groups,
+    counts,
+    totalKnownParticipants: counts.total,
+    decisionHint: getPupilFollowUpDecisionHint(lifecycle, counts),
+  };
 }
 
 function getAssignmentDueAt(assignment = {}) {
@@ -466,11 +733,10 @@ export function groupAssignmentLifecycleInputs({
   const rosterByClass = new Map();
   for (const row of Array.isArray(membershipRows) ? membershipRows : []) {
     const classId = getRowClassId(row);
-    const pupilId = getRowPupilId(row);
-    if (!classId || !pupilId) continue;
+    if (!classId) continue;
     const next = rosterByClass.get(classId) || [];
-    next.push(pupilId);
-    rosterByClass.set(classId, uniqueIds(next));
+    next.push(row);
+    rosterByClass.set(classId, next);
   }
 
   return Object.fromEntries(
@@ -479,16 +745,29 @@ export function groupAssignmentLifecycleInputs({
         const assignmentId = cleanId(assignment?.id);
         if (!assignmentId) return null;
         const classId = cleanId(assignment?.class_id || assignment?.classId);
+        const assignmentStatusRows = statusesByAssignment.get(assignmentId) || [];
+        const assignmentTargetRows = targetsByAssignment.get(assignmentId) || [];
+        const assignmentRosterRows = rosterByClass.get(classId) || [];
+        const lifecycle = buildAssignmentLifecycleModel({
+          assignment,
+          statusRows: assignmentStatusRows,
+          targetRows: assignmentTargetRows,
+          rosterPupilIds: assignmentRosterRows.map(getRowPupilId),
+          now,
+          staleDays,
+        });
         return [
           assignmentId,
-          buildAssignmentLifecycleModel({
-            assignment,
-            statusRows: statusesByAssignment.get(assignmentId) || [],
-            targetRows: targetsByAssignment.get(assignmentId) || [],
-            rosterPupilIds: rosterByClass.get(classId) || [],
-            now,
-            staleDays,
-          }),
+          {
+            ...lifecycle,
+            pupilFollowUp: buildAssignmentPupilFollowUpModel({
+              assignment,
+              lifecycle,
+              statusRows: assignmentStatusRows,
+              targetRows: assignmentTargetRows,
+              rosterRows: assignmentRosterRows,
+            }),
+          },
         ];
       })
       .filter(Boolean)
