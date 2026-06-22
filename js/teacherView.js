@@ -789,6 +789,7 @@ let groupComparisonRequestId = 0;
 let staffAccessDirectoryRequestId = 0;
 let staffAccessDetailsRequestId = 0;
 let bankMonitorRequestId = 0;
+let dashboardRenderId = 0;
 let visualAnalyticsDerivedCache = {
   sourceData: null,
   grapheme: "",
@@ -3031,10 +3032,10 @@ async function handleCommitStaffAccessImport() {
   }
 }
 
-async function loadPupilOnboardingPreflight() {
+async function loadPupilOnboardingPreflight({ repaint = true } = {}) {
   state.pupilOnboarding.preflightLoading = true;
   state.pupilOnboarding.preflightError = "";
-  if (rootEl?.isConnected) paint();
+  if (repaint && rootEl?.isConnected) paint();
 
   try {
     state.pupilOnboarding.preflight = await readPupilImportDuplicatePreflight();
@@ -3044,7 +3045,7 @@ async function loadPupilOnboardingPreflight() {
     state.pupilOnboarding.preflightError = error?.message || "Could not review pupil directory duplicates.";
   } finally {
     state.pupilOnboarding.preflightLoading = false;
-    if (rootEl?.isConnected) paint();
+    if (repaint && rootEl?.isConnected) paint();
   }
 }
 
@@ -5177,12 +5178,80 @@ function getAssignmentWatchLabel(analytics) {
   return analytics?.weakGraphemes?.[0]?.target || analytics?.hardestWords?.[0]?.word || "--";
 }
 
-export async function renderTeacherDashboard(containerEl) {
+function reportTeacherDashboardStage(onStage, stage) {
+  if (typeof onStage !== "function") return;
+  try {
+    onStage(stage);
+  } catch (error) {
+    console.warn("teacher dashboard stage reporter error:", error);
+  }
+}
+
+function isCurrentTeacherDashboardRender({
+  renderId,
+  containerEl,
+  userId,
+} = {}) {
+  return renderId === dashboardRenderId
+    && rootEl === containerEl
+    && !!rootEl?.isConnected
+    && String(state.user?.id || "") === String(userId || "");
+}
+
+async function runDeferredTeacherDashboardTask(label, renderContext, task) {
+  if (!isCurrentTeacherDashboardRender(renderContext)) return;
+  try {
+    await task();
+  } catch (error) {
+    console.error(`deferred teacher dashboard ${label} error:`, error);
+  } finally {
+    if (isCurrentTeacherDashboardRender(renderContext)) paint();
+  }
+}
+
+async function runDeferredTeacherDashboardEnrichment(renderContext) {
+  const tasks = [
+    runDeferredTeacherDashboardTask("analytics", renderContext, async () => {
+      await refreshVisualAnalyticsSummary();
+      if (
+        isCurrentTeacherDashboardRender(renderContext)
+        && state.visualAnalytics.summaryOpen
+      ) {
+        openVisualSummaryForScope(state.analyticsAssistant.scopeType, state.analyticsAssistant.scopeId);
+      }
+    }),
+    runDeferredTeacherDashboardTask("analytics history", renderContext, () =>
+      loadAnalyticsAssistantThreads(renderContext.userId)
+    ),
+  ];
+
+  if (canManageRoles()) {
+    tasks.push(
+      runDeferredTeacherDashboardTask("staff directory", renderContext, () =>
+        loadStaffAccessDirectory()
+      )
+    );
+  }
+
+  if (canImportCsv()) {
+    tasks.push(
+      runDeferredTeacherDashboardTask("pupil import preflight", renderContext, () =>
+        loadPupilOnboardingPreflight({ repaint: false })
+      )
+    );
+  }
+
+  await Promise.allSettled(tasks);
+}
+
+export async function renderTeacherDashboard(containerEl, { onStage } = {}) {
   if (!containerEl) return;
+  const renderId = ++dashboardRenderId;
   rootEl = containerEl;
 
   injectStyles();
   await initialiseUser();
+  reportTeacherDashboardStage(onStage, "user");
 
   if (!state.user) {
     rootEl.innerHTML = `
@@ -5194,7 +5263,10 @@ export async function renderTeacherDashboard(containerEl) {
     return;
   }
 
-  await loadDashboardData();
+  await loadDashboardData({
+    deferEnrichment: true,
+    onStage,
+  });
   applyUrlState();
   paint();
 
@@ -5203,6 +5275,14 @@ export async function renderTeacherDashboard(containerEl) {
     eventsBound = true;
   }
 
+  reportTeacherDashboardStage(onStage, "first_paint");
+  const renderContext = {
+    renderId,
+    containerEl,
+    userId: String(state.user.id || ""),
+  };
+  reportTeacherDashboardStage(onStage, "deferred_enrichment");
+  void runDeferredTeacherDashboardEnrichment(renderContext);
   void ensureDefaultGroupComparisonLoaded();
 }
 
@@ -5333,17 +5413,20 @@ async function applyInterventionGroupFilters({ force = false, allowBroad = false
   if (rootEl?.isConnected) paint();
 }
 
-async function loadDashboardData() {
+async function loadDashboardData({
+  deferEnrichment = false,
+  onStage = null,
+} = {}) {
   const teacherId = state.user.id;
   const accessContext = await readStaffAccessContext();
   state.accessContext = accessContext || createDefaultAccessContext(teacherId);
+  reportTeacherDashboardStage(onStage, "access_context");
   const canLoadAutomationRuns = canManageAutomation();
 
-  const [classes, tests, assignments, _analyticsThreads, classPolicies, appRole, automationPolicies, automationRecentRuns] = await Promise.all([
+  const [classes, tests, assignments, classPolicies, appRole, automationPolicies, automationRecentRuns] = await Promise.all([
     loadClasses(),
     loadTests(),
     loadAssignments(),
-    loadAnalyticsAssistantThreads(teacherId),
     listClassAutoAssignPolicies(),
     readTeacherAppRole(),
     listPersonalisedAutomationPolicies({ includeArchived: true }),
@@ -5351,12 +5434,14 @@ async function loadDashboardData() {
       ? listRecentPersonalisedGenerationRuns({ limit: 20, includePupilRows: true })
       : Promise.resolve([]),
   ]);
+  reportTeacherDashboardStage(onStage, "core_data");
 
   state.classes = classes;
   state.tests = tests;
   syncSelectedTestIdsWithLoadedTests();
   state.assignments = sortAssignmentsForAttention(assignments);
   await refreshAssignmentLifecycleSummaries();
+  reportTeacherDashboardStage(onStage, "lifecycle_summary");
   state.appRole = appRole;
   state.classPoliciesByClassId = buildClassPoliciesByClassId(classPolicies);
   setAutomationPolicies(automationPolicies);
@@ -5401,24 +5486,30 @@ async function loadDashboardData() {
     Object.entries(state.assignmentLifecycle.closeConfirmByAssignmentId || {})
       .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
   );
-  await refreshVisualAnalyticsSummary();
-  if (state.visualAnalytics.summaryOpen) {
-    openVisualSummaryForScope(state.analyticsAssistant.scopeType, state.analyticsAssistant.scopeId);
-  }
 
   if (profileSyncNotice?.message) {
     showNotice(profileSyncNotice.message, profileSyncNotice.kind || "info");
   }
 
   if (canManageRoles()) {
-    await loadStaffAccessDirectory();
+    if (deferEnrichment) {
+      state.staffAccess.loadingDirectory = true;
+      state.staffAccess.error = "";
+    } else {
+      await loadStaffAccessDirectory();
+    }
   } else {
     state.staffAccess = createDefaultStaffAccessState();
     state.sections.staffAccess = false;
   }
 
   if (canImportCsv()) {
-    await loadPupilOnboardingPreflight();
+    if (deferEnrichment) {
+      state.pupilOnboarding.preflightLoading = true;
+      state.pupilOnboarding.preflightError = "";
+    } else {
+      await loadPupilOnboardingPreflight();
+    }
   } else {
     state.pupilOnboarding = createDefaultPupilOnboardingState();
     state.sections.pupilOnboarding = false;
@@ -5426,6 +5517,23 @@ async function loadDashboardData() {
   if (!canViewWordloomCoreBankMonitor()) {
     state.bankMonitor = createDefaultBankMonitorState();
     state.sections.bankMonitor = false;
+  }
+
+  if (deferEnrichment) {
+    state.visualAnalytics = {
+      ...state.visualAnalytics,
+      status: "loading",
+      message: "",
+    };
+    state.analyticsAssistant.threadsLoading = true;
+  } else {
+    await Promise.all([
+      refreshVisualAnalyticsSummary(),
+      loadAnalyticsAssistantThreads(teacherId),
+    ]);
+    if (state.visualAnalytics.summaryOpen) {
+      openVisualSummaryForScope(state.analyticsAssistant.scopeType, state.analyticsAssistant.scopeId);
+    }
   }
 }
 

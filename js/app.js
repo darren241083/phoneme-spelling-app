@@ -77,7 +77,7 @@ function loadTeacherDashboard() {
   teacherDashboardPromise = getCachedImport(
     teacherDashboardPromise,
     async () => {
-      const module = await import("./teacherView.js?v=7.01");
+      const module = await import("./teacherView.js?v=7.02");
       return module.renderTeacherDashboard;
     },
     () => {
@@ -160,12 +160,12 @@ function shouldSkipAuthRouteForEvent({
   teacherDashboardVisible = false,
 } = {}) {
   const event = String(authEvent || "").trim().toUpperCase();
-  if (event === "TOKEN_REFRESHED") return true;
-  return event === "SIGNED_IN"
-    && String(role || "") === "teacher"
+  const completedTeacherDashboardMatchesSession = String(role || "") === "teacher"
     && teacherDashboardVisible === true
     && !!String(currentTeacherUserId || "").trim()
     && String(sessionUserId || "").trim() === String(currentTeacherUserId || "").trim();
+  return (event === "TOKEN_REFRESHED" || event === "SIGNED_IN")
+    && completedTeacherDashboardMatchesSession;
 }
 
 async function bindAuthStateListener() {
@@ -268,12 +268,48 @@ function showPupilDashboard() {
   btnSignOut.style.display = "inline-block";
 }
 
-function withTimeout(promise, ms, label = "operation") {
+function withTimeout(promise, ms, label = "operation", {
+  getLastStage = null,
+  logLateOutcome = false,
+} = {}) {
   let timeoutId = null;
+  let timedOut = false;
+  const observedPromise = Promise.resolve(promise);
+
+  if (logLateOutcome) {
+    observedPromise.then(
+      () => {
+        if (!timedOut) return;
+        console.warn(`${label} resolved after timeout`, {
+          lastStage: typeof getLastStage === "function" ? getLastStage() : "",
+        });
+      },
+      (error) => {
+        if (!timedOut) return;
+        console.error(`${label} rejected after timeout`, {
+          lastStage: typeof getLastStage === "function" ? getLastStage() : "",
+          error,
+        });
+      },
+    );
+  }
+
   const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      const lastStage = typeof getLastStage === "function"
+        ? String(getLastStage() || "").trim()
+        : "";
+      console.error(`${label} timed out`, {
+        timeoutMs: ms,
+        lastStage,
+      });
+      reject(new Error(
+        `${label} timed out after ${ms}ms${lastStage ? ` (last stage: ${lastStage})` : ""}`
+      ));
+    }, ms);
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+  return Promise.race([observedPromise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 function escapeHtml(str) {
@@ -374,7 +410,16 @@ async function route() {
 
     try {
       const renderTeacherDashboard = await withTimeout(loadTeacherDashboard(), 5000, "load teacher dashboard");
-      await withTimeout(renderTeacherDashboard(viewTeacher), 8000, "renderTeacherDashboard");
+      let lastRenderStage = "starting";
+      const renderPromise = renderTeacherDashboard(viewTeacher, {
+        onStage(stage) {
+          lastRenderStage = String(stage || lastRenderStage);
+        },
+      });
+      await withTimeout(renderPromise, 8000, "renderTeacherDashboard", {
+        getLastStage: () => lastRenderStage,
+        logLateOutcome: true,
+      });
       displayedTeacherUserId = String(session.user.id || "").trim();
     } catch (error) {
       displayedTeacherUserId = "";
