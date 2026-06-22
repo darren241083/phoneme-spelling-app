@@ -173,7 +173,7 @@ import {
   getAssignmentLifecycleSectionKey,
   groupAssignmentLifecycleInputs,
   validateAssignmentDueDateExtension,
-} from "./assignmentLifecycleView.js?v=1.3";
+} from "./assignmentLifecycleView.js?v=1.4";
 import {
   AUTO_ASSIGN_POLICY_DEFAULTS,
   AUTO_ASSIGN_POLICY_LENGTH_MAX,
@@ -751,6 +751,7 @@ const state = {
     manualAssignClassByTestId: {},
     dueDateEditByAssignmentId: {},
     closeConfirmByAssignmentId: {},
+    pupilFollowUpOpenByAssignmentId: {},
   },
   classResultsUi: {
     rangeByClass: {},
@@ -5485,6 +5486,12 @@ async function loadDashboardData({
   state.assignmentLifecycle.closeConfirmByAssignmentId = Object.fromEntries(
     Object.entries(state.assignmentLifecycle.closeConfirmByAssignmentId || {})
       .filter(([assignmentId]) => state.assignments.some((item) => String(item.id) === String(assignmentId)))
+  );
+  state.assignmentLifecycle.pupilFollowUpOpenByAssignmentId = Object.fromEntries(
+    Object.entries(state.assignmentLifecycle.pupilFollowUpOpenByAssignmentId || {})
+      .filter(([assignmentId, isOpen]) =>
+        isOpen && state.assignments.some((item) => String(item.id) === String(assignmentId))
+      )
   );
 
   if (profileSyncNotice?.message) {
@@ -11730,6 +11737,11 @@ async function onRootClick(event) {
       state.activePanel?.type === "results-assignment" &&
       String(state.activePanel.id) === String(assignmentId);
 
+    if (!wasSame) {
+      clearAssignmentPupilFollowUpOpen(assignmentId);
+      clearAssignmentDueDateEditState(assignmentId);
+      clearAssignmentCloseConfirmState(assignmentId);
+    }
     togglePanelWithAnchoredScroll({
       type: "results-assignment",
       id: assignmentId,
@@ -11738,6 +11750,25 @@ async function onRootClick(event) {
     if (!wasSame) {
       await ensureAssignmentAnalytics(assignmentId, { force: true });
     }
+    return;
+  }
+
+  if (action === "toggle-assignment-pupil-follow-up") {
+    const assignmentId = button.dataset.assignmentId;
+    if (!assignmentId) return;
+    const nextOpen = !isAssignmentPupilFollowUpOpen(assignmentId);
+    if (nextOpen) {
+      clearAssignmentDueDateEditState(assignmentId);
+      clearAssignmentCloseConfirmState(assignmentId);
+      if (
+        state.activePanel?.type === "results-assignment"
+        && String(state.activePanel.id) === String(assignmentId)
+      ) {
+        state.activePanel = null;
+      }
+    }
+    setAssignmentPupilFollowUpOpen(assignmentId, nextOpen);
+    refreshAssignmentLifecycleCard(assignmentId, { focusPupilFollowUpToggle: true });
     return;
   }
 
@@ -24266,6 +24297,24 @@ function clearAssignmentDueDateEditState(assignmentId = "") {
   state.assignmentLifecycle.dueDateEditByAssignmentId = next;
 }
 
+function isAssignmentPupilFollowUpOpen(assignmentId = "") {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  return !!(safeAssignmentId && state.assignmentLifecycle.pupilFollowUpOpenByAssignmentId?.[safeAssignmentId]);
+}
+
+function setAssignmentPupilFollowUpOpen(assignmentId = "", isOpen = false) {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId) return;
+  const next = { ...(state.assignmentLifecycle.pupilFollowUpOpenByAssignmentId || {}) };
+  if (isOpen) next[safeAssignmentId] = true;
+  else delete next[safeAssignmentId];
+  state.assignmentLifecycle.pupilFollowUpOpenByAssignmentId = next;
+}
+
+function clearAssignmentPupilFollowUpOpen(assignmentId = "") {
+  setAssignmentPupilFollowUpOpen(assignmentId, false);
+}
+
 function setAssignmentCloseConfirmState(assignmentId = "", nextState = {}) {
   const safeAssignmentId = String(assignmentId || "").trim();
   if (!safeAssignmentId) return;
@@ -24349,6 +24398,13 @@ function openAssignmentDueDateEdit(assignmentId = "") {
     return;
   }
 
+  clearAssignmentPupilFollowUpOpen(editModel.assignmentId);
+  if (
+    state.activePanel?.type === "results-assignment"
+    && String(state.activePanel.id) === String(editModel.assignmentId)
+  ) {
+    state.activePanel = null;
+  }
   setAssignmentDueDateEditState(editModel.assignmentId, {
     value: toAssignmentDueDateInputValue(editModel.currentDueAt),
     status: "idle",
@@ -24365,6 +24421,13 @@ function openAssignmentCloseConfirm(assignmentId = "") {
     return;
   }
 
+  clearAssignmentPupilFollowUpOpen(closeModel.assignmentId);
+  if (
+    state.activePanel?.type === "results-assignment"
+    && String(state.activePanel.id) === String(closeModel.assignmentId)
+  ) {
+    state.activePanel = null;
+  }
   clearAssignmentDueDateEditState(closeModel.assignmentId);
   setAssignmentCloseConfirmState(closeModel.assignmentId, {
     status: "idle",
@@ -24627,6 +24690,36 @@ function refreshAssignmentLifecycleUi({
       if (focusTarget instanceof HTMLElement) focusTarget.focus();
     });
   }
+  return true;
+}
+
+function refreshAssignmentLifecycleCard(assignmentId = "", {
+  focusPupilFollowUpToggle = false,
+} = {}) {
+  const safeAssignmentId = String(assignmentId || "").trim();
+  if (!safeAssignmentId || !rootEl) return false;
+  const currentCard = Array.from(rootEl.querySelectorAll("[data-assignment-card-id]"))
+    .find((card) => String(card?.dataset?.assignmentCardId || "") === safeAssignmentId);
+  const assignment = findAssignmentRecord(safeAssignmentId);
+  if (!(currentCard instanceof HTMLElement) || !assignment) return false;
+
+  const beforeTop = currentCard.getBoundingClientRect().top;
+  const template = document.createElement("template");
+  template.innerHTML = renderAssignmentCardCompact(assignment).trim();
+  const nextCard = template.content.firstElementChild;
+  if (!(nextCard instanceof HTMLElement)) return false;
+
+  currentCard.replaceWith(nextCard);
+  requestAnimationFrame(() => {
+    if (!nextCard.isConnected) return;
+    const afterTop = nextCard.getBoundingClientRect().top;
+    const delta = afterTop - beforeTop;
+    if (Math.abs(delta) > 1) window.scrollBy(0, delta);
+    if (focusPupilFollowUpToggle) {
+      const toggle = nextCard.querySelector('[data-action="toggle-assignment-pupil-follow-up"]');
+      if (toggle instanceof HTMLElement) toggle.focus({ preventScroll: true });
+    }
+  });
   return true;
 }
 
@@ -26690,6 +26783,166 @@ function formatAssignmentLifecycleProgressLabel(lifecycle, analytics = null) {
   return "Progress pending";
 }
 
+function buildAssignmentPupilFollowUpDisplayModel(lifecycle = null) {
+  const followUp = lifecycle?.pupilFollowUp;
+  const groups = followUp?.groups;
+  if (!followUp || !groups || typeof groups !== "object") {
+    return { available: false, summaryItems: [], sections: [] };
+  }
+
+  const definitions = {
+    completed: { label: "completed", heading: "Completed" },
+    in_progress: { label: "in progress", heading: "In progress" },
+    not_started: { label: "not started", heading: "Not started" },
+    check_data: { label: "to check", heading: "Check data" },
+  };
+  const rowsByKey = Object.fromEntries(
+    Object.keys(definitions).map((key) => [key, Array.isArray(groups[key]) ? groups[key] : []])
+  );
+  const counts = Object.fromEntries(
+    Object.keys(definitions).map((key) => {
+      const storedCount = Number(followUp?.counts?.[key]);
+      return [key, Number.isFinite(storedCount) ? Math.max(0, storedCount) : rowsByKey[key].length];
+    })
+  );
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  if (!total) return { available: false, summaryItems: [], sections: [] };
+
+  const summaryOrder = ["completed", "in_progress", "not_started", "check_data"];
+  const sectionOrder = ["in_progress", "not_started", "check_data", "completed"];
+  const incompleteCount = counts.in_progress + counts.not_started + counts.check_data;
+
+  return {
+    available: true,
+    total,
+    incompleteCount,
+    hasIncomplete: incompleteCount > 0,
+    decisionHint: String(followUp?.decisionHint?.text || "").trim(),
+    summaryItems: summaryOrder
+      .filter((key) => counts[key] > 0)
+      .map((key) => ({ key, count: counts[key], label: definitions[key].label })),
+    sections: sectionOrder
+      .filter((key) => rowsByKey[key].length > 0)
+      .map((key) => ({
+        key,
+        heading: definitions[key].heading,
+        count: counts[key],
+        rows: rowsByKey[key],
+        collapsed: key === "completed" && incompleteCount > 0,
+      })),
+  };
+}
+
+function getAssignmentPupilFollowUpIds(assignmentId = "") {
+  const safeId = String(assignmentId || "").trim().replace(/[^a-z0-9_-]+/gi, "-") || "assignment";
+  return {
+    buttonId: `assignment-pupil-follow-up-toggle-${safeId}`,
+    panelId: `assignment-pupil-follow-up-panel-${safeId}`,
+  };
+}
+
+function getAssignmentPupilFollowUpRowMeta(row = {}, sectionKey = "") {
+  const lastActivityAt = row?.lastActivityAt;
+  if (lastActivityAt) {
+    if (sectionKey === "completed") return `Completed ${formatDate(lastActivityAt)}`;
+    return `Last activity ${formatDate(lastActivityAt)}`;
+  }
+  if (sectionKey === "not_started") return "Not started";
+  if (sectionKey === "check_data") return "Pupil information needs checking";
+  if (sectionKey === "completed") return "Completed";
+  return "In progress";
+}
+
+function renderAssignmentPupilFollowUpPerson(row = {}, sectionKey = "") {
+  const displayName = String(row?.displayName || "Pupil record unavailable").trim() || "Pupil record unavailable";
+  const username = String(row?.username || "").trim();
+  return `
+    <li class="td-assignment-follow-up-person">
+      <div>
+        <strong>${escapeHtml(displayName)}</strong>
+        ${username ? `<span>${escapeHtml(`Username ${username}`)}</span>` : ""}
+      </div>
+      <span>${escapeHtml(getAssignmentPupilFollowUpRowMeta(row, sectionKey))}</span>
+    </li>
+  `;
+}
+
+function renderAssignmentPupilFollowUpSection(section = {}) {
+  const list = `
+    <ul class="td-assignment-follow-up-list">
+      ${(section.rows || []).map((row) => renderAssignmentPupilFollowUpPerson(row, section.key)).join("")}
+    </ul>
+  `;
+  if (section.collapsed) {
+    return `
+      <details class="td-assignment-follow-up-completed">
+        <summary>
+          <span>${escapeHtml(section.heading || "Completed")}</span>
+          <span>${escapeHtml(String(section.count || 0))}</span>
+        </summary>
+        ${list}
+      </details>
+    `;
+  }
+  return `
+    <section class="td-assignment-follow-up-section">
+      <div class="td-assignment-follow-up-section-head">
+        <h5>${escapeHtml(section.heading || "")}</h5>
+        <span>${escapeHtml(String(section.count || 0))}</span>
+      </div>
+      ${list}
+    </section>
+  `;
+}
+
+function renderAssignmentPupilFollowUpSummary(assignmentId = "", lifecycle = null, isOpen = false) {
+  const model = buildAssignmentPupilFollowUpDisplayModel(lifecycle);
+  if (!model.available) return "";
+  const ids = getAssignmentPupilFollowUpIds(assignmentId);
+  return `
+    <div class="td-assignment-follow-up-summary">
+      <div class="td-assignment-follow-up-counts" aria-label="Pupil assignment progress">
+        ${model.summaryItems.map((item) => `
+          <span class="td-assignment-follow-up-count td-assignment-follow-up-count--${escapeAttr(item.key)}">
+            <strong>${escapeHtml(String(item.count))}</strong> ${escapeHtml(item.label)}
+          </span>
+        `).join("")}
+      </div>
+      <button
+        id="${escapeAttr(ids.buttonId)}"
+        class="td-assignment-follow-up-toggle"
+        type="button"
+        data-action="toggle-assignment-pupil-follow-up"
+        data-assignment-id="${escapeAttr(assignmentId)}"
+        aria-expanded="${isOpen ? "true" : "false"}"
+        aria-controls="${escapeAttr(ids.panelId)}"
+      >
+        ${escapeHtml(isOpen ? "Hide pupils" : "View pupils")}
+      </button>
+    </div>
+  `;
+}
+
+function renderAssignmentPupilFollowUpPanel(assignmentId = "", lifecycle = null, isOpen = false) {
+  if (!isOpen) return "";
+  const model = buildAssignmentPupilFollowUpDisplayModel(lifecycle);
+  if (!model.available) return "";
+  const ids = getAssignmentPupilFollowUpIds(assignmentId);
+  return `
+    <div
+      id="${escapeAttr(ids.panelId)}"
+      class="td-inline-panel td-inline-panel--attached td-inline-panel--calm td-assignment-follow-up-panel"
+      role="region"
+      aria-labelledby="${escapeAttr(ids.buttonId)}"
+    >
+      ${model.decisionHint ? `<p class="td-assignment-follow-up-hint">${escapeHtml(model.decisionHint)}</p>` : ""}
+      <div class="td-assignment-follow-up-sections">
+        ${model.sections.map(renderAssignmentPupilFollowUpSection).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function formatAssignmentLifecycleTargetLabel(lifecycle) {
   const targeted = Math.max(0, Number(lifecycle?.targetedPupilCount || 0));
   const total = Math.max(0, Number(lifecycle?.totalPupilCount || 0));
@@ -26852,11 +27105,13 @@ function renderAssignmentCardCompact(item) {
   const resultsFraming = getAssignmentResultsFraming(item);
   const provenanceLine = getAssignmentProvenanceLine(item);
   const lifecycle = getAssignmentLifecycleModel(item);
+  const pupilFollowUpModel = buildAssignmentPupilFollowUpDisplayModel(lifecycle);
+  const isPupilFollowUpOpen = pupilFollowUpModel.available && isAssignmentPupilFollowUpOpen(assignmentId);
   const isResultsOpen =
     state.activePanel?.type === "results-assignment" &&
     String(state.activePanel.id) === assignmentId;
 
-  const isActive = isResultsOpen;
+  const isActive = isResultsOpen || isPupilFollowUpOpen;
   const analyticsReady = state.analyticsByAssignment[assignmentId]?.status === "ready";
   const analytics = analyticsReady ? state.analyticsByAssignment[assignmentId].data.current : null;
   const dueAt = lifecycle?.dueAt || item.deadline || item.end_at || item.endAt || "";
@@ -26869,7 +27124,7 @@ function renderAssignmentCardCompact(item) {
   const dueDateEditState = getAssignmentDueDateEditState(assignmentId);
   const closeModel = buildAssignmentCloseModelForRecord(item);
   const closeState = getAssignmentCloseConfirmState(assignmentId);
-  const isClosedStaleState = !isResultsOpen && (lifecycleKey === "expired" || lifecycleKey === "stale");
+  const isClosedStaleState = !isActive && (lifecycleKey === "expired" || lifecycleKey === "stale");
   const cardClasses = [
     "td-assignment-card",
     "td-assignment-card--lifecycle",
@@ -26892,8 +27147,9 @@ function renderAssignmentCardCompact(item) {
           <div class="td-assignment-meta td-assignment-meta--stack td-assignment-meta--compact">
             ${renderAssignmentLifecycleBadge(lifecycle)}
             <span class="td-assignment-chip">${renderIconLabel("calendar", dueLabel)}</span>
-            <span class="td-assignment-chip">${renderIconLabel("checkCircle", progressLabel)}</span>
+            ${pupilFollowUpModel.available ? "" : `<span class="td-assignment-chip">${renderIconLabel("checkCircle", progressLabel)}</span>`}
           </div>
+          ${renderAssignmentPupilFollowUpSummary(assignmentId, lifecycle, isPupilFollowUpOpen)}
           ${isResultsOpen ? renderAssignmentLifecycleSecondaryDetails(item, lifecycle, analytics) : renderAssignmentLifecycleSignal(lifecycle)}
         </div>
 
@@ -26929,6 +27185,7 @@ function renderAssignmentCardCompact(item) {
         </div>
       </div>
 
+      ${renderAssignmentPupilFollowUpPanel(assignmentId, lifecycle, isPupilFollowUpOpen)}
       ${renderAssignmentDueDateEditPanel(item, dueDateEditModel)}
       ${renderAssignmentCloseConfirmPanel(item, closeModel)}
       ${isResultsOpen ? renderAssignmentResultsPanelCalm(item) : ""}
@@ -33517,6 +33774,203 @@ function injectStyles() {
       line-height:1.35;
     }
 
+    .td-assignment-follow-up-summary{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px 14px;
+      margin-top:10px;
+      padding-top:10px;
+      border-top:1px solid #eef2f7;
+    }
+
+    .td-assignment-follow-up-counts{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:5px 0;
+      color:#64748b;
+      font-size:0.84rem;
+      font-weight:600;
+      line-height:1.35;
+    }
+
+    .td-assignment-follow-up-count{
+      display:inline-flex;
+      align-items:center;
+      white-space:nowrap;
+    }
+
+    .td-assignment-follow-up-count + .td-assignment-follow-up-count::before{
+      content:"·";
+      margin:0 8px;
+      color:#cbd5e1;
+      font-weight:800;
+    }
+
+    .td-assignment-follow-up-count strong{
+      margin-right:3px;
+      color:#334155;
+    }
+
+    .td-assignment-follow-up-count--check_data,
+    .td-assignment-follow-up-count--check_data strong{
+      color:#92400e;
+    }
+
+    .td-assignment-follow-up-toggle{
+      flex:0 0 auto;
+      appearance:none;
+      border:0;
+      background:transparent;
+      padding:4px 2px;
+      color:#475569;
+      font:inherit;
+      font-size:0.84rem;
+      font-weight:750;
+      text-decoration:underline;
+      text-decoration-color:#cbd5e1;
+      text-underline-offset:3px;
+      cursor:pointer;
+    }
+
+    .td-assignment-follow-up-toggle:hover{
+      color:#0f172a;
+      text-decoration-color:#64748b;
+    }
+
+    .td-assignment-follow-up-toggle:focus-visible{
+      outline:3px solid rgba(37,99,235,.24);
+      outline-offset:3px;
+      border-radius:5px;
+    }
+
+    .td-assignment-follow-up-panel{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      background:#fbfdff;
+    }
+
+    .td-assignment-follow-up-hint{
+      margin:0;
+      color:#475569;
+      font-size:0.9rem;
+      line-height:1.5;
+    }
+
+    .td-assignment-follow-up-sections{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .td-assignment-follow-up-section{
+      min-width:0;
+    }
+
+    .td-assignment-follow-up-section-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:7px;
+    }
+
+    .td-assignment-follow-up-section-head h5{
+      margin:0;
+      color:#334155;
+      font-size:0.88rem;
+      font-weight:800;
+    }
+
+    .td-assignment-follow-up-section-head > span,
+    .td-assignment-follow-up-completed summary > span:last-child{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:24px;
+      min-height:24px;
+      padding:2px 7px;
+      border-radius:999px;
+      background:#eef2f7;
+      color:#64748b;
+      font-size:0.78rem;
+      font-weight:800;
+    }
+
+    .td-assignment-follow-up-list{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+      gap:7px;
+      margin:0;
+      padding:0;
+      list-style:none;
+    }
+
+    .td-assignment-follow-up-person{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      min-width:0;
+      padding:9px 10px;
+      border:1px solid #e2e8f0;
+      border-radius:11px;
+      background:#fff;
+    }
+
+    .td-assignment-follow-up-person > div{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+
+    .td-assignment-follow-up-person strong{
+      overflow-wrap:anywhere;
+      color:#1e293b;
+      font-size:0.87rem;
+      line-height:1.3;
+    }
+
+    .td-assignment-follow-up-person span{
+      color:#64748b;
+      font-size:0.76rem;
+      line-height:1.35;
+    }
+
+    .td-assignment-follow-up-person > span{
+      flex:0 0 auto;
+      max-width:45%;
+      text-align:right;
+    }
+
+    .td-assignment-follow-up-completed{
+      border-top:1px solid #e2e8f0;
+      padding-top:10px;
+    }
+
+    .td-assignment-follow-up-completed summary{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      color:#64748b;
+      font-size:0.86rem;
+      font-weight:750;
+      cursor:pointer;
+      list-style:none;
+    }
+
+    .td-assignment-follow-up-completed summary::-webkit-details-marker{
+      display:none;
+    }
+
+    .td-assignment-follow-up-completed[open] summary{
+      margin-bottom:7px;
+    }
+
     .td-assignment-due-date-panel{
       display:block;
     }
@@ -37082,6 +37536,28 @@ function injectStyles() {
 
       .td-assignment-lifecycle-group-head{
         gap:8px;
+      }
+
+      .td-assignment-follow-up-summary{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+
+      .td-assignment-follow-up-toggle{
+        align-self:flex-start;
+      }
+
+      .td-assignment-follow-up-list{
+        grid-template-columns:1fr;
+      }
+
+      .td-assignment-follow-up-person{
+        flex-direction:column;
+      }
+
+      .td-assignment-follow-up-person > span{
+        max-width:none;
+        text-align:left;
       }
 
       .td-card-actions{

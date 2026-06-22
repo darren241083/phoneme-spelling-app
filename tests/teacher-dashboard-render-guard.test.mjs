@@ -240,8 +240,39 @@ for (const [label, handlerSource] of [
   assert.equal(handlerSource.includes("if (nextFilter === getAssignment"), true);
 }
 
+const followUpHandlerStart = teacherViewSource.indexOf('if (action === "toggle-assignment-pupil-follow-up")');
+const followUpHandlerEnd = teacherViewSource.indexOf('if (action === "edit-assignment-due-date")', followUpHandlerStart);
+assert.notEqual(followUpHandlerStart, -1);
+assert.notEqual(followUpHandlerEnd, -1);
+const followUpHandler = teacherViewSource.slice(followUpHandlerStart, followUpHandlerEnd);
+assert.equal(followUpHandler.includes("refreshAssignmentLifecycleCard"), true);
+for (const forbidden of [
+  "paint();",
+  "supabase",
+  "refreshAssignmentLifecycleSummaries",
+  "ensureAssignmentAnalytics",
+  "teacherAnalyticsChat",
+  ".rpc(",
+]) {
+  assert.equal(
+    followUpHandler.includes(forbidden),
+    false,
+    `pupil follow-up toggle must not call ${forbidden}`
+  );
+}
+
+const cardRefreshStart = teacherViewSource.indexOf("function refreshAssignmentLifecycleCard(");
+const cardRefreshEnd = teacherViewSource.indexOf("function renderSectionUpcomingAssignments", cardRefreshStart);
+assert.notEqual(cardRefreshStart, -1);
+assert.notEqual(cardRefreshEnd, -1);
+const cardRefreshSource = teacherViewSource.slice(cardRefreshStart, cardRefreshEnd);
+assert.equal(cardRefreshSource.includes("replaceWith"), true);
+assert.equal(cardRefreshSource.includes("paint();"), false);
+assert.equal(cardRefreshSource.includes("supabase"), false);
+
 assert.equal(teacherViewSource.includes('data-role="assignment-lifecycle-body"'), true);
-assert.equal(appSource.includes('teacherView.js?v=7.02'), true);
-assert.equal(loginSource.includes('app.js?v=5.131'), true);
+assert.equal(teacherViewSource.includes('assignmentLifecycleView.js?v=1.4'), true);
+assert.equal(appSource.includes('teacherView.js?v=7.03'), true);
+assert.equal(loginSource.includes('app.js?v=5.132'), true);
 
 console.log("Passed teacher dashboard initial-render guard checks.");
