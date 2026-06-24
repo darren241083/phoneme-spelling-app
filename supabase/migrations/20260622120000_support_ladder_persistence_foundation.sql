@@ -1,17 +1,8 @@
 begin;
 
 alter table public.tests
-  add column if not exists delivery_model text,
+  add column if not exists delivery_model text not null default 'legacy_fixed',
   add column if not exists support_preset text;
-
-update public.tests
-set delivery_model = 'legacy_fixed'
-where delivery_model is null
-   or btrim(delivery_model) = '';
-
-alter table public.tests
-  alter column delivery_model set default 'legacy_fixed',
-  alter column delivery_model set not null;
 
 alter table public.tests
   drop constraint if exists tests_delivery_model_check,
@@ -30,17 +21,8 @@ alter table public.tests
     check (delivery_model <> 'support_ladder' or support_preset is not null);
 
 alter table public.assignments_v2
-  add column if not exists delivery_model text,
+  add column if not exists delivery_model text not null default 'legacy_fixed',
   add column if not exists support_preset text;
-
-update public.assignments_v2
-set delivery_model = 'legacy_fixed'
-where delivery_model is null
-   or btrim(delivery_model) = '';
-
-alter table public.assignments_v2
-  alter column delivery_model set default 'legacy_fixed',
-  alter column delivery_model set not null;
 
 alter table public.assignments_v2
   drop constraint if exists assignments_v2_delivery_model_check,
@@ -59,19 +41,10 @@ alter table public.assignments_v2
     check (delivery_model <> 'support_ladder' or support_preset is not null);
 
 alter table public.attempts
-  add column if not exists delivery_model text,
+  add column if not exists delivery_model text not null default 'legacy_fixed',
   add column if not exists support_state text,
   add column if not exists evidence_category text,
   add column if not exists support_actions jsonb;
-
-update public.attempts
-set delivery_model = 'legacy_fixed'
-where delivery_model is null
-   or btrim(delivery_model) = '';
-
-alter table public.attempts
-  alter column delivery_model set default 'legacy_fixed',
-  alter column delivery_model set not null;
 
 alter table public.attempts
   drop constraint if exists attempts_delivery_model_check,
