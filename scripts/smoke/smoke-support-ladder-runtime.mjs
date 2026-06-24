@@ -258,6 +258,16 @@ const ATTEMPT_SELECT = [
   "created_at",
 ].join(",");
 
+const BROWSER_LAUNCH_FIELDS = [
+  "delivery_model",
+  "support_preset",
+  "mode",
+  "question_type",
+  "attempt_source",
+  "assignmentOrigin",
+  "evidence_source",
+];
+
 let interruptRequested = false;
 let resolveManualWait = null;
 
@@ -890,6 +900,7 @@ function printVerifyReport(report, runtimeReport, gateReport, config) {
     console.log("Runtime smoke assignment visible: yes");
     console.log(`Runtime delivery_model: ${runtimeReport.assignment.delivery_model || "(missing)"}`);
     console.log(`Runtime support_preset: ${formatNullable(runtimeReport.assignment.support_preset)}`);
+    printBrowserLaunchDiagnostics(runtimeReport.assignment);
   } else {
     console.log("Runtime smoke assignment visible: no");
   }
@@ -930,6 +941,8 @@ async function runScenario(admin, runtime, config) {
 
     const runtimeReport = await inspectRuntime(runtime, config);
     assertRuntimeSupportLadder(runtimeReport, config);
+    printBrowserLaunchDiagnostics(runtimeReport.assignment);
+    assertRuntimeBrowserLaunchSupportLadder(runtimeReport.assignment);
     console.log("Runtime support-ladder visibility verified: yes");
 
     printManualInstructions(config);
@@ -1058,12 +1071,133 @@ function assertRuntimeSupportLadder(runtimeReport, config) {
   }
 }
 
+function readFirstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function normalizeRuntimeKey(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function normalizeDeliveryModel(value = "") {
+  const key = normalizeRuntimeKey(value);
+  if (key === "supportladder" || key === "ladder") return SUPPORT_DELIVERY_MODEL;
+  return key === SUPPORT_DELIVERY_MODEL ? SUPPORT_DELIVERY_MODEL : LEGACY_DELIVERY_MODEL;
+}
+
+function isExcludedBrowserLaunchSource(value = "") {
+  const key = normalizeRuntimeKey(value);
+  return key === "baseline"
+    || key === "baseline_v1"
+    || key === "baseline_v2"
+    || key === "practice"
+    || key === "learn"
+    || key === "extra_challenge"
+    || key === "spelling_bee"
+    || key === "spellingbee"
+    || key === "sample"
+    || key === "demo"
+    || key === "presenter"
+    || key === "presentation"
+    || key === "public_presentation";
+}
+
+function isAssignedBrowserLaunchSource(value = "") {
+  const key = normalizeRuntimeKey(value);
+  return key === "assigned_core"
+    || key === "teacher_assigned"
+    || key === "auto_assigned"
+    || key === "auto_generated"
+    || key === "generated"
+    || key === "test";
+}
+
+function readBrowserLaunchSourceValues(assignment = null) {
+  return [
+    assignment?.attempt_source,
+    assignment?.attemptSource,
+    assignment?.assignment_origin,
+    assignment?.assignmentOrigin,
+    assignment?.evidence_source,
+    assignment?.evidenceSource,
+  ].filter((value) => value !== undefined && value !== null && String(value).trim() !== "");
+}
+
+function getBrowserLaunchFields(assignment = null) {
+  const source = assignment && typeof assignment === "object" ? assignment : {};
+  return {
+    delivery_model: normalizeDeliveryModel(readFirstDefined(source.delivery_model, source.deliveryModel)),
+    support_preset: readFirstDefined(source.support_preset, source.supportPreset) ?? null,
+    mode: readFirstDefined(source.mode, source.assignmentMode) ?? null,
+    question_type: readFirstDefined(source.question_type, source.questionType) ?? null,
+    attempt_source: readFirstDefined(source.attempt_source, source.attemptSource) ?? null,
+    assignmentOrigin: readFirstDefined(source.assignmentOrigin, source.assignment_origin) ?? null,
+    evidence_source: readFirstDefined(source.evidence_source, source.evidenceSource) ?? null,
+  };
+}
+
+function evaluateBrowserLaunchGate(assignment = null) {
+  if (!assignment) {
+    return { deliveryModel: LEGACY_DELIVERY_MODEL, reason: "runtime assignment missing" };
+  }
+
+  const fields = getBrowserLaunchFields(assignment);
+  if (fields.delivery_model !== SUPPORT_DELIVERY_MODEL) {
+    return { deliveryModel: LEGACY_DELIVERY_MODEL, reason: "delivery_model is not support_ladder" };
+  }
+  if (!assignment.id || !assignment.class_id) {
+    return { deliveryModel: LEGACY_DELIVERY_MODEL, reason: "missing assigned dashboard context" };
+  }
+
+  const sourceValues = readBrowserLaunchSourceValues(assignment);
+  const excludedSource = sourceValues.find((value) => isExcludedBrowserLaunchSource(value));
+  if (excludedSource) {
+    return { deliveryModel: LEGACY_DELIVERY_MODEL, reason: `excluded source ${excludedSource}` };
+  }
+
+  const modeKey = normalizeRuntimeKey(fields.mode);
+  if (modeKey === "practice") {
+    const hasAssignedSource = sourceValues.some((value) => isAssignedBrowserLaunchSource(value));
+    return hasAssignedSource
+      ? { deliveryModel: SUPPORT_DELIVERY_MODEL, reason: "explicit support_ladder assigned practice-mode fixture" }
+      : { deliveryModel: LEGACY_DELIVERY_MODEL, reason: "practice mode without assigned source" };
+  }
+
+  if (isExcludedBrowserLaunchSource(fields.mode)) {
+    return { deliveryModel: LEGACY_DELIVERY_MODEL, reason: `excluded mode ${fields.mode}` };
+  }
+
+  return { deliveryModel: SUPPORT_DELIVERY_MODEL, reason: "explicit support_ladder delivery" };
+}
+
+function printBrowserLaunchDiagnostics(assignment = null) {
+  if (!assignment) return;
+  const fields = getBrowserLaunchFields(assignment);
+  const gate = evaluateBrowserLaunchGate(assignment);
+  console.log("Runtime browser launch fields:");
+  for (const field of BROWSER_LAUNCH_FIELDS) {
+    console.log(`  ${field}: ${formatNullable(fields[field])}`);
+  }
+  console.log(`Browser launch gate expected: ${gate.deliveryModel}${gate.reason ? ` (${gate.reason})` : ""}`);
+}
+
+function assertRuntimeBrowserLaunchSupportLadder(assignment = null) {
+  const gate = evaluateBrowserLaunchGate(assignment);
+  if (gate.deliveryModel !== SUPPORT_DELIVERY_MODEL) {
+    throw new Error(`Browser launch gate expected ${gate.deliveryModel}, expected ${SUPPORT_DELIVERY_MODEL}: ${gate.reason}.`);
+  }
+}
+
 function printManualInstructions(config) {
   const scenario = config.scenario;
   console.log("");
   console.log("Manual browser instructions:");
   console.log(`  Log in as smoke pupil ${PUPIL_USERNAME} with PIN ${PUPIL_PIN}.`);
   console.log("  Open the smoke assignment.");
+  console.log('  Confirm the first browser screen does not show "Question: Focus sound" or the old grapheme selector.');
   for (const step of scenario.steps) {
     console.log(`  - ${step}`);
   }

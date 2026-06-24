@@ -1396,6 +1396,33 @@ export function mountGame({
       || key === "public_presentation";
   }
 
+  function isAssignedSupportLadderSource(value = "") {
+    const key = normalizeRuntimeKey(value);
+    return key === "assigned_core"
+      || key === "teacher_assigned"
+      || key === "auto_assigned"
+      || key === "auto_generated"
+      || key === "generated"
+      || key === "test";
+  }
+
+  function readSupportLadderSourceValues(item = null) {
+    return [
+      item?.attempt_source,
+      item?.attemptSource,
+      item?.assignment_origin,
+      item?.assignmentOrigin,
+      item?.evidence_source,
+      item?.evidenceSource,
+      testMeta?.attempt_source,
+      testMeta?.attemptSource,
+      testMeta?.assignment_origin,
+      testMeta?.assignmentOrigin,
+      testMeta?.evidence_source,
+      testMeta?.evidenceSource,
+    ].filter((value) => value !== undefined && value !== null && String(value).trim() !== "");
+  }
+
   function isBaselineLikeRuntimeItem(item = null) {
     const choice = getChoice(item);
     const choiceSource = normalizeRuntimeKey(choice?.source);
@@ -1413,24 +1440,20 @@ export function mountGame({
     if (isCompetitionMode || isSampleMode || presentationMode) return true;
     if (isBaselineLikeRuntimeItem(item)) return true;
 
-    const mode = readFirstDefined(item?.mode, testMeta?.mode);
-    if (isExcludedSupportLadderSource(mode)) return true;
+    const sourceValues = readSupportLadderSourceValues(item);
+    if (sourceValues.some((value) => isExcludedSupportLadderSource(value))) return true;
 
-    const source = readFirstDefined(
-      item?.attempt_source,
-      item?.attemptSource,
-      item?.assignment_origin,
-      item?.assignmentOrigin,
-      item?.evidence_source,
-      item?.evidenceSource,
-      testMeta?.attempt_source,
-      testMeta?.attemptSource,
-      testMeta?.assignment_origin,
-      testMeta?.assignmentOrigin,
-      testMeta?.evidence_source,
-      testMeta?.evidenceSource
-    );
-    return isExcludedSupportLadderSource(source);
+    const mode = readFirstDefined(item?.mode, testMeta?.mode);
+    const modeKey = normalizeRuntimeKey(mode);
+    if (modeKey === "practice") {
+      return !isSupportLadderDelivery({
+        item,
+        testMeta,
+        assignment: testMeta,
+      }) || !sourceValues.some((value) => isAssignedSupportLadderSource(value));
+    }
+
+    return isExcludedSupportLadderSource(mode);
   }
 
   function isSupportLadderRuntimeItem(item = currentItem()) {

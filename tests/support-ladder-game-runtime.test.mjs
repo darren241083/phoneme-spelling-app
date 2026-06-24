@@ -447,6 +447,38 @@ test("support-ladder words show the small access issue control", async () => {
   assert.match(runtime.host.innerHTML, /not sure which word/i);
 });
 
+test("support-ladder smoke assignment overrides legacy practice mode", async () => {
+  const runtime = mountRuntime({
+    word: defaultWord({
+      choice: {
+        question_type: "focus_sound",
+        focus_graphemes: ["a"],
+      },
+    }),
+    testMeta: {
+      question_type: "focus_sound",
+      mode: "practice",
+      attempt_source: "teacher_assigned",
+      evidence_source: "assigned_core",
+      delivery_model: "support_ladder",
+      support_preset: "balanced",
+      max_attempts: 2,
+    },
+  });
+
+  assert.equal(runtime.host.querySelector("#promptLine").textContent, "Listen and spell the word.");
+  assert.equal(runtime.host.querySelector(".focusSoundShell"), null);
+  assert.ok(runtime.host.querySelector("#pupilAnswer"), "support ladder should use independent spelling input first");
+  assert.equal(runtime.host.querySelector("#supportLadderAccessWrap").style.display, "flex");
+
+  await submitFullRecall(runtime.host, "phase");
+
+  assert.equal(runtime.attempts.length, 1);
+  assert.equal(runtime.attempts[0].deliveryModel, "support_ladder");
+  assert.equal(runtime.attempts[0].supportState, "independent");
+  assert.equal(runtime.attempts[0].evidenceCategory, "correct_first_time");
+});
+
 test("support-ladder first attempt correct produces correct_first_time metadata", async () => {
   const runtime = mountRuntime();
 
@@ -718,7 +750,10 @@ test("legacy final incorrect behaviour still follows old max-attempt reveal", as
 test("baseline, practice, sample, and Spelling Bee contexts do not enter ladder flow", async () => {
   const cases = [
     { name: "baseline", testMeta: { attempt_source: "baseline", max_attempts: 1 } },
-    { name: "practice", testMeta: { mode: "practice", attempt_source: "practice", max_attempts: 1 } },
+    { name: "practice", testMeta: { mode: "practice", attempt_source: "practice", delivery_model: "support_ladder", support_preset: "balanced", max_attempts: 1 } },
+    { name: "learn source", testMeta: { mode: "learn", attempt_source: "learn", delivery_model: "support_ladder", support_preset: "balanced", max_attempts: 1 } },
+    { name: "extra challenge", testMeta: { mode: "test", attempt_source: "extra_challenge", evidence_source: "extra_challenge", max_attempts: 1 } },
+    { name: "presenter", testMeta: { mode: "presentation", attempt_source: "presentation", max_attempts: 1 } },
     { name: "sample", testMeta: { sample_mode: true, max_attempts: 1 }, assignmentId: null, recordAttempts: false },
     { name: "spelling bee", testMeta: { competition_mode: "spelling_bee", spelling_bee: true, max_attempts: 1 } },
   ];

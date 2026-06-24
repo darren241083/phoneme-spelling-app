@@ -18,7 +18,7 @@ import {
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
 } from "./db.js?v=1.50";
-import { mountGame } from "./game.js?v=1.45";
+import { mountGame } from "./game.js?v=1.47";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
 import { buildPreviewModel, renderPhonicsPreviewModel } from "./phonicsRenderer.js?v=1.6";
