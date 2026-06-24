@@ -526,6 +526,12 @@ async function inspectFixture(client, config) {
   if (rows.assignment && rows.assignment.evidence_source !== "assigned_core") {
     drift.push(`assignment evidence_source is ${rows.assignment.evidence_source || "null"}, expected assigned_core`);
   }
+  if (rows.assignment && rows.assignment.delivery_model !== "legacy_fixed") {
+    drift.push(`assignment delivery_model is ${rows.assignment.delivery_model || "null"}, expected legacy_fixed`);
+  }
+  if (rows.assignment && rows.assignment.support_preset !== null && rows.assignment.support_preset !== undefined) {
+    drift.push(`assignment support_preset is ${rows.assignment.support_preset}, expected null`);
+  }
   if (rows.assignment && (rows.assignment.automation_kind || rows.assignment.automation_run_id)) {
     drift.push("assignment has automation fields set; reset will clear them");
   }
@@ -552,6 +558,9 @@ async function inspectFixture(client, config) {
     Number(rows.status.score_rate || 0) !== 0
   )) {
     drift.push("assignment pupil status has score counters; reset will clear them");
+  }
+  if (rows.status && hasSupportLadderStatusSummary(rows.status)) {
+    drift.push("assignment pupil status has support-ladder counters; reset will clear them");
   }
 
   const complete = missing.length === 0;
@@ -937,6 +946,8 @@ async function ensureAssignment(client, config, teacherId, schoolId, actions) {
     automation_run_id: null,
     automation_triggered_by: null,
     evidence_source: "assigned_core",
+    delivery_model: "legacy_fixed",
+    support_preset: null,
   };
   await upsertById(client, "assignments_v2", config.ids.assignment, payload, actions, "assignment");
 }
@@ -993,6 +1004,8 @@ async function resetProgressRows(client, config, teacherId, schoolId) {
     automation_run_id: null,
     automation_triggered_by: null,
     evidence_source: "assigned_core",
+    delivery_model: "legacy_fixed",
+    support_preset: null,
   });
 
   await client.patchRows("assignment_pupil_statuses", [{ column: "id", value: config.ids.status }], {
@@ -1026,7 +1039,28 @@ function baselineStatusPayload(config, teacherId, schoolId, id) {
     average_attempts: 0,
     score_rate: 0,
     result_json: [],
+    independent_first_correct_words: null,
+    self_corrected_words: null,
+    supported_correct_words: null,
+    supported_incorrect_words: null,
+    access_issue_words: null,
+    headline_attempted_words: null,
+    headline_correct_words: null,
+    headline_score_rate: null,
   };
+}
+
+function hasSupportLadderStatusSummary(row = {}) {
+  return [
+    "independent_first_correct_words",
+    "self_corrected_words",
+    "supported_correct_words",
+    "supported_incorrect_words",
+    "access_issue_words",
+    "headline_attempted_words",
+    "headline_correct_words",
+    "headline_score_rate",
+  ].some((field) => row[field] !== null && row[field] !== undefined);
 }
 
 async function ensureDirectRow(client, table, marker, filters, payload, isSafe, actions, label) {
