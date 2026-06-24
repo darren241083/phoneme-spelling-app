@@ -11,6 +11,7 @@ const {
   isSupportLadderDelivery,
   normalizeSupportLadderState,
   recordSupportLadderAction,
+  recordSupportLadderClarification,
   resolveSupportLadderTerminalEvidence,
 } = await loadBrowserModule("../js/supportLadderRuntime.js", import.meta.url);
 
@@ -167,6 +168,78 @@ test("material support prevents independent-success classification", () => {
     assert.equal(metadata.evidenceCategory, "correct_with_support", action);
     assert.equal(metadata.correct, true, action);
   }
+});
+
+test("clarification records sentence support only when sentence is shown", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
+    sentenceShown: true,
+    meaningShown: false,
+  });
+
+  assert.equal(state.clarificationShown, true);
+  assert.deepEqual(plain(state.supportActions), ["clarification_sentence"]);
+});
+
+test("clarification records meaning support only when meaning is shown", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
+    sentenceShown: false,
+    meaningShown: true,
+  });
+
+  assert.equal(state.clarificationShown, true);
+  assert.deepEqual(plain(state.supportActions), ["meaning"]);
+});
+
+test("clarification records sentence and meaning together", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
+    sentenceShown: true,
+    meaningShown: true,
+  });
+
+  assert.equal(state.clarificationShown, true);
+  assert.deepEqual(plain(state.supportActions), ["clarification_sentence", "meaning"]);
+});
+
+test("clarification without safe content records no support action", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
+    sentenceShown: false,
+    meaningShown: false,
+  });
+
+  assert.equal(state.clarificationShown, false);
+  assert.deepEqual(plain(state.supportActions), []);
+});
+
+test("clarification support actions dedupe and stay serializable", () => {
+  const state = recordSupportLadderClarification(
+    recordSupportLadderClarification(createInitialSupportLadderState(), {
+      sentenceShown: true,
+      meaningShown: true,
+    }),
+    {
+      sentence_shown: "yes",
+      meaning_shown: "yes",
+    }
+  );
+  const roundTrip = JSON.parse(JSON.stringify(state));
+
+  assert.deepEqual(plain(normalizeSupportLadderState(roundTrip)), {
+    phase: "independent",
+    attemptNumber: 1,
+    supportActions: ["clarification_sentence", "meaning"],
+    lastSubmittedIncorrectAnswer: null,
+    clarificationShown: true,
+  });
+});
+
+test("clarification prevents independent-success classification", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
+    sentenceShown: true,
+  });
+  const metadata = buildSupportLadderResultMetadata(state, { correct: true });
+
+  assert.equal(metadata.evidenceCategory, "correct_with_support");
+  assert.equal(metadata.correct, true);
 });
 
 test("support actions dedupe and normalize consistently", () => {

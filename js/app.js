@@ -115,7 +115,7 @@ function loadPupilAuth() {
 function loadGameRuntime() {
   gameRuntimePromise = getCachedImport(
     gameRuntimePromise,
-    () => import("./game.js?v=1.45"),
+    () => import("./game.js?v=1.46"),
     () => {
       gameRuntimePromise = null;
     },

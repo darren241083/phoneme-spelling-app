@@ -1,6 +1,8 @@
 import {
   DELIVERY_MODEL_SUPPORT_LADDER,
   EVIDENCE_CATEGORY_ACCESS_ISSUE,
+  SUPPORT_ACTION_CLARIFICATION_SENTENCE,
+  SUPPORT_ACTION_MEANING,
   SUPPORT_ACTION_SEGMENTED_INPUT,
   SUPPORT_STATE_ACCESS_ISSUE,
   SUPPORT_STATE_INDEPENDENT,
@@ -201,6 +203,34 @@ export function recordSupportLadderAction(state = null, action = []) {
   return normalizeSupportLadderState({
     ...normalized,
     supportActions: nextActions,
+  });
+}
+
+export function recordSupportLadderClarification(state = null, options = {}) {
+  const source = isPlainObject(options) ? options : {};
+  const clarificationActions = [];
+  const sentenceShown = normalizeRuntimeBoolean(readRuntimeFirstDefined(
+    source.sentenceShown,
+    source.sentence_shown
+  ));
+  const meaningShown = normalizeRuntimeBoolean(readRuntimeFirstDefined(
+    source.meaningShown,
+    source.meaning_shown
+  ));
+
+  if (sentenceShown) clarificationActions.push(SUPPORT_ACTION_CLARIFICATION_SENTENCE);
+  if (meaningShown) clarificationActions.push(SUPPORT_ACTION_MEANING);
+
+  const normalized = normalizeSupportLadderState(state);
+  if (!clarificationActions.length) return normalized;
+
+  return normalizeSupportLadderState({
+    ...normalized,
+    supportActions: [
+      ...normalized.supportActions,
+      ...clarificationActions,
+    ],
+    clarificationShown: true,
   });
 }
 

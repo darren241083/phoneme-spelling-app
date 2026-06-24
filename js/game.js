@@ -33,7 +33,8 @@ import {
   createInitialSupportLadderState,
   isSupportLadderDelivery,
   normalizeSupportLadderState,
-} from "./supportLadderRuntime.js";
+  recordSupportLadderClarification,
+} from "./supportLadderRuntime.js?v=1.1";
 
 const LOOM_DECOY_COUNTS = {
   none: 0,
@@ -248,6 +249,49 @@ export function mountGame({
         border-color:rgba(var(--wl-accent-rgb),.36);
         background:var(--wl-accent-tint);
         color:var(--wl-text);
+      }
+      .gameAccessIssueWrap{
+        display:flex;
+        justify-content:center;
+        margin-top:4px;
+      }
+      .gameAccessIssueButton{
+        min-height:34px;
+        padding:7px 10px;
+        font-size:13px;
+        font-weight:700;
+      }
+      .gameClarificationPanel{
+        width:min(520px,100%);
+        margin:6px auto 0;
+        padding:10px 12px;
+        border:1px solid var(--wl-line, #e5e7eb);
+        border-radius:8px;
+        background:#fff;
+        text-align:left;
+        font-size:14px;
+        line-height:1.4;
+        box-shadow:0 8px 20px rgba(15,23,42,.06);
+      }
+      .gameClarificationIntro{
+        color:var(--wl-text-muted, #64748b);
+        margin-bottom:6px;
+      }
+      .gameClarificationRow{
+        margin-top:4px;
+        color:var(--wl-text, #111827);
+      }
+      .gameClarificationActions{
+        display:flex;
+        gap:8px;
+        justify-content:center;
+        flex-wrap:wrap;
+        margin-top:8px;
+      }
+      .gameClarificationActions .btn{
+        min-height:34px;
+        padding:7px 10px;
+        font-size:13px;
       }
       .gameShell--present .guidedPrompt{
         font-size:13px;
@@ -845,6 +889,10 @@ export function mountGame({
       <div id="promptLine" class="muted gamePromptLine" style="text-align:center;"></div>
       <div id="sentenceLine" class="muted gameSentenceLine" style="text-align:center; display:none;"></div>
       <div id="contextMeaningLine" class="muted gameContextMeaningLine" style="display:none;" aria-live="polite"></div>
+      <div id="supportLadderAccessWrap" class="gameAccessIssueWrap" style="display:none;">
+        <button id="btnSupportAccessIssue" class="btn secondary gameAccessIssueButton" type="button">I'm not sure which word you mean</button>
+      </div>
+      <div id="supportLadderClarification" class="gameClarificationPanel" style="display:none;" aria-live="polite"></div>
 
       <div class="wordProgress">
         <div class="wordProgressBar"><span id="wordProgressFill"></span></div>
@@ -910,6 +958,9 @@ export function mountGame({
   const btnCheck = $("btnCheck");
   const btnNext = $("btnNext");
   const btnExit = $("btnExit");
+  const supportLadderAccessWrap = $("supportLadderAccessWrap");
+  const btnSupportAccessIssue = $("btnSupportAccessIssue");
+  const supportLadderClarification = $("supportLadderClarification");
   const leaveConfirm = $("leaveConfirm");
   const btnLeaveContinue = $("btnLeaveContinue");
   const btnLeaveSave = $("btnLeaveSave");
@@ -1420,6 +1471,11 @@ export function mountGame({
         entry?.last_submitted_incorrect_answer,
         null
       ),
+      clarificationShown: readFirstDefined(
+        entry?.clarificationShown,
+        entry?.clarification_shown,
+        false
+      ),
     });
   }
 
@@ -1563,6 +1619,10 @@ export function mountGame({
     if (entry.completed) return true;
     if (Math.max(0, Number(entry?.attemptsUsed || 0)) > 0) return true;
     if (String(entry?.typed ?? "").trim()) return true;
+    const supportLadderState = entry?.supportLadderState || entry?.support_ladder_state || null;
+    if (supportLadderState?.clarificationShown === true) return true;
+    if (Array.isArray(supportLadderState?.supportActions) && supportLadderState.supportActions.length > 0) return true;
+    if (Array.isArray(entry?.supportActions) && entry.supportActions.length > 0) return true;
     const inputState = entry?.inputState && typeof entry.inputState === "object" ? entry.inputState : null;
     if (!inputState) return false;
 
@@ -2269,6 +2329,130 @@ export function mountGame({
     speak(visibleMeaning);
   }
 
+  function hideSupportLadderAccessControls() {
+    if (supportLadderAccessWrap) supportLadderAccessWrap.style.display = "none";
+    if (btnSupportAccessIssue) btnSupportAccessIssue.disabled = true;
+    if (supportLadderClarification) {
+      supportLadderClarification.style.display = "none";
+      supportLadderClarification.innerHTML = "";
+    }
+  }
+
+  function getSupportLadderClarificationContent(item = currentItem()) {
+    if (!item) {
+      return {
+        sentence: "",
+        meaning: "",
+        sentenceShown: false,
+        meaningShown: false,
+        hasSafeContent: false,
+      };
+    }
+
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    const sentenceShown = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
+    const meaningShown = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
+
+    return {
+      sentence: sentenceShown ? visibleSentence : "",
+      meaning: meaningShown ? visibleMeaning : "",
+      sentenceShown,
+      meaningShown,
+      hasSafeContent: sentenceShown || meaningShown,
+    };
+  }
+
+  function persistSupportLadderProgressState(item, supportState) {
+    if (!item || !supportState) return null;
+    const existingEntry = getProgressEntry(item);
+    const attemptsUsed = Math.max(
+      Math.max(0, Number(existingEntry?.completed ? 0 : existingEntry?.attemptsUsed || 0)),
+      Math.max(0, currentAttempt - 1)
+    );
+    const entry = buildStoredProgressEntry(item, {
+      completed: false,
+      correct: false,
+      typed: getCurrentTypedValue(),
+      lastSubmittedIncorrectAnswer: supportState.lastSubmittedIncorrectAnswer || existingEntry?.lastSubmittedIncorrectAnswer || null,
+      attemptsUsed,
+      attemptsAllowed: getAttemptsAllowedForItem(item),
+      questionType: resolveQuestionType(item),
+      modeKind: currentModeKind || resolveModeKind(item),
+      inputState: captureCurrentInputState(),
+      feedbackState: null,
+      index: idx + 1,
+      supportMetadata: {
+        deliveryModel: "support_ladder",
+        supportState: supportState.phase,
+        evidenceCategory: null,
+        supportActions: supportState.supportActions,
+      },
+      supportLadderState: supportState,
+    });
+    progressEntries.set(getItemStateKey(item), entry);
+    return entry;
+  }
+
+  function renderSupportLadderClarificationPanel(item = currentItem(), supportState = getSupportLadderStateForItem(item), content = null) {
+    if (!supportLadderClarification || !isSupportLadderRuntimeItem(item) || !supportState) return;
+    const resolvedContent = content || getSupportLadderClarificationContent(item);
+    const rows = [];
+    if (resolvedContent.sentenceShown) {
+      rows.push(`<div class="gameClarificationRow"><strong>Sentence:</strong> ${escapeHtml(resolvedContent.sentence)}</div>`);
+    }
+    if (resolvedContent.meaningShown) {
+      rows.push(`<div class="gameClarificationRow"><strong>Meaning:</strong> ${escapeHtml(resolvedContent.meaning)}</div>`);
+    }
+    if (!rows.length) {
+      rows.push(`<div class="gameClarificationRow">There isn't a safe clue to show for this word.</div>`);
+    }
+
+    supportLadderClarification.innerHTML = `
+      <div class="gameClarificationIntro">This might help identify the word.</div>
+      ${rows.join("")}
+      <div class="gameClarificationActions">
+        <button id="btnSupportTrySpelling" class="btn secondary" type="button">Try spelling it</button>
+        <button id="btnSupportStillNotSure" class="btn secondary" type="button">Still not sure</button>
+      </div>
+    `;
+    supportLadderClarification.style.display = "block";
+
+    $("btnSupportTrySpelling")?.addEventListener("click", () => {
+      if (supportLadderClarification) supportLadderClarification.style.display = "none";
+      focusCurrentControl();
+    });
+    $("btnSupportStillNotSure")?.addEventListener("click", () => {
+      void completeSupportLadderAccessIssue();
+    });
+  }
+
+  function renderSupportLadderAccessControls(item = currentItem(), supportState = getSupportLadderStateForItem(item)) {
+    hideSupportLadderAccessControls();
+    if (!isSupportLadderRuntimeItem(item) || !supportState || supportState.phase === "access_issue" || locked) return;
+    if (supportLadderAccessWrap) supportLadderAccessWrap.style.display = "flex";
+    if (btnSupportAccessIssue) btnSupportAccessIssue.disabled = false;
+    if (supportState.clarificationShown) {
+      renderSupportLadderClarificationPanel(item, supportState);
+    }
+  }
+
+  function showSupportLadderClarification() {
+    if (locked) return;
+    const item = currentItem();
+    if (!isSupportLadderRuntimeItem(item)) return;
+    const currentState = getSupportLadderStateForItem(item);
+    if (!currentState || currentState.phase === "access_issue") return;
+    const content = getSupportLadderClarificationContent(item);
+    const nextState = recordSupportLadderClarification(currentState, content);
+
+    persistSupportLadderProgressState(item, nextState);
+    renderSupportLadderAccessControls(item, nextState);
+    renderSupportLadderClarificationPanel(item, nextState, content);
+    scheduleProgressSync({ immediate: true });
+  }
+
   function shouldRevealOnFinalWrong(item) {
     if (isCompetitionMode) return false;
     if (!presentationMode) return true;
@@ -2718,6 +2902,7 @@ export function mountGame({
     btnListen.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
+    hideSupportLadderAccessControls();
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -4395,9 +4580,11 @@ export function mountGame({
     sentenceLine.style.display = "none";
     sentenceLine.textContent = "";
     hideNativeContextControls();
+    hideSupportLadderAccessControls();
 
     if (supportLadderState) {
       renderSupportLadderWord(item, supportLadderState);
+      renderSupportLadderAccessControls(item, supportLadderState);
     } else if (currentModeKind === "focus_sound") {
       promptLine.textContent = presentationMode
         ? "Spell the word."
@@ -4549,6 +4736,7 @@ export function mountGame({
     btnListen.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
+    hideSupportLadderAccessControls();
     btnCheck.disabled = true;
     btnCheck.style.display = "none";
     btnNext.textContent = idx >= words.length - 1 ? "Finish test" : "Next word";
@@ -4559,7 +4747,7 @@ export function mountGame({
     const resolvedWordText = String(item?.word || "").trim()
       || buildWordFromGraphemes(Array.isArray(item?.segments) ? item.segments : []);
     const resolvedFocusGrapheme = getResolvedFocusGrapheme(item);
-    const revealOnFinalWrong = !correct && shouldRevealOnFinalWrong(item);
+    const revealOnFinalWrong = correct === false && shouldRevealOnFinalWrong(item);
     const completedEntry = buildStoredProgressEntry(item, {
       completed: true,
       correct,
@@ -4585,7 +4773,7 @@ export function mountGame({
     updateHeader();
     scheduleProgressSync({ immediate: true });
 
-    if (correct) {
+    if (correct === true) {
       feedback.innerHTML = `<span class="badgeOk">Correct.</span> <span class="muted">${attemptsUsed} ${attemptsUsed === 1 ? "attempt" : "attempts"}.</span>`;
       if (isCompetitionMode) {
         btnNext.style.display = "none";
@@ -4600,6 +4788,17 @@ export function mountGame({
 
     if (revealOnFinalWrong) {
       showFinalWrongRevealState(item, completedEntry);
+      return;
+    }
+
+    if (
+      correct === null
+      && (
+        supportMetadata?.supportState === "access_issue"
+        || supportLadderState?.phase === "access_issue"
+      )
+    ) {
+      feedback.innerHTML = `<span class="muted">Thanks. We'll mark this as a word-meaning issue, not a spelling mistake.</span>`;
       return;
     }
 
@@ -4658,6 +4857,35 @@ export function mountGame({
     );
     scheduleProgressSync({ immediate: true });
     renderWord();
+  }
+
+  async function completeSupportLadderAccessIssue() {
+    if (locked) return;
+    const item = currentItem();
+    if (!isSupportLadderRuntimeItem(item)) return;
+    const currentState = getSupportLadderStateForItem(item);
+    if (!currentState) return;
+    const transition = advanceSupportLadderAfterSubmission(currentState, {
+      accessIssue: true,
+      correct: null,
+      typed: "",
+    });
+    const attemptMetadata = transition.attemptMetadata || {};
+
+    await logAttempt({
+      typed: "",
+      correct: null,
+      attemptNumber: attemptMetadata.attemptNumber || currentAttempt,
+      supportMetadata: attemptMetadata,
+    });
+
+    finishWord({
+      correct: transition.correct,
+      typed: "",
+      attemptsUsed: transition.resultMetadata?.attemptNumber || currentAttempt,
+      supportMetadata: transition.resultMetadata,
+      supportLadderState: transition.state,
+    });
   }
 
   async function check() {
@@ -5122,6 +5350,10 @@ export function mountGame({
   btnContextMeaning?.addEventListener("click", () => {
     stopAudioPlayback();
     showCurrentContextMeaning();
+  });
+  btnSupportAccessIssue?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showSupportLadderClarification();
   });
   btnCheck.addEventListener("click", check);
   btnNext.addEventListener("click", () => {
