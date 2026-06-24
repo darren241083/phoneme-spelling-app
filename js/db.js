@@ -27,6 +27,14 @@ import {
   buildTestWordContextSnapshot,
   normalizeContextWord,
 } from "./spellingContextSupport.js?v=1.2";
+import {
+  DELIVERY_MODEL_SUPPORT_LADDER,
+  normalizeDeliveryModel,
+  normalizeEvidenceCategory,
+  normalizeSupportActions,
+  normalizeSupportState,
+  summarizeEvidence,
+} from "./supportLadderEvidence.js";
 
 const ASSIGNMENT_TARGET_TABLE = "assignment_pupil_target_words";
 const ASSIGNMENT_STATUS_TABLE = "assignment_pupil_statuses";
@@ -42,6 +50,186 @@ const SPELLING_BEE_RESULT_TABLE = "spelling_bee_results";
 const STAFF_PROFILES_TABLE = "staff_profiles";
 const STAFF_IMPORT_BATCH_TABLE = "staff_import_batches";
 const PUPIL_IMPORT_BATCH_TABLE = "pupil_import_batches";
+const SUPPORT_PRESET_VALUES = new Set([
+  "balanced",
+  "independent_first",
+  "more_support_when_needed",
+]);
+
+function readFirstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function normalizeSupportPresetForPersistence(value = null) {
+  const key = String(value || "").trim().toLowerCase();
+  return SUPPORT_PRESET_VALUES.has(key) ? key : null;
+}
+
+function normalizeTriStateCorrectness(value, { legacy = false } = {}) {
+  if (value === null) return legacy ? false : null;
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  const key = String(value ?? "").trim().toLowerCase();
+  if (["true", "yes", "y", "1"].includes(key)) return true;
+  if (["false", "no", "n", "0"].includes(key)) return false;
+  return legacy ? false : null;
+}
+
+function normalizeResultDeliveryModel(entry = null, fallback = "") {
+  return normalizeDeliveryModel(readFirstDefined(
+    entry?.deliveryModel,
+    entry?.delivery_model,
+    fallback,
+  ));
+}
+
+function buildResultLadderMetadata(entry = null, fallback = {}) {
+  const deliveryModel = normalizeResultDeliveryModel(entry, fallback.deliveryModel ?? fallback.delivery_model);
+  if (deliveryModel !== DELIVERY_MODEL_SUPPORT_LADDER) return null;
+
+  return {
+    deliveryModel,
+    supportPreset: normalizeSupportPresetForPersistence(readFirstDefined(
+      entry?.supportPreset,
+      entry?.support_preset,
+      fallback.supportPreset,
+      fallback.support_preset,
+    )),
+    supportState: normalizeSupportState(readFirstDefined(
+      entry?.supportState,
+      entry?.support_state,
+      fallback.supportState,
+      fallback.support_state,
+    )) || null,
+    evidenceCategory: normalizeEvidenceCategory(readFirstDefined(
+      entry?.evidenceCategory,
+      entry?.evidence_category,
+      fallback.evidenceCategory,
+      fallback.evidence_category,
+    )) || null,
+    supportActions: normalizeSupportActions(readFirstDefined(
+      entry?.supportActions,
+      entry?.support_actions,
+      fallback.supportActions,
+      fallback.support_actions,
+    )),
+  };
+}
+
+function normalizeResultCorrectness(entry = null, ladderMetadata = null) {
+  const rawCorrect = readFirstDefined(entry?.correct, entry?.is_correct);
+  return ladderMetadata
+    ? normalizeTriStateCorrectness(rawCorrect)
+    : normalizeTriStateCorrectness(rawCorrect, { legacy: true });
+}
+
+function normalizeSupportLadderStatusSummary(value = undefined, existing = null) {
+  if (value === undefined) {
+    return {
+      independent_first_correct_words: existing?.independentFirstCorrectWords ?? existing?.independent_first_correct_words ?? null,
+      self_corrected_words: existing?.selfCorrectedWords ?? existing?.self_corrected_words ?? null,
+      supported_correct_words: existing?.supportedCorrectWords ?? existing?.supported_correct_words ?? null,
+      supported_incorrect_words: existing?.supportedIncorrectWords ?? existing?.supported_incorrect_words ?? null,
+      access_issue_words: existing?.accessIssueWords ?? existing?.access_issue_words ?? null,
+      headline_attempted_words: existing?.headlineAttemptedWords ?? existing?.headline_attempted_words ?? null,
+      headline_correct_words: existing?.headlineCorrectWords ?? existing?.headline_correct_words ?? null,
+      headline_score_rate: existing?.headlineScoreRate ?? existing?.headline_score_rate ?? null,
+    };
+  }
+  if (!value) {
+    return {
+      independent_first_correct_words: null,
+      self_corrected_words: null,
+      supported_correct_words: null,
+      supported_incorrect_words: null,
+      access_issue_words: null,
+      headline_attempted_words: null,
+      headline_correct_words: null,
+      headline_score_rate: null,
+    };
+  }
+  return {
+    independent_first_correct_words: Math.max(0, Number(value.independent_first_correct_words ?? value.independentFirstCorrectWords ?? 0)),
+    self_corrected_words: Math.max(0, Number(value.self_corrected_words ?? value.selfCorrectedWords ?? 0)),
+    supported_correct_words: Math.max(0, Number(value.supported_correct_words ?? value.supportedCorrectWords ?? 0)),
+    supported_incorrect_words: Math.max(0, Number(value.supported_incorrect_words ?? value.supportedIncorrectWords ?? 0)),
+    access_issue_words: Math.max(0, Number(value.access_issue_words ?? value.accessIssueWords ?? 0)),
+    headline_attempted_words: Math.max(0, Number(value.headline_attempted_words ?? value.headlineAttemptedWords ?? 0)),
+    headline_correct_words: Math.max(0, Number(value.headline_correct_words ?? value.headlineCorrectWords ?? 0)),
+    headline_score_rate: Number.isFinite(Number(value.headline_score_rate ?? value.headlineScoreRate))
+      ? Number(value.headline_score_rate ?? value.headlineScoreRate)
+      : null,
+  };
+}
+
+function calculateSupportLadderSummary(rows = []) {
+  const ladderRows = (Array.isArray(rows) ? rows : [])
+    .filter((entry) => normalizeResultDeliveryModel(entry) === DELIVERY_MODEL_SUPPORT_LADDER);
+  if (!ladderRows.length) return null;
+
+  const summary = summarizeEvidence(ladderRows.map((entry) => ({
+    deliveryModel: DELIVERY_MODEL_SUPPORT_LADDER,
+    supportState: entry.supportState,
+    evidenceCategory: entry.evidenceCategory,
+    supportActions: entry.supportActions,
+    correct: entry.correct,
+    completed: entry.completed !== false,
+    attemptNumber: entry.attemptsUsed,
+  })));
+
+  return {
+    independent_first_correct_words: summary.independentFirstCorrectCount,
+    self_corrected_words: summary.selfCorrectedCount,
+    supported_correct_words: summary.supportedCorrectCount,
+    supported_incorrect_words: summary.supportedIncorrectCount,
+    access_issue_words: summary.accessIssueCount,
+    headline_attempted_words: summary.headlineAttempted,
+    headline_correct_words: summary.headlineCorrect,
+    headline_score_rate: summary.headlineScoreRate ?? null,
+    rawAttempted: summary.rawAttempted,
+    rawCorrect: summary.rawCorrect,
+    rawScoreRate: summary.rawScoreRate,
+  };
+}
+
+function buildAttemptEvidenceFields(source = null) {
+  const deliveryModel = normalizeDeliveryModel(readFirstDefined(
+    source?.deliveryModel,
+    source?.delivery_model,
+  ));
+  if (deliveryModel !== DELIVERY_MODEL_SUPPORT_LADDER) return {};
+
+  return {
+    delivery_model: deliveryModel,
+    support_state: normalizeSupportState(readFirstDefined(source?.supportState, source?.support_state)) || null,
+    evidence_category: normalizeEvidenceCategory(readFirstDefined(source?.evidenceCategory, source?.evidence_category)) || null,
+    support_actions: normalizeSupportActions(readFirstDefined(source?.supportActions, source?.support_actions)),
+  };
+}
+
+function isSupportLadderPayload(payload = null) {
+  return normalizeDeliveryModel(payload?.delivery_model ?? payload?.deliveryModel) === DELIVERY_MODEL_SUPPORT_LADDER;
+}
+
+function sameSupportActions(a = [], b = []) {
+  const left = normalizeSupportActions(a);
+  const right = normalizeSupportActions(b);
+  if (left.length !== right.length) return false;
+  return left.every((action, index) => action === right[index]);
+}
+
+function hasMatchingSupportLadderEvidence(existingAttempt = null, expected = null) {
+  if (!expected || normalizeResultDeliveryModel(expected) !== DELIVERY_MODEL_SUPPORT_LADDER) return true;
+  if (normalizeDeliveryModel(existingAttempt?.delivery_model ?? existingAttempt?.deliveryModel) !== DELIVERY_MODEL_SUPPORT_LADDER) return false;
+  const expectedMetadata = buildResultLadderMetadata(expected);
+  return (normalizeSupportState(existingAttempt?.support_state ?? existingAttempt?.supportState) || null) === expectedMetadata.supportState
+    && (normalizeEvidenceCategory(existingAttempt?.evidence_category ?? existingAttempt?.evidenceCategory) || null) === expectedMetadata.evidenceCategory
+    && sameSupportActions(existingAttempt?.support_actions ?? existingAttempt?.supportActions, expectedMetadata.supportActions);
+}
 const STAFF_PENDING_ACCESS_APPROVALS_TABLE = "staff_pending_access_approvals";
 const STAFF_PENDING_ROLE_ASSIGNMENTS_TABLE = "staff_pending_role_assignments";
 const STAFF_PENDING_SCOPE_ASSIGNMENTS_TABLE = "staff_pending_scope_assignments";
@@ -1823,10 +2011,15 @@ async function validateAutomationEligibleClassIds(teacherId, classIds = [], acce
 }
 
 async function tryInsertAttempts(payload) {
+  const ladderPayload = isSupportLadderPayload(payload);
+  const evidenceFields = buildAttemptEvidenceFields(payload);
+  const withEvidenceFields = (variant) => ladderPayload
+    ? { ...variant, ...evidenceFields }
+    : variant;
   const legacyWord = payload.word ?? payload.word_text ?? null;
   const legacyIsCorrect = payload.is_correct ?? payload.correct ?? null;
   const legacyAttemptNo = payload.attempt_no ?? payload.attempt_number ?? null;
-  const essentialAssignmentVariant = {
+  const essentialAssignmentVariant = withEvidenceFields({
     pupil_id: payload.pupil_id,
     assignment_id: payload.assignment_id ?? null,
     test_id: payload.test_id,
@@ -1838,7 +2031,7 @@ async function tryInsertAttempts(payload) {
     attempt_number: payload.attempt_number ?? null,
     word_text: payload.word_text ?? payload.word ?? null,
     word_source: payload.word_source ?? null,
-  };
+  });
   const modernVariant = {
     ...essentialAssignmentVariant,
     attempts_allowed: payload.attempts_allowed ?? null,
@@ -1860,7 +2053,7 @@ async function tryInsertAttempts(payload) {
     focus_grapheme: payload.focus_grapheme ?? null,
     pattern_type: payload.pattern_type ?? null,
   };
-  const essentialNoTargetVariant = {
+  const essentialNoTargetVariant = withEvidenceFields({
     pupil_id: payload.pupil_id,
     assignment_id: payload.assignment_id ?? null,
     test_id: payload.test_id,
@@ -1870,7 +2063,7 @@ async function tryInsertAttempts(payload) {
     correct: payload.correct,
     attempt_number: payload.attempt_number ?? null,
     word_text: payload.word_text ?? payload.word ?? null,
-  };
+  });
   const essentialNoTargetLegacyVariant = {
     ...essentialNoTargetVariant,
     word: legacyWord,
@@ -1878,7 +2071,7 @@ async function tryInsertAttempts(payload) {
     attempt_no: legacyAttemptNo,
   };
   const variants = [
-    { name: "full_payload", data: payload },
+    { name: "full_payload", data: ladderPayload ? { ...payload, ...evidenceFields } : payload },
     { name: "modern_variant", data: modernVariant },
     { name: "legacy_rich_variant", data: legacyRichVariant },
     { name: "essential_assignment_variant", data: essentialAssignmentVariant },
@@ -1908,6 +2101,22 @@ async function tryInsertAttempts(payload) {
     lastError = error;
   }
 
+  if (ladderPayload) {
+    return {
+      ...payload,
+      ...evidenceFields,
+      id: null,
+      persisted: false,
+      error: lastError ? {
+        code: lastError.code || "",
+        message: lastError.message || "Could not record support-ladder attempt evidence.",
+      } : {
+        code: "",
+        message: "Could not record support-ladder attempt evidence.",
+      },
+    };
+  }
+
   throw lastError || new Error("Could not record attempt.");
 }
 
@@ -1933,6 +2142,14 @@ function normalizeAssignmentStatusRow(row) {
     scoreRate: Number.isFinite(Number(row?.score_rate ?? row?.scoreRate))
       ? Number(row?.score_rate ?? row?.scoreRate)
       : 0,
+    independentFirstCorrectWords: row?.independent_first_correct_words ?? row?.independentFirstCorrectWords ?? null,
+    selfCorrectedWords: row?.self_corrected_words ?? row?.selfCorrectedWords ?? null,
+    supportedCorrectWords: row?.supported_correct_words ?? row?.supportedCorrectWords ?? null,
+    supportedIncorrectWords: row?.supported_incorrect_words ?? row?.supportedIncorrectWords ?? null,
+    accessIssueWords: row?.access_issue_words ?? row?.accessIssueWords ?? null,
+    headlineAttemptedWords: row?.headline_attempted_words ?? row?.headlineAttemptedWords ?? null,
+    headlineCorrectWords: row?.headline_correct_words ?? row?.headlineCorrectWords ?? null,
+    headlineScoreRate: row?.headline_score_rate ?? row?.headlineScoreRate ?? null,
     resultJson: Array.isArray(rawResultJson) ? rawResultJson : [],
     createdAt: row?.created_at || row?.createdAt || null,
     updatedAt: row?.updated_at || row?.updatedAt || null,
@@ -2014,39 +2231,44 @@ function sanitizeAssignmentResultRows(results = []) {
   }
 
   return (Array.isArray(results) ? results : [])
-    .map((entry, index) => ({
-      itemKey: String(entry?.itemKey || "").trim() || null,
-      index: index + 1,
-      wordId: String(entry?.wordId || "").trim() || null,
-      baseTestWordId: String(entry?.baseTestWordId || "").trim() || null,
-      assignmentTargetId: String(entry?.assignmentTargetId || "").trim() || null,
-      word: String(entry?.word || entry?.correctSpelling || "").trim() || "",
-      correctSpelling: String(entry?.correctSpelling || entry?.word || "").trim() || "",
-      typed: String(entry?.typed ?? "").trim(),
-      correct: !!entry?.correct,
-      attemptsUsed: entry?.completed === false
-        ? Math.max(0, Number(entry?.attemptsUsed ?? 0))
-        : Math.max(1, Number(entry?.attemptsUsed || 1)),
-      attemptsAllowed: Number.isFinite(Number(entry?.attemptsAllowed ?? entry?.attempts_allowed))
-        ? Math.max(1, Number(entry?.attemptsAllowed ?? entry?.attempts_allowed))
-        : null,
-      completed: entry?.completed === false ? false : true,
-      questionType: String(entry?.questionType || "").trim() || null,
-      modeKind: String(entry?.modeKind || "").trim() || null,
-      wordSource: String(entry?.wordSource || "").trim() || (entry?.assignmentTargetId ? "targeted" : "base"),
-      focusGrapheme: String(entry?.focusGrapheme || "").trim().toLowerCase() || null,
-      patternType: String(entry?.patternType || "").trim().toLowerCase() || null,
-      targetGraphemes: Array.isArray(entry?.targetGraphemes)
-        ? entry.targetGraphemes.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
-        : [],
-      lastSubmittedIncorrectAnswer: String(
-        entry?.lastSubmittedIncorrectAnswer
-        ?? entry?.last_submitted_incorrect_answer
-        ?? ""
-      ).trim() || null,
-      inputState: sanitizeAssignmentInputState(entry?.inputState),
-      feedbackState: sanitizeAssignmentFeedbackState(entry?.feedbackState ?? entry?.feedback_state),
-    }))
+    .map((entry, index) => {
+      const ladderMetadata = buildResultLadderMetadata(entry);
+      const assignmentTargetId = String(entry?.assignmentTargetId ?? entry?.assignment_target_id ?? "").trim() || null;
+      const row = {
+        itemKey: String(entry?.itemKey || "").trim() || null,
+        index: index + 1,
+        wordId: String(entry?.wordId ?? entry?.word_id ?? "").trim() || null,
+        baseTestWordId: String(entry?.baseTestWordId ?? entry?.base_test_word_id ?? "").trim() || null,
+        assignmentTargetId,
+        word: String(entry?.word || entry?.correctSpelling || "").trim() || "",
+        correctSpelling: String(entry?.correctSpelling || entry?.word || "").trim() || "",
+        typed: String(entry?.typed ?? "").trim(),
+        correct: normalizeResultCorrectness(entry, ladderMetadata),
+        attemptsUsed: entry?.completed === false
+          ? Math.max(0, Number(entry?.attemptsUsed ?? entry?.attempts_used ?? 0))
+          : Math.max(1, Number(entry?.attemptsUsed ?? entry?.attempts_used ?? 1)),
+        attemptsAllowed: Number.isFinite(Number(entry?.attemptsAllowed ?? entry?.attempts_allowed))
+          ? Math.max(1, Number(entry?.attemptsAllowed ?? entry?.attempts_allowed))
+          : null,
+        completed: entry?.completed === false ? false : true,
+        questionType: String(entry?.questionType ?? entry?.question_type ?? "").trim() || null,
+        modeKind: String(entry?.modeKind ?? entry?.mode_kind ?? "").trim() || null,
+        wordSource: String(entry?.wordSource ?? entry?.word_source ?? "").trim() || (assignmentTargetId ? "targeted" : "base"),
+        focusGrapheme: String(entry?.focusGrapheme ?? entry?.focus_grapheme ?? "").trim().toLowerCase() || null,
+        patternType: String(entry?.patternType ?? entry?.pattern_type ?? "").trim().toLowerCase() || null,
+        targetGraphemes: Array.isArray(entry?.targetGraphemes ?? entry?.target_graphemes)
+          ? (entry?.targetGraphemes ?? entry?.target_graphemes).map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+          : [],
+        lastSubmittedIncorrectAnswer: String(
+          entry?.lastSubmittedIncorrectAnswer
+          ?? entry?.last_submitted_incorrect_answer
+          ?? ""
+        ).trim() || null,
+        inputState: sanitizeAssignmentInputState(entry?.inputState ?? entry?.input_state),
+        feedbackState: sanitizeAssignmentFeedbackState(entry?.feedbackState ?? entry?.feedback_state),
+      };
+      return ladderMetadata ? { ...row, ...ladderMetadata } : row;
+    })
     .filter((entry) => entry.assignmentTargetId || entry.baseTestWordId || entry.word);
 }
 
@@ -2059,18 +2281,25 @@ function buildAssignmentCompletionSummary(result = null) {
   }));
   const completedRows = rows.filter((entry) => entry.completed !== false);
   const totalWords = Math.max(0, Number(result?.totalWords || completedRows.length || rows.length || 0));
-  const correctWords = completedRows.filter((entry) => entry.correct).length;
+  const supportSummary = calculateSupportLadderSummary(rows);
+  const correctWords = supportSummary
+    ? supportSummary.rawCorrect
+    : completedRows.filter((entry) => entry.correct).length;
   const averageAttempts = Number.isFinite(Number(result?.averageAttempts))
     ? Number(result.averageAttempts)
     : (completedRows.length
       ? completedRows.reduce((sum, entry) => sum + Math.max(1, Number(entry?.attemptsUsed || 1)), 0) / completedRows.length
       : 0);
+  const scoreRate = supportSummary
+    ? (supportSummary.rawScoreRate ?? 0)
+    : (totalWords ? correctWords / totalWords : 0);
   return {
     resultJson: rows,
     totalWords,
     correctWords,
     averageAttempts,
-    scoreRate: totalWords ? correctWords / totalWords : 0,
+    scoreRate,
+    supportSummary,
   };
 }
 
@@ -2078,16 +2307,23 @@ function buildAssignmentProgressSummary(progress = null) {
   const rows = sanitizeAssignmentResultRows(progress?.itemStates || []);
   const completedRows = rows.filter((entry) => entry.completed !== false);
   const totalWords = Math.max(0, Number(progress?.totalWords || rows.length || 0));
-  const correctWords = completedRows.filter((entry) => entry.correct).length;
+  const supportSummary = calculateSupportLadderSummary(rows);
+  const correctWords = supportSummary
+    ? supportSummary.rawCorrect
+    : completedRows.filter((entry) => entry.correct).length;
   const averageAttempts = completedRows.length
     ? completedRows.reduce((sum, entry) => sum + Math.max(1, Number(entry?.attemptsUsed || 1)), 0) / completedRows.length
     : 0;
+  const scoreRate = supportSummary
+    ? (supportSummary.rawScoreRate ?? 0)
+    : (totalWords ? correctWords / totalWords : 0);
   return {
     resultJson: rows,
     totalWords,
     correctWords,
     averageAttempts,
-    scoreRate: totalWords ? correctWords / totalWords : 0,
+    scoreRate,
+    supportSummary,
   };
 }
 
@@ -2980,6 +3216,10 @@ function normalizeBaselineGateAssignmentPayload(payload) {
     question_type: normalizeStoredQuestionType(assignment?.question_type, { title }),
     mode: String(assignment?.mode || "test").trim() || "test",
     max_attempts: assignment?.max_attempts == null ? null : Number(assignment.max_attempts),
+    delivery_model: normalizeDeliveryModel(assignment?.delivery_model ?? assignment?.deliveryModel),
+    deliveryModel: normalizeDeliveryModel(assignment?.delivery_model ?? assignment?.deliveryModel),
+    support_preset: normalizeSupportPresetForPersistence(assignment?.support_preset ?? assignment?.supportPreset),
+    supportPreset: normalizeSupportPresetForPersistence(assignment?.support_preset ?? assignment?.supportPreset),
     audio_enabled: assignment?.audio_enabled !== false,
     hints_enabled: assignment?.hints_enabled !== false,
     end_at: assignment?.end_at || null,
@@ -2991,6 +3231,14 @@ function normalizeBaselineGateAssignmentPayload(payload) {
     correct_words: Math.max(0, Number(assignment?.correct_words || 0)),
     average_attempts: Number.isFinite(Number(assignment?.average_attempts)) ? Number(assignment.average_attempts) : 0,
     score_rate: Number.isFinite(Number(assignment?.score_rate)) ? Number(assignment.score_rate) : 0,
+    independent_first_correct_words: assignment?.independent_first_correct_words ?? assignment?.independentFirstCorrectWords ?? null,
+    self_corrected_words: assignment?.self_corrected_words ?? assignment?.selfCorrectedWords ?? null,
+    supported_correct_words: assignment?.supported_correct_words ?? assignment?.supportedCorrectWords ?? null,
+    supported_incorrect_words: assignment?.supported_incorrect_words ?? assignment?.supportedIncorrectWords ?? null,
+    access_issue_words: assignment?.access_issue_words ?? assignment?.accessIssueWords ?? null,
+    headline_attempted_words: assignment?.headline_attempted_words ?? assignment?.headlineAttemptedWords ?? null,
+    headline_correct_words: assignment?.headline_correct_words ?? assignment?.headlineCorrectWords ?? null,
+    headline_score_rate: assignment?.headline_score_rate ?? assignment?.headlineScoreRate ?? null,
     result_json: Array.isArray(assignment?.result_json) ? assignment.result_json : [],
     completed: !!assignment?.completed || !!assignment?.completed_at,
     isLocked: !!assignment?.completed || !!assignment?.completed_at,
@@ -3164,6 +3412,7 @@ async function upsertAssignmentPupilStatus({
   averageAttempts = null,
   scoreRate = null,
   resultJson = null,
+  supportSummary = undefined,
 } = {}) {
   const safeAssignmentId = String(assignmentId || "").trim();
   const safePupilId = String(pupilId || "").trim();
@@ -3193,6 +3442,7 @@ async function upsertAssignmentPupilStatus({
   const nextScoreRate = scoreRate == null
     ? (Number.isFinite(Number(existing?.scoreRate)) ? Number(existing.scoreRate) : (nextTotalWords ? nextCorrectWords / nextTotalWords : 0))
     : (Number.isFinite(Number(scoreRate)) ? Number(scoreRate) : (nextTotalWords ? nextCorrectWords / nextTotalWords : 0));
+  const nextSupportSummary = normalizeSupportLadderStatusSummary(supportSummary, existing);
   const payload = {
     teacher_id: String(teacherId || existing?.teacherId || "").trim() || null,
     assignment_id: safeAssignmentId,
@@ -3212,6 +3462,14 @@ async function upsertAssignmentPupilStatus({
     correct_words: nextCorrectWords,
     average_attempts: nextAverageAttempts,
     score_rate: nextScoreRate,
+    independent_first_correct_words: nextSupportSummary.independent_first_correct_words,
+    self_corrected_words: nextSupportSummary.self_corrected_words,
+    supported_correct_words: nextSupportSummary.supported_correct_words,
+    supported_incorrect_words: nextSupportSummary.supported_incorrect_words,
+    access_issue_words: nextSupportSummary.access_issue_words,
+    headline_attempted_words: nextSupportSummary.headline_attempted_words,
+    headline_correct_words: nextSupportSummary.headline_correct_words,
+    headline_score_rate: nextSupportSummary.headline_score_rate,
     result_json: nextResultJson,
     created_at: existing?.createdAt || nowIso,
     updated_at: nowIso,
@@ -3286,6 +3544,7 @@ export async function saveAssignmentProgress({
     averageAttempts: summary.averageAttempts,
     scoreRate: summary.scoreRate,
     resultJson: summary.resultJson,
+    supportSummary: summary.supportSummary,
   });
 }
 
@@ -3336,6 +3595,7 @@ export async function markAssignmentComplete({
     averageAttempts: summary.averageAttempts,
     scoreRate: summary.scoreRate,
     resultJson: summary.resultJson,
+    supportSummary: summary.supportSummary,
   });
   console.log("Assignment marked complete:", {
     assignmentId: String(assignmentId || ""),
@@ -5911,6 +6171,10 @@ function normalizePupilRuntimeAssignmentRow(row = {}) {
       : normalizeStoredQuestionType(source?.question_type, { title }),
     mode: String(source?.mode || "test").trim() || "test",
     max_attempts: source?.max_attempts == null ? null : Number(source.max_attempts),
+    delivery_model: normalizeDeliveryModel(source?.delivery_model ?? source?.deliveryModel),
+    deliveryModel: normalizeDeliveryModel(source?.delivery_model ?? source?.deliveryModel),
+    support_preset: normalizeSupportPresetForPersistence(source?.support_preset ?? source?.supportPreset),
+    supportPreset: normalizeSupportPresetForPersistence(source?.support_preset ?? source?.supportPreset),
     audio_enabled: source?.audio_enabled !== false,
     hints_enabled: isSpellingBee ? false : source?.hints_enabled !== false,
     automation_kind: String(source?.automation_kind || source?.automationKind || "").trim() || null,
@@ -5949,6 +6213,14 @@ function normalizePupilRuntimeAssignmentRow(row = {}) {
     score_rate: Number.isFinite(Number(source?.score_rate ?? source?.scoreRate))
       ? Number(source?.score_rate ?? source?.scoreRate)
       : 0,
+    independent_first_correct_words: source?.independent_first_correct_words ?? source?.independentFirstCorrectWords ?? null,
+    self_corrected_words: source?.self_corrected_words ?? source?.selfCorrectedWords ?? null,
+    supported_correct_words: source?.supported_correct_words ?? source?.supportedCorrectWords ?? null,
+    supported_incorrect_words: source?.supported_incorrect_words ?? source?.supportedIncorrectWords ?? null,
+    access_issue_words: source?.access_issue_words ?? source?.accessIssueWords ?? null,
+    headline_attempted_words: source?.headline_attempted_words ?? source?.headlineAttemptedWords ?? null,
+    headline_correct_words: source?.headline_correct_words ?? source?.headlineCorrectWords ?? null,
+    headline_score_rate: source?.headline_score_rate ?? source?.headlineScoreRate ?? null,
     result_json: Array.isArray(source?.result_json ?? source?.resultJson)
       ? (source?.result_json ?? source?.resultJson)
       : [],
@@ -6286,6 +6558,8 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
       class_id,
       mode,
       max_attempts,
+      delivery_model,
+      support_preset,
       audio_enabled,
       hints_enabled,
       analytics_target_words_enabled,
@@ -6537,6 +6811,10 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
         }),
         mode: item.mode || "test",
         max_attempts: item.max_attempts == null ? null : Number(item.max_attempts),
+        delivery_model: normalizeDeliveryModel(item?.delivery_model),
+        deliveryModel: normalizeDeliveryModel(item?.delivery_model),
+        support_preset: normalizeSupportPresetForPersistence(item?.support_preset),
+        supportPreset: normalizeSupportPresetForPersistence(item?.support_preset),
         audio_enabled: item.audio_enabled !== false,
         hints_enabled: item.hints_enabled !== false,
         automation_kind: automationKind || null,
@@ -6562,6 +6840,14 @@ export async function getPupilAssignments({ classId, pupilId = "" }) {
         score_rate: Number.isFinite(Number(statusRow?.scoreRate ?? statusRow?.score_rate))
           ? Number(statusRow?.scoreRate ?? statusRow?.score_rate)
           : 0,
+        independent_first_correct_words: statusRow?.independentFirstCorrectWords ?? statusRow?.independent_first_correct_words ?? null,
+        self_corrected_words: statusRow?.selfCorrectedWords ?? statusRow?.self_corrected_words ?? null,
+        supported_correct_words: statusRow?.supportedCorrectWords ?? statusRow?.supported_correct_words ?? null,
+        supported_incorrect_words: statusRow?.supportedIncorrectWords ?? statusRow?.supported_incorrect_words ?? null,
+        access_issue_words: statusRow?.accessIssueWords ?? statusRow?.access_issue_words ?? null,
+        headline_attempted_words: statusRow?.headlineAttemptedWords ?? statusRow?.headline_attempted_words ?? null,
+        headline_correct_words: statusRow?.headlineCorrectWords ?? statusRow?.headline_correct_words ?? null,
+        headline_score_rate: statusRow?.headlineScoreRate ?? statusRow?.headline_score_rate ?? null,
         result_json: Array.isArray(statusRow?.resultJson ?? statusRow?.result_json)
           ? (statusRow?.resultJson ?? statusRow?.result_json)
           : [],
@@ -6651,10 +6937,24 @@ export async function pupilRecordAttempt({
   targetGraphemes,
   focusGrapheme,
   patternType,
+  deliveryModel,
+  supportState,
+  evidenceCategory,
+  supportActions,
 }) {
   if (!testId || (!testWordId && !assignmentTargetId)) return null;
 
   try {
+    const evidenceFields = buildAttemptEvidenceFields({
+      deliveryModel,
+      supportState,
+      evidenceCategory,
+      supportActions,
+    });
+    const ladderPayload = evidenceFields.delivery_model === DELIVERY_MODEL_SUPPORT_LADDER;
+    const safeCorrect = ladderPayload
+      ? normalizeTriStateCorrectness(correct)
+      : normalizeTriStateCorrectness(correct, { legacy: true });
     const payload = {
       pupil_id: pupilId || null,
       assignment_id: assignmentId || null,
@@ -6663,8 +6963,8 @@ export async function pupilRecordAttempt({
       assignment_target_id: assignmentTargetId || null,
       mode,
       typed,
-      correct,
-      is_correct: correct,
+      correct: safeCorrect,
+      is_correct: safeCorrect,
       attempt_number: attemptNumber || null,
       attempt_no: attemptNumber || null,
       attempts_allowed: attemptsAllowed || null,
@@ -6676,6 +6976,7 @@ export async function pupilRecordAttempt({
       focus_grapheme: focusGrapheme || null,
       pattern_type: patternType || null,
       created_at: new Date().toISOString(),
+      ...evidenceFields,
     };
     console.log("ATTEMPT WRITE payload:", {
       assignmentId: payload.assignment_id,
@@ -6716,7 +7017,9 @@ export async function readAssignmentAttemptRows({
       mode,
       typed,
       correct,
+      is_correct,
       attempt_number,
+      attempt_no,
       attempts_allowed,
       word_text,
       word_source,
@@ -6724,6 +7027,10 @@ export async function readAssignmentAttemptRows({
       target_graphemes,
       focus_grapheme,
       pattern_type,
+      delivery_model,
+      support_state,
+      evidence_category,
+      support_actions,
       created_at
     `)
     .eq("assignment_id", safeAssignmentId)
@@ -6749,11 +7056,22 @@ function shouldBackfillAssignmentAttempt(existingAttempt, result) {
   const existingAttemptNumber = Math.max(1, Number(existingAttempt?.attempt_number || existingAttempt?.attempt_no || 1));
   if (existingAttemptNumber < expectedAttemptNumber) return true;
 
-  if (!!existingAttempt?.correct !== !!result?.correct) return true;
+  const expectedIsLadder = normalizeResultDeliveryModel(result) === DELIVERY_MODEL_SUPPORT_LADDER;
+  const existingCorrect = normalizeTriStateCorrectness(
+    readFirstDefined(existingAttempt?.correct, existingAttempt?.is_correct),
+    { legacy: !expectedIsLadder }
+  );
+  const expectedCorrect = normalizeTriStateCorrectness(
+    readFirstDefined(result?.correct, result?.is_correct),
+    { legacy: !expectedIsLadder }
+  );
+  if (existingCorrect !== expectedCorrect) return true;
 
   const existingTyped = String(existingAttempt?.typed ?? "").trim().toLowerCase();
   const expectedTyped = String(result?.typed ?? "").trim().toLowerCase();
-  if (expectedTyped && existingTyped !== expectedTyped) return true;
+  if ((expectedIsLadder || expectedTyped) && existingTyped !== expectedTyped) return true;
+
+  if (!hasMatchingSupportLadderEvidence(existingAttempt, result)) return true;
 
   return false;
 }
@@ -6769,14 +7087,14 @@ export async function reconcileAssignmentResultAttempts({
   const safePupilId = String(pupilId || "").trim();
   const safeAssignmentId = String(assignmentId || "").trim();
   const safeTestId = String(testId || "").trim();
-  const resultRows = Array.isArray(results) ? results : [];
+  const resultRows = sanitizeAssignmentResultRows(results);
   if (!safePupilId || !safeAssignmentId || !safeTestId || !resultRows.length) {
     return { insertedCount: 0, existingCount: 0 };
   }
 
   const { data: existingRows, error } = await supabase
     .from("attempts")
-    .select("assignment_target_id, test_word_id, correct, attempt_number, attempt_no, typed, created_at")
+    .select("assignment_id, pupil_id, assignment_target_id, test_word_id, correct, is_correct, attempt_number, attempt_no, typed, delivery_model, support_state, evidence_category, support_actions, created_at")
     .eq("assignment_id", safeAssignmentId)
     .eq("pupil_id", safePupilId)
     .order("created_at", { ascending: true });
@@ -6811,7 +7129,7 @@ export async function reconcileAssignmentResultAttempts({
       assignmentTargetId: assignmentTargetId || null,
       mode: String(result?.questionType || "").trim() || null,
       typed: String(result?.typed ?? ""),
-      correct: !!result?.correct,
+      correct: normalizeResultCorrectness(result, buildResultLadderMetadata(result)),
       attemptNumber: Math.max(1, Number(result?.attemptsUsed || 1)),
       attemptsAllowed: Number.isFinite(Number(result?.attemptsAllowed))
         ? Number(result.attemptsAllowed)
@@ -6822,16 +7140,26 @@ export async function reconcileAssignmentResultAttempts({
       targetGraphemes: Array.isArray(result?.targetGraphemes) ? result.targetGraphemes : null,
       focusGrapheme: String(result?.focusGrapheme || "").trim() || null,
       patternType: String(result?.patternType || "").trim() || null,
+      deliveryModel: result?.deliveryModel,
+      supportState: result?.supportState,
+      evidenceCategory: result?.evidenceCategory,
+      supportActions: result?.supportActions,
     });
 
-    if (inserted) {
+    if (inserted && inserted.persisted !== false) {
       insertedCount += 1;
       latestByKey.set(key, {
+        assignment_id: safeAssignmentId,
+        pupil_id: safePupilId,
         assignment_target_id: assignmentTargetId || null,
         test_word_id: testWordId || null,
-        correct: !!result?.correct,
+        correct: normalizeResultCorrectness(result, buildResultLadderMetadata(result)),
         attempt_number: Math.max(1, Number(result?.attemptsUsed || 1)),
         typed: String(result?.typed ?? ""),
+        delivery_model: result?.deliveryModel,
+        support_state: result?.supportState,
+        evidence_category: result?.evidenceCategory,
+        support_actions: result?.supportActions,
       });
     }
   }

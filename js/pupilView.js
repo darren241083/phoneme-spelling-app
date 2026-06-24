@@ -18,7 +18,7 @@ import {
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
 } from "./db.js?v=1.50";
-import { mountGame } from "./game.js?v=1.43";
+import { mountGame } from "./game.js?v=1.44";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
 import { buildPreviewModel, renderPhonicsPreviewModel } from "./phonicsRenderer.js?v=1.6";
@@ -210,6 +210,80 @@ function getAttemptTimestampMs(attempt) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+function readFirstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function normalizeSupportLadderDeliveryModel(value = "") {
+  const key = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (key === "supportladder" || key === "ladder") return "support_ladder";
+  return key === "support_ladder" ? key : "legacy_fixed";
+}
+
+function normalizeResumeCorrectness(value, { ladder = false } = {}) {
+  if (ladder && value === null) return null;
+  return value === true || String(value || "").trim().toLowerCase() === "true";
+}
+
+function buildResumeSupportLadderMetadata({ item = null, word = null, snapshotEntry = null, latestAttempt = null } = {}) {
+  const deliveryModel = normalizeSupportLadderDeliveryModel(readFirstDefined(
+    latestAttempt?.delivery_model,
+    latestAttempt?.deliveryModel,
+    snapshotEntry?.deliveryModel,
+    snapshotEntry?.delivery_model,
+    word?.deliveryModel,
+    word?.delivery_model,
+    item?.deliveryModel,
+    item?.delivery_model,
+  ));
+  if (deliveryModel !== "support_ladder") return {};
+  const supportActions = readFirstDefined(
+    latestAttempt?.support_actions,
+    latestAttempt?.supportActions,
+    snapshotEntry?.supportActions,
+    snapshotEntry?.support_actions,
+    word?.supportActions,
+    word?.support_actions,
+    item?.supportActions,
+    item?.support_actions,
+  );
+  return {
+    deliveryModel,
+    supportPreset: readFirstDefined(
+      snapshotEntry?.supportPreset,
+      snapshotEntry?.support_preset,
+      word?.supportPreset,
+      word?.support_preset,
+      item?.supportPreset,
+      item?.support_preset,
+    ) ?? null,
+    supportState: readFirstDefined(
+      latestAttempt?.support_state,
+      latestAttempt?.supportState,
+      snapshotEntry?.supportState,
+      snapshotEntry?.support_state,
+      word?.supportState,
+      word?.support_state,
+      item?.supportState,
+      item?.support_state,
+    ) ?? null,
+    evidenceCategory: readFirstDefined(
+      latestAttempt?.evidence_category,
+      latestAttempt?.evidenceCategory,
+      snapshotEntry?.evidenceCategory,
+      snapshotEntry?.evidence_category,
+      word?.evidenceCategory,
+      word?.evidence_category,
+      item?.evidenceCategory,
+      item?.evidence_category,
+    ) ?? null,
+    supportActions: Array.isArray(supportActions) ? supportActions.slice() : (supportActions ?? []),
+  };
+}
+
 function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
   const words = Array.isArray(item?.words) ? item.words : [];
   if (!words.length) return null;
@@ -239,6 +313,8 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
     max_attempts: item?.max_attempts == null ? null : item.max_attempts,
     attempt_source: item?.attempt_source || "test",
     assignmentOrigin: item?.assignmentOrigin || item?.attempt_source || "test",
+    delivery_model: normalizeSupportLadderDeliveryModel(item?.delivery_model ?? item?.deliveryModel),
+    support_preset: item?.support_preset ?? item?.supportPreset ?? null,
   };
 
   const itemStates = words.map((word, index) => {
@@ -252,16 +328,23 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       return getAttemptTimestampMs(a) - getAttemptTimestampMs(b);
     });
     const latestAttempt = itemAttempts[itemAttempts.length - 1] || null;
+    const supportMetadata = buildResumeSupportLadderMetadata({ item, word, snapshotEntry, latestAttempt });
+    const isLadder = supportMetadata.deliveryModel === "support_ladder";
     const latestIncorrectAttempt = itemAttempts.filter((attempt) => !attempt?.correct).slice(-1)[0] || null;
     const derivedAttemptsUsed = itemAttempts.reduce((max, attempt) => Math.max(max, getAttemptOrderValue(attempt)), 0);
     const snapshotAttemptsUsed = Math.max(0, Number(snapshotEntry?.attemptsUsed || 0));
     const attemptsAllowed = resolveItemAttemptsAllowed(word, testMeta);
     const attemptsUsed = Math.max(derivedAttemptsUsed, snapshotAttemptsUsed);
-    const completedFromAttempts = attemptsUsed > 0 && (!!latestAttempt?.correct || attemptsUsed >= attemptsAllowed);
+    const latestCorrect = latestAttempt
+      ? normalizeResumeCorrectness(readFirstDefined(latestAttempt.correct, latestAttempt.is_correct), { ladder: isLadder })
+      : null;
+    const isAccessIssue = isLadder
+      && (supportMetadata.supportState === "access_issue" || supportMetadata.evidenceCategory === "access_issue");
+    const completedFromAttempts = attemptsUsed > 0 && (latestCorrect === true || isAccessIssue || attemptsUsed >= attemptsAllowed);
     const completed = snapshotEntry?.completed === true || completedFromAttempts;
     const correct = latestAttempt
-      ? !!latestAttempt.correct
-      : !!snapshotEntry?.correct;
+      ? latestCorrect
+      : normalizeResumeCorrectness(snapshotEntry?.correct, { ladder: isLadder });
     const feedbackState = normalizeStoredFeedbackState(snapshotEntry?.feedbackState ?? snapshotEntry?.feedback_state);
     const lastSubmittedIncorrectAnswer = completed
       ? null
@@ -305,6 +388,7 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
       lastSubmittedIncorrectAnswer,
       feedbackState,
       inputState: storedInputState,
+      ...supportMetadata,
     };
   }).filter((entry) => {
     if (!entry) return false;
@@ -3208,6 +3292,8 @@ async function openSession(containerEl, session, item, assignments, practicePack
       question_type: isSpellingBee ? "no_support_assessment" : (item.question_type || "focus_sound"),
       mode: item.mode || "test",
       max_attempts: isSpellingBee ? 1 : (item.max_attempts == null ? null : item.max_attempts),
+      delivery_model: item?.delivery_model || item?.deliveryModel || "legacy_fixed",
+      support_preset: item?.support_preset || item?.supportPreset || null,
       attempt_source: item.attempt_source || "test",
       audio_enabled: item.audio_enabled !== false,
       hints_enabled: isSpellingBee ? false : item.hints_enabled !== false,
