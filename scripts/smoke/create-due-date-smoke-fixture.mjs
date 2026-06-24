@@ -15,11 +15,16 @@ const DEFAULT_IDS = {
   testWord: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d009",
   assignment: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00a",
   status: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00b",
+  formClass: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00c",
+  pupilFormClass: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00d",
+  baselineStatus: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00e",
 };
 
 const DEFAULT_BASELINE_END_AT = "2030-01-15T12:00:00.000Z";
+const REQUIRED_BASELINE_STANDARD_KEY = "core_v2";
 const SCHOOL_SLUG = "wordloom-smoke-do-not-delete";
 const CLASS_JOIN_CODE = "SMKDD1";
+const FORM_CLASS_JOIN_CODE = "SMKFM1";
 const PUPIL_USERNAME = "wordloom_smoke_do_not_delete_pupil";
 const PUPIL_MIS_ID = "WORDLOOM-SMOKE-DO-NOT-DELETE-PUPIL";
 
@@ -55,7 +60,7 @@ async function main() {
   if (mode === "--verify") {
     const report = await inspectFixture(client, config);
     printReport("--verify", report, config);
-    if (!report.safe || !report.complete) {
+    if (!report.safe || !report.complete || !report.baseline) {
       process.exitCode = 1;
     }
     return;
@@ -167,6 +172,12 @@ function buildFixtureConfig(env) {
       yearGroup: "Smoke",
       classType: "subject",
     },
+    formClass: {
+      name: `${MARKER} Current Form`,
+      joinCode: FORM_CLASS_JOIN_CODE,
+      yearGroup: "Smoke",
+      classType: "form",
+    },
     pupil: {
       firstName: MARKER,
       surname: "Due Date Pupil",
@@ -231,7 +242,11 @@ function printDryRun(config, env) {
   console.log(`Smoke school slug: ${config.school.slug}`);
   console.log(`Smoke teacher email: ${env.teacherEmail || "(not set)"}`);
   console.log(`Smoke assignment id: ${config.ids.assignment}`);
+  console.log(`Smoke form class id: ${config.ids.formClass}`);
+  console.log(`Smoke pupil form membership id: ${config.ids.pupilFormClass}`);
+  console.log(`Smoke baseline gate status id: ${config.ids.baselineStatus}`);
   console.log(`Baseline end_at: ${config.baselineEndAt}`);
+  console.log(`Baseline gate standard: ${REQUIRED_BASELINE_STANDARD_KEY}`);
   console.log("");
   console.log("Environment readiness:");
   console.log(`  WORDLOOM_SUPABASE_URL: ${env.supabaseUrl ? "set" : "missing"}`);
@@ -308,6 +323,25 @@ function createSupabaseAdminClient(env) {
         method: "DELETE",
         headers: { Prefer: "return=representation" },
       }, `delete ${table}`);
+    },
+    rpc(name, body = {}, label = `rpc ${name}`) {
+      return request(`rest/v1/rpc/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }, label);
+    },
+    readBaselineGateState(pupilId) {
+      return this.rpc("read_pupil_baseline_gate_state", {
+        requested_pupil_id: pupilId,
+        requested_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+      }, "read pupil baseline gate state");
+    },
+    ensureFormClassBaselineAssignments(formClassIds) {
+      return this.rpc("ensure_form_class_baseline_assignments", {
+        requested_class_ids: formClassIds,
+        requested_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+      }, "ensure form class baseline assignments");
     },
     getAuthUserById(userId) {
       return authRequest(`auth/v1/admin/users/${encodeURIComponent(userId)}`, {
@@ -398,30 +432,39 @@ async function applyFixture(client, config) {
   await ensureClass(client, config, teacherId, school.id, actions);
   await ensurePupil(client, config, school.id, actions);
   await ensurePupilClass(client, config, school.id, actions);
+  await ensureSmokeFormClass(client, config, teacherId, school.id, actions);
+  await ensurePupilFormClass(client, config, school.id, actions);
   await ensureTest(client, config, teacherId, school.id, actions);
   await ensureTestWord(client, config, school.id, actions);
   await ensureAssignment(client, config, teacherId, school.id, actions);
   await ensureAssignmentStatus(client, config, teacherId, school.id, actions);
+  const gate = await ensureSmokeBaselineGateReady(client, config, actions);
   const reset = await resetProgressRows(client, config, teacherId, school.id);
 
   const report = await inspectFixture(client, config);
-  return { teacherId, schoolId: school.id, actions, reset, report };
+  return { teacherId, schoolId: school.id, actions, gate, reset, report };
 }
 
 async function resetFixture(client, config) {
   const report = await inspectFixture(client, config);
-  if (!report.safe) {
-    throw new Error(`Refusing reset because fixture is unsafe: ${report.errors.join("; ")}`);
+  const blockingErrors = getResetBlockingErrors(report);
+  if (blockingErrors.length) {
+    throw new Error(`Refusing reset because fixture is unsafe: ${blockingErrors.join("; ")}`);
   }
-  if (!report.complete) {
-    throw new Error("Refusing reset because the smoke fixture is incomplete. Run --apply first.");
+  const blockingMissing = getResetBlockingMissing(report);
+  if (blockingMissing.length) {
+    throw new Error(`Refusing reset because the smoke fixture is incomplete: ${blockingMissing.join(", ")}. Run --apply first.`);
   }
 
   const teacherId = report.rows.authUser.id;
   const schoolId = report.rows.school.id;
+  const actions = [];
+  await ensureSmokeFormClass(client, config, teacherId, schoolId, actions);
+  await ensurePupilFormClass(client, config, schoolId, actions);
+  const gate = await ensureSmokeBaselineGateReady(client, config, actions);
   const reset = await resetProgressRows(client, config, teacherId, schoolId);
   const after = await inspectFixture(client, config);
-  return { teacherId, schoolId, reset, report: after };
+  return { teacherId, schoolId, actions, gate, reset, report: after };
 }
 
 async function inspectFixture(client, config) {
@@ -482,6 +525,23 @@ async function inspectFixture(client, config) {
     row.school_id === rows.school?.id
   );
 
+  rows.formClass = await selectOne(client, "classes", [{ column: "id", value: config.ids.formClass }]);
+  rows.formClassByJoinCode = await selectOne(client, "classes", [{ column: "join_code", value: config.formClass.joinCode }]);
+  if (rows.formClassByJoinCode && rows.formClassByJoinCode.id !== config.ids.formClass) {
+    errors.push("smoke form class join code belongs to another row");
+  }
+  checkRow("form class", rows.formClass, missing, errors, (row) =>
+    row.id === config.ids.formClass &&
+    hasMarker(row) &&
+    row.teacher_id === teacherId &&
+    row.school_id === rows.school?.id &&
+    row.name === config.formClass.name &&
+    row.join_code === config.formClass.joinCode &&
+    row.year_group === config.formClass.yearGroup &&
+    row.class_type === config.formClass.classType &&
+    row.department_key === null
+  );
+
   rows.pupil = await selectOne(client, "pupils", [{ column: "id", value: config.ids.pupil }]);
   checkRow("pupil", rows.pupil, missing, errors, (row) =>
     hasMarker(row) &&
@@ -496,6 +556,27 @@ async function inspectFixture(client, config) {
     row.class_id === config.ids.class &&
     row.pupil_id === config.ids.pupil &&
     row.active === true
+  );
+
+  rows.pupilFormClass = await selectOne(client, "pupil_classes", [{ column: "id", value: config.ids.pupilFormClass }]);
+  rows.pupilFormClassByPair = await selectOne(client, "pupil_classes", [
+    { column: "class_id", value: config.ids.formClass },
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "active", value: "true", op: "is" },
+  ]);
+  if (rows.pupilFormClassByPair && rows.pupilFormClassByPair.id !== config.ids.pupilFormClass) {
+    errors.push("active smoke pupil form membership exists under a non-fixed id");
+  }
+  checkRow("pupil form membership", rows.pupilFormClass, missing, errors, (row) =>
+    hasMarker(row) &&
+    row.school_id === rows.school?.id &&
+    row.class_id === config.ids.formClass &&
+    row.pupil_id === config.ids.pupil &&
+    row.active === true &&
+    !row.left_at &&
+    !row.ended_at &&
+    !row.ended_by &&
+    !row.ended_reason
   );
 
   rows.test = await selectOne(client, "tests", [{ column: "id", value: config.ids.test }]);
@@ -563,10 +644,30 @@ async function inspectFixture(client, config) {
     drift.push("assignment pupil status has support-ladder counters; reset will clear them");
   }
 
+  rows.baselineGate = normalizeBaselineGateState(await client.readBaselineGateState(config.ids.pupil));
+  const gateReady = isSmokeBaselineGateReady(rows.baselineGate, config);
+  if (!gateReady) {
+    errors.push(formatBaselineGateNotReady(rows.baselineGate, config));
+  }
+
+  rows.baselineStatus = await selectOne(client, "assignment_pupil_statuses", [{ column: "id", value: config.ids.baselineStatus }]);
+  checkRow("baseline gate status", rows.baselineStatus, missing, errors, (row) =>
+    row.id === config.ids.baselineStatus &&
+    (!rows.baselineGate.completedAssignmentId || row.assignment_id === rows.baselineGate.completedAssignmentId) &&
+    row.pupil_id === config.ids.pupil &&
+    row.status === "completed" &&
+    !!row.completed_at
+  );
+
+  rows.personalisedBlockingRows = await readBlockingPersonalisedRows(client, config);
+  if (rows.personalisedBlockingRows.length) {
+    errors.push(`found ${rows.personalisedBlockingRows.length} waiting/provisioning personalised generation row(s) for the smoke pupil`);
+  }
+
   const complete = missing.length === 0;
   const safe = errors.length === 0;
-  const baseline = complete && safe && drift.length === 0;
-  return { complete, safe, baseline, missing, errors, drift, rows };
+  const baseline = complete && safe && drift.length === 0 && gateReady && rows.personalisedBlockingRows.length === 0;
+  return { complete, safe, baseline, gateReady, missing, errors, drift, rows };
 }
 
 function checkRow(label, row, missing, errors, isSafe) {
@@ -577,6 +678,16 @@ function checkRow(label, row, missing, errors, isSafe) {
   if (!isSafe(row)) {
     errors.push(`${label} exists but does not match the smoke fixture shape`);
   }
+}
+
+function getResetBlockingErrors(report) {
+  return (report.errors || [])
+    .filter((message) => !String(message || "").startsWith("baseline gate is not ready"));
+}
+
+function getResetBlockingMissing(report) {
+  const repairable = new Set(["form class", "pupil form membership", "baseline gate status"]);
+  return (report.missing || []).filter((label) => !repairable.has(label));
 }
 
 async function ensureSmokeAuthUser(client, config, allowCreate, actions) {
@@ -884,6 +995,127 @@ async function ensurePupilClass(client, config, schoolId, actions) {
   actions.push("created pupil-class membership");
 }
 
+async function ensureSmokeFormClass(client, config, teacherId, schoolId, actions) {
+  const byId = await selectOne(client, "classes", [{ column: "id", value: config.ids.formClass }]);
+  const byJoinCode = await selectOne(client, "classes", [{ column: "join_code", value: config.formClass.joinCode }]);
+  if (byId && (!hasMarker(byId) || byId.school_id !== schoolId)) {
+    throw new Error("Refusing to use fixed smoke form class id because it belongs to unmarked or different-school data.");
+  }
+  if (byJoinCode && (!hasMarker(byJoinCode) || byJoinCode.id !== config.ids.formClass || byJoinCode.school_id !== schoolId)) {
+    throw new Error("Refusing to use smoke form class join code because it collides with another row.");
+  }
+
+  const payload = {
+    id: config.ids.formClass,
+    teacher_id: teacherId,
+    school_id: schoolId,
+    name: config.formClass.name,
+    join_code: config.formClass.joinCode,
+    year_group: config.formClass.yearGroup,
+    class_type: config.formClass.classType,
+    department_key: null,
+  };
+  await upsertById(client, "classes", config.ids.formClass, payload, actions, "form class");
+}
+
+async function ensurePupilFormClass(client, config, schoolId, actions) {
+  const byPair = await selectOne(client, "pupil_classes", [
+    { column: "class_id", value: config.ids.formClass },
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "active", value: "true", op: "is" },
+  ]);
+  const byId = await selectOne(client, "pupil_classes", [{ column: "id", value: config.ids.pupilFormClass }]);
+  if (byId && !hasMarker(byId)) {
+    throw new Error("Refusing to use fixed pupil-form membership id because it belongs to unmarked data.");
+  }
+  if (byPair && byPair.id !== config.ids.pupilFormClass) {
+    throw new Error("Refusing to use smoke pupil form membership because an active non-fixed row already exists.");
+  }
+
+  const existing = byPair || byId;
+  const payload = {
+    id: existing?.id || config.ids.pupilFormClass,
+    school_id: schoolId,
+    class_id: config.ids.formClass,
+    pupil_id: config.ids.pupil,
+    active: true,
+    left_at: null,
+    ended_at: null,
+    ended_by: null,
+    ended_reason: null,
+    import_metadata: config.metadata,
+  };
+
+  if (existing) {
+    const rows = await client.patchRows("pupil_classes", [{ column: "id", value: existing.id }], payload);
+    assertSingleRow(rows, "pupil form membership repair", existing.id);
+    actions.push("reused pupil-form membership");
+    return;
+  }
+
+  const rows = await client.insertRow("pupil_classes", payload);
+  assertSingleRow(rows, "pupil form membership insert", config.ids.pupilFormClass);
+  actions.push("created pupil-form membership");
+}
+
+async function ensureSmokeBaselineGateReady(client, config, actions) {
+  const provision = await client.ensureFormClassBaselineAssignments([config.ids.formClass]);
+  let baselineAssignmentId = extractBaselineAssignmentIdFromProvision(provision, config);
+  if (!baselineAssignmentId) {
+    const gateBeforeStatus = normalizeBaselineGateState(await client.readBaselineGateState(config.ids.pupil));
+    baselineAssignmentId = gateBeforeStatus.assignmentId || gateBeforeStatus.completedAssignmentId;
+  }
+  if (!baselineAssignmentId) {
+    throw new Error("Could not resolve the smoke form baseline assignment id after provisioning.");
+  }
+
+  const baselineAssignment = await selectOne(client, "assignments_v2", [
+    { column: "id", value: baselineAssignmentId },
+  ]);
+  if (!baselineAssignment) {
+    throw new Error("Smoke form baseline assignment was not found after provisioning.");
+  }
+  if (baselineAssignment.class_id !== config.ids.formClass) {
+    throw new Error("Resolved baseline assignment does not belong to the smoke form class.");
+  }
+
+  await ensureCompletedBaselineStatus(client, config, baselineAssignment, actions);
+
+  const gate = normalizeBaselineGateState(await client.readBaselineGateState(config.ids.pupil));
+  if (!isSmokeBaselineGateReady(gate, config)) {
+    throw new Error(formatBaselineGateNotReady(gate, config));
+  }
+  return { provision, baselineAssignmentId, gate };
+}
+
+async function ensureCompletedBaselineStatus(client, config, baselineAssignment, actions) {
+  const byPair = await selectOne(client, "assignment_pupil_statuses", [
+    { column: "assignment_id", value: baselineAssignment.id },
+    { column: "pupil_id", value: config.ids.pupil },
+  ]);
+  const byId = await selectOne(client, "assignment_pupil_statuses", [{ column: "id", value: config.ids.baselineStatus }]);
+  if (byId && (byId.assignment_id !== baselineAssignment.id || byId.pupil_id !== config.ids.pupil)) {
+    throw new Error("Refusing to use fixed baseline status id because it belongs to another assignment/pupil.");
+  }
+  if (byPair && byPair.id !== config.ids.baselineStatus) {
+    throw new Error("Refusing to create fixed baseline status because the smoke pupil already has a non-fixed baseline status row.");
+  }
+
+  const existing = byPair || byId;
+  const now = new Date().toISOString();
+  const payload = completedBaselineStatusPayload(config, baselineAssignment, existing?.id || config.ids.baselineStatus, now);
+  if (existing) {
+    const rows = await client.patchRows("assignment_pupil_statuses", [{ column: "id", value: existing.id }], payload);
+    assertSingleRow(rows, "baseline gate status repair", existing.id);
+    actions.push("reused baseline gate status");
+    return;
+  }
+
+  const rows = await client.insertRow("assignment_pupil_statuses", payload);
+  assertSingleRow(rows, "baseline gate status insert", config.ids.baselineStatus);
+  actions.push("created baseline gate status");
+}
+
 async function ensureTest(client, config, teacherId, schoolId, actions) {
   const payload = {
     id: config.ids.test,
@@ -978,15 +1210,21 @@ async function ensureAssignmentStatus(client, config, teacherId, schoolId, actio
 }
 
 async function resetProgressRows(client, config, teacherId, schoolId) {
-  const attempts = await client.deleteRows("attempts", [{ column: "assignment_id", value: config.ids.assignment }]);
+  const attempts = await client.deleteRows("attempts", [
+    { column: "assignment_id", value: config.ids.assignment },
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "test_id", value: config.ids.test },
+  ]);
   const targetWords = await client.deleteRows("assignment_pupil_target_words", [
     { column: "assignment_id", value: config.ids.assignment },
+    { column: "pupil_id", value: config.ids.pupil },
   ]);
   const overrides = await client.deleteRows("assignment_pupil_overrides", [
     { column: "assignment_id", value: config.ids.assignment },
+    { column: "pupil_id", value: config.ids.pupil },
   ]);
 
-  await client.patchRows("assignments_v2", [{ column: "id", value: config.ids.assignment }], {
+  const assignmentRows = await client.patchRows("assignments_v2", [{ column: "id", value: config.ids.assignment }], {
     teacher_id: teacherId,
     school_id: schoolId,
     class_id: config.ids.class,
@@ -1007,11 +1245,13 @@ async function resetProgressRows(client, config, teacherId, schoolId) {
     delivery_model: "legacy_fixed",
     support_preset: null,
   });
+  assertSingleRow(assignmentRows, "smoke assignment reset", config.ids.assignment);
 
-  await client.patchRows("assignment_pupil_statuses", [{ column: "id", value: config.ids.status }], {
+  const statusRows = await client.patchRows("assignment_pupil_statuses", [{ column: "id", value: config.ids.status }], {
     ...baselineStatusPayload(config, teacherId, schoolId, config.ids.status),
     updated_at: new Date().toISOString(),
   });
+  assertSingleRow(statusRows, "smoke status reset", config.ids.status);
 
   return {
     attemptsDeleted: Array.isArray(attempts) ? attempts.length : 0,
@@ -1047,6 +1287,37 @@ function baselineStatusPayload(config, teacherId, schoolId, id) {
     headline_attempted_words: null,
     headline_correct_words: null,
     headline_score_rate: null,
+  };
+}
+
+function completedBaselineStatusPayload(config, baselineAssignment, id, timestamp) {
+  return {
+    id,
+    teacher_id: baselineAssignment.teacher_id,
+    school_id: baselineAssignment.school_id,
+    assignment_id: baselineAssignment.id,
+    class_id: baselineAssignment.class_id,
+    test_id: baselineAssignment.test_id,
+    pupil_id: config.ids.pupil,
+    status: "completed",
+    started_at: timestamp,
+    completed_at: timestamp,
+    last_opened_at: timestamp,
+    last_activity_at: timestamp,
+    total_words: 0,
+    correct_words: 0,
+    average_attempts: 0,
+    score_rate: 0,
+    result_json: [],
+    independent_first_correct_words: null,
+    self_corrected_words: null,
+    supported_correct_words: null,
+    supported_incorrect_words: null,
+    access_issue_words: null,
+    headline_attempted_words: null,
+    headline_correct_words: null,
+    headline_score_rate: null,
+    updated_at: timestamp,
   };
 }
 
@@ -1103,6 +1374,81 @@ async function selectOne(client, table, filters, select = "*") {
   return rows[0];
 }
 
+async function readBlockingPersonalisedRows(client, config) {
+  const rows = await client.selectRows("personalised_generation_run_pupils", [
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "status", value: "(waiting,provisioning)", op: "in" },
+  ], "id,run_id,class_id,pupil_id,status,assignment_id,updated_at");
+  if (!Array.isArray(rows)) {
+    throw new Error("Personalised generation row check returned an unexpected response.");
+  }
+  return rows;
+}
+
+function normalizeIdList(value) {
+  const source = Array.isArray(value) ? value : [];
+  return [...new Set(
+    source
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function normalizeBaselineGateState(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const classIds = normalizeIdList(source.class_ids ?? source.classIds);
+  const formClassIds = normalizeIdList(source.form_class_ids ?? source.formClassIds);
+  return {
+    status: String(source.status || "waiting").trim().toLowerCase() || "waiting",
+    waitingReason: String(source.waiting_reason ?? source.waitingReason ?? "").trim().toLowerCase() || null,
+    assignmentId: String(source.assignment_id ?? source.assignmentId ?? source.assignment?.id ?? "").trim(),
+    completedAssignmentId: String(source.completed_assignment_id ?? source.completedAssignmentId ?? "").trim(),
+    requiredStandardKey: String(source.required_standard_key ?? source.requiredStandardKey ?? REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase() || REQUIRED_BASELINE_STANDARD_KEY,
+    classIds,
+    formClassIds,
+  };
+}
+
+function isSmokeBaselineGateReady(gateState, config) {
+  return gateState?.status === "ready"
+    && gateState.formClassIds.includes(config.ids.formClass)
+    && !!gateState.completedAssignmentId;
+}
+
+function formatBaselineGateNotReady(gateState, config) {
+  return [
+    "baseline gate is not ready",
+    `status=${gateState?.status || "null"}`,
+    `waiting_reason=${gateState?.waitingReason || "null"}`,
+    `form_class_ids=${formatIdList(gateState?.formClassIds)}`,
+    `completed_assignment_id=${gateState?.completedAssignmentId || "null"}`,
+    `expected_form_class_id=${config.ids.formClass}`,
+  ].join("; ");
+}
+
+function formatIdList(values = []) {
+  const list = normalizeIdList(values);
+  return list.length ? list.join(",") : "[]";
+}
+
+function extractBaselineAssignmentIdFromProvision(provision = {}, config) {
+  const results = Array.isArray(provision?.results) ? provision.results : [];
+  const exact = results.find((row) =>
+    String(row?.class_id || "").trim() === config.ids.formClass
+    && String(row?.assignment_id || "").trim()
+  );
+  return String(exact?.assignment_id || "").trim();
+}
+
+function assertSingleRow(rows, label, expectedId) {
+  if (!Array.isArray(rows)) {
+    throw new Error(`${label} returned an unexpected response.`);
+  }
+  if (rows.length !== 1 || (expectedId && String(rows[0]?.id || "") !== String(expectedId))) {
+    throw new Error(`${label} did not affect exactly the expected row.`);
+  }
+}
+
 function describeFilters(filters) {
   return filters.map((filter) => `${filter.column}=${filter.value}`).join(", ");
 }
@@ -1121,10 +1467,14 @@ function printReport(mode, report, config) {
   console.log(`Safe: ${report.safe ? "yes" : "no"}`);
   console.log(`At baseline: ${report.baseline ? "yes" : "no"}`);
   console.log(`Smoke assignment id: ${config.ids.assignment}`);
+  console.log(`Smoke form class id: ${config.ids.formClass}`);
+  console.log(`Smoke pupil form membership id: ${config.ids.pupilFormClass}`);
+  console.log(`Smoke baseline gate status id: ${config.ids.baselineStatus}`);
   console.log(`Baseline end_at: ${config.baselineEndAt}`);
   if (report.rows.authUser?.id) console.log(`Smoke teacher user id: ${report.rows.authUser.id}`);
   if (report.rows.school?.id) console.log(`Smoke school id: ${report.rows.school.id}`);
   if (report.rows.assignment?.end_at) console.log(`Current assignment end_at: ${report.rows.assignment.end_at}`);
+  printBaselineGateReport(report);
   if (report.missing.length) console.log(`Missing: ${report.missing.join(", ")}`);
   if (report.errors.length) console.log(`Unsafe: ${report.errors.join("; ")}`);
   if (report.drift.length) console.log(`Drift: ${report.drift.join("; ")}`);
@@ -1134,12 +1484,15 @@ function printApplyResult(result, config) {
   console.log("Fixture apply complete.");
   printResultCore(result, config);
   if (result.actions.length) console.log(`Actions: ${result.actions.join(", ")}`);
+  printGateResult(result.gate);
   printResetCounts(result.reset);
 }
 
 function printResetResult(result, config) {
   console.log("Fixture reset complete.");
   printResultCore(result, config);
+  if (result.actions?.length) console.log(`Actions: ${result.actions.join(", ")}`);
+  printGateResult(result.gate);
   printResetCounts(result.reset);
 }
 
@@ -1147,19 +1500,45 @@ function printResultCore(result, config) {
   console.log(`Smoke school id: ${result.schoolId}`);
   console.log(`Smoke teacher user id: ${result.teacherId}`);
   console.log(`Smoke class id: ${config.ids.class}`);
+  console.log(`Smoke form class id: ${config.ids.formClass}`);
   console.log(`Smoke pupil id: ${config.ids.pupil}`);
+  console.log(`Smoke pupil form membership id: ${config.ids.pupilFormClass}`);
   console.log(`Smoke test id: ${config.ids.test}`);
   console.log(`Smoke assignment id: ${config.ids.assignment}`);
+  console.log(`Smoke baseline gate status id: ${config.ids.baselineStatus}`);
   console.log(`Baseline end_at: ${config.baselineEndAt}`);
   console.log(`Verified complete: ${result.report.complete ? "yes" : "no"}`);
   console.log(`Verified safe: ${result.report.safe ? "yes" : "no"}`);
   console.log(`Verified at baseline: ${result.report.baseline ? "yes" : "no"}`);
+  printBaselineGateReport(result.report);
 }
 
 function printResetCounts(reset) {
   console.log(`Smoke attempts deleted: ${reset.attemptsDeleted}`);
   console.log(`Smoke target words deleted: ${reset.targetWordsDeleted}`);
   console.log(`Smoke overrides deleted: ${reset.overridesDeleted}`);
+}
+
+function printBaselineGateReport(report) {
+  const gate = report?.rows?.baselineGate;
+  if (!gate) {
+    console.log("Baseline gate status: (not read)");
+    return;
+  }
+  console.log(`Baseline gate status: ${gate.status}`);
+  console.log(`Baseline gate waiting reason: ${gate.waitingReason || "null"}`);
+  console.log(`Baseline gate form class ids: ${formatIdList(gate.formClassIds)}`);
+  console.log(`Baseline gate completed assignment id: ${gate.completedAssignmentId || "null"}`);
+  console.log(`Baseline gate ready: ${report.gateReady ? "yes" : "no"}`);
+  const blockers = report?.rows?.personalisedBlockingRows || [];
+  console.log(`Waiting/provisioning personalised rows for smoke pupil: ${blockers.length}`);
+}
+
+function printGateResult(gateResult) {
+  if (!gateResult?.gate) return;
+  console.log(`Gate repair baseline assignment id: ${gateResult.baselineAssignmentId || "null"}`);
+  console.log(`Gate repair status: ${gateResult.gate.status}`);
+  console.log(`Gate repair completed assignment id: ${gateResult.gate.completedAssignmentId || "null"}`);
 }
 
 function redactSecrets(text) {

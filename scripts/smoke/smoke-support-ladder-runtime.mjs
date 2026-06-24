@@ -16,13 +16,18 @@ const DEFAULT_IDS = {
   testWord: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d009",
   assignment: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00a",
   status: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00b",
+  formClass: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00c",
+  pupilFormClass: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00d",
+  baselineStatus: "5f958e46-d1ec-4b0f-9bc9-e45fd1d5d00e",
 };
 
 const SCHOOL_SLUG = "wordloom-smoke-do-not-delete";
 const CLASS_JOIN_CODE = "SMKDD1";
+const FORM_CLASS_JOIN_CODE = "SMKFM1";
 const PUPIL_USERNAME = "wordloom_smoke_do_not_delete_pupil";
 const PUPIL_PIN = "0000";
 const TEST_WORD = "rain";
+const REQUIRED_BASELINE_STANDARD_KEY = "core_v2";
 const LEGACY_DELIVERY_MODEL = "legacy_fixed";
 const SUPPORT_DELIVERY_MODEL = "support_ladder";
 const SUPPORT_PRESET = "balanced";
@@ -292,8 +297,11 @@ async function main() {
   if (parsed.mode === "--verify") {
     const report = await inspectFixture(admin, config);
     const runtimeReport = await inspectRuntime(runtime, config);
-    printVerifyReport(report, runtimeReport, config);
-    if (!report.complete || !report.safe || !runtimeReport.ok) process.exitCode = 1;
+    const gateReport = await inspectBaselineGate(runtime, config);
+    printVerifyReport(report, runtimeReport, gateReport, config);
+    if (!report.complete || !report.safe || !runtimeReport.ok || !gateReport.ready || !baselineStatusMatchesGate(report, gateReport)) {
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -426,6 +434,9 @@ function printDryRun(config, env) {
   console.log("");
   console.log("Safety checks before writes:");
   console.log("  fixed smoke school/class/pupil/test/test word markers");
+  console.log("  fixed smoke form class and active form membership");
+  console.log("  read_pupil_baseline_gate_state is ready for the smoke pupil");
+  console.log("  no waiting/provisioning personalised generation rows for the smoke pupil");
   console.log("  fixed assignment/status relationships");
   console.log("  exactly one assignment row patched");
   console.log("  exactly one status row reset");
@@ -452,11 +463,14 @@ function printDryRun(config, env) {
 function printFixtureIds(config) {
   console.log(`Smoke school id: ${config.ids.school}`);
   console.log(`Smoke class id: ${config.ids.class}`);
+  console.log(`Smoke form class id: ${config.ids.formClass}`);
   console.log(`Smoke pupil id: ${config.ids.pupil}`);
+  console.log(`Smoke pupil form membership id: ${config.ids.pupilFormClass}`);
   console.log(`Smoke test id: ${config.ids.test}`);
   console.log(`Smoke test word id: ${config.ids.testWord}`);
   console.log(`Smoke assignment id: ${config.ids.assignment}`);
   console.log(`Smoke status id: ${config.ids.status}`);
+  console.log(`Smoke baseline gate status id: ${config.ids.baselineStatus}`);
   console.log(`Smoke pupil login: ${PUPIL_USERNAME} / PIN ${PUPIL_PIN}`);
 }
 
@@ -510,6 +524,15 @@ function createSupabaseClient(rawBaseUrl, key, label) {
         body: { requested_pupil_id: pupilId },
       }, "read pupil runtime assignments");
     },
+    readBaselineGateState(pupilId) {
+      return request("rest/v1/rpc/read_pupil_baseline_gate_state", {
+        method: "POST",
+        body: {
+          requested_pupil_id: pupilId,
+          requested_standard_key: REQUIRED_BASELINE_STANDARD_KEY,
+        },
+      }, "read pupil baseline gate state");
+    },
   };
 }
 
@@ -558,6 +581,23 @@ async function inspectFixture(client, config) {
     hasMarker(row)
   );
 
+  rows.formClass = await selectOne(client, "classes", [{ column: "id", value: config.ids.formClass }]);
+  rows.formClassByJoinCode = await selectOne(client, "classes", [{ column: "join_code", value: FORM_CLASS_JOIN_CODE }]);
+  if (rows.formClassByJoinCode && rows.formClassByJoinCode.id !== config.ids.formClass) {
+    errors.push("smoke form class join code belongs to another row");
+  }
+  checkRow("form class", rows.formClass, missing, errors, (row) =>
+    row.id === config.ids.formClass &&
+    row.school_id === config.ids.school &&
+    row.teacher_id === rows.class?.teacher_id &&
+    row.name === `${MARKER} Current Form` &&
+    row.join_code === FORM_CLASS_JOIN_CODE &&
+    row.year_group === "Smoke" &&
+    row.class_type === "form" &&
+    row.department_key === null &&
+    hasMarker(row)
+  );
+
   rows.pupil = await selectOne(client, "pupils", [{ column: "id", value: config.ids.pupil }]);
   checkRow("pupil", rows.pupil, missing, errors, (row) =>
     row.id === config.ids.pupil &&
@@ -574,6 +614,28 @@ async function inspectFixture(client, config) {
     row.class_id === config.ids.class &&
     row.pupil_id === config.ids.pupil &&
     row.active === true &&
+    hasMarker(row)
+  );
+
+  rows.pupilFormClass = await selectOne(client, "pupil_classes", [{ column: "id", value: config.ids.pupilFormClass }]);
+  rows.pupilFormClassByPair = await selectOne(client, "pupil_classes", [
+    { column: "class_id", value: config.ids.formClass },
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "active", value: "true", op: "is" },
+  ]);
+  if (rows.pupilFormClassByPair && rows.pupilFormClassByPair.id !== config.ids.pupilFormClass) {
+    errors.push("active smoke pupil form membership exists under a non-fixed id");
+  }
+  checkRow("pupil form membership", rows.pupilFormClass, missing, errors, (row) =>
+    row.id === config.ids.pupilFormClass &&
+    row.school_id === config.ids.school &&
+    row.class_id === config.ids.formClass &&
+    row.pupil_id === config.ids.pupil &&
+    row.active === true &&
+    !row.left_at &&
+    !row.ended_at &&
+    !row.ended_by &&
+    !row.ended_reason &&
     hasMarker(row)
   );
 
@@ -644,6 +706,14 @@ async function inspectFixture(client, config) {
     drift.push("assignment pupil status has support-ladder counters");
   }
 
+  rows.baselineStatus = await selectOne(client, "assignment_pupil_statuses", [{ column: "id", value: config.ids.baselineStatus }]);
+  checkRow("baseline gate status", rows.baselineStatus, missing, errors, (row) =>
+    row.id === config.ids.baselineStatus &&
+    row.pupil_id === config.ids.pupil &&
+    row.status === "completed" &&
+    !!row.completed_at
+  );
+
   rows.attempts = await client.selectRows("attempts", [
     { column: "assignment_id", value: config.ids.assignment },
     { column: "pupil_id", value: config.ids.pupil },
@@ -654,6 +724,11 @@ async function inspectFixture(client, config) {
   }
   if (rows.attempts.length) {
     drift.push(`assignment has ${rows.attempts.length} smoke attempt row(s)`);
+  }
+
+  rows.personalisedBlockingRows = await readBlockingPersonalisedRows(client, config);
+  if (rows.personalisedBlockingRows.length) {
+    errors.push(`found ${rows.personalisedBlockingRows.length} waiting/provisioning personalised generation row(s) for the smoke pupil`);
   }
 
   return {
@@ -692,6 +767,15 @@ async function inspectRuntime(runtimeClient, config) {
   return { ok, payload: normalized, assignment };
 }
 
+async function inspectBaselineGate(runtimeClient, config) {
+  const payload = await runtimeClient.readBaselineGateState(config.ids.pupil);
+  const normalized = normalizeBaselineGatePayload(payload);
+  return {
+    ready: isSmokeBaselineGateReady(normalized, config),
+    payload: normalized,
+  };
+}
+
 function normalizeRuntimePayload(payload, requestedPupilId) {
   const source = payload && typeof payload === "object" ? payload : {};
   const assignments = Array.isArray(source.assignments)
@@ -711,7 +795,71 @@ function findRuntimeAssignment(runtimePayload, assignmentId) {
     .find((row) => String(row?.id || "").trim() === assignmentId) || null;
 }
 
-function printVerifyReport(report, runtimeReport, config) {
+async function readBlockingPersonalisedRows(client, config) {
+  const rows = await client.selectRows("personalised_generation_run_pupils", [
+    { column: "pupil_id", value: config.ids.pupil },
+    { column: "status", value: "(waiting,provisioning)", op: "in" },
+  ], "id,run_id,class_id,pupil_id,status,assignment_id,updated_at");
+  assertArrayResponse(rows, "Personalised generation blocker check");
+  return rows;
+}
+
+function normalizeBaselineGatePayload(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  return {
+    status: String(source.status || "waiting").trim().toLowerCase() || "waiting",
+    waitingReason: String(source.waiting_reason ?? source.waitingReason ?? "").trim().toLowerCase() || null,
+    assignmentId: String(source.assignment_id ?? source.assignmentId ?? source.assignment?.id ?? "").trim(),
+    completedAssignmentId: String(source.completed_assignment_id ?? source.completedAssignmentId ?? "").trim(),
+    requiredStandardKey: String(source.required_standard_key ?? source.requiredStandardKey ?? REQUIRED_BASELINE_STANDARD_KEY).trim().toLowerCase() || REQUIRED_BASELINE_STANDARD_KEY,
+    classIds: normalizeIdList(source.class_ids ?? source.classIds),
+    formClassIds: normalizeIdList(source.form_class_ids ?? source.formClassIds),
+  };
+}
+
+function normalizeIdList(value) {
+  const source = Array.isArray(value) ? value : [];
+  return [...new Set(
+    source
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  )];
+}
+
+function isSmokeBaselineGateReady(gateState, config) {
+  return gateState?.status === "ready"
+    && gateState.formClassIds.includes(config.ids.formClass)
+    && !!gateState.completedAssignmentId;
+}
+
+function baselineStatusMatchesGate(fixtureReport, gateReport) {
+  const row = fixtureReport?.rows?.baselineStatus || null;
+  const completedAssignmentId = String(gateReport?.payload?.completedAssignmentId || "").trim();
+  return !!row
+    && !!completedAssignmentId
+    && String(row.assignment_id || "").trim() === completedAssignmentId
+    && String(row.pupil_id || "").trim() === fixtureReport?.rows?.pupil?.id
+    && String(row.status || "").trim().toLowerCase() === "completed"
+    && !!row.completed_at;
+}
+
+function formatIdList(values = []) {
+  const list = normalizeIdList(values);
+  return list.length ? list.join(",") : "[]";
+}
+
+function formatBaselineGateNotReady(gateState, config) {
+  return [
+    "baseline gate is not ready",
+    `status=${gateState?.status || "null"}`,
+    `waiting_reason=${gateState?.waitingReason || "null"}`,
+    `form_class_ids=${formatIdList(gateState?.formClassIds)}`,
+    `completed_assignment_id=${gateState?.completedAssignmentId || "null"}`,
+    `expected_form_class_id=${config.ids.formClass}`,
+  ].join("; ");
+}
+
+function printVerifyReport(report, runtimeReport, gateReport, config) {
   console.log("Mode: --verify (remote read-only)");
   printFixtureIds(config);
   console.log("");
@@ -721,6 +869,14 @@ function printVerifyReport(report, runtimeReport, config) {
   if (report.missing.length) console.log(`Missing: ${report.missing.join(", ")}`);
   if (report.errors.length) console.log(`Unsafe: ${report.errors.join("; ")}`);
   if (report.drift.length) console.log(`Drift: ${report.drift.join("; ")}`);
+  console.log("");
+  console.log(`Baseline gate status: ${gateReport.payload.status}`);
+  console.log(`Baseline gate waiting reason: ${gateReport.payload.waitingReason || "null"}`);
+  console.log(`Baseline gate form class ids: ${formatIdList(gateReport.payload.formClassIds)}`);
+  console.log(`Baseline gate completed assignment id: ${gateReport.payload.completedAssignmentId || "null"}`);
+  console.log(`Baseline gate ready: ${gateReport.ready ? "yes" : "no"}`);
+  console.log(`Baseline gate fixed status matches: ${baselineStatusMatchesGate(report, gateReport) ? "yes" : "no"}`);
+  console.log(`Waiting/provisioning personalised rows for smoke pupil: ${report.rows.personalisedBlockingRows?.length || 0}`);
   console.log("");
   console.log(`Current assignment delivery_model: ${report.rows.assignment?.delivery_model || "(missing)"}`);
   console.log(`Current assignment support_preset: ${formatNullable(report.rows.assignment?.support_preset)}`);
@@ -754,6 +910,9 @@ async function runScenario(admin, runtime, config) {
   try {
     const report = await inspectFixture(admin, config);
     validateFixtureForWrite(report);
+    const gateReport = await inspectBaselineGate(runtime, config);
+    validateBaselineGateForWrite(gateReport, report, config);
+    console.log("Baseline gate readiness verified: yes");
     startingEndAt = report.rows.assignment.end_at || null;
 
     writeApplied = true;
@@ -796,6 +955,19 @@ function validateFixtureForWrite(report) {
   }
   if (!report.safe) {
     throw new Error(`Refusing write mode because the smoke fixture is unsafe: ${report.errors.join("; ")}.`);
+  }
+}
+
+function validateBaselineGateForWrite(gateReport, fixtureReport, config) {
+  if (!gateReport.ready) {
+    throw new Error(`Refusing write mode because ${formatBaselineGateNotReady(gateReport.payload, config)}.`);
+  }
+  if (!baselineStatusMatchesGate(fixtureReport, gateReport)) {
+    throw new Error("Refusing write mode because the fixed baseline gate status row does not match the gate completed assignment.");
+  }
+  const blockers = fixtureReport.rows.personalisedBlockingRows || [];
+  if (blockers.length) {
+    throw new Error(`Refusing write mode because ${blockers.length} waiting/provisioning personalised generation row(s) exist for the smoke pupil.`);
   }
 }
 
