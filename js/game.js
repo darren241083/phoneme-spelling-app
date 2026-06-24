@@ -28,6 +28,12 @@ import {
   hasMeaningSupport,
   hasSentenceSupport,
 } from "./spellingContextSupport.js?v=1.3";
+import {
+  advanceSupportLadderAfterSubmission,
+  createInitialSupportLadderState,
+  isSupportLadderDelivery,
+  normalizeSupportLadderState,
+} from "./supportLadderRuntime.js";
 
 const LOOM_DECOY_COUNTS = {
   none: 0,
@@ -1085,6 +1091,7 @@ export function mountGame({
 
   function resolveQuestionType(item) {
     if (isCompetitionMode) return "full_recall";
+    if (isSupportLadderRuntimeItem(item)) return "full_recall";
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1133,6 +1140,10 @@ export function mountGame({
 
   function resolveModeKind(item) {
     if (isCompetitionMode) return "no_support_assessment";
+    if (isSupportLadderRuntimeItem(item)) {
+      const supportState = getSupportLadderStateForItem(item);
+      return supportState?.phase === "supported" ? "segmented_spelling" : "no_support_assessment";
+    }
     const choice = getChoice(item);
     const explicit =
       String(
@@ -1186,6 +1197,10 @@ export function mountGame({
   }
 
   function readableQuestionType(item, type = currentModeKind) {
+    if (isSupportLadderRuntimeItem(item)) {
+      return getQuestionHeaderLabel(type) || "Support ladder";
+    }
+
     const choice = getChoice(item);
     const explicitTypeValue = choice?.question_type ?? choice?.questionType ?? choice?.mode ?? "";
     if (String(explicitTypeValue || "").trim()) {
@@ -1216,6 +1231,7 @@ export function mountGame({
 
   function getAttemptsAllowedForItem(item = currentItem()) {
     if (isCompetitionMode) return 1;
+    if (isSupportLadderRuntimeItem(item)) return 3;
     return resolveItemAttemptsAllowed(item, testMeta);
   }
 
@@ -1302,13 +1318,113 @@ export function mountGame({
     return undefined;
   }
 
+  function normalizeRuntimeKey(value = "") {
+    return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  }
+
   function normalizeSupportLadderDeliveryModel(value = "") {
-    const key = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const key = normalizeRuntimeKey(value);
     if (key === "supportladder" || key === "ladder") return "support_ladder";
     return key === "support_ladder" ? key : "legacy_fixed";
   }
 
+  function isExcludedSupportLadderSource(value = "") {
+    const key = normalizeRuntimeKey(value);
+    return key === "baseline"
+      || key === "baseline_v1"
+      || key === "baseline_v2"
+      || key === "practice"
+      || key === "learn"
+      || key === "extra_challenge"
+      || key === "spelling_bee"
+      || key === "spellingbee"
+      || key === "sample"
+      || key === "demo"
+      || key === "presenter"
+      || key === "presentation"
+      || key === "public_presentation";
+  }
+
+  function isBaselineLikeRuntimeItem(item = null) {
+    const choice = getChoice(item);
+    const choiceSource = normalizeRuntimeKey(choice?.source);
+    return normalizeChoiceFlag(item?.isBaseline)
+      || normalizeChoiceFlag(item?.is_baseline)
+      || normalizeChoiceFlag(choice?.baseline_v1)
+      || normalizeChoiceFlag(choice?.baseline_v2)
+      || choiceSource === "baseline"
+      || choiceSource === "baseline_v1"
+      || choiceSource === "baseline_v2";
+  }
+
+  function isSupportLadderExcludedRuntimeContext(item = null) {
+    if (!item || !assignmentId || !recordAttempts) return true;
+    if (isCompetitionMode || isSampleMode || presentationMode) return true;
+    if (isBaselineLikeRuntimeItem(item)) return true;
+
+    const mode = readFirstDefined(item?.mode, testMeta?.mode);
+    if (isExcludedSupportLadderSource(mode)) return true;
+
+    const source = readFirstDefined(
+      item?.attempt_source,
+      item?.attemptSource,
+      item?.assignment_origin,
+      item?.assignmentOrigin,
+      item?.evidence_source,
+      item?.evidenceSource,
+      testMeta?.attempt_source,
+      testMeta?.attemptSource,
+      testMeta?.assignment_origin,
+      testMeta?.assignmentOrigin,
+      testMeta?.evidence_source,
+      testMeta?.evidenceSource
+    );
+    return isExcludedSupportLadderSource(source);
+  }
+
+  function isSupportLadderRuntimeItem(item = currentItem()) {
+    if (isSupportLadderExcludedRuntimeContext(item)) return false;
+    return isSupportLadderDelivery({
+      item,
+      testMeta,
+      assignment: testMeta,
+    });
+  }
+
+  function getSupportLadderStateForItem(item = currentItem(), entry = getProgressEntry(item)) {
+    if (!isSupportLadderRuntimeItem(item)) return null;
+    if (entry?.supportLadderState || entry?.support_ladder_state) {
+      return normalizeSupportLadderState(entry.supportLadderState || entry.support_ladder_state);
+    }
+
+    const attemptsUsed = Math.max(0, Number(entry?.attemptsUsed || 0));
+    const savedPhase = readFirstDefined(entry?.supportState, entry?.support_state);
+    let phase = savedPhase;
+    if (entry?.completed !== true) {
+      if (attemptsUsed >= 2 && (!phase || ["independent", "retry"].includes(normalizeRuntimeKey(phase)))) {
+        phase = "supported";
+      } else if (attemptsUsed >= 1 && (!phase || normalizeRuntimeKey(phase) === "independent")) {
+        phase = "retry";
+      }
+    }
+
+    if (!phase) {
+      return createInitialSupportLadderState();
+    }
+
+    return normalizeSupportLadderState({
+      phase,
+      supportActions: readFirstDefined(entry?.supportActions, entry?.support_actions, []),
+      lastSubmittedIncorrectAnswer: readFirstDefined(
+        entry?.lastSubmittedIncorrectAnswer,
+        entry?.last_submitted_incorrect_answer,
+        null
+      ),
+    });
+  }
+
   function resolveSupportLadderMetadata(item = null, source = null) {
+    if (!isSupportLadderRuntimeItem(item)) return {};
     const deliveryModel = normalizeSupportLadderDeliveryModel(readFirstDefined(
       source?.deliveryModel,
       source?.delivery_model,
@@ -1326,6 +1442,26 @@ export function mountGame({
       testMeta?.supportActions,
       testMeta?.support_actions,
     );
+    const supportLadderState = normalizeSupportLadderState(readFirstDefined(
+      source?.supportLadderState,
+      source?.support_ladder_state,
+      {
+        phase: readFirstDefined(
+          source?.supportState,
+          source?.support_state,
+          item?.supportState,
+          item?.support_state,
+          testMeta?.supportState,
+          testMeta?.support_state,
+        ),
+        supportActions,
+        lastSubmittedIncorrectAnswer: readFirstDefined(
+          source?.lastSubmittedIncorrectAnswer,
+          source?.last_submitted_incorrect_answer,
+          null
+        ),
+      }
+    ));
     return {
       deliveryModel,
       supportPreset: readFirstDefined(
@@ -1343,6 +1479,7 @@ export function mountGame({
         item?.support_state,
         testMeta?.supportState,
         testMeta?.support_state,
+        supportLadderState.phase,
       ) ?? null,
       evidenceCategory: readFirstDefined(
         source?.evidenceCategory,
@@ -1352,7 +1489,8 @@ export function mountGame({
         testMeta?.evidenceCategory,
         testMeta?.evidence_category,
       ) ?? null,
-      supportActions: Array.isArray(supportActions) ? supportActions.slice() : (supportActions ?? []),
+      supportActions: supportLadderState.supportActions,
+      supportLadderState,
     };
   }
 
@@ -1373,6 +1511,8 @@ export function mountGame({
     inputState = null,
     feedbackState = null,
     index = null,
+    supportMetadata = null,
+    supportLadderState = null,
   } = {}) {
     if (!item) return null;
     const choice = getChoice(item);
@@ -1386,7 +1526,11 @@ export function mountGame({
     const safeAttemptsUsed = safeCompleted
       ? Math.max(1, Number(attemptsUsed || 1))
       : Math.max(0, Number(attemptsUsed || 0));
-    const supportMetadata = resolveSupportLadderMetadata(item);
+    const ladderMetadata = resolveSupportLadderMetadata(item, {
+      ...(supportMetadata && typeof supportMetadata === "object" ? supportMetadata : {}),
+      supportLadderState,
+      lastSubmittedIncorrectAnswer,
+    });
 
     return {
       itemKey,
@@ -1394,7 +1538,7 @@ export function mountGame({
       wordId: item?.id || null,
       word: resolvedWordText,
       typed: String(typed ?? "").trim(),
-      correct: normalizeStoredCorrectness(correct, supportMetadata),
+      correct: normalizeStoredCorrectness(correct, ladderMetadata),
       completed: safeCompleted,
       attemptsUsed: safeAttemptsUsed,
       attemptsAllowed: resolvedAttemptsAllowed,
@@ -1410,7 +1554,7 @@ export function mountGame({
       lastSubmittedIncorrectAnswer: String(lastSubmittedIncorrectAnswer ?? "").trim() || null,
       inputState: cloneProgressInputState(inputState),
       feedbackState: cloneProgressFeedbackState(feedbackState),
-      ...supportMetadata,
+      ...ladderMetadata,
     };
   }
 
@@ -1688,6 +1832,7 @@ export function mountGame({
   function buildCurrentDraftProgressEntry(item = currentItem()) {
     if (!item) return null;
     const existingEntry = getProgressEntry(item);
+    const supportLadderState = getSupportLadderStateForItem(item, existingEntry);
     const attemptsUsed = Math.max(
       Math.max(0, Number(existingEntry?.completed ? 0 : existingEntry?.attemptsUsed || 0)),
       Math.max(0, currentAttempt - 1)
@@ -1707,6 +1852,13 @@ export function mountGame({
       inputState: captureCurrentInputState(),
       feedbackState: null,
       index: idx + 1,
+      supportMetadata: supportLadderState
+        ? {
+          supportState: supportLadderState.phase,
+          supportActions: supportLadderState.supportActions,
+        }
+        : null,
+      supportLadderState,
     });
   }
 
@@ -1972,6 +2124,8 @@ export function mountGame({
         inputState: resumeEntry?.inputState,
         feedbackState: resumeEntry?.feedbackState,
         index: Number(resumeEntry?.index || index + 1),
+        supportMetadata: resumeEntry,
+        supportLadderState: resumeEntry?.supportLadderState ?? resumeEntry?.support_ladder_state ?? null,
       });
       if (!storedEntry) continue;
       progressEntries.set(itemKey, storedEntry);
@@ -2600,6 +2754,8 @@ export function mountGame({
       inputState: null,
       feedbackState: null,
       index: entry?.index,
+      supportMetadata: entry,
+      supportLadderState: entry?.supportLadderState ?? entry?.support_ladder_state ?? null,
     }));
     rebuildSessionResultState();
     return true;
@@ -2789,6 +2945,15 @@ export function mountGame({
     if (!(input instanceof HTMLInputElement)) return;
 
     const progressEntry = getProgressEntry(item);
+    if (isSupportLadderRuntimeItem(item)) {
+      const supportState = getSupportLadderStateForItem(item, progressEntry);
+      if (
+        (supportState?.phase === "retry" || supportState?.phase === "supported")
+        && progressEntry?.inputState?.kind !== "full_recall"
+      ) {
+        return;
+      }
+    }
     const storedValue = progressEntry?.inputState?.kind === "full_recall"
       ? progressEntry.inputState.value
       : progressEntry?.completed === false
@@ -4185,6 +4350,19 @@ export function mountGame({
     renderFocusSound(item);
   }
 
+  function renderSupportLadderWord(item, supportState = getSupportLadderStateForItem(item)) {
+    if (supportState?.phase === "supported") {
+      promptLine.textContent = "Use the boxes to help spell the word.";
+      renderSegmentedSpelling(item);
+      return;
+    }
+
+    promptLine.textContent = supportState?.phase === "retry"
+      ? "Not quite. Try once more."
+      : "Listen and spell the word.";
+    renderFullRecall({ disablePaste: true });
+  }
+
   function renderWord() {
     locked = false;
     completionInFlight = false;
@@ -4201,8 +4379,12 @@ export function mountGame({
     btnListen.disabled = false;
 
     const item = currentItem();
-    const savedAttemptsUsed = Math.max(0, Number(getProgressEntry(item)?.attemptsUsed || 0));
-    currentAttempt = Math.max(1, Math.min(getAttemptsAllowedForItem(item), savedAttemptsUsed + 1));
+    const progressEntry = getProgressEntry(item);
+    const supportLadderState = getSupportLadderStateForItem(item, progressEntry);
+    const savedAttemptsUsed = Math.max(0, Number(progressEntry?.attemptsUsed || 0));
+    currentAttempt = supportLadderState
+      ? Math.max(1, Math.min(getAttemptsAllowedForItem(item), supportLadderState.attemptNumber))
+      : Math.max(1, Math.min(getAttemptsAllowedForItem(item), savedAttemptsUsed + 1));
     updateHeader();
     renderAttemptDots();
     const questionType = resolveQuestionType(item);
@@ -4214,7 +4396,9 @@ export function mountGame({
     sentenceLine.textContent = "";
     hideNativeContextControls();
 
-    if (currentModeKind === "focus_sound") {
+    if (supportLadderState) {
+      renderSupportLadderWord(item, supportLadderState);
+    } else if (currentModeKind === "focus_sound") {
       promptLine.textContent = presentationMode
         ? "Spell the word."
         : "Choose the correct grapheme for the focus sound.";
@@ -4266,7 +4450,7 @@ export function mountGame({
       renderFullRecall();
     }
 
-    refreshNativeContextControls(item);
+    if (!supportLadderState) refreshNativeContextControls(item);
 
     if (hasPendingFinalWrongReveal(getProgressEntry(item))) {
       showFinalWrongRevealState(item);
@@ -4322,7 +4506,7 @@ export function mountGame({
     return String(typed || "").trim().toLowerCase() === target;
   }
 
-  async function logAttempt({ typed, correct }) {
+  async function logAttempt({ typed, correct, supportMetadata = null, attemptNumber = currentAttempt } = {}) {
     if (!recordAttempts) return;
     const item = currentItem();
     const choice = getChoice(item);
@@ -4331,7 +4515,9 @@ export function mountGame({
       || buildWordFromGraphemes(Array.isArray(item?.segments) ? item.segments : []);
     const resolvedTestId = item?.test_id || item?.testId || testMeta?.id;
     const attemptsAllowed = getAttemptsAllowedForItem(item);
-    const supportMetadata = resolveSupportLadderMetadata(item);
+    const ladderMetadata = supportMetadata?.deliveryModel === "support_ladder"
+      ? supportMetadata
+      : resolveSupportLadderMetadata(item);
     await pupilRecordAttempt({
       pupilId,
       assignmentId,
@@ -4341,7 +4527,7 @@ export function mountGame({
       mode: resolveQuestionType(item),
       typed,
       correct,
-      attemptNumber: currentAttempt,
+      attemptNumber,
       attemptsAllowed: Number.isFinite(attemptsAllowed) ? attemptsAllowed : null,
       wordText: resolvedWordText || null,
       wordSource: item?.word_source || item?.wordSource || (item?.is_target_word ? "targeted" : "base"),
@@ -4349,14 +4535,14 @@ export function mountGame({
       targetGraphemes: Array.isArray(item?.segments) ? item.segments : null,
       focusGrapheme: resolvedFocusGrapheme,
       patternType: choice?.pattern_type || null,
-      deliveryModel: supportMetadata.deliveryModel,
-      supportState: supportMetadata.supportState,
-      evidenceCategory: supportMetadata.evidenceCategory,
-      supportActions: supportMetadata.supportActions,
+      deliveryModel: ladderMetadata.deliveryModel,
+      supportState: ladderMetadata.supportState,
+      evidenceCategory: ladderMetadata.evidenceCategory,
+      supportActions: ladderMetadata.supportActions,
     });
   }
 
-  function finishWord({ correct, typed }) {
+  function finishWord({ correct, typed, supportMetadata = null, supportLadderState = null, attemptsUsed = currentAttempt } = {}) {
     locked = true;
     clearCompetitionTimer();
     stopAudioPlayback();
@@ -4373,7 +4559,6 @@ export function mountGame({
     const resolvedWordText = String(item?.word || "").trim()
       || buildWordFromGraphemes(Array.isArray(item?.segments) ? item.segments : []);
     const resolvedFocusGrapheme = getResolvedFocusGrapheme(item);
-    const attemptsUsed = currentAttempt;
     const revealOnFinalWrong = !correct && shouldRevealOnFinalWrong(item);
     const completedEntry = buildStoredProgressEntry(item, {
       completed: true,
@@ -4386,6 +4571,8 @@ export function mountGame({
       inputState: revealOnFinalWrong ? captureCurrentInputState() : null,
       feedbackState: revealOnFinalWrong ? { kind: "final_wrong_reveal", pending: true } : null,
       index: idx + 1,
+      supportMetadata,
+      supportLadderState,
     });
     progressEntries.set(getItemStateKey(item), completedEntry);
     upsertCompletedResult(item, {
@@ -4419,6 +4606,60 @@ export function mountGame({
     feedback.innerHTML = `<span class="badgeBad">Incorrect.</span>`;
   }
 
+  async function checkSupportLadderSubmission(item, { typed, correct }) {
+    const currentState = getSupportLadderStateForItem(item);
+    const transition = advanceSupportLadderAfterSubmission(currentState, {
+      correct,
+      typed,
+    });
+    const attemptMetadata = transition.attemptMetadata || {};
+
+    await logAttempt({
+      typed: transition.typed,
+      correct: transition.correct,
+      attemptNumber: attemptMetadata.attemptNumber || currentAttempt,
+      supportMetadata: attemptMetadata,
+    });
+
+    if (transition.terminal) {
+      finishWord({
+        correct: transition.correct,
+        typed: transition.typed,
+        attemptsUsed: transition.resultMetadata?.attemptNumber || currentAttempt,
+        supportMetadata: transition.resultMetadata,
+        supportLadderState: transition.state,
+      });
+      return;
+    }
+
+    const nextState = transition.state;
+    progressEntries.set(
+      getItemStateKey(item),
+      buildStoredProgressEntry(item, {
+        completed: false,
+        correct: false,
+        typed: "",
+        lastSubmittedIncorrectAnswer: transition.typed,
+        attemptsUsed: attemptMetadata.attemptNumber || currentAttempt,
+        attemptsAllowed: getAttemptsAllowedForItem(item),
+        questionType: "full_recall",
+        modeKind: nextState.phase === "supported" ? "segmented_spelling" : "no_support_assessment",
+        inputState: null,
+        feedbackState: null,
+        index: idx + 1,
+        supportMetadata: {
+          deliveryModel: "support_ladder",
+          supportState: nextState.phase,
+          evidenceCategory: null,
+          supportActions: nextState.supportActions,
+        },
+        supportLadderState: nextState,
+      })
+    );
+    scheduleProgressSync({ immediate: true });
+    renderWord();
+  }
+
   async function check() {
     if (locked) return;
     const item = currentItem();
@@ -4430,9 +4671,15 @@ export function mountGame({
     const attemptsAllowed = getAttemptsAllowedForItem(item);
     const typed = getCurrentTypedValue();
     const correct = isCurrentCorrect(typed);
+    const supportLadderActive = isSupportLadderRuntimeItem(item);
 
-    if (!correct && shouldBlockRepeatedIncorrectSubmission(item, typed)) {
+    if (!supportLadderActive && !correct && shouldBlockRepeatedIncorrectSubmission(item, typed)) {
       feedback.innerHTML = `<strong>Have another look first. Change your spelling before checking again.</strong>`;
+      return;
+    }
+
+    if (supportLadderActive) {
+      await checkSupportLadderSubmission(item, { typed, correct });
       return;
     }
 

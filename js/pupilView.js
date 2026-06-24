@@ -18,7 +18,7 @@ import {
   startSpellingBeeResult,
   finalizeSpellingBeeResult,
 } from "./db.js?v=1.50";
-import { mountGame } from "./game.js?v=1.44";
+import { mountGame } from "./game.js?v=1.45";
 import { applyAccessibilitySettings, renderAccessibilityControls, saveAccessibilitySettings } from "./accessibility.js";
 import { chooseBestFocusGrapheme, inferPhonemeFromGrapheme } from "./data/phonemeHelpers.js";
 import { buildPreviewModel, renderPhonicsPreviewModel } from "./phonicsRenderer.js?v=1.6";
@@ -229,6 +229,7 @@ function normalizeResumeCorrectness(value, { ladder = false } = {}) {
 }
 
 function buildResumeSupportLadderMetadata({ item = null, word = null, snapshotEntry = null, latestAttempt = null } = {}) {
+  const preferSnapshotState = snapshotEntry?.completed === false;
   const deliveryModel = normalizeSupportLadderDeliveryModel(readFirstDefined(
     latestAttempt?.delivery_model,
     latestAttempt?.deliveryModel,
@@ -241,6 +242,8 @@ function buildResumeSupportLadderMetadata({ item = null, word = null, snapshotEn
   ));
   if (deliveryModel !== "support_ladder") return {};
   const supportActions = readFirstDefined(
+    preferSnapshotState ? snapshotEntry?.supportActions : undefined,
+    preferSnapshotState ? snapshotEntry?.support_actions : undefined,
     latestAttempt?.support_actions,
     latestAttempt?.supportActions,
     snapshotEntry?.supportActions,
@@ -261,6 +264,8 @@ function buildResumeSupportLadderMetadata({ item = null, word = null, snapshotEn
       item?.support_preset,
     ) ?? null,
     supportState: readFirstDefined(
+      preferSnapshotState ? snapshotEntry?.supportState : undefined,
+      preferSnapshotState ? snapshotEntry?.support_state : undefined,
       latestAttempt?.support_state,
       latestAttempt?.supportState,
       snapshotEntry?.supportState,
@@ -333,14 +338,21 @@ function buildAssignmentResumeState(item, statusRow, attemptRows = []) {
     const latestIncorrectAttempt = itemAttempts.filter((attempt) => !attempt?.correct).slice(-1)[0] || null;
     const derivedAttemptsUsed = itemAttempts.reduce((max, attempt) => Math.max(max, getAttemptOrderValue(attempt)), 0);
     const snapshotAttemptsUsed = Math.max(0, Number(snapshotEntry?.attemptsUsed || 0));
-    const attemptsAllowed = resolveItemAttemptsAllowed(word, testMeta);
+    const attemptsAllowed = isLadder
+      ? Math.max(3, Number(snapshotEntry?.attemptsAllowed || 0) || 0)
+      : resolveItemAttemptsAllowed(word, testMeta);
     const attemptsUsed = Math.max(derivedAttemptsUsed, snapshotAttemptsUsed);
     const latestCorrect = latestAttempt
       ? normalizeResumeCorrectness(readFirstDefined(latestAttempt.correct, latestAttempt.is_correct), { ladder: isLadder })
       : null;
     const isAccessIssue = isLadder
       && (supportMetadata.supportState === "access_issue" || supportMetadata.evidenceCategory === "access_issue");
-    const completedFromAttempts = attemptsUsed > 0 && (latestCorrect === true || isAccessIssue || attemptsUsed >= attemptsAllowed);
+    const completedFromAttempts = attemptsUsed > 0 && (
+      latestCorrect === true
+      || isAccessIssue
+      || (isLadder && supportMetadata.supportState === "supported" && latestCorrect === false)
+      || attemptsUsed >= attemptsAllowed
+    );
     const completed = snapshotEntry?.completed === true || completedFromAttempts;
     const correct = latestAttempt
       ? latestCorrect

@@ -273,6 +273,6 @@ assert.equal(cardRefreshSource.includes("supabase"), false);
 assert.equal(teacherViewSource.includes('data-role="assignment-lifecycle-body"'), true);
 assert.equal(teacherViewSource.includes('assignmentLifecycleView.js?v=1.5'), true);
 assert.equal(appSource.includes('teacherView.js?v=7.04'), true);
-assert.equal(loginSource.includes('app.js?v=5.133'), true);
+assert.equal(loginSource.includes('app.js?v=5.134'), true);
 
 console.log("Passed teacher dashboard initial-render guard checks.");
