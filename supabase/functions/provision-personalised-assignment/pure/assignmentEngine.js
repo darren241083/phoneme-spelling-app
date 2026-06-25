@@ -2720,7 +2720,10 @@ export function buildGeneratedAssignmentPlan({
     ...(policy && typeof policy === "object" ? policy : {}),
     assignment_length: policy?.assignment_length ?? totalWords,
   });
-  const engineOptions = buildAutoAssignEngineOptions(normalizedPolicy);
+  const engineOptions = buildAutoAssignEngineOptions({
+    ...(policy && typeof policy === "object" ? policy : {}),
+    ...normalizedPolicy,
+  });
   const pupils = normalizePupilList(pupilIds);
   const composition = buildAutoAssignmentComposition(normalizedPolicy.assignment_length);
   const sortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]

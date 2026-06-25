@@ -76,12 +76,18 @@ function buildPlan({
   confusionByTarget = new Map(),
   policy = null,
 } = {}) {
+  const effectivePolicy = {
+    delivery_model: "support_ladder",
+    support_preset: "balanced",
+    assignment_length: 10,
+    ...(policy && typeof policy === "object" ? policy : {}),
+  };
   return buildGeneratedAssignmentPlan({
     pupilIds: ["pupil-1"],
     teacherTests: buildWordBank(targetScores),
     attempts: [],
     totalWords: 10,
-    policy,
+    policy: effectivePolicy,
     currentProfiles: {
       "pupil-1": {
         concernRows,
@@ -130,7 +136,7 @@ function countIndependentTargets(words) {
     .length;
 }
 
-test("needs_support defaults most generated items to segmented spelling and reserves focus for clear weakness", () => {
+test("needs_support defaults most generated items to segmented spelling without old focus support", () => {
   const words = getWords(buildPlan({
     band: "needs_support",
     targetScores: [30, 32, 34, 36],
@@ -145,13 +151,9 @@ test("needs_support defaults most generated items to segmented spelling and rese
   }));
 
   assert.equal(countType(words, "segmented_spelling") > countType(words, "no_support_assessment"), true);
-  assert.equal(countType(words, "focus_sound"), 2);
+  assert.equal(countType(words, "focus_sound"), 0);
   assert.equal(countNonIndependentTargets(words), 2);
   assert.equal(countIndependentTargets(words), 2);
-  for (const item of words.filter((word) => word.questionType === "focus_sound")) {
-    assert.equal(item.assignmentRole, "target");
-    assert.match(item.supportLadderReason, /weak|confusion|failure/);
-  }
 });
 
 test("core_developing defaults target items to segmented spelling", () => {
@@ -219,7 +221,7 @@ test("early_stretch skews independent while keeping target structure where evide
   assert.equal(countType(words, "focus_sound"), 0);
 });
 
-test("clear confusion uses launch focus_sound instead of deprecated generated support types", () => {
+test("clear confusion routes to segmented spelling without deprecated generated support types", () => {
   const words = getWords(buildPlan({
     band: "core_developing",
     targetScores: [34, 38, 42, 46],
@@ -236,7 +238,8 @@ test("clear confusion uses launch focus_sound instead of deprecated generated su
     ]]),
   }));
 
-  assert.equal(countType(words, "focus_sound"), 1);
+  assert.equal(countType(words, "focus_sound"), 0);
+  assert.equal(byRole(words, "target").some((item) => item.questionType === "segmented_spelling"), true);
   assert.equal(words.some((item) => item.questionType === "multiple_choice_grapheme_picker"), false);
   assert.equal(words.some((item) => item.questionType === "type_what_you_hear"), false);
   assert.equal(words.some((item) => item.questionType === "spell_loom"), false);
@@ -294,8 +297,8 @@ test("balanced respects the old base target non-independent cap", () => {
 
   assert.equal(countNonIndependentTargets(words), 2);
   assert.equal(countIndependentTargets(words), 2);
-  assert.equal(countType(byRole(words, "target"), "focus_sound"), 1);
-  assert.equal(countType(byRole(words, "target"), "segmented_spelling"), 1);
+  assert.equal(countType(byRole(words, "target"), "focus_sound"), 0);
+  assert.equal(countType(byRole(words, "target"), "segmented_spelling"), 2);
 });
 
 test("more_support_when_needed uses the extra target slot while preserving one independent target", () => {
@@ -322,7 +325,36 @@ test("more_support_when_needed uses the extra target slot while preserving one i
 
   assert.equal(countNonIndependentTargets(words), 3);
   assert.equal(countIndependentTargets(words), 1);
-  assert.equal(countType(byRole(words, "target"), "focus_sound"), 2);
+  assert.equal(countType(byRole(words, "target"), "focus_sound"), 0);
+  assert.equal(countType(byRole(words, "target"), "segmented_spelling"), 3);
+});
+
+test("legacy fixed delivery can still emit launch focus support when explicitly requested", () => {
+  const words = getWords(buildPlan({
+    band: "core_developing",
+    targetScores: [34, 38, 42, 46],
+    concernRows: [{
+      target: "ph",
+      total: 4,
+      securityBand: "insecure",
+      accuracy: 0.25,
+      firstTrySuccessRate: 0.25,
+      recentIncorrectCount: 2,
+    }],
+    confusionByTarget: new Map([[
+      "ph",
+      { expected: "ph", actual: "f", attemptCount: 2, substitutionCount: 2 },
+    ]]),
+    policy: {
+      delivery_model: "legacy_fixed",
+      support_preset: "balanced",
+      assignment_length: 10,
+    },
+  }));
+
+  assert.equal(countNonIndependentTargets(words), 2);
+  assert.equal(countIndependentTargets(words), 2);
+  assert.equal(countType(byRole(words, "target"), "focus_sound"), 1);
   assert.equal(countType(byRole(words, "target"), "segmented_spelling"), 1);
 });
 

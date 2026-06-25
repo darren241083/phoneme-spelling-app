@@ -5,6 +5,8 @@ export const AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED = "regular_personalised
 export const AUTOMATION_POLICY_TYPE_SPELLING_BEE = "spelling_bee";
 export const SPELLING_BEE_LENGTH_MODE_CAPPED = "capped";
 export const SPELLING_BEE_LENGTH_MODE_UNTIL_WRONG = "until_wrong";
+export const DELIVERY_MODEL_LEGACY_FIXED = "legacy_fixed";
+export const DELIVERY_MODEL_SUPPORT_LADDER = "support_ladder";
 
 export const AUTOMATION_POLICY_TYPE_OPTIONS = Object.freeze([
   {
@@ -32,17 +34,17 @@ export const AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS = Object.freeze([
   {
     value: "balanced",
     label: "Balanced",
-    description: "Mix independent and structured spelling support using the normal personalised balance.",
+    description: "Mix independent spelling with segmented support where it is useful.",
   },
   {
     value: "independent_first",
-    label: "Independent-first",
-    description: "Keep the test as independent as possible and only avoid support where it is not needed.",
+    label: "Mostly independent",
+    description: "Keep most words independent unless support is clearly needed.",
   },
   {
     value: "more_support_when_needed",
     label: "More support when needed",
-    description: "Use extra support more readily when the pupil profile suggests they need it.",
+    description: "Use segmented support more readily for pupils with weaker evidence.",
   },
 ]);
 
@@ -292,7 +294,19 @@ export function getAutoAssignSupportPresetLabel(value) {
 export function getAutoAssignSupportPresetDescription(value) {
   const normalized = normalizeSupportPreset(value);
   return AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS.find((option) => option.value === normalized)?.description
-    || "Mix independent and structured spelling support using the normal personalised balance.";
+    || "Mix independent spelling with segmented support where it is useful.";
+}
+
+function normalizeDeliveryModel(value) {
+  const next = String(value || "").trim().toLowerCase();
+  return next === DELIVERY_MODEL_SUPPORT_LADDER
+    ? DELIVERY_MODEL_SUPPORT_LADDER
+    : DELIVERY_MODEL_LEGACY_FIXED;
+}
+
+export function isSupportLadderDeliveryPolicy(rawPolicy = null) {
+  const source = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
+  return normalizeDeliveryModel(source.delivery_model || source.deliveryModel) === DELIVERY_MODEL_SUPPORT_LADDER;
 }
 
 export function buildAutoAssignPolicySummary(rawPolicy = null, { useDefaultLabel = false } = {}) {
@@ -306,10 +320,11 @@ export function buildAutoAssignPolicySummary(rawPolicy = null, { useDefaultLabel
 
 export function buildAutoAssignEngineOptions(rawPolicy = null) {
   const policy = normalizeAutoAssignPolicy(rawPolicy);
+  const supportLadderDelivery = isSupportLadderDeliveryPolicy(rawPolicy);
   const baseOptions = {
     policy,
     supportPreset: policy.support_preset,
-    allowConfusionSubstitution: true,
+    allowConfusionSubstitution: !supportLadderDelivery,
     allowSupportedSubstitution: true,
     extraTargetSupportSlots: 0,
     minimumIndependentTargetItems: 0,

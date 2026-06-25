@@ -182,6 +182,8 @@ import {
   AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
   AUTOMATION_POLICY_TYPE_SPELLING_BEE,
   AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS,
+  DELIVERY_MODEL_LEGACY_FIXED,
+  DELIVERY_MODEL_SUPPORT_LADDER,
   SPELLING_BEE_LENGTH_MODE_OPTIONS,
   buildAutoAssignPolicySummary,
   buildDefaultPersonalisedAutomationPolicy,
@@ -208,6 +210,7 @@ import {
 
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
+const REGULAR_PERSONALISED_DELIVERY_MODEL = DELIVERY_MODEL_SUPPORT_LADDER;
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
@@ -12559,6 +12562,36 @@ async function buildActiveAutomatedAssignmentMap({ pupilIds = [] } = {}) {
   });
 }
 
+function buildRegularPersonalisedSupportPolicy(policy = AUTO_ASSIGN_POLICY_DEFAULTS) {
+  return {
+    ...normalizeAutoAssignPolicy({
+      ...(policy && typeof policy === "object" ? policy : {}),
+      policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+    }),
+    policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+    delivery_model: REGULAR_PERSONALISED_DELIVERY_MODEL,
+  };
+}
+
+function buildGeneratedAssignmentDeliveryFields({
+  deliveryModel = DELIVERY_MODEL_LEGACY_FIXED,
+  supportPreset = null,
+} = {}) {
+  const safeDeliveryModel = String(deliveryModel || "").trim().toLowerCase() === DELIVERY_MODEL_SUPPORT_LADDER
+    ? DELIVERY_MODEL_SUPPORT_LADDER
+    : DELIVERY_MODEL_LEGACY_FIXED;
+  const normalizedPolicy = normalizeAutoAssignPolicy({
+    policy_type: AUTOMATION_POLICY_TYPE_REGULAR_PERSONALISED,
+    support_preset: supportPreset || AUTO_ASSIGN_POLICY_DEFAULTS.support_preset,
+  });
+  return {
+    delivery_model: safeDeliveryModel,
+    support_preset: safeDeliveryModel === DELIVERY_MODEL_SUPPORT_LADDER
+      ? normalizedPolicy.support_preset
+      : null,
+  };
+}
+
 async function buildPersonalisedPlanForClass({
   classId = "",
   pupilIds = [],
@@ -12567,7 +12600,7 @@ async function buildPersonalisedPlanForClass({
 } = {}) {
   const safeClassId = String(classId || "").trim();
   const safePupilIds = normalizeIdList(pupilIds);
-  const effectivePolicy = normalizeAutoAssignPolicy(policy);
+  const effectivePolicy = buildRegularPersonalisedSupportPolicy(policy);
   if (!safeClassId || !safePupilIds.length) {
     throw new Error("No eligible pupils were available for this class.");
   }
@@ -12664,6 +12697,8 @@ async function createGeneratedAssignmentForClass({
   className = "",
   deadlineIso = null,
   plan = null,
+  deliveryModel = DELIVERY_MODEL_LEGACY_FIXED,
+  supportPreset = null,
   automationContext = null,
   seedIncludedStatuses = false,
 } = {}) {
@@ -12676,6 +12711,10 @@ async function createGeneratedAssignmentForClass({
   let createdAssignmentId = "";
 
   try {
+    const deliveryFields = buildGeneratedAssignmentDeliveryFields({
+      deliveryModel,
+      supportPreset,
+    });
     const title = buildAssignmentEngineTitle({
       className: className || "Class",
       focusGrapheme: plan.clearFocusGrapheme,
@@ -12687,6 +12726,7 @@ async function createGeneratedAssignmentForClass({
       title,
       status: "published",
       question_type: "segmented_spelling",
+      ...deliveryFields,
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
     }, "id");
@@ -12715,6 +12755,7 @@ async function createGeneratedAssignmentForClass({
         audio_enabled: true,
         hints_enabled: true,
         end_at: deadlineIso || null,
+        ...deliveryFields,
         analytics_target_words_enabled: false,
         analytics_target_words_per_pupil: 0,
         automation_kind: automationContext?.kind || null,
@@ -12986,17 +13027,19 @@ async function handleAutoAssignPractice(form) {
     if (!pupilIds.length) {
       throw new Error("This class does not have any active pupils yet.");
     }
-    const effectivePolicy = getEffectiveClassAutoAssignPolicy(classId);
-    const { plan } = await buildPersonalisedPlanForClass({
+    const classPolicy = getEffectiveClassAutoAssignPolicy(classId);
+    const { plan, effectivePolicy } = await buildPersonalisedPlanForClass({
       classId,
       pupilIds,
-      policy: effectivePolicy,
+      policy: classPolicy,
     });
     const created = await createGeneratedAssignmentForClass({
       classId,
       className: selectedClass.name || "Class",
       deadlineIso: deadlineRaw ? new Date(deadlineRaw).toISOString() : null,
       plan,
+      deliveryModel: effectivePolicy.delivery_model,
+      supportPreset: effectivePolicy.support_preset,
     });
     createdTestId = String(created?.testId || "");
     createdAssignmentId = String(created?.assignmentId || "");
@@ -13495,7 +13538,7 @@ async function handleRunNowPersonalisedGeneration() {
 
       let created = null;
       try {
-        const { plan } = await buildPersonalisedPlanForClass({
+        const { plan, effectivePolicy: generatedPolicy } = await buildPersonalisedPlanForClass({
           classId,
           pupilIds: includedPupilIds,
           policy: effectivePolicy,
@@ -13506,6 +13549,8 @@ async function handleRunNowPersonalisedGeneration() {
           className,
           deadlineIso,
           plan,
+          deliveryModel: generatedPolicy.delivery_model,
+          supportPreset: generatedPolicy.support_preset,
           automationContext: {
             kind: ASSIGNMENT_AUTOMATION_KIND_PERSONALISED,
             source: ASSIGNMENT_AUTOMATION_SOURCE_MANUAL_RUN_NOW,
@@ -15792,7 +15837,7 @@ function renderCreateBar() {
         value: buildSpellingBeeLengthModeSummary(automationRunPolicy),
       },
       {
-        label: "Question support",
+        label: "Spelling support",
         value: "No assistance",
       },
       {
@@ -15818,7 +15863,7 @@ function renderCreateBar() {
         value: `${automationRunPolicy.assignment_length} words`,
       },
       {
-        label: "Question support",
+        label: "Spelling support",
         value: getAutomationQuestionSupportLabel(automationRunPolicy.support_preset),
       },
       {
@@ -16553,9 +16598,9 @@ function renderCreateBar() {
                             </div>
                           </div>
                           <div class="td-automation-inline-label-row">
-                            <strong>Question support</strong>
+                            <strong>Spelling support</strong>
                           </div>
-                          <div class="td-action-inline-copy">Controls how often pupils get segmented spelling support instead of independent typing.</div>
+                          <div class="td-action-inline-copy">Pupils try independently, try once more, then use segmented spelling support before the answer is shown. Word-meaning help stays separate from spelling support.</div>
                           <div class="td-automation-preset-guide">
                             ${automationPresetGuideHtml}
                           </div>
@@ -27978,7 +28023,7 @@ function renderClassCard(cls) {
             </label>
 
             <label class="td-field">
-              <span>Support preset</span>
+              <span>Spelling support</span>
               <select class="td-input" name="support_preset">
                 ${AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS
                   .map((option) => `<option value="${escapeAttr(option.value)}" ${effectiveAutoAssignPolicy.support_preset === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`)

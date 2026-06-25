@@ -9,6 +9,7 @@ import {
   buildBaselineEvidenceAttemptRows,
   buildPlacementCurrentProfiles,
   buildProvisioningPlan,
+  buildProvisioningPolicy,
   buildPublicProvisioningResponse,
   hasIncompleteRequiredCoreRuntimeAssignment,
   isRequiredCoreRuntimeAssignment,
@@ -39,6 +40,14 @@ assert.deepEqual(buildPublicProvisioningResponse({ status: "not_eligible" }), { 
 assert.deepEqual(buildPublicProvisioningResponse({ status: "not_enough_evidence" }), { status: "not_enough_evidence" });
 assert.deepEqual(buildPublicProvisioningResponse({ status: "error" }), { status: "error" });
 assert.deepEqual(buildPublicProvisioningResponse({ status: "unexpected" }), { status: "generation_failed" });
+
+const regularProvisioningPolicy = buildProvisioningPolicy({
+  assignment_length: 4,
+  support_preset: "balanced",
+  allow_starter_fallback: false,
+});
+assert.equal(regularProvisioningPolicy.delivery_model, "support_ladder");
+assert.equal(regularProvisioningPolicy.support_preset, "balanced");
 
 function runtimeAssignment({
   evidenceSource = "assigned_core",
@@ -350,11 +359,7 @@ const provisionedFromStatusOnly = buildProvisioningPlan({
   baselineAssignments: [baselineAssignment],
   baselineStatusRows: [baselineStatusWithResultJson],
   wordloomCoreWordRows: buildCoreBankRowsForProvisioning(),
-  policy: {
-    assignment_length: 4,
-    support_preset: "balanced",
-    allow_starter_fallback: false,
-  },
+  policy: regularProvisioningPolicy,
 });
 assert.equal(provisionedFromStatusOnly.plan.pupilPlans.length, 1);
 assert.equal(provisionedFromStatusOnly.plan.pupilPlans[0].primaryTargetGrapheme, "tion");
@@ -362,6 +367,14 @@ assert.equal(
   provisionedFromStatusOnly.plan.pupilPlans[0].words.some((word) =>
     word.assignmentRole === "target" && word.focusGrapheme === "tion"
   ),
+  true,
+);
+assert.equal(
+  provisionedFromStatusOnly.plan.pupilPlans[0].words.some((word) => word.questionType === "focus_sound"),
+  false,
+);
+assert.equal(
+  provisionedFromStatusOnly.plan.pupilPlans[0].words.some((word) => word.questionType === "segmented_spelling"),
   true,
 );
 

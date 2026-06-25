@@ -35,10 +35,17 @@ const CLAIMED_STATUS = "claimed";
 const BASELINE_STANDARD_KEY = "core_v2";
 const EVIDENCE_SOURCE_ASSIGNED_CORE = "assigned_core";
 const EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
+const DELIVERY_MODEL_LEGACY_FIXED = "legacy_fixed";
+const DELIVERY_MODEL_SUPPORT_LADDER = "support_ladder";
 const EXTRA_CHALLENGE_ACTION = "extra_challenge";
 const EXTRA_CHALLENGE_ASSIGNMENT_LENGTH = 5;
 const EXTRA_CHALLENGE_SUPPORT_PRESET = "balanced";
 const WORDLOOM_CORE_BANK_PAGE_SIZE = 1000;
+const SUPPORT_PRESET_VALUES = new Set([
+  "balanced",
+  "independent_first",
+  "more_support_when_needed",
+]);
 
 type ServiceClient = ReturnType<typeof createClient>;
 
@@ -545,6 +552,33 @@ function normalizeSourceKey(value: unknown = "") {
     .replace(/[^a-z0-9_-]/g, "");
 }
 
+function normalizeDeliveryModel(value: unknown = "") {
+  return normalizeSourceKey(value) === DELIVERY_MODEL_SUPPORT_LADDER
+    ? DELIVERY_MODEL_SUPPORT_LADDER
+    : DELIVERY_MODEL_LEGACY_FIXED;
+}
+
+function normalizeSupportPreset(value: unknown = "") {
+  const key = normalizeSourceKey(value);
+  return SUPPORT_PRESET_VALUES.has(key) ? key : EXTRA_CHALLENGE_SUPPORT_PRESET;
+}
+
+function buildGeneratedAssignmentDeliveryFields({
+  deliveryModel = DELIVERY_MODEL_LEGACY_FIXED,
+  supportPreset = null,
+}: {
+  deliveryModel?: string | null;
+  supportPreset?: string | null;
+} = {}) {
+  const safeDeliveryModel = normalizeDeliveryModel(deliveryModel);
+  return {
+    delivery_model: safeDeliveryModel,
+    support_preset: safeDeliveryModel === DELIVERY_MODEL_SUPPORT_LADDER
+      ? normalizeSupportPreset(supportPreset)
+      : null,
+  };
+}
+
 async function readRuntimeAssignmentsForPupil(serviceClient: ServiceClient, pupilId: string) {
   const { data, error } = await serviceClient.rpc("read_pupil_runtime_assignments", {
     requested_pupil_id: pupilId,
@@ -720,6 +754,8 @@ async function createGeneratedAssignment(
     evidenceSource = EVIDENCE_SOURCE_ASSIGNED_CORE,
     automationSource = AUTOMATION_SOURCE_MANUAL_RUN_NOW,
     titleOverride = "",
+    deliveryModel = DELIVERY_MODEL_LEGACY_FIXED,
+    supportPreset = null,
   }: {
     teacherId: string;
     schoolId: string;
@@ -732,6 +768,8 @@ async function createGeneratedAssignment(
     evidenceSource?: string;
     automationSource?: string | null;
     titleOverride?: string;
+    deliveryModel?: string | null;
+    supportPreset?: string | null;
   },
 ) {
   let createdTestId = "";
@@ -745,6 +783,10 @@ async function createGeneratedAssignment(
     ? EVIDENCE_SOURCE_EXTRA_CHALLENGE
     : EVIDENCE_SOURCE_ASSIGNED_CORE;
   const safeAutomationSource = String(automationSource || "").trim() || null;
+  const deliveryFields = buildGeneratedAssignmentDeliveryFields({
+    deliveryModel,
+    supportPreset,
+  });
 
   const { data: createdTest, error: testError } = await insertSingleRowWithAnalyticsFallback(
     serviceClient,
@@ -755,6 +797,7 @@ async function createGeneratedAssignment(
       title,
       status: "published",
       question_type: "segmented_spelling",
+      ...deliveryFields,
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
     },
@@ -792,6 +835,7 @@ async function createGeneratedAssignment(
       audio_enabled: true,
       hints_enabled: true,
       end_at: deadlineIso || null,
+      ...deliveryFields,
       analytics_target_words_enabled: false,
       analytics_target_words_per_pupil: 0,
       evidence_source: safeEvidenceSource,
@@ -1041,6 +1085,8 @@ async function handleExtraChallengeProvisioning(serviceClient: ServiceClient, pu
       evidenceSource: EVIDENCE_SOURCE_EXTRA_CHALLENGE,
       automationSource: null,
       titleOverride: "Extra challenge",
+      deliveryModel: DELIVERY_MODEL_LEGACY_FIXED,
+      supportPreset: null,
     });
 
     return publicStatus("provisioned", 200, created.assignmentId);
@@ -1191,6 +1237,7 @@ Deno.serve(async (req) => {
       generatedTargetRowCount: Array.isArray(assignmentTargetRows) ? assignmentTargetRows.length : 0,
     });
 
+    const provisioningPolicy = buildProvisioningPolicy(context.runRow) as Record<string, unknown>;
     const { plan } = buildProvisioningPlan({
       pupilId: context.pupilId,
       teacherTests,
@@ -1199,7 +1246,7 @@ Deno.serve(async (req) => {
       baselineStatusRows: effectiveBaselineStatusRows,
       wordloomCoreWordRows,
       assignmentTargetRows,
-      policy: buildProvisioningPolicy(context.runRow),
+      policy: provisioningPolicy,
       resolvedWordMap: null,
     });
 
@@ -1212,6 +1259,8 @@ Deno.serve(async (req) => {
       deadlineIso: String(context.runRow?.derived_deadline_at || "") || null,
       plan,
       artifacts: createdArtifacts,
+      deliveryModel: String(provisioningPolicy.delivery_model || ""),
+      supportPreset: String(provisioningPolicy.support_preset || ""),
     });
     createdArtifacts.assignmentId = created.assignmentId;
     createdArtifacts.testId = created.testId;

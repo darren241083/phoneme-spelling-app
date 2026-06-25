@@ -13,7 +13,10 @@ import {
   mergePlacementWithLiveProfiles,
   resolveBaselinePresetFromWordRows,
 } from "./pure/baselinePlacement.js";
-import { normalizeAutoAssignPolicy } from "./pure/autoAssignPolicy.js";
+import {
+  DELIVERY_MODEL_SUPPORT_LADDER,
+  normalizeAutoAssignPolicy,
+} from "./pure/autoAssignPolicy.js";
 import { getQuestionEvidenceTier } from "./pure/questionTypes.js";
 
 export { ASSIGNMENT_ENGINE_TARGET_SOURCE };
@@ -63,11 +66,14 @@ export function buildPublicProvisioningResponse({ status = "", assignmentId = ""
 }
 
 export function buildProvisioningPolicy(runRow = null) {
-  return normalizeAutoAssignPolicy({
-    assignment_length: runRow?.assignment_length,
-    support_preset: runRow?.support_preset,
-    allow_starter_fallback: runRow?.allow_starter_fallback,
-  });
+  return {
+    ...normalizeAutoAssignPolicy({
+      assignment_length: runRow?.assignment_length,
+      support_preset: runRow?.support_preset,
+      allow_starter_fallback: runRow?.allow_starter_fallback,
+    }),
+    delivery_model: DELIVERY_MODEL_SUPPORT_LADDER,
+  };
 }
 
 function normalizeRuntimeSourceKey(value = "") {
@@ -583,7 +589,10 @@ export function buildProvisioningPlan({
   resolvedWordMap = null,
 } = {}) {
   const safePupilId = normalizeId(pupilId);
-  const effectivePolicy = normalizeAutoAssignPolicy(policy);
+  const effectivePolicy = {
+    ...(policy && typeof policy === "object" ? policy : {}),
+    ...normalizeAutoAssignPolicy(policy),
+  };
   if (!safePupilId) throw new Error("A pupil id is required to build a provisioning plan.");
 
   const safeBaselineAssignments = filterBaselineAssignments(baselineAssignments);
