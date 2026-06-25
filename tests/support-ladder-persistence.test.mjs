@@ -386,6 +386,26 @@ test("final result sanitization preserves ladder evidence", async () => {
   assert.deepEqual(row.supportActions, ["segmented_input"]);
 });
 
+test("prompt-identification actions remain metadata without becoming spelling support", async () => {
+  const { markAssignmentComplete, calls } = loadDbHelpers();
+
+  await markAssignmentComplete(completionArgs({
+    totalWords: 1,
+    results: [ladderResult({
+      evidenceCategory: null,
+      supportActions: ["clarification_sentence", "meaning"],
+    })],
+  }));
+
+  const payload = getStatusPayload(calls);
+  const [row] = payload.result_json;
+  assert.deepEqual(row.supportActions, ["clarification_sentence", "meaning"]);
+  assert.equal(payload.independent_first_correct_words, 1);
+  assert.equal(payload.supported_correct_words, 0);
+  assert.equal(payload.supported_incorrect_words, 0);
+  assert.equal(payload.headline_correct_words, 1);
+});
+
 test("access issue remains null-correct and may have an empty typed value", async () => {
   const { markAssignmentComplete, calls } = loadDbHelpers();
 

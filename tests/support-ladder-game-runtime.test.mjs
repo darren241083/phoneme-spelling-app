@@ -444,7 +444,33 @@ test("support-ladder words show the small access issue control", async () => {
 
   assert.equal(runtime.host.querySelector("#supportLadderAccessWrap").style.display, "flex");
   assert.equal(runtime.host.querySelector("#btnSupportAccessIssue").disabled, false);
-  assert.match(runtime.host.innerHTML, /not sure which word/i);
+  assert.match(runtime.host.innerHTML, /Need help knowing the word/i);
+});
+
+test("legacy words show optional word-identification support as one help control", async () => {
+  const runtime = mountRuntime({
+    word: wordWithSafeContext(),
+    testMeta: {
+      delivery_model: "legacy_fixed",
+      max_attempts: 2,
+      hints_enabled: true,
+    },
+  });
+
+  assert.equal(runtime.host.querySelector("#supportLadderAccessWrap").style.display, "none");
+  assert.equal(runtime.host.querySelector("#btnWordIdHelp").style.display, "inline-block");
+  assert.equal(runtime.host.querySelector("#btnWordIdHelp").disabled, false);
+
+  await runtime.host.querySelector("#btnWordIdHelp").click();
+
+  const panel = runtime.host.querySelector("#supportLadderClarification");
+  assert.equal(panel.style.display, "block");
+  assert.match(panel.innerHTML, /This might help identify the word/);
+  assert.doesNotMatch(panel.innerHTML, /I'm not sure which word you mean/);
+  assert.match(panel.innerHTML, /The ____ lasted for two weeks/);
+  assert.match(panel.innerHTML, /A stage in a process/);
+  assert.equal(runtime.host.querySelector("#btnSupportStillNotSure"), null);
+  assert.equal(runtime.attempts.length, 0);
 });
 
 test("support-ladder smoke assignment overrides legacy practice mode", async () => {
@@ -507,6 +533,7 @@ test("safe clarification shows masked sentence and meaning without logging an at
   const panel = runtime.host.querySelector("#supportLadderClarification");
   assert.equal(panel.style.display, "block");
   assert.match(panel.innerHTML, /This might help identify the word/);
+  assert.doesNotMatch(panel.innerHTML, /I'm not sure which word you mean/);
   assert.match(panel.innerHTML, /Sentence:/);
   assert.match(panel.innerHTML, /The ____ lasted for two weeks/);
   assert.match(panel.innerHTML, /Meaning:/);
@@ -531,7 +558,7 @@ test("try spelling returns to the current input mode after clarification", async
   assert.ok(runtime.host.querySelector("#pupilAnswer"), "full recall input should remain active");
 });
 
-test("correct after clarification is supported diagnostic evidence", async () => {
+test("correct after clarification remains independent spelling evidence", async () => {
   const runtime = mountRuntime({ word: wordWithSafeContext() });
 
   await runtime.host.querySelector("#btnSupportAccessIssue").click();
@@ -541,13 +568,37 @@ test("correct after clarification is supported diagnostic evidence", async () =>
   assert.equal(runtime.attempts.length, 1);
   assert.equal(runtime.attempts[0].correct, true);
   assert.equal(runtime.attempts[0].supportState, "independent");
-  assert.equal(runtime.attempts[0].evidenceCategory, "correct_with_support");
+  assert.equal(runtime.attempts[0].evidenceCategory, "correct_first_time");
   assert.deepEqual(runtime.attempts[0].supportActions, ["clarification_sentence", "meaning"]);
 
   const entry = latestProgressEntry(runtime.progressSnapshots);
   assert.equal(entry.completed, true);
   assert.equal(entry.correct, true);
-  assert.equal(entry.evidenceCategory, "correct_with_support");
+  assert.equal(entry.evidenceCategory, "correct_first_time");
+  assert.equal(entry.supportState, "independent");
+  assert.equal(entry.supportLadderState.clarificationShown, true);
+  assert.deepEqual(entry.supportActions, ["clarification_sentence", "meaning"]);
+});
+
+test("retry correct after clarification remains retry spelling evidence", async () => {
+  const runtime = mountRuntime({ word: wordWithSafeContext() });
+
+  await submitFullRecall(runtime.host, "faze");
+  await runtime.host.querySelector("#btnSupportAccessIssue").click();
+  await flushRuntimeTasks();
+  await submitFullRecall(runtime.host, "phase");
+
+  assert.equal(runtime.attempts.length, 2);
+  assert.equal(runtime.attempts[1].correct, true);
+  assert.equal(runtime.attempts[1].supportState, "retry");
+  assert.equal(runtime.attempts[1].evidenceCategory, "correct_after_retry");
+  assert.deepEqual(runtime.attempts[1].supportActions, ["clarification_sentence", "meaning"]);
+
+  const entry = latestProgressEntry(runtime.progressSnapshots);
+  assert.equal(entry.completed, true);
+  assert.equal(entry.correct, true);
+  assert.equal(entry.supportState, "retry");
+  assert.equal(entry.evidenceCategory, "correct_after_retry");
   assert.deepEqual(entry.supportActions, ["clarification_sentence", "meaning"]);
 });
 
@@ -722,6 +773,9 @@ test("support-ladder supported incorrect produces incorrect_with_support", async
   assert.equal(runtime.attempts[2].supportState, "supported");
   assert.equal(runtime.attempts[2].evidenceCategory, "incorrect_with_support");
   assert.deepEqual(runtime.attempts[2].supportActions, ["segmented_input"]);
+  assert.match(runtime.host.querySelector("#feedback").innerHTML, /gameCorrectSpellingReveal/);
+  assert.match(runtime.host.querySelector("#feedback").innerHTML, /The correct spelling is/);
+  assert.match(runtime.host.querySelector("#feedback").innerHTML, /Look carefully before moving on/);
 
   const entry = latestProgressEntry(runtime.progressSnapshots);
   assert.equal(entry.completed, true);
@@ -745,6 +799,7 @@ test("legacy final incorrect behaviour still follows old max-attempt reveal", as
   assert.equal(runtime.attempts.some((attempt) => attempt.deliveryModel === "support_ladder"), false);
   assert.equal(latestProgressEntry(runtime.progressSnapshots).completed, true);
   assert.match(runtime.host.querySelector("#feedback").innerHTML, /The correct spelling is/);
+  assert.match(runtime.host.querySelector("#feedback").innerHTML, /gameCorrectSpellingReveal/);
 });
 
 test("baseline, practice, sample, and Spelling Bee contexts do not enter ladder flow", async () => {

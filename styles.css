@@ -1080,6 +1080,10 @@ body {
 .feedbackRevealText{
   line-height:1.35;
 }
+.gameCorrectSpellingReveal{
+  color:#15803d;
+  font-weight:800;
+}
 .feedbackRevealHint{
   font-size:13px;
   color:var(--muted);

@@ -41,9 +41,12 @@ export const SUPPORT_LADDER_NEUTRAL_ACTIONS = Object.freeze([
   SUPPORT_ACTION_REQUIRED_SENTENCE,
 ]);
 
-export const SUPPORT_LADDER_MATERIAL_ACTIONS = Object.freeze([
+export const SUPPORT_LADDER_PROMPT_IDENTIFICATION_ACTIONS = Object.freeze([
   SUPPORT_ACTION_CLARIFICATION_SENTENCE,
   SUPPORT_ACTION_MEANING,
+]);
+
+export const SUPPORT_LADDER_MATERIAL_ACTIONS = Object.freeze([
   SUPPORT_ACTION_SEGMENTED_INPUT,
   SUPPORT_ACTION_FOCUS_SOUND,
 ]);
@@ -60,6 +63,7 @@ const SUPPORT_STATE_VALUES = new Set([
 ]);
 const EVIDENCE_CATEGORY_VALUES = new Set(SUPPORT_LADDER_EVIDENCE_CATEGORIES);
 const SUPPORT_ACTION_VALUES = new Set(SUPPORT_LADDER_SUPPORT_ACTIONS);
+const PROMPT_IDENTIFICATION_ACTION_VALUES = new Set(SUPPORT_LADDER_PROMPT_IDENTIFICATION_ACTIONS);
 const MATERIAL_SUPPORT_ACTION_VALUES = new Set(SUPPORT_LADDER_MATERIAL_ACTIONS);
 
 function normalizeKey(value = "") {
@@ -162,6 +166,10 @@ export function normalizeSupportActions(value = []) {
 
 export function hasMaterialSupportActions(value = []) {
   return normalizeSupportActions(value).some((action) => MATERIAL_SUPPORT_ACTION_VALUES.has(action));
+}
+
+export function hasPromptIdentificationActions(value = []) {
+  return normalizeSupportActions(value).some((action) => PROMPT_IDENTIFICATION_ACTION_VALUES.has(action));
 }
 
 function getOutcomeSupportActions(outcome = null, context = null) {

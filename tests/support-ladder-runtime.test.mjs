@@ -160,8 +160,8 @@ test("replay and required sentence do not downgrade independent success", () => 
   }
 });
 
-test("material support prevents independent-success classification", () => {
-  for (const action of ["segmented_spelling", "focus", "definition", "context_sentence"]) {
+test("material spelling support prevents independent-success classification", () => {
+  for (const action of ["segmented_spelling", "focus"]) {
     const state = recordSupportLadderAction(createInitialSupportLadderState(), action);
     const metadata = buildSupportLadderResultMetadata(state, { correct: true });
 
@@ -232,13 +232,26 @@ test("clarification support actions dedupe and stay serializable", () => {
   });
 });
 
-test("clarification prevents independent-success classification", () => {
+test("clarification preserves independent-success classification", () => {
   const state = recordSupportLadderClarification(createInitialSupportLadderState(), {
     sentenceShown: true,
   });
   const metadata = buildSupportLadderResultMetadata(state, { correct: true });
 
-  assert.equal(metadata.evidenceCategory, "correct_with_support");
+  assert.equal(metadata.evidenceCategory, "correct_first_time");
+  assert.deepEqual(plain(metadata.supportActions), ["clarification_sentence"]);
+  assert.equal(metadata.correct, true);
+});
+
+test("clarification preserves retry-success classification", () => {
+  const state = recordSupportLadderClarification(createInitialSupportLadderState({ phase: "retry" }), {
+    sentenceShown: true,
+    meaningShown: true,
+  });
+  const metadata = buildSupportLadderResultMetadata(state, { correct: true });
+
+  assert.equal(metadata.evidenceCategory, "correct_after_retry");
+  assert.deepEqual(plain(metadata.supportActions), ["clarification_sentence", "meaning"]);
   assert.equal(metadata.correct, true);
 });
 

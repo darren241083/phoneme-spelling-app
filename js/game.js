@@ -890,7 +890,7 @@ export function mountGame({
       <div id="sentenceLine" class="muted gameSentenceLine" style="text-align:center; display:none;"></div>
       <div id="contextMeaningLine" class="muted gameContextMeaningLine" style="display:none;" aria-live="polite"></div>
       <div id="supportLadderAccessWrap" class="gameAccessIssueWrap" style="display:none;">
-        <button id="btnSupportAccessIssue" class="btn secondary gameAccessIssueButton" type="button">I'm not sure which word you mean</button>
+        <button id="btnSupportAccessIssue" class="btn secondary gameAccessIssueButton" type="button">Need help knowing the word?</button>
       </div>
       <div id="supportLadderClarification" class="gameClarificationPanel" style="display:none;" aria-live="polite"></div>
 
@@ -913,6 +913,7 @@ export function mountGame({
 
       <div class="row gameActionRow">
         <button id="btnListen" class="btn secondary" type="button">Replay word</button>
+        <button id="btnWordIdHelp" class="btn secondary gameContextButton" type="button" style="display:none;">Need help knowing the word?</button>
         <button id="btnContextSentence" class="btn secondary gameContextButton" type="button" style="display:none;">Sentence</button>
         <button id="btnContextMeaning" class="btn secondary gameContextButton" type="button" style="display:none;">Meaning</button>
         <button id="btnCheck" class="btn" type="button">Check word</button>
@@ -953,6 +954,7 @@ export function mountGame({
   const gameShell = $("gameShell");
   const feedback = $("feedback");
   const btnListen = $("btnListen");
+  const btnWordIdHelp = $("btnWordIdHelp");
   const btnContextSentence = $("btnContextSentence");
   const btnContextMeaning = $("btnContextMeaning");
   const btnCheck = $("btnCheck");
@@ -1789,6 +1791,7 @@ export function mountGame({
     stopAudioPlayback();
     btnExit.disabled = true;
     btnListen.disabled = true;
+    if (btnWordIdHelp) btnWordIdHelp.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
@@ -1852,6 +1855,7 @@ export function mountGame({
     stopAudioPlayback();
     btnExit.disabled = true;
     btnListen.disabled = true;
+    if (btnWordIdHelp) btnWordIdHelp.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
     btnCheck.disabled = true;
@@ -2268,6 +2272,11 @@ export function mountGame({
   }
 
   function hideNativeContextControls() {
+    if (btnWordIdHelp) {
+      btnWordIdHelp.style.display = "none";
+      btnWordIdHelp.disabled = true;
+      btnWordIdHelp.title = "";
+    }
     if (btnContextSentence) {
       btnContextSentence.style.display = "none";
       btnContextSentence.disabled = true;
@@ -2301,24 +2310,44 @@ export function mountGame({
     return context.sentenceRequired === true;
   }
 
+  function getWordIdentificationSupportContent(item = currentItem()) {
+    if (!item) {
+      return {
+        sentence: "",
+        meaning: "",
+        sentenceShown: false,
+        meaningShown: false,
+        hasSafeContent: false,
+      };
+    }
+
+    const context = getSpellingContextSupport(item);
+    const visibleSentence = getVisibleContextSentence(context, item);
+    const visibleMeaning = getVisibleContextMeaning(context, item);
+    const sentenceShown = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
+    const meaningShown = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
+
+    return {
+      sentence: sentenceShown ? visibleSentence : "",
+      meaning: meaningShown ? visibleMeaning : "",
+      sentenceShown,
+      meaningShown,
+      hasSafeContent: sentenceShown || meaningShown,
+    };
+  }
+
   function refreshNativeContextControls(item = currentItem()) {
     hideNativeContextControls();
     if (!shouldUseNativeContextSupport() || !item) return;
 
     const context = getSpellingContextSupport(item);
-    const visibleSentence = getVisibleContextSentence(context, item);
-    const visibleMeaning = getVisibleContextMeaning(context, item);
-    const sentenceAvailable = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
-    const meaningAvailable = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
+    const content = getWordIdentificationSupportContent(item);
+    const visibleSentence = content.sentence;
+    const sentenceAvailable = content.sentenceShown;
 
-    if (btnContextSentence && sentenceAvailable) {
-      btnContextSentence.style.display = "inline-block";
-      btnContextSentence.disabled = false;
-    }
-
-    if (btnContextMeaning && meaningAvailable) {
-      btnContextMeaning.style.display = "inline-block";
-      btnContextMeaning.disabled = false;
+    if (btnWordIdHelp && content.hasSafeContent) {
+      btnWordIdHelp.style.display = "inline-block";
+      btnWordIdHelp.disabled = false;
     }
 
     if (sentenceAvailable && shouldAutoShowContextSentence(context)) {
@@ -2362,29 +2391,7 @@ export function mountGame({
   }
 
   function getSupportLadderClarificationContent(item = currentItem()) {
-    if (!item) {
-      return {
-        sentence: "",
-        meaning: "",
-        sentenceShown: false,
-        meaningShown: false,
-        hasSafeContent: false,
-      };
-    }
-
-    const context = getSpellingContextSupport(item);
-    const visibleSentence = getVisibleContextSentence(context, item);
-    const visibleMeaning = getVisibleContextMeaning(context, item);
-    const sentenceShown = hasSentenceSupport(item) && isContextSentenceAllowed(context) && !!visibleSentence;
-    const meaningShown = hasMeaningSupport(item) && !isBaselineContext(context) && !!visibleMeaning;
-
-    return {
-      sentence: sentenceShown ? visibleSentence : "",
-      meaning: meaningShown ? visibleMeaning : "",
-      sentenceShown,
-      meaningShown,
-      hasSafeContent: sentenceShown || meaningShown,
-    };
+    return getWordIdentificationSupportContent(item);
   }
 
   function persistSupportLadderProgressState(item, supportState) {
@@ -2418,9 +2425,9 @@ export function mountGame({
     return entry;
   }
 
-  function renderSupportLadderClarificationPanel(item = currentItem(), supportState = getSupportLadderStateForItem(item), content = null) {
-    if (!supportLadderClarification || !isSupportLadderRuntimeItem(item) || !supportState) return;
-    const resolvedContent = content || getSupportLadderClarificationContent(item);
+  function renderWordIdentificationSupportPanel(item = currentItem(), content = null, { allowStillNotSure = false } = {}) {
+    if (!supportLadderClarification || !item) return;
+    const resolvedContent = content || getWordIdentificationSupportContent(item);
     const rows = [];
     if (resolvedContent.sentenceShown) {
       rows.push(`<div class="gameClarificationRow"><strong>Sentence:</strong> ${escapeHtml(resolvedContent.sentence)}</div>`);
@@ -2431,13 +2438,16 @@ export function mountGame({
     if (!rows.length) {
       rows.push(`<div class="gameClarificationRow">There isn't a safe clue to show for this word.</div>`);
     }
+    const stillNotSureButton = allowStillNotSure
+      ? `<button id="btnSupportStillNotSure" class="btn secondary" type="button">Still not sure</button>`
+      : "";
 
     supportLadderClarification.innerHTML = `
       <div class="gameClarificationIntro">This might help identify the word.</div>
       ${rows.join("")}
       <div class="gameClarificationActions">
         <button id="btnSupportTrySpelling" class="btn secondary" type="button">Try spelling it</button>
-        <button id="btnSupportStillNotSure" class="btn secondary" type="button">Still not sure</button>
+        ${stillNotSureButton}
       </div>
     `;
     supportLadderClarification.style.display = "block";
@@ -2446,8 +2456,25 @@ export function mountGame({
       if (supportLadderClarification) supportLadderClarification.style.display = "none";
       focusCurrentControl();
     });
-    $("btnSupportStillNotSure")?.addEventListener("click", () => {
+    if (allowStillNotSure) $("btnSupportStillNotSure")?.addEventListener("click", () => {
       void completeSupportLadderAccessIssue();
+    });
+  }
+
+  function renderSupportLadderClarificationPanel(item = currentItem(), supportState = getSupportLadderStateForItem(item), content = null) {
+    if (!supportLadderClarification || !isSupportLadderRuntimeItem(item) || !supportState) return;
+    renderWordIdentificationSupportPanel(item, content || getSupportLadderClarificationContent(item), {
+      allowStillNotSure: true,
+    });
+  }
+
+  function showCurrentWordIdentificationSupport() {
+    if (!shouldUseNativeContextSupport() || locked) return;
+    const item = currentItem();
+    const content = getWordIdentificationSupportContent(item);
+    if (!content.hasSafeContent) return;
+    renderWordIdentificationSupportPanel(item, content, {
+      allowStillNotSure: false,
     });
   }
 
@@ -2879,7 +2906,7 @@ export function mountGame({
 
   function buildFinalWrongFeedbackMarkup(item, correctSpelling) {
     const safeSpelling = String(correctSpelling || "").trim();
-    const revealLead = `<div class="feedbackRevealText">The correct spelling is <strong>${escapeHtml(safeSpelling)}</strong>.</div>`;
+    const revealLead = `<div class="feedbackRevealText">The correct spelling is <strong class="gameCorrectSpellingReveal">${escapeHtml(safeSpelling)}</strong>.</div>`;
     const reminder = `<div class="feedbackRevealHint">Look carefully before moving on.</div>`;
 
     if ((currentModeKind || resolveModeKind(item)) === "segmented_spelling") {
@@ -2923,6 +2950,7 @@ export function mountGame({
     locked = true;
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnWordIdHelp) btnWordIdHelp.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
     hideSupportLadderAccessControls();
@@ -4757,6 +4785,7 @@ export function mountGame({
     clearCompetitionTimer();
     stopAudioPlayback();
     btnListen.disabled = true;
+    if (btnWordIdHelp) btnWordIdHelp.disabled = true;
     if (btnContextSentence) btnContextSentence.disabled = true;
     if (btnContextMeaning) btnContextMeaning.disabled = true;
     hideSupportLadderAccessControls();
@@ -5365,6 +5394,10 @@ export function mountGame({
   btnListen.addEventListener("click", () => {
     stopAudioPlayback();
     playCurrentAudio();
+  });
+  btnWordIdHelp?.addEventListener("click", () => {
+    stopAudioPlayback();
+    showCurrentWordIdentificationSupport();
   });
   btnContextSentence?.addEventListener("click", () => {
     stopAudioPlayback();

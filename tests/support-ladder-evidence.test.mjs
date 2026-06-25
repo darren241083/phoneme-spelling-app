@@ -95,10 +95,24 @@ test("neutral replay and required sentence do not downgrade independent success"
   }
 });
 
-test("material support downgrades otherwise independent success", () => {
+test("prompt-identification support does not downgrade independent success", () => {
   for (const action of [
     "clarification_sentence",
     "meaning",
+  ]) {
+    const result = browserEvidence.interpretWordEvidence(ladderOutcome({
+      support_actions: [action],
+    }));
+    assert.equal(result.category, "correct_first_time", action);
+    assert.equal(result.rawCorrect, true, action);
+    assert.equal(result.headlineCorrect, true, action);
+    assert.equal(result.supportActions.includes(action), true, action);
+    assert.equal(browserEvidence.hasPromptIdentificationActions([action]), true, action);
+  }
+});
+
+test("material spelling support downgrades otherwise independent success", () => {
+  for (const action of [
     "segmented_input",
     "focus_sound",
   ]) {
@@ -111,14 +125,15 @@ test("material support downgrades otherwise independent success", () => {
   }
 });
 
-test("clarification followed by a correct spelling remains supported success", () => {
+test("clarification followed by a correct retry spelling remains retry evidence", () => {
   const result = browserEvidence.interpretWordEvidence(ladderOutcome({
     support_state: "retry",
     attempt_number: 2,
     support_actions: ["clarification_sentence"],
   }));
-  assert.equal(result.category, "correct_with_support");
-  assert.equal(result.diagnosticSignal, "supported_success");
+  assert.equal(result.category, "correct_after_retry");
+  assert.equal(result.diagnosticSignal, "self_correction");
+  assert.deepEqual(normalizeForAssert(result.supportActions), ["clarification_sentence"]);
 });
 
 test("non-terminal attempt rows are excluded from progression", () => {
@@ -287,15 +302,24 @@ test("support action normalization is deterministic and separates neutral from m
     "replay_audio",
     "segmented_spelling",
     "focus_sound",
+    "definition",
+    "context_sentence",
   ]);
   assert.deepEqual(normalizeForAssert(actions), [
     "replay_word",
+    "clarification_sentence",
+    "meaning",
     "segmented_input",
     "focus_sound",
   ]);
   assert.equal(browserEvidence.hasMaterialSupportActions(["replay_word"]), false);
   assert.equal(browserEvidence.hasMaterialSupportActions(["required_sentence"]), false);
-  assert.equal(browserEvidence.hasMaterialSupportActions(["meaning"]), true);
+  assert.equal(browserEvidence.hasMaterialSupportActions(["meaning"]), false);
+  assert.equal(browserEvidence.hasMaterialSupportActions(["clarification_sentence"]), false);
+  assert.equal(browserEvidence.hasMaterialSupportActions(["segmented_input"]), true);
+  assert.equal(browserEvidence.hasPromptIdentificationActions(["meaning"]), true);
+  assert.equal(browserEvidence.hasPromptIdentificationActions(["clarification_sentence"]), true);
+  assert.equal(browserEvidence.hasPromptIdentificationActions(["segmented_input"]), false);
 });
 
 test("browser and Edge pure helpers remain in output parity", () => {

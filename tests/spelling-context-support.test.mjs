@@ -310,6 +310,26 @@ test("hides target-leaking meanings from runtime support", () => {
   assert.equal(getVisiblePupilMeaningSupport("Kind and caring like a father.", "fatherly"), "");
 });
 
+test("runtime support does not expose root or stem leaks in pupil-visible clues", () => {
+  const item = {
+    word: "fatherly",
+    choice: {
+      context_support: {
+        sentence: "He gave father advice before the trip.",
+        sentence_status: "teacher_edited",
+        meaning: "Kind and caring like a father.",
+        meaning_status: "teacher_edited",
+        meaning_enabled: true,
+      },
+    },
+  };
+  const context = getSpellingContextSupport(item);
+
+  assert.equal(getVisiblePupilSentenceSupport(context.sentence, context.word), "");
+  assert.equal(context.meaning, "");
+  assert.equal(getVisiblePupilMeaningSupport("Kind and caring like a father.", context.word), "");
+});
+
 test("context snapshots drop unsafe meanings but keep safe support", () => {
   const snapshot = buildTestWordContextSnapshot("fatherly", {
     sentence: "He gave kind advice before the trip.",
