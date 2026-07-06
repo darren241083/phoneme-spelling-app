@@ -1026,8 +1026,91 @@ function canPresentTestRecord(record) {
   return canEditTestRecord(record);
 }
 
+function getNormalizedTestStatus(record) {
+  return String(record?.status || "").trim().toLowerCase();
+}
+
+function isDashboardAssignableTestStatus(record) {
+  const status = getNormalizedTestStatus(record);
+  return !["draft", "private", "archived"].includes(status);
+}
+
+function isActiveSchoolSafeTestRecord(record) {
+  const testSchoolId = String(record?.school_id || "").trim();
+  const { activeSchoolId, activeSchool } = getCurrentSchoolDetails();
+  const safeActiveSchoolId = String(activeSchoolId || "").trim();
+  if (!safeActiveSchoolId) return true;
+  if (!testSchoolId) return !!activeSchool?.is_legacy_default;
+  return testSchoolId === safeActiveSchoolId;
+}
+
+function getTestAssignmentAvailability(record) {
+  if (!record) {
+    return {
+      canAssign: false,
+      reason: "Choose a test before assigning.",
+      assignableClasses: [],
+    };
+  }
+
+  if (!String(record?.id || "").trim()) {
+    return {
+      canAssign: false,
+      reason: "This test cannot be assigned because its record is missing an id.",
+      assignableClasses: [],
+    };
+  }
+
+  if (!canAssignTests()) {
+    return {
+      canAssign: false,
+      reason: "Teacher assignment access is required before assigning tests.",
+      assignableClasses: [],
+    };
+  }
+
+  if (!isActiveSchoolSafeTestRecord(record)) {
+    return {
+      canAssign: false,
+      reason: "This test belongs to a different school context.",
+      assignableClasses: [],
+    };
+  }
+
+  if (!isDashboardAssignableTestStatus(record)) {
+    return {
+      canAssign: false,
+      reason: "Draft and private tests cannot be assigned from the dashboard.",
+      assignableClasses: [],
+    };
+  }
+
+  if (record?.is_auto_generated) {
+    return {
+      canAssign: false,
+      reason: "Use Generate Personalised Test to create a fresh personalised set for a class.",
+      assignableClasses: [],
+    };
+  }
+
+  const assignableClasses = getOwnedAssignableClasses();
+  if (!assignableClasses.length) {
+    return {
+      canAssign: false,
+      reason: "Create or open one of your own classes before assigning a test.",
+      assignableClasses,
+    };
+  }
+
+  return {
+    canAssign: true,
+    reason: "",
+    assignableClasses,
+  };
+}
+
 function canAssignFromTestRecord(record) {
-  return canEditTestRecord(record) && canAssignTests();
+  return getTestAssignmentAvailability(record).canAssign;
 }
 
 function getSelectedTestIds() {
@@ -11614,8 +11697,9 @@ async function onRootClick(event) {
     const testId = button.dataset.testId;
     if (!testId) return;
     const selectedTest = findTestRecord(testId);
-    if (!canAssignFromTestRecord(selectedTest)) {
-      showNotice("You can only assign tests that you own.", "error");
+    const assignmentAvailability = getTestAssignmentAvailability(selectedTest);
+    if (!assignmentAvailability.canAssign) {
+      showNotice(assignmentAvailability.reason || "This test cannot be assigned from the dashboard.", "error");
       paint();
       return;
     }
@@ -14100,15 +14184,16 @@ async function handleAssignTest(form) {
     return;
   }
 
-  if (selectedTest?.is_auto_generated) {
-    showNotice("Use Generate Personalised Test to create a fresh personalised set for a class.", "error");
+  const assignmentAvailability = getTestAssignmentAvailability(selectedTest);
+  if (!assignmentAvailability.canAssign) {
+    showNotice(assignmentAvailability.reason || "This test cannot be assigned from the dashboard.", "error");
     paint();
     return;
   }
 
   const selectedClass = findClassRecord(classId);
-  if (!canAssignFromTestRecord(selectedTest) || !canEditClassRecord(selectedClass)) {
-    showNotice("You can only assign your own tests to classes that you own.", "error");
+  if (!canEditClassRecord(selectedClass)) {
+    showNotice("You can only assign tests to classes that you own.", "error");
     paint();
     return;
   }
@@ -14130,9 +14215,10 @@ async function handleAssignTest(form) {
     analytics_target_words_per_pupil: analyticsTargetSettings.count,
   };
 
+  const schoolScopedPayload = withActiveSchoolId(payload, state.accessContext);
   const { data: insertedAssignment, error } = await insertSingleRowWithAnalyticsFallback(
     "assignments_v2",
-    payload,
+    schoolScopedPayload,
     "id, created_at",
   );
 
@@ -27450,9 +27536,10 @@ function renderManualAssignmentDeliveryControl(currentValue = MANUAL_ASSIGNMENT_
 
 function renderTestCard(test) {
   const canEditTest = canEditTestRecord(test);
-  const canAssignTest = canAssignFromTestRecord(test);
+  const assignmentAvailability = getTestAssignmentAvailability(test);
+  const canAssignTest = assignmentAvailability.canAssign;
   const canPresentTest = canPresentTestRecord(test);
-  const assignableClasses = getOwnedAssignableClasses();
+  const assignableClasses = assignmentAvailability.assignableClasses || [];
   const isAssignOpen =
     canAssignTest &&
     state.activePanel?.type === "assign-test" &&

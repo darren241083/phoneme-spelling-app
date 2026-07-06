@@ -7,7 +7,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(testDir, "..");
 
 function readSource(relativePath) {
-  return readFileSync(path.join(rootDir, relativePath), "utf8");
+  return readFileSync(path.join(rootDir, relativePath), "utf8").replace(/\r\n/g, "\n");
 }
 
 const dbSource = readSource("js/db.js");
@@ -46,6 +46,11 @@ assert.equal(
   teacherViewSource.includes("insert(withActiveSchoolId(payload, state.accessContext))"),
   true,
   "teacher analytics assistant history should store the active school id"
+);
+assert.equal(
+  teacherViewSource.includes("const schoolScopedPayload = withActiveSchoolId(payload, state.accessContext);"),
+  true,
+  "dashboard manual assignment should attach the active school id"
 );
 assert.equal(
   dbSource.includes("query = applyActiveSchoolFilter(query, context.accessContext);"),

@@ -88,6 +88,8 @@ test("dashboard manual assignment insert uses assignment delivery helper only", 
   assert.match(source, /manualAssignmentDelivery\.js\?v=1\.0/);
   assert.match(assignSource, /const deliveryFields = buildManualAssignmentDeliveryFields\(fd\.get\("delivery_model"\)\);/);
   assert.match(assignSource, /\.\.\.deliveryFields,\s*analytics_target_words_enabled:/);
+  assert.match(assignSource, /const schoolScopedPayload = withActiveSchoolId\(payload, state\.accessContext\);/);
+  assert.match(assignSource, /"assignments_v2",\s*schoolScopedPayload,/s);
   assert.doesNotMatch(assignSource, /\.from\("tests"\)|updateRowsWithAnalyticsFallback\("tests"|\.from\("tests"\)\s*\.update/);
 });
 
