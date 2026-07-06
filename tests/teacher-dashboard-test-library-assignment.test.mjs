@@ -53,7 +53,7 @@ function extractFunctionSource(source, functionName) {
 }
 
 const teacherViewSource = readSource("js/teacherView.js");
-const migrationSource = readSource("supabase/migrations/20260706120000_allow_visible_test_dashboard_assignments.sql");
+const migrationSource = readSource("supabase/migrations/20260706123000_restrict_manual_assignment_to_owned_tests.sql");
 
 function loadAssignmentHelpers() {
   let teacherAssignmentAccess = true;
@@ -192,16 +192,21 @@ const visibleNonOwnedTest = {
   is_auto_generated: false,
 };
 assert.equal(helpers.canEditTestRecord(visibleNonOwnedTest), false);
+const visibleNonOwnedAvailability = availabilityFor(visibleNonOwnedTest);
 assert.equal(
-  availabilityFor(visibleNonOwnedTest).canAssign,
-  true,
-  "visible suitable non-owned tests should be dashboard-assignable"
+  visibleNonOwnedAvailability.canAssign,
+  false,
+  "visible suitable non-owned tests should not be dashboard-assignable"
 );
-assert.equal(helpers.canAssignFromTestRecord(visibleNonOwnedTest), true);
+assert.equal(
+  visibleNonOwnedAvailability.reason,
+  "Only the teacher who created this test can assign it."
+);
+assert.equal(helpers.canAssignFromTestRecord(visibleNonOwnedTest), false);
 
 resetAccess();
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, assignment_count: 3 }).canAssign,
+  availabilityFor({ ...visibleNonOwnedTest, teacher_id: "teacher-1", assignment_count: 3 }).canAssign,
   true,
   "live suitable tests should remain dashboard-assignable when owned classes exist"
 );
@@ -223,24 +228,24 @@ assert.equal(
 
 resetAccess();
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, status: "draft" }).canAssign,
+  availabilityFor({ ...ownEditableTest, status: "draft" }).canAssign,
   false,
   "draft tests should not be dashboard-assignable"
 );
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, status: "private" }).canAssign,
+  availabilityFor({ ...ownEditableTest, status: "private" }).canAssign,
   false,
   "private tests should not be dashboard-assignable"
 );
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, status: "archived" }).canAssign,
+  availabilityFor({ ...ownEditableTest, status: "archived" }).canAssign,
   false,
   "archived tests should not be dashboard-assignable"
 );
 
 resetAccess();
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, is_auto_generated: true }).canAssign,
+  availabilityFor({ ...ownEditableTest, is_auto_generated: true }).canAssign,
   false,
   "auto-generated tests should not be dashboard-assignable"
 );
@@ -278,14 +283,14 @@ setCurrentSchoolDetails({
   activeSchool: { id: "legacy-school", is_legacy_default: true },
 });
 assert.equal(
-  availabilityFor({ ...visibleNonOwnedTest, school_id: null }).canAssign,
+  availabilityFor({ ...ownEditableTest, school_id: null }).canAssign,
   true,
   "legacy-default school context should still allow legacy null-school tests"
 );
 
 resetAccess();
 setOwnedClasses([]);
-const noOwnedClassAvailability = availabilityFor(visibleNonOwnedTest);
+const noOwnedClassAvailability = availabilityFor(ownEditableTest);
 assert.equal(
   noOwnedClassAvailability.canAssign,
   false,
@@ -322,7 +327,7 @@ assert.match(renderTestCardSource, /canEditTest \? `<button class="td-btn td-btn
 const blockedRenderTestCard = loadRenderTestCard({
   canAssign: false,
   canAssignAccess: true,
-  reason: "Create or open one of your own classes before assigning a test.",
+  reason: "Only the teacher who created this test can assign it.",
 });
 const blockedAssignHtml = blockedRenderTestCard({
   id: "test-visible",
@@ -331,7 +336,7 @@ const blockedAssignHtml = blockedRenderTestCard({
 });
 assert.match(blockedAssignHtml, /td-disabled-assign-control/);
 assert.match(blockedAssignHtml, /<button[\s\S]*disabled[\s\S]*>\s*Assign\s*<\/button>/);
-assert.match(blockedAssignHtml, /Create or open one of your own classes before assigning a test\./);
+assert.match(blockedAssignHtml, /Only the teacher who created this test can assign it\./);
 assert.doesNotMatch(blockedAssignHtml, /data-action="open-assign-test"/);
 
 const noAccessRenderTestCard = loadRenderTestCard({
@@ -378,10 +383,11 @@ assert.match(migrationSource, /SECURITY DEFINER/);
 assert.match(migrationSource, /checked_teacher_id is distinct from actor_user_id/);
 assert.match(migrationSource, /c\.teacher_id = actor_user_id/);
 assert.match(migrationSource, /public\.is_teacher_compat\(actor_user_id, class_school_id\)/);
-assert.match(migrationSource, /public\.can_view_test\(t\.id, actor_user_id\)/);
+assert.match(migrationSource, /test_teacher_id is distinct from actor_user_id/);
+assert.match(migrationSource, /Only the teacher who created this test can assign it\./);
 assert.match(migrationSource, /test_status in \('draft', 'private', 'archived'\)/);
 assert.match(migrationSource, /assignment_engine_pool/);
-assert.match(migrationSource, /coalesce\(lower\(btrim\(new\.automation_kind\)\), ''\) <> 'personalised'/);
+assert.match(migrationSource, /assignment_automation_kind <> 'personalised'/);
 assert.doesNotMatch(migrationSource, /update\s+public\.tests/i);
 
 console.log("Passed teacher dashboard test-library assignment checks.");

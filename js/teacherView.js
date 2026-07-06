@@ -1077,6 +1077,14 @@ function getTestAssignmentAvailability(record) {
     };
   }
 
+  if (!ownsTeacherRecord(record)) {
+    return {
+      canAssign: false,
+      reason: "Only the teacher who created this test can assign it.",
+      assignableClasses: [],
+    };
+  }
+
   if (!isDashboardAssignableTestStatus(record)) {
     return {
       canAssign: false,
