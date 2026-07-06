@@ -276,7 +276,7 @@ assert.equal(teacherViewSource.includes("function renderManualAssignmentDelivery
 assert.equal(teacherViewSource.includes("MANUAL_ASSIGNMENT_DELIVERY_COPY.label"), true);
 assert.equal(teacherViewSource.includes('name="delivery_model"'), true);
 assert.equal(teacherViewSource.includes('data-field="manual-assignment-delivery"'), true);
-assert.equal(appSource.includes('teacherView.js?v=7.06'), true);
-assert.equal(loginSource.includes('app.js?v=5.136'), true);
+assert.equal(appSource.includes('teacherView.js?v=7.07'), true);
+assert.equal(loginSource.includes('app.js?v=5.137'), true);
 
 console.log("Passed teacher dashboard initial-render guard checks.");

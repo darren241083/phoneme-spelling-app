@@ -27538,6 +27538,10 @@ function renderTestCard(test) {
   const canEditTest = canEditTestRecord(test);
   const assignmentAvailability = getTestAssignmentAvailability(test);
   const canAssignTest = assignmentAvailability.canAssign;
+  const canShowBlockedAssign = canAssignTests() && !canAssignTest;
+  const assignmentBlockedReason = String(
+    assignmentAvailability.reason || "This test cannot be assigned from the dashboard."
+  ).trim() || "This test cannot be assigned from the dashboard.";
   const canPresentTest = canPresentTestRecord(test);
   const assignableClasses = assignmentAvailability.assignableClasses || [];
   const isAssignOpen =
@@ -27550,6 +27554,7 @@ function renderTestCard(test) {
   const isSelected = getSelectedTestIds().includes(testId);
   const title = test.title || "Untitled test";
   const selectedManualClassId = getManualAssignmentSelectedClassId(testId);
+  const assignmentBlockedReasonId = `assign-blocked-${testId || "unknown-test"}`;
 
   return `
     <article class="td-test-card ${isAssignOpen ? "is-active" : ""} ${isFlashed ? "is-flash" : ""} ${isSelected ? "is-selected" : ""}">
@@ -27588,6 +27593,19 @@ function renderTestCard(test) {
             >
               ${test?.is_auto_generated ? "Generated" : "Assign"}
             </button>
+          ` : canShowBlockedAssign ? `
+            <span class="td-disabled-assign-control">
+              <button
+                class="td-btn td-btn--ghost"
+                type="button"
+                disabled
+                title="${escapeAttr(assignmentBlockedReason)}"
+                aria-describedby="${escapeAttr(assignmentBlockedReasonId)}"
+              >
+                Assign
+              </button>
+              <small id="${escapeAttr(assignmentBlockedReasonId)}">${escapeHtml(assignmentBlockedReason)}</small>
+            </span>
           ` : ""}
           ${canEditTest ? `<button class="td-btn td-btn--ghost" type="button" data-action="open-edit-test" data-test-id="${escapeAttr(test.id)}">Edit</button>` : ""}
           ${canEditTest ? `<button class="td-btn td-btn--ghost" type="button" data-action="duplicate-test" data-test-id="${escapeAttr(test.id)}">Duplicate</button>` : ""}
@@ -28068,7 +28086,7 @@ function renderClassCard(cls) {
   const subtitleParts = [];
   if (cls?.year_group) subtitleParts.push(cls.year_group);
   subtitleParts.push(getClassTypeDisplayLabel(cls?.class_type));
-  subtitleParts.push("Ready for assignments");
+  subtitleParts.push(canEditClass ? "Ready for assignments" : "Visible to you");
 
   return `
     <article class="td-class-card ${isActive ? "is-active" : ""} ${isFlashed ? "is-flash" : ""}">
@@ -33818,6 +33836,22 @@ function injectStyles() {
       flex:0 0 auto;
     }
 
+    .td-disabled-assign-control{
+      display:inline-flex;
+      flex-direction:column;
+      align-items:flex-end;
+      gap:4px;
+      max-width:240px;
+    }
+
+    .td-disabled-assign-control small{
+      color:#64748b;
+      font-size:0.78rem;
+      line-height:1.25;
+      text-align:right;
+      white-space:normal;
+    }
+
     .td-inline-panel{
       margin:0 16px 16px;
       border:1px solid #dbe3ee;
@@ -37610,6 +37644,14 @@ function injectStyles() {
 
       .td-card-actions{
         justify-content:flex-start;
+      }
+
+      .td-disabled-assign-control{
+        align-items:flex-start;
+      }
+
+      .td-disabled-assign-control small{
+        text-align:left;
       }
 
       .td-chat-card--surface{

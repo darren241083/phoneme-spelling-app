@@ -119,6 +119,70 @@ function availabilityFor(record) {
   return helpers.getTestAssignmentAvailability(record);
 }
 
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function loadRenderTestCard({
+  canAssign = false,
+  canAssignAccess = true,
+  canEdit = false,
+  canPresent = false,
+  reason = "Create or open one of your own classes before assigning a test.",
+} = {}) {
+  const context = {
+    String,
+    state: {
+      activePanel: null,
+      flashTestId: null,
+    },
+    canEditTestRecord: () => canEdit,
+    getTestAssignmentAvailability: () => ({
+      canAssign,
+      reason,
+      assignableClasses: canAssign ? [{ id: "class-1", name: "Class 1" }] : [],
+    }),
+    canAssignTests: () => canAssignAccess,
+    canPresentTestRecord: () => canPresent,
+    getSelectedTestIds: () => [],
+    getManualAssignmentSelectedClassId: () => "",
+    escapeAttr: escapeHtml,
+    escapeHtml,
+    renderTestMeta: () => "Published | 2 assigned",
+    renderManualAssignmentDeliveryControl: () => "",
+    renderManualAssignmentDuplicateWarning: () => "",
+  };
+  return vm.runInNewContext(`(${extractFunctionSource(teacherViewSource, "renderTestCard")})`, context);
+}
+
+function loadRenderClassCard({ canEdit = false } = {}) {
+  const context = {
+    String,
+    state: {
+      activePanel: null,
+      flashClassId: null,
+    },
+    canEditClassRecord: () => canEdit,
+    getSavedClassAutoAssignPolicy: () => null,
+    getEffectiveClassAutoAssignPolicy: () => ({}),
+    buildAutoAssignPolicySummary: () => "default",
+    getClassTypeDisplayLabel: () => "Form group",
+    escapeAttr: escapeHtml,
+    escapeHtml,
+    renderClassResultsPanel: () => "",
+    renderClassRemovalPanel: () => "",
+    AUTO_ASSIGN_POLICY_LENGTH_MIN: 1,
+    AUTO_ASSIGN_POLICY_LENGTH_MAX: 50,
+    AUTO_ASSIGN_SUPPORT_PRESET_OPTIONS: [],
+    AUTO_ASSIGN_POLICY_DEFAULTS: {},
+  };
+  return vm.runInNewContext(`(${extractFunctionSource(teacherViewSource, "renderClassCard")})`, context);
+}
+
 resetAccess();
 const visibleNonOwnedTest = {
   id: "test-visible",
@@ -134,6 +198,13 @@ assert.equal(
   "visible suitable non-owned tests should be dashboard-assignable"
 );
 assert.equal(helpers.canAssignFromTestRecord(visibleNonOwnedTest), true);
+
+resetAccess();
+assert.equal(
+  availabilityFor({ ...visibleNonOwnedTest, assignment_count: 3 }).canAssign,
+  true,
+  "live suitable tests should remain dashboard-assignable when owned classes exist"
+);
 
 resetAccess();
 const ownEditableTest = {
@@ -214,10 +285,15 @@ assert.equal(
 
 resetAccess();
 setOwnedClasses([]);
+const noOwnedClassAvailability = availabilityFor(visibleNonOwnedTest);
 assert.equal(
-  availabilityFor(visibleNonOwnedTest).canAssign,
+  noOwnedClassAvailability.canAssign,
   false,
-  "assignment should require at least one owned assignable class"
+  "suitable tests should be blocked when only visible non-owned classes exist"
+);
+assert.equal(
+  noOwnedClassAvailability.reason,
+  "Create or open one of your own classes before assigning a test."
 );
 
 const assignGateSource = extractFunctionSource(teacherViewSource, "canAssignFromTestRecord");
@@ -234,10 +310,57 @@ const renderTestCardSource = sourceSlice(
 );
 assert.match(renderTestCardSource, /const assignmentAvailability = getTestAssignmentAvailability\(test\);/);
 assert.match(renderTestCardSource, /const canAssignTest = assignmentAvailability\.canAssign;/);
+assert.match(renderTestCardSource, /const canShowBlockedAssign = canAssignTests\(\) && !canAssignTest;/);
+assert.match(renderTestCardSource, /td-disabled-assign-control/);
+assert.match(renderTestCardSource, /title="\$\{escapeAttr\(assignmentBlockedReason\)\}"/);
+assert.match(renderTestCardSource, /aria-describedby="\$\{escapeAttr\(assignmentBlockedReasonId\)\}"/);
 assert.match(renderTestCardSource, /data-action="open-edit-test"/);
 assert.match(renderTestCardSource, /data-action="duplicate-test"/);
 assert.match(renderTestCardSource, /data-action="delete-test"/);
 assert.match(renderTestCardSource, /canEditTest \? `<button class="td-btn td-btn--ghost" type="button" data-action="open-edit-test"/);
+
+const blockedRenderTestCard = loadRenderTestCard({
+  canAssign: false,
+  canAssignAccess: true,
+  reason: "Create or open one of your own classes before assigning a test.",
+});
+const blockedAssignHtml = blockedRenderTestCard({
+  id: "test-visible",
+  title: "Visible test",
+  is_auto_generated: false,
+});
+assert.match(blockedAssignHtml, /td-disabled-assign-control/);
+assert.match(blockedAssignHtml, /<button[\s\S]*disabled[\s\S]*>\s*Assign\s*<\/button>/);
+assert.match(blockedAssignHtml, /Create or open one of your own classes before assigning a test\./);
+assert.doesNotMatch(blockedAssignHtml, /data-action="open-assign-test"/);
+
+const noAccessRenderTestCard = loadRenderTestCard({
+  canAssign: false,
+  canAssignAccess: false,
+});
+const noAccessAssignHtml = noAccessRenderTestCard({
+  id: "test-visible",
+  title: "Visible test",
+  is_auto_generated: false,
+});
+assert.doesNotMatch(noAccessAssignHtml, />\s*Assign\s*</);
+
+const renderClassCardSource = sourceSlice(
+  teacherViewSource,
+  "function renderClassCard(cls)",
+  "function findTestRecord"
+);
+assert.match(renderClassCardSource, /subtitleParts\.push\(canEditClass \? "Ready for assignments" : "Visible to you"\);/);
+const readOnlyRenderClassCard = loadRenderClassCard({ canEdit: false });
+const readOnlyClassHtml = readOnlyRenderClassCard({
+  id: "class-visible",
+  name: "Visible Class",
+  year_group: "Year 7",
+  class_type: "form",
+});
+assert.match(readOnlyClassHtml, /Visible to you/);
+assert.doesNotMatch(readOnlyClassHtml, /Ready for assignments/);
+assert.doesNotMatch(readOnlyClassHtml, /data-action="open-edit-class"|data-action="delete-class"/);
 
 const handleAssignSource = sourceSlice(
   teacherViewSource,
