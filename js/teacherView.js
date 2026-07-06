@@ -220,6 +220,7 @@ const DEMO_TEST_PREFIX = "[Demo]";
 const REGULAR_PERSONALISED_DELIVERY_MODEL = DELIVERY_MODEL_SUPPORT_LADDER;
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
+const NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS = new Set(["bankMonitor", "upcoming", "classes", "tests"]);
 const ADVANCED_MANUAL_TOOLS_COPY = "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.";
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
 const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
@@ -692,7 +693,13 @@ const state = {
     upcoming: false,
     classes: false,
     tests: false,
-    analytics: false,
+    analytics: true,
+  },
+  revealedQuarantinedSections: {
+    bankMonitor: false,
+    upcoming: false,
+    classes: false,
+    tests: false,
   },
   activePanel: null, // { type: "assign-test" | "edit-class" | "results-assignment" | "class-results", id: string }
   flashTestId: null,
@@ -5039,7 +5046,30 @@ function getAutomationQuestionSupportLabel(value = "") {
   return "Balanced";
 }
 
+function isNormalDashboardSectionQuarantined(sectionKey) {
+  return NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS.has(String(sectionKey || ""));
+}
+
+function revealQuarantinedDashboardSection(sectionKey) {
+  if (!isNormalDashboardSectionQuarantined(sectionKey)) return;
+  state.revealedQuarantinedSections = {
+    ...state.revealedQuarantinedSections,
+    [sectionKey]: true,
+  };
+}
+
+function shouldRenderDashboardSection(sectionKey) {
+  return !isNormalDashboardSectionQuarantined(sectionKey)
+    || !!state.revealedQuarantinedSections?.[sectionKey];
+}
+
+function renderDashboardSection(sectionKey, renderer) {
+  if (!shouldRenderDashboardSection(sectionKey)) return "";
+  return typeof renderer === "function" ? renderer() : "";
+}
+
 function openDashboardSection(sectionKey) {
+  revealQuarantinedDashboardSection(sectionKey);
   for (const key of DASHBOARD_SECTION_KEYS) {
     state.sections[key] = key === sectionKey;
   }
@@ -15654,11 +15684,11 @@ function paint() {
       ${renderCreateBar()}
       ${renderSectionStaffAccess()}
       ${renderSectionPupilOnboarding()}
-      ${renderSectionWordloomCoreBankMonitor()}
+      ${renderDashboardSection("bankMonitor", renderSectionWordloomCoreBankMonitor)}
       ${renderAnalyticsBar()}
-      ${renderSectionUpcomingAssignments()}
-      ${renderSectionClasses()}
-      ${renderSectionTests()}
+      ${renderDashboardSection("upcoming", renderSectionUpcomingAssignments)}
+      ${renderDashboardSection("classes", renderSectionClasses)}
+      ${renderDashboardSection("tests", renderSectionTests)}
       ${renderFloatingAIButton()}
     </section>
   `;

@@ -2,8 +2,8 @@
 
 Status: Internal product direction and implementation guardrail
 Last updated: 6 July 2026
-Latest pushed checkpoint: `ee6da27 Document Wordloom product roadmap guardrails`
-Current implementation checkpoint: Manual Test Builder/Test Library quarantined behind Advanced manual tools.
+Latest pushed checkpoint: `3942cf0 Quarantine manual test tools`
+Current implementation checkpoint: Normal dashboard is Analytics-first; standalone class/lifecycle/core/manual sections are quarantined from normal first-load.
 
 ## Current Product Direction
 
@@ -12,6 +12,7 @@ Current implementation checkpoint: Manual Test Builder/Test Library quarantined 
 * Support Ladder should become the standard/default pupil delivery model.
 * Manual dashboard assignment remains limited to teacher-owned tests.
 * Manual Test Builder/Test Library is preserved for occasional custom lists or legacy manual tests, but it is no longer the normal teacher dashboard path.
+* The normal dashboard should lead with Analytics, keeping teacher-facing insight simple and low-clutter.
 
 ## Current Priority
 
@@ -19,12 +20,15 @@ Current implementation checkpoint: Manual Test Builder/Test Library quarantined 
 * Keep the disabled Assign reason UI so access decisions are visible.
 * Preserve Support Ladder delivery while moving teacher workflows toward automation and intervention oversight.
 * Keep manual tools behind Advanced manual tools, with direct builder links and existing old tests preserved.
+* Keep standalone class, assignment lifecycle, core bank, and manual-tool dashboard blocks hidden from normal first-load.
 
 ## Next Up
 
 * Remove question type choice from ordinary teacher Test Builder flows.
 * Retain question types only as internal, specialist, admin, migration, or runtime modes where needed.
 * Continue shaping admin workflows around setup, data/imports, analytics oversight, and automation/core/personalised assignment management.
+* Redesign hidden class/lifecycle/core/manual areas into role-specific Analytics, admin, or support surfaces.
+* Move `Your classes` information into Analytics rather than restoring it as a separate normal-dashboard section.
 
 ## Later / Deferred
 
@@ -40,12 +44,14 @@ Current implementation checkpoint: Manual Test Builder/Test Library quarantined 
 * Do not make admin a default path for casual reassignment of another teacher’s personal tests.
 * Do not re-expand teacher-facing manual test-building as the main product workflow.
 * Do not restore a prominent normal-dashboard `+ Create test` path while automation is the recommended route.
+* Do not restore `Your classes`, Assignment lifecycle, Core bank monitor, or Advanced manual tools as normal first-load dashboard blocks.
 * Do not expose draft/private/archived/auto-generated tests for manual dashboard assignment.
 * Do not treat school visibility, read-only access, or analytics visibility as sharing permission.
 
 ## Recent Checkpoints
 
 * Manual Test Builder/Test Library is quarantined behind Advanced manual tools for occasional custom lists or legacy manual tests.
+* Normal dashboard first-load is Analytics-first, with standalone class/lifecycle/core/manual blocks hidden until explicit fallback/admin-support flows are designed.
 * Direct `test-builder.html?id=...` links and old test records are preserved.
 * `15a2585 Restrict manual assignment to owned tests` tightened manual dashboard assignment back to owned tests.
 * Migration `20260706123000_restrict_manual_assignment_to_owned_tests` has been applied remotely.
