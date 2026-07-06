@@ -207,6 +207,13 @@ import {
   buildSpellingBeeExposurePlan,
   buildSpellingBeeLadder,
 } from "./spellingBeePolicy.js?v=1.0";
+import {
+  MANUAL_ASSIGNMENT_DELIVERY_COPY,
+  MANUAL_ASSIGNMENT_DELIVERY_DEFAULT,
+  MANUAL_ASSIGNMENT_DELIVERY_OPTIONS,
+  buildManualAssignmentDeliveryFields,
+  normalizeManualAssignmentDeliveryModel,
+} from "./manualAssignmentDelivery.js?v=1.0";
 
 const DEMO_CLASS_PREFIX = "[Demo]";
 const DEMO_TEST_PREFIX = "[Demo]";
@@ -14085,6 +14092,7 @@ async function handleAssignTest(form) {
   const deadlineRaw = String(fd.get("deadline") || "").trim();
   const selectedTest = state.tests.find((item) => String(item?.id || "") === testId) || null;
   const analyticsTargetSettings = getAnalyticsTargetSettingsFromSource(selectedTest);
+  const deliveryFields = buildManualAssignmentDeliveryFields(fd.get("delivery_model"));
 
   if (!testId || !classId) {
     showNotice("Please choose a class before assigning.", "error");
@@ -14117,6 +14125,7 @@ async function handleAssignTest(form) {
     audio_enabled: true,
     hints_enabled: true,
     end_at: deadlineRaw ? new Date(deadlineRaw).toISOString() : null,
+    ...deliveryFields,
     analytics_target_words_enabled: analyticsTargetSettings.enabled,
     analytics_target_words_per_pupil: analyticsTargetSettings.count,
   };
@@ -27409,6 +27418,36 @@ function renderManualAssignmentDuplicateWarning(testId = "") {
   `;
 }
 
+function renderManualAssignmentDeliveryControl(currentValue = MANUAL_ASSIGNMENT_DELIVERY_DEFAULT) {
+  const current = normalizeManualAssignmentDeliveryModel(currentValue);
+  return `
+    <div class="td-manual-delivery-group">
+      <div class="td-automation-inline-label-row">
+        <strong>${escapeHtml(MANUAL_ASSIGNMENT_DELIVERY_COPY.label)}</strong>
+      </div>
+      <div class="td-automation-preset-guide td-manual-delivery-options">
+        ${MANUAL_ASSIGNMENT_DELIVERY_OPTIONS
+          .map((option) => `
+            <label class="td-automation-preset-guide-item ${current === option.value ? "is-current" : ""}">
+              <input
+                type="radio"
+                name="delivery_model"
+                value="${escapeAttr(option.value)}"
+                data-field="manual-assignment-delivery"
+                ${current === option.value ? "checked" : ""}
+              />
+              <span>
+                <strong>${escapeHtml(option.label)}</strong>
+                <small>${escapeHtml(option.description)}</small>
+              </span>
+            </label>
+          `)
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderTestCard(test) {
   const canEditTest = canEditTestRecord(test);
   const canAssignTest = canAssignFromTestRecord(test);
@@ -27513,6 +27552,8 @@ function renderTestCard(test) {
                 <input class="td-input" type="datetime-local" name="deadline" />
               </label>
             </div>
+
+            ${renderManualAssignmentDeliveryControl()}
 
             ${renderManualAssignmentDuplicateWarning(test.id)}
 
@@ -29707,6 +29748,16 @@ function injectStyles() {
 
     .td-form-grid--assign{
       grid-template-columns:1.3fr 0.8fr 0.9fr 1fr;
+    }
+
+    .td-manual-delivery-group{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-manual-delivery-options{
+      grid-template-columns:repeat(2,minmax(220px,1fr));
     }
 
     .td-field{

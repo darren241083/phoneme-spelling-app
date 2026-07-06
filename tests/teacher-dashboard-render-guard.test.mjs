@@ -272,7 +272,11 @@ assert.equal(cardRefreshSource.includes("supabase"), false);
 
 assert.equal(teacherViewSource.includes('data-role="assignment-lifecycle-body"'), true);
 assert.equal(teacherViewSource.includes('assignmentLifecycleView.js?v=1.5'), true);
-assert.equal(appSource.includes('teacherView.js?v=7.04'), true);
+assert.equal(teacherViewSource.includes("function renderManualAssignmentDeliveryControl"), true);
+assert.equal(teacherViewSource.includes("MANUAL_ASSIGNMENT_DELIVERY_COPY.label"), true);
+assert.equal(teacherViewSource.includes('name="delivery_model"'), true);
+assert.equal(teacherViewSource.includes('data-field="manual-assignment-delivery"'), true);
+assert.equal(appSource.includes('teacherView.js?v=7.05'), true);
 assert.equal(loginSource.includes('app.js?v=5.135'), true);
 
 console.log("Passed teacher dashboard initial-render guard checks.");

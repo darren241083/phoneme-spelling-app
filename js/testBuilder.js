@@ -50,6 +50,13 @@ import {
   DIFFICULTY_TARGET_OPTIONS,
   RESEARCH_DIFFICULTY_REFERENCES,
 } from "./researchDifficulty.js?v=2.4";
+import {
+  MANUAL_ASSIGNMENT_DELIVERY_COPY,
+  MANUAL_ASSIGNMENT_DELIVERY_DEFAULT,
+  MANUAL_ASSIGNMENT_DELIVERY_OPTIONS,
+  buildManualAssignmentDeliveryFields,
+  normalizeManualAssignmentDeliveryModel,
+} from "./manualAssignmentDelivery.js?v=1.0";
 
 const appEl = document.getElementById("app");
 const ACCESSIBILITY_OPTIONS = [
@@ -70,7 +77,7 @@ const LOOM_DECOY_LEVEL_OPTIONS = [
   { value: "medium", label: "Medium" },
 ];
 const ATTEMPT_OPTIONS = ["1", "2", "3", "5", "10", "unlimited"];
-const DEFAULT_ASSIGN = { maxAttempts:"2", deadline:"", audioEnabled:true, hintsEnabled:true };
+const DEFAULT_ASSIGN = { maxAttempts:"2", deadline:"", audioEnabled:true, hintsEnabled:true, deliveryModel:MANUAL_ASSIGNMENT_DELIVERY_DEFAULT };
 const MAX_TEST_WORDS = 20;
 const UK_ENGLISH_AI_INSTRUCTION = "Use UK English and UK school-appropriate wording.";
 const UK_ENGLISH_AI_AVOIDANCE = "Avoid US terms and spellings such as mom, color, favorite, center or organize; use mum, colour, favourite, centre and organise where needed.";
@@ -941,6 +948,7 @@ async function loadAll(){
       deadline: existing?.end_at ? toLocalDateTimeInput(existing.end_at) : "",
       audioEnabled: existing?.audio_enabled ?? DEFAULT_ASSIGN.audioEnabled,
       hintsEnabled: existing?.hints_enabled ?? DEFAULT_ASSIGN.hintsEnabled,
+      deliveryModel: normalizeManualAssignmentDeliveryModel(existing?.delivery_model),
     };
     state.assignmentsByClass[String(cls.id)] = assignmentState;
     state.assignmentBaselineByClass[String(cls.id)] = { ...assignmentState };
@@ -1369,6 +1377,13 @@ function onChange(event){
   if(target.matches('[data-field="assignment-hints"]')){
     const id = String(target.dataset.classId || "");
     state.assignmentsByClass[id].hintsEnabled = !!target.checked;
+    markDirty();
+    return;
+  }
+  if(target.matches('[data-field="assignment-delivery-model"]')){
+    const id = String(target.dataset.classId || "");
+    if(!state.assignmentsByClass[id]) state.assignmentsByClass[id] = { ...DEFAULT_ASSIGN };
+    state.assignmentsByClass[id].deliveryModel = normalizeManualAssignmentDeliveryModel(target.value);
     markDirty();
     return;
   }
@@ -2215,10 +2230,9 @@ async function saveBuilder({ assign=false, silent=false }){
           analytics_target_words_enabled: analyticsSettings.enabled,
           analytics_target_words_per_pupil: analyticsSettings.count,
         };
-        const schoolScopedPayload = withActiveSchoolId(payload, state.accessContext);
         const existingAssignmentId = state.assignmentsByClass[classId]?.assignmentId;
         if(existingAssignmentId){
-          const { error } = await updateRowsWithAnalyticsFallback("assignments_v2", schoolScopedPayload, {
+          const { error } = await updateRowsWithAnalyticsFallback("assignments_v2", withActiveSchoolId(payload, state.accessContext), {
             id: existingAssignmentId,
             teacher_id: state.user.id,
             test_id: state.testId,
@@ -2248,6 +2262,10 @@ async function saveBuilder({ assign=false, silent=false }){
           continue;
         }
 
+        const schoolScopedPayload = withActiveSchoolId({
+          ...payload,
+          ...buildManualAssignmentDeliveryFields(s.deliveryModel),
+        }, state.accessContext);
         const { data:inserted, error } = await insertSingleRowWithAnalyticsFallback(
           "assignments_v2",
           schoolScopedPayload,
@@ -2727,6 +2745,7 @@ function renderAssignments(){
     const alreadyAssigned = !!s.assignmentId;
     const isSelected = state.selectedClassIds.has(id);
     const lockedSettings = state.isLocked && alreadyAssigned;
+    const deliveryModel = normalizeManualAssignmentDeliveryModel(s.deliveryModel);
     return `<div class="tb-assign-card">
       <div class="tb-class-check"><label><input type="checkbox" data-field="assign-class" data-class-id="${esc(id)}" ${isSelected?"checked":""}> ${esc(cls.name || "Untitled class")}</label></div>
       <div class="tb-assign-grid">
@@ -2735,6 +2754,29 @@ function renderAssignments(){
         <label class="tb-toggle-pill"><input type="checkbox" data-field="assignment-audio" data-class-id="${esc(id)}" ${s.audioEnabled?"checked":""} ${lockedSettings?"disabled":""}> <span>Audio</span></label>
         <label class="tb-toggle-pill"><input type="checkbox" data-field="assignment-hints" data-class-id="${esc(id)}" ${s.hintsEnabled?"checked":""} ${lockedSettings?"disabled":""}> <span>Hints</span></label>
       </div>
+      ${alreadyAssigned ? "" : `
+        <div class="tb-delivery-group">
+          <div class="tb-delivery-title">${esc(MANUAL_ASSIGNMENT_DELIVERY_COPY.label)}</div>
+          <div class="tb-delivery-options">
+            ${MANUAL_ASSIGNMENT_DELIVERY_OPTIONS.map((option) => `
+              <label class="tb-delivery-option ${deliveryModel === option.value ? "is-current" : ""}">
+                <input
+                  type="radio"
+                  name="assignment_delivery_${esc(id)}"
+                  value="${esc(option.value)}"
+                  data-field="assignment-delivery-model"
+                  data-class-id="${esc(id)}"
+                  ${deliveryModel === option.value ? "checked" : ""}
+                >
+                <span>
+                  <strong>${esc(option.label)}</strong>
+                  <small>${esc(option.description)}</small>
+                </span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      `}
     </div>`;
   }).join("");
 }
@@ -2955,6 +2997,15 @@ function injectStyles(){
     .tb-assign-stack{display:flex;flex-direction:column;gap:12px}.tb-assign-card{border:1px solid var(--tb-line);border-radius:18px;padding:14px;background:#fbfdff}
     .tb-class-check{display:flex;gap:10px;align-items:center;font-weight:800;margin-bottom:10px}
     .tb-assign-grid{display:grid;grid-template-columns:minmax(160px,.8fr) minmax(220px,1fr) auto auto;gap:12px;align-items:end}
+    .tb-delivery-group{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+    .tb-delivery-title{color:#64748b;font-size:13px;font-weight:800}
+    .tb-delivery-options{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px}
+    .tb-delivery-option{display:flex;align-items:flex-start;gap:10px;min-width:0;padding:13px;border:1px solid var(--tb-line);border-radius:14px;background:#fff;color:#475569;font-size:.86rem;line-height:1.45;cursor:pointer}
+    .tb-delivery-option input{flex:0 0 auto;margin-top:2px}
+    .tb-delivery-option span{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .tb-delivery-option strong{color:#0f172a;font-size:.9rem;line-height:1.25}
+    .tb-delivery-option small{color:#475569;font-size:.84rem;line-height:1.42}
+    .tb-delivery-option.is-current{border-color:#94a3b8;background:#eff6ff;box-shadow:inset 0 0 0 1px rgba(148,163,184,.14)}
     .tb-toggle-pill{display:inline-flex;gap:8px;align-items:center;justify-content:center;height:46px;padding:0 16px;border:1px solid var(--tb-line);border-radius:16px;background:#fff;font-weight:700;white-space:nowrap}.tb-toggle-pill--wide{justify-content:flex-start}
     .tb-bottom-bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-top:1px solid var(--tb-line);display:flex;justify-content:space-between;gap:16px;align-items:center;padding:14px 18px;z-index:20}.tb-bottom-actions{display:flex;gap:10px}.tb-saved{font-weight:800;color:#334155}
     .tb-notice{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-radius:16px;border:1px solid var(--tb-line);margin-bottom:16px;background:#fff}.tb-success{background:#ecfdf5;border-color:#86efac}.tb-error{background:#fef2f2;border-color:#fecaca}
@@ -2963,7 +3014,7 @@ function injectStyles(){
     .tb-floating button,.tb-notice button{background:transparent;border:none;font-size:20px;cursor:pointer;color:inherit}
     .pr-scroll{overflow-x:auto;overflow-y:hidden;max-width:100%;padding-bottom:2px}.pr-wrap{display:inline-grid;grid-template-rows:auto auto;row-gap:6px;min-width:max-content}.pr-letters,.pr-marks{display:grid;grid-template-columns:repeat(var(--pr-cols),minmax(24px,24px));column-gap:8px;align-items:start}.pr-cell{text-align:center;font-weight:800;font-size:18px;min-width:24px}.pr-dot{width:10px;height:10px;border-radius:999px;background:var(--tb-grey);justify-self:center;align-self:start;margin-top:1px}.pr-dot-orange{background:var(--tb-orange);margin-top:1px}.pr-underline{height:4px;background:var(--tb-orange);border-radius:999px;align-self:start;margin-top:5px}.pr-bridge{height:16px;border-bottom:4px solid var(--tb-orange);border-left:4px solid var(--tb-orange);border-right:4px solid var(--tb-orange);border-bottom-left-radius:14px;border-bottom-right-radius:14px;align-self:start;margin-top:1px}
     @media (max-width:1280px){.tb-helper-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tb-generator-analytics-row,.tb-assign-grid,.tb-difficulty-detail-grid{grid-template-columns:1fr 1fr}.tb-table-head,.tb-word-row{grid-template-columns:1fr}}
-    @media (max-width:760px){.tb-wrap{padding:14px 14px 120px}.tb-topbar,.tb-section-head,.tb-lock-banner,.tb-difficulty-panel-head{flex-direction:column;align-items:stretch}.tb-bottom-bar{flex-direction:column;align-items:stretch}.tb-bottom-actions{width:100%}.tb-bottom-actions .tb-btn{flex:1}.tb-helper-grid,.tb-test-settings-grid,.tb-generator-analytics-row,.tb-assign-grid,.tb-difficulty-detail-grid{grid-template-columns:1fr}.tb-table-footer{justify-content:stretch}}
+    @media (max-width:760px){.tb-wrap{padding:14px 14px 120px}.tb-topbar,.tb-section-head,.tb-lock-banner,.tb-difficulty-panel-head{flex-direction:column;align-items:stretch}.tb-bottom-bar{flex-direction:column;align-items:stretch}.tb-bottom-actions{width:100%}.tb-bottom-actions .tb-btn{flex:1}.tb-helper-grid,.tb-test-settings-grid,.tb-generator-analytics-row,.tb-assign-grid,.tb-delivery-options,.tb-difficulty-detail-grid{grid-template-columns:1fr}.tb-table-footer{justify-content:stretch}}
   `;
   document.head.appendChild(style);
 }
