@@ -124,7 +124,8 @@ function escapeHtml(value = "") {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function loadRenderTestCard({
@@ -157,6 +158,46 @@ function loadRenderTestCard({
     renderManualAssignmentDuplicateWarning: () => "",
   };
   return vm.runInNewContext(`(${extractFunctionSource(teacherViewSource, "renderTestCard")})`, context);
+}
+
+function loadRenderSectionTests({ canUseAdvancedManualTools = true, createActionHtml = "" } = {}) {
+  const context = {
+    state: {
+      sections: { tests: true },
+      testSearch: "",
+      tests: [],
+    },
+    ADVANCED_MANUAL_TOOLS_COPY: "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.",
+    canUseAdvancedManualTools: () => canUseAdvancedManualTools,
+    getGroupedTests: () => ({ live: [], draft: [], ready: [] }),
+    renderCollapsibleSectionHeader: ({ title }) => `<header>${escapeHtml(title)}</header>`,
+    renderTestLibraryCreateAction: () => createActionHtml,
+    renderTestLibrarySummary: () => "",
+    renderTestBulkActions: () => "",
+    renderTestGroupSection: () => "",
+    getNoMatchingTestsMessage: () => "Try a different search term.",
+    getEmptyTestLibraryTitle: () => "You have not created any tests yet.",
+    getEmptyTestLibraryMessage: () => "Use Create test to build your first one.",
+    escapeAttr: escapeHtml,
+    escapeHtml,
+  };
+  return vm.runInNewContext(`(${extractFunctionSource(teacherViewSource, "renderSectionTests")})`, context);
+}
+
+function loadAdvancedManualToolsGate({
+  createTests = false,
+  manageOwnContent = false,
+  assignTests = false,
+} = {}) {
+  const context = {
+    canCreateTests: () => createTests,
+    canManageOwnContent: () => manageOwnContent,
+    canAssignTests: () => assignTests,
+  };
+  return vm.runInNewContext(
+    `(${extractFunctionSource(teacherViewSource, "canUseAdvancedManualTools")})`,
+    context
+  );
 }
 
 function loadRenderClassCard({ canEdit = false } = {}) {
@@ -339,6 +380,23 @@ assert.match(blockedAssignHtml, /<button[\s\S]*disabled[\s\S]*>\s*Assign\s*<\/bu
 assert.match(blockedAssignHtml, /Only the teacher who created this test can assign it\./);
 assert.doesNotMatch(blockedAssignHtml, /data-action="open-assign-test"/);
 
+const assignableRenderTestCard = loadRenderTestCard({
+  canAssign: true,
+  canAssignAccess: true,
+  canEdit: true,
+  canPresent: true,
+});
+const assignableTestCardHtml = assignableRenderTestCard({
+  id: "test-own",
+  title: "Owned test",
+  is_auto_generated: false,
+});
+assert.match(assignableTestCardHtml, /data-action="open-assign-test"/);
+assert.match(assignableTestCardHtml, /data-action="open-edit-test"/);
+assert.match(assignableTestCardHtml, /data-action="duplicate-test"/);
+assert.match(assignableTestCardHtml, /data-action="delete-test"/);
+assert.match(assignableTestCardHtml, /data-action="open-present-test"/);
+
 const noAccessRenderTestCard = loadRenderTestCard({
   canAssign: false,
   canAssignAccess: false,
@@ -349,6 +407,85 @@ const noAccessAssignHtml = noAccessRenderTestCard({
   is_auto_generated: false,
 });
 assert.doesNotMatch(noAccessAssignHtml, />\s*Assign\s*</);
+
+const renderCreateBarSource = extractFunctionSource(teacherViewSource, "renderCreateBar");
+assert.doesNotMatch(
+  renderCreateBarSource,
+  /data-action="create-test"/,
+  "normal dashboard Create bar should not expose prominent manual test creation"
+);
+
+const renderSectionTestsSource = extractFunctionSource(teacherViewSource, "renderSectionTests");
+assert.match(renderSectionTestsSource, /if \(!canUseAdvancedManualTools\(\)\) return "";/);
+assert.match(renderSectionTestsSource, /Advanced manual tools/);
+assert.match(renderSectionTestsSource, /ADVANCED_MANUAL_TOOLS_COPY/);
+assert.match(renderSectionTestsSource, /renderTestLibraryCreateAction\(\)/);
+
+const advancedManualToolsGateSource = extractFunctionSource(teacherViewSource, "canUseAdvancedManualTools");
+assert.match(advancedManualToolsGateSource, /return canCreateTests\(\) && canManageOwnContent\(\);/);
+assert.doesNotMatch(advancedManualToolsGateSource, /\|\||canAssignTests\(\)/);
+assert.equal(
+  loadAdvancedManualToolsGate({ createTests: true, manageOwnContent: true, assignTests: true })(),
+  true,
+  "teacher-compatible manual content users should see Advanced manual tools"
+);
+assert.equal(
+  loadAdvancedManualToolsGate({ createTests: false, manageOwnContent: false, assignTests: false })(),
+  false,
+  "admin-only/read-only users should not see Advanced manual tools"
+);
+assert.equal(
+  loadAdvancedManualToolsGate({ createTests: false, manageOwnContent: false, assignTests: true })(),
+  false,
+  "assignment-only users should not see Advanced manual tools"
+);
+assert.equal(
+  loadAdvancedManualToolsGate({ createTests: true, manageOwnContent: false, assignTests: true })(),
+  false,
+  "partial manual access without own-content management should not see Advanced manual tools"
+);
+
+const eligibleRenderSectionTests = loadRenderSectionTests({
+  canUseAdvancedManualTools: true,
+  createActionHtml: '<button data-action="create-test">+ Create test</button>',
+});
+const eligibleManualToolsHtml = eligibleRenderSectionTests();
+assert.match(eligibleManualToolsHtml, /Advanced manual tools/);
+assert.match(
+  eligibleManualToolsHtml,
+  /For occasional custom lists or legacy manual tests\. Wordloom&#39;s recommended route is automated personalised assignments\./
+);
+assert.match(eligibleManualToolsHtml, /data-action="create-test"/);
+
+const readOnlyRenderSectionTests = loadRenderSectionTests({
+  canUseAdvancedManualTools: false,
+  createActionHtml: '<button data-action="create-test">+ Create test</button>',
+});
+const readOnlyManualToolsHtml = readOnlyRenderSectionTests();
+assert.equal(readOnlyManualToolsHtml, "");
+assert.doesNotMatch(readOnlyManualToolsHtml, /Advanced manual tools|data-action="create-test"/);
+
+const renderBuildTestButton = vm.runInNewContext(
+  `(${extractFunctionSource(teacherViewSource, "renderBuildTestButton")})`,
+  {}
+);
+assert.equal(
+  renderBuildTestButton({
+    action: "build-confusion-test",
+    labelAttrName: "data-confusion-label",
+    labelAttrValue: "a/e",
+    targetsAttrName: "data-confusion-targets",
+    targets: ["a", "e"],
+    practiceWords: ["cat"],
+    scopeLabel: "Class 1",
+  }),
+  "",
+  "analytics build-test CTAs should be hidden during manual-tool quarantine"
+);
+
+const buildTestBuilderUrlSource = extractFunctionSource(teacherViewSource, "buildTestBuilderUrl");
+assert.match(buildTestBuilderUrlSource, /\.\/test-builder\.html/);
+assert.match(buildTestBuilderUrlSource, /url\.searchParams\.set\("id", String\(testId\)\);/);
 
 const renderClassCardSource = sourceSlice(
   teacherViewSource,

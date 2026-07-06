@@ -2,7 +2,8 @@
 
 Status: Internal product direction and implementation guardrail
 Last updated: 6 July 2026
-Latest checkpoint: `15a2585 Restrict manual assignment to owned tests`
+Latest pushed checkpoint: `ee6da27 Document Wordloom product roadmap guardrails`
+Current implementation checkpoint: Manual Test Builder/Test Library quarantined behind Advanced manual tools.
 
 ## Current Product Direction
 
@@ -10,16 +11,17 @@ Latest checkpoint: `15a2585 Restrict manual assignment to owned tests`
 * Teachers should not need to build or manually manage large numbers of tests.
 * Support Ladder should become the standard/default pupil delivery model.
 * Manual dashboard assignment remains limited to teacher-owned tests.
+* Manual Test Builder/Test Library is preserved for occasional custom lists or legacy manual tests, but it is no longer the normal teacher dashboard path.
 
 ## Current Priority
 
 * Keep dashboard manual assignment safe: own-tests-only, own-classes-only, no visibility-implies-assignability.
 * Keep the disabled Assign reason UI so access decisions are visible.
 * Preserve Support Ladder delivery while moving teacher workflows toward automation and intervention oversight.
+* Keep manual tools behind Advanced manual tools, with direct builder links and existing old tests preserved.
 
 ## Next Up
 
-* Hide or demote normal Test Builder from the main teacher dashboard flow after the current assignment rules are safe.
 * Remove question type choice from ordinary teacher Test Builder flows.
 * Retain question types only as internal, specialist, admin, migration, or runtime modes where needed.
 * Continue shaping admin workflows around setup, data/imports, analytics oversight, and automation/core/personalised assignment management.
@@ -30,17 +32,21 @@ Latest checkpoint: `15a2585 Restrict manual assignment to owned tests`
 * Sharing should support named teacher, department/subject, and school-wide/shared-bank scopes.
 * Sharing must define clear owner, assignee, edit, duplicate, assign, and revoke permissions.
 * Visibility alone must never imply assignability.
+* Plan safe legacy row cleanup only after retention, audit, assignment-history, and school-data implications are understood.
 
 ## Do Not Accidentally Build
 
 * Do not let normal teachers manually assign another teacher’s self-built tests just because they are visible.
 * Do not make admin a default path for casual reassignment of another teacher’s personal tests.
 * Do not re-expand teacher-facing manual test-building as the main product workflow.
+* Do not restore a prominent normal-dashboard `+ Create test` path while automation is the recommended route.
 * Do not expose draft/private/archived/auto-generated tests for manual dashboard assignment.
 * Do not treat school visibility, read-only access, or analytics visibility as sharing permission.
 
 ## Recent Checkpoints
 
+* Manual Test Builder/Test Library is quarantined behind Advanced manual tools for occasional custom lists or legacy manual tests.
+* Direct `test-builder.html?id=...` links and old test records are preserved.
 * `15a2585 Restrict manual assignment to owned tests` tightened manual dashboard assignment back to owned tests.
 * Migration `20260706123000_restrict_manual_assignment_to_owned_tests` has been applied remotely.
 * Browser smoke confirmed visible classes show `Visible to you`.

@@ -220,6 +220,7 @@ const DEMO_TEST_PREFIX = "[Demo]";
 const REGULAR_PERSONALISED_DELIVERY_MODEL = DELIVERY_MODEL_SUPPORT_LADDER;
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
+const ADVANCED_MANUAL_TOOLS_COPY = "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.";
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
 const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
 const ALL_CLASSES_EXPORT_SCOPE_VALUE = "__all_classes__";
@@ -887,6 +888,10 @@ function canAssignTests() {
 
 function canManageOwnContent() {
   return !!getAccessCapabilities()?.can_manage_own_content || hasTeacherAuthoringAccess();
+}
+
+function canUseAdvancedManualTools() {
+  return canCreateTests() && canManageOwnContent();
 }
 
 function getCurrentTeacherId() {
@@ -15753,14 +15758,12 @@ function renderCreateBar() {
     : (demoLoaded ? "Refresh demo data" : "Load demo data");
   const showClearDemoButton = demoLoaded || (demoBusy && demoBusyAction === "clear");
   const demoClearLabel = demoBusy && demoBusyAction === "clear" ? "Removing demo data..." : "Clear demo data";
-  const showCreateTest = canCreateTests();
   const showBaselineAction = canManageOwnContent() && canAssignTests();
   const showRunNowAutomation = canManageAutomation();
   const showCreateInterventionGroup = canManageInterventionGroups();
   const showDemoDataControls = canManageAutomation();
   const hasVisibleCreateControls =
-    showCreateTest
-    || showBaselineAction
+    showBaselineAction
     || showRunNowAutomation
     || showCreateInterventionGroup
     || showDemoDataControls;
@@ -16197,7 +16200,6 @@ function renderCreateBar() {
       <div class="td-action-kicker">Create</div>
 
       <div class="td-action-row">
-        ${showCreateTest ? `<button class="td-btn td-btn--primary" type="button" data-action="create-test">+ Create test</button>` : ""}
         ${showBaselineAction ? `
           <div class="td-action-button-shell">
             <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Baseline status</button>
@@ -18284,23 +18286,7 @@ function renderBuildTestButton({
   practiceWords = [],
   scopeLabel = "",
 }) {
-  if (!canCreateTests()) return "";
-
-  return `
-    <button
-      type="button"
-      class="td-btn td-test-cta"
-      data-action="${escapeAttr(action)}"
-      ${escapeAttr(labelAttrName)}="${escapeAttr(labelAttrValue || "")}"
-      ${escapeAttr(targetsAttrName)}="${escapeAttr(JSON.stringify(targets || []))}"
-      data-practice-words="${escapeAttr(JSON.stringify(practiceWords || []))}"
-      data-scope-label="${escapeAttr(scopeLabel || "")}"
-      aria-label="${escapeAttr(`Build test draft: ${labelAttrValue || "Spelling"}`)}"
-    >
-      <span class="td-test-cta-label">Build test</span>
-      <span class="td-test-cta-arrow" aria-hidden="true"></span>
-    </button>
-  `;
+  return "";
 }
 
 function renderAccuracyBandCard(bucket, summary) {
@@ -24813,7 +24799,7 @@ function renderAssignmentLifecycleBody(model = buildAssignmentLifecycleRenderMod
         : `
       <div class="td-empty">
         <strong>No assignments yet.</strong>
-        <p>Create a test, then assign it to a class to see activity here.</p>
+        <p>Automated personalised assignments and occasional advanced manual assignments will appear here.</p>
       </div>
     `
     }
@@ -25107,6 +25093,8 @@ function renderTestGroupSection({ key, title, description, tests, term }) {
 }
 
 function renderSectionTests() {
+  if (!canUseAdvancedManualTools()) return "";
+
   const isOpen = state.sections.tests;
   const term = state.testSearch.trim().toLowerCase();
   const groups = getGroupedTests(term);
@@ -25115,7 +25103,7 @@ function renderSectionTests() {
   return `
     <section class="td-section td-section--tests">
       ${renderCollapsibleSectionHeader({
-        title: "Test library",
+        title: "Advanced manual tools",
         section: "tests",
         isOpen,
       })}
@@ -25124,6 +25112,7 @@ function renderSectionTests() {
         isOpen
           ? `
         <div class="td-section-body">
+          <p class="td-muted td-advanced-manual-tools-copy">${escapeHtml(ADVANCED_MANUAL_TOOLS_COPY)}</p>
           ${renderTestLibraryCreateAction()}
           <div class="td-search-row">
             <input
