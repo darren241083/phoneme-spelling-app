@@ -1,0 +1,53 @@
+# Wordloom Roadmap
+
+Status: Internal product direction and implementation guardrail
+Last updated: 6 July 2026
+Latest checkpoint: `15a2585 Restrict manual assignment to owned tests`
+
+## Current Product Direction
+
+* Wordloom should become an automated, low-work-for-teachers spelling intervention system.
+* Teachers should not need to build or manually manage large numbers of tests.
+* Support Ladder should become the standard/default pupil delivery model.
+* Manual dashboard assignment remains limited to teacher-owned tests.
+
+## Current Priority
+
+* Keep dashboard manual assignment safe: own-tests-only, own-classes-only, no visibility-implies-assignability.
+* Keep the disabled Assign reason UI so access decisions are visible.
+* Preserve Support Ladder delivery while moving teacher workflows toward automation and intervention oversight.
+
+## Next Up
+
+* Hide or demote normal Test Builder from the main teacher dashboard flow after the current assignment rules are safe.
+* Remove question type choice from ordinary teacher Test Builder flows.
+* Retain question types only as internal, specialist, admin, migration, or runtime modes where needed.
+* Continue shaping admin workflows around setup, data/imports, analytics oversight, and automation/core/personalised assignment management.
+
+## Later / Deferred
+
+* Build a proper explicit Share system/shared bank.
+* Sharing should support named teacher, department/subject, and school-wide/shared-bank scopes.
+* Sharing must define clear owner, assignee, edit, duplicate, assign, and revoke permissions.
+* Visibility alone must never imply assignability.
+
+## Do Not Accidentally Build
+
+* Do not let normal teachers manually assign another teacher’s self-built tests just because they are visible.
+* Do not make admin a default path for casual reassignment of another teacher’s personal tests.
+* Do not re-expand teacher-facing manual test-building as the main product workflow.
+* Do not expose draft/private/archived/auto-generated tests for manual dashboard assignment.
+* Do not treat school visibility, read-only access, or analytics visibility as sharing permission.
+
+## Recent Checkpoints
+
+* `15a2585 Restrict manual assignment to owned tests` tightened manual dashboard assignment back to owned tests.
+* Migration `20260706123000_restrict_manual_assignment_to_owned_tests` has been applied remotely.
+* Browser smoke confirmed visible classes show `Visible to you`.
+* Browser smoke confirmed non-owned tests show disabled Assign with `Only the teacher who created this test can assign it.`
+* Known separate issue: the `public.teachers` foreign-key/create-test bootstrap issue remains separate.
+* Parked untracked screenshot/audit/seed files should remain untouched:
+
+  * `assests/screenshots/...`
+  * `selector-audit-output.txt`
+  * `supabase/seeds/demo_multischool_fixture.sql`
