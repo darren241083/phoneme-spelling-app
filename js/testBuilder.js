@@ -33,9 +33,6 @@ import {
 } from "./phonicsResolution.js?v=1.0";
 import {
   DEFAULT_QUESTION_TYPE,
-  getLaunchQuestionTypeOptions,
-  getQuestionTypeDisplayLabel,
-  isLaunchVisibleQuestionType,
   isIndependentQuestionType,
   normalizeStoredQuestionType,
 } from "./questionTypes.js";
@@ -65,16 +62,6 @@ const ACCESSIBILITY_OPTIONS = [
   { value: "blue", label: "Light blue" },
   { value: "green", label: "Light green" },
   { value: "yellow", label: "Soft yellow" },
-];
-const TEST_TYPE_OPTIONS = getLaunchQuestionTypeOptions({ noSupportLabel: "No support (assessment mode)" });
-const SEGMENTED_VISUAL_AID_OPTIONS = [
-  { value: "none", label: "Off" },
-  { value: "phonics", label: "Phonics aids" },
-];
-const LOOM_DECOY_LEVEL_OPTIONS = [
-  { value: "none", label: "None" },
-  { value: "light", label: "Light" },
-  { value: "medium", label: "Medium" },
 ];
 const ATTEMPT_OPTIONS = ["1", "2", "3", "5", "10", "unlimited"];
 const DEFAULT_ASSIGN = { maxAttempts:"2", deadline:"", audioEnabled:true, hintsEnabled:true, deliveryModel:MANUAL_ASSIGNMENT_DELIVERY_DEFAULT };
@@ -1321,12 +1308,6 @@ function onChange(event){
     markDirty();
     return;
   }
-  if(target.matches('[data-field="test-question-type"]')){
-    state.test.question_type = target.value || DEFAULT_QUESTION_TYPE;
-    markDirty();
-    paint();
-    return;
-  }
   if(target.matches('[data-field="test-loom-decoy-level"]')){
     state.loomDecoyLevel = normalizeLoomDecoyLevel(target.value);
     markDirty();
@@ -2130,7 +2111,7 @@ function validateBuilderForAssign(){
     if(savedQuestionType === "focus_sound"){
       const hasSupportedFocus = segments.some((segment) => getPhonemeAlternativeOptions(segment, null, ["core", "all"]).length > 0);
       if(!hasSupportedFocus){
-        issues.push(`Word ${index + 1} "${row.word}" needs a focus sound with real alternative graphemes, or a different test type.`);
+        issues.push(`Word ${index + 1} "${row.word}" needs a focus sound with real alternative graphemes. Check the grapheme structure or focus grapheme.`);
       }
     }
   }
@@ -2661,22 +2642,6 @@ function renderWordDifficultyCell(row, index){
   `;
 }
 
-function getTestTypeOptionsForRender(questionType){
-  const currentType = normalizeStoredQuestionType(questionType, {
-    title: state.test?.title || "",
-  });
-  if(isLaunchVisibleQuestionType(currentType)){
-    return TEST_TYPE_OPTIONS;
-  }
-  return [
-    {
-      value: currentType,
-      label: `${getQuestionTypeDisplayLabel(currentType, { noSupportLabel: "No support" })} (legacy)`,
-    },
-    ...TEST_TYPE_OPTIONS,
-  ];
-}
-
 function renderContextSupportCell(row, index){
   return `
     <div class="tb-context-cell">
@@ -2723,23 +2688,8 @@ function renderRow(row, index){
 }
 
 function renderAssignments(){
-  const questionType = normalizeStoredQuestionType(state.test?.question_type, {
-    title: state.test?.title || "",
-  });
-  const showLoomSettings = questionType === "spell_loom";
-  const showSegmentedSettings = questionType === "segmented_spelling";
-  const testTypeOptions = getTestTypeOptionsForRender(questionType);
-  const testTypeCard = `<div class="tb-assign-card">
-      <div class="tb-test-settings-grid">
-        <label><span>Test type</span><select class="tb-input" data-field="test-question-type" ${state.isLocked ? "disabled" : ""}>${testTypeOptions.map(o => `<option value="${esc(o.value)}" ${String(questionType)===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>
-        ${showLoomSettings ? `<label><span>Decoy bands</span><select class="tb-input" data-field="test-loom-decoy-level" ${state.isLocked ? "disabled" : ""}>${LOOM_DECOY_LEVEL_OPTIONS.map(o => `<option value="${esc(o.value)}" ${normalizeLoomDecoyLevel(state.loomDecoyLevel)===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
-        ${showSegmentedSettings ? `<label><span>Phonics aids</span><select class="tb-input" data-field="test-segmented-visual-aids" ${state.isLocked ? "disabled" : ""}>${SEGMENTED_VISUAL_AID_OPTIONS.map(o => `<option value="${esc(o.value)}" ${state.segmentedVisualAidsMode===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
-      </div>
-      ${showLoomSettings ? `<div class="tb-subtle">Adds extra grapheme bands to the tray without changing the correct word.</div>` : ""}
-      ${showSegmentedSettings ? `<div class="tb-subtle">Keeps the input letter-based. Phonics aids add the existing dot, underline, and split-digraph bridge marks under the boxes.</div>` : ""}
-    </div>`;
-  if(!state.classes.length) return `${testTypeCard}<div class="tb-empty">No classes yet.</div>`;
-  return testTypeCard + state.classes.map(cls => {
+  if(!state.classes.length) return `<div class="tb-empty">No classes yet.</div>`;
+  return state.classes.map(cls => {
     const id = String(cls.id);
     const s = state.assignmentsByClass[id] || { ...DEFAULT_ASSIGN };
     const alreadyAssigned = !!s.assignmentId;
