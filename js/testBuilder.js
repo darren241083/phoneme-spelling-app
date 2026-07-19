@@ -72,9 +72,12 @@ const CONTEXT_KEY_DEFAULT = "default";
 const CONTEXT_STATUS_TEACHER_ENTERED = "teacher_entered";
 const CONTEXT_STATUS_TEACHER_EDITED = "teacher_edited";
 const DUPLICATE_WORD_WARNING = "This word is already in this test.";
+const NO_TEST_SELECTED_ERROR_CODE = "TEST_BUILDER_NO_TEST_SELECTED";
+const NO_TEST_SELECTED_BLOCKING_COPY = "The Test Builder needs an existing test or draft link before it can load.";
 
 const state = {
   loading:true,
+  fatalState:null,
   saving:false,
   assigning:false,
   aiWorking:false,
@@ -170,14 +173,52 @@ function isNoRowsError(error){
     || message.includes("json object requested");
 }
 
+function isUnavailableTestLookupError(error){
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return !error
+    || isNoRowsError(error)
+    || code === "22P02"
+    || message.includes("invalid input syntax for type uuid")
+    || message.includes("invalid uuid");
+}
+
+function createNoTestSelectedError(){
+  const error = new Error("No test selected");
+  error.code = NO_TEST_SELECTED_ERROR_CODE;
+  return error;
+}
+
+function isNoTestSelectedError(error){
+  return String(error?.code || "") === NO_TEST_SELECTED_ERROR_CODE;
+}
+
+function ensureEventsBound(){
+  if(eventsBound) return;
+  bindEvents();
+  eventsBound = true;
+}
+
+function showNoTestSelectedBlockingState(){
+  state.loading = false;
+  state.fatalState = {
+    title:"No test selected",
+    copy:NO_TEST_SELECTED_BLOCKING_COPY,
+  };
+  state.notice = "";
+  state.floating = "";
+  paint();
+  ensureEventsBound();
+}
+
 
 boot();
 
 async function boot(){
   injectStyles();
   applyOverlay();
-  state.testId = new URLSearchParams(window.location.search).get("id");
-  if(!state.testId){ fail("No test ID found."); return; }
+  state.testId = String(new URLSearchParams(window.location.search).get("id") || "").trim();
+  if(!state.testId){ showNoTestSelectedBlockingState(); return; }
 
   const { data:auth } = await supabase.auth.getUser();
   state.user = auth?.user || null;
@@ -192,10 +233,14 @@ async function boot(){
     state.loading = false;
     state.isDirty = !!contextPrefilled;
     paint();
-    if(!eventsBound){ bindEvents(); eventsBound = true; }
+    ensureEventsBound();
     autosave = createAutosave({ intervalMs: 15000, onSave: async()=>{ if(state.isDirty && !state.isLocked && !state.saving && !state.assigning) await saveBuilder({ assign:false, silent:true }); }});
     autosave.start();
   } catch (error) {
+    if(isNoTestSelectedError(error)){
+      showNoTestSelectedBlockingState();
+      return;
+    }
     console.error(error);
     fail(error?.message || "Could not load test builder.");
   }
@@ -870,8 +915,8 @@ async function loadAll(){
 
   const testRes = await testQuery.single();
   if(testRes.error || !testRes.data){
-    if(!testRes.data && (!testRes.error || isNoRowsError(testRes.error))){
-      throw new Error("This test is not available in the current school.");
+    if(!testRes.data && isUnavailableTestLookupError(testRes.error)){
+      throw createNoTestSelectedError();
     }
     throw new Error(testRes.error?.message || "Could not load this test.");
   }
@@ -2443,11 +2488,30 @@ function buildStateHash(){
 }
 
 function paint(){
+  if(state.fatalState){
+    appEl.innerHTML = renderNoTestSelectedBlockingState();
+    return;
+  }
   if(state.loading){
     appEl.innerHTML = `<div class="tb-wrap"><section class="tb-card">Loading...</section></div>`;
     return;
   }
   appEl.innerHTML = renderLayout();
+}
+
+function renderNoTestSelectedBlockingState(){
+  const title = state.fatalState?.title || "No test selected";
+  const copy = state.fatalState?.copy || NO_TEST_SELECTED_BLOCKING_COPY;
+  return `<div class="tb-wrap">
+    <section class="tb-card tb-blocking-state" role="alert" aria-labelledby="tbBlockingHeading">
+      <div class="tb-kicker">Test builder</div>
+      <h1 id="tbBlockingHeading">${esc(title)}</h1>
+      <p>${esc(copy)}</p>
+      <div class="tb-blocking-actions">
+        <button type="button" class="tb-btn tb-btn-black" data-action="back-dashboard">Back to dashboard</button>
+      </div>
+    </section>
+  </div>`;
 }
 
 function renderLayout(){
@@ -2898,6 +2962,10 @@ function injectStyles(){
     .tb-overlay{display:flex;gap:8px;align-items:center}
     .tb-small-select{min-width:140px}
     .tb-card{background:var(--tb-card);border:1px solid var(--tb-line);border-radius:24px;box-shadow:var(--tb-shadow);padding:20px;margin-bottom:16px}
+    .tb-blocking-state{max-width:680px;margin:72px auto 16px;display:flex;flex-direction:column;gap:14px}
+    .tb-blocking-state h1{margin:0;color:var(--tb-text);font-size:30px;line-height:1.2}
+    .tb-blocking-state p{margin:0;max-width:56ch;color:var(--tb-muted);line-height:1.55}
+    .tb-blocking-actions{display:flex;align-items:center;gap:10px;margin-top:4px}
     .tb-section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}.tb-section-head-tight{align-items:center}
     .tb-section-head h2{margin:4px 0 4px;font-size:26px}.tb-section-head p{margin:0;color:var(--tb-muted)}
     .tb-title-heading-input{margin:6px 0 0;padding:0;border:none;background:transparent;color:var(--tb-text);font-size:34px;font-weight:800;line-height:1.3;outline:none;width:min(900px,100%)}

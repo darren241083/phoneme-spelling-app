@@ -117,7 +117,7 @@ assert.match(
 
 assert.match(
   builderHtml,
-  /js\/testBuilder\.js\?v=5\.46/,
+  /js\/testBuilder\.js\?v=5\.47/,
   "test-builder.html should cache-bust the updated Test Builder module"
 );
 
