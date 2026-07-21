@@ -41,6 +41,9 @@ assert.deepEqual(buildPublicProvisioningResponse({ status: "not_enough_evidence"
 assert.deepEqual(buildPublicProvisioningResponse({ status: "error" }), { status: "error" });
 assert.deepEqual(buildPublicProvisioningResponse({ status: "unexpected" }), { status: "generation_failed" });
 
+const PROVISIONING_USAGE_AS_OF_MS = Date.parse("2026-05-11T12:00:00.000Z");
+const PROVISIONING_USAGE_AFTER_INTERVAL_MS = Date.parse("2026-05-25T12:10:00.001Z");
+
 const regularProvisioningPolicy = buildProvisioningPolicy({
   assignment_length: 4,
   support_preset: "balanced",
@@ -191,6 +194,29 @@ function buildUsageAwareCoreBankRowsForProvisioning() {
   });
 }
 
+function buildSingleTargetUsageCoreBankRowsForProvisioning() {
+  const wordRows = [
+    coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 44 }),
+    coreBankWord({ id: "core-boat", word: "boat", segments: ["b", "oa", "t"], focus: "oa", score: 28 }),
+    coreBankWord({ id: "core-seed", word: "seed", segments: ["s", "ee", "d"], focus: "ee", score: 28 }),
+    coreBankWord({ id: "core-train", word: "train", segments: ["t", "r", "ai", "n"], focus: "ai", score: 30 }),
+    coreBankWord({ id: "core-light", word: "light", segments: ["l", "igh", "t"], focus: "igh", score: 32 }),
+  ];
+  const focusTargetRows = [...new Set(wordRows.map((row) => row.primary_focus_grapheme))]
+    .map((focus) => ({ id: `target-${focus}`, focus_grapheme: focus, is_active: true }));
+  return mapWordloomCoreBankRowsToWordRows({
+    wordRows,
+    wordTargetRows: wordRows.map((row) => ({
+      id: `link-${row.id}`,
+      word_id: row.id,
+      focus_target_id: `target-${row.primary_focus_grapheme}`,
+      focus_grapheme: row.primary_focus_grapheme,
+      target_role: "primary",
+    })),
+    focusTargetRows,
+  });
+}
+
 function buildLowCoverageCoreBankRowsForProvisioning() {
   const wordRows = [
     coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 46 }),
@@ -274,6 +300,41 @@ function buildBaselineAttemptRows(rows, {
     typed: row.typed,
     target_graphemes: row.targetGraphemes,
   }));
+}
+
+function generatedTargetRow({
+  id = "target-action",
+  assignmentId = "generated-assignment",
+  pupilId = "pupil-one",
+  testWordId = "generated-action",
+  word = "action",
+  createdAt = "2026-05-10T12:10:00.000Z",
+  assignmentCreatedAt = createdAt,
+  evidenceSource = "assigned_core",
+  automationKind = "personalised",
+  mode = "test",
+  joinedAsArray = false,
+} = {}) {
+  const assignmentRow = {
+    id: assignmentId,
+    created_at: assignmentCreatedAt,
+    evidence_source: evidenceSource,
+    automation_kind: automationKind,
+    mode,
+  };
+  return {
+    id,
+    assignment_id: assignmentId,
+    pupil_id: pupilId,
+    test_word_id: testWordId,
+    target_source: "assignment_engine_v1",
+    created_at: createdAt,
+    assignments_v2: joinedAsArray ? [assignmentRow] : assignmentRow,
+    test_words: {
+      id: testWordId,
+      word,
+    },
+  };
 }
 
 const baselineRows = buildBaselineRows();
@@ -436,6 +497,7 @@ const provisionedWithUsageAwareSelection = buildProvisioningPlan({
     support_preset: "balanced",
     allow_starter_fallback: false,
   },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
 });
 const usageAwareTargetWords = provisionedWithUsageAwareSelection.plan.pupilPlans[0].words
   .filter((word) => word.assignmentRole === "target")
@@ -449,23 +511,13 @@ const provisionedWithAssignedTargetSpacing = buildProvisioningPlan({
   baselineAssignments: [baselineAssignment],
   baselineStatusRows: attemptDerivedBaselineStatusRows,
   wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
-  assignmentTargetRows: [{
-    id: "target-action",
-    assignment_id: "generated-assignment",
-    pupil_id: "pupil-one",
-    test_word_id: "generated-action",
-    target_source: "assignment_engine_v1",
-    created_at: "2026-05-10T12:10:00.000Z",
-    test_words: {
-      id: "generated-action",
-      word: "action",
-    },
-  }],
+  assignmentTargetRows: [generatedTargetRow()],
   policy: {
     assignment_length: 4,
     support_preset: "balanced",
     allow_starter_fallback: false,
   },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
 });
 const assignedTargetSpacingWords = provisionedWithAssignedTargetSpacing.plan.pupilPlans[0].words
   .filter((word) => word.assignmentRole === "target")
@@ -484,6 +536,7 @@ const provisionedWithoutExtraChallengeUsage = buildProvisioningPlan({
     support_preset: "balanced",
     allow_starter_fallback: false,
   },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
 });
 const provisionedIgnoringExtraChallengeUsage = buildProvisioningPlan({
   pupilId: "pupil-one",
@@ -513,10 +566,176 @@ const provisionedIgnoringExtraChallengeUsage = buildProvisioningPlan({
     support_preset: "balanced",
     allow_starter_fallback: false,
   },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
 });
 assert.deepEqual(
   provisionedIgnoringExtraChallengeUsage.plan.pupilPlans[0].words.map((word) => word.word),
   provisionedWithoutExtraChallengeUsage.plan.pupilPlans[0].words.map((word) => word.word),
+);
+
+const provisionedWithReviewDueUsage = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [
+    ...baselineAttemptRows,
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "old-live-assignment",
+      test_word_id: "old-live-action",
+      word_text: "action",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "auto_assigned",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["a", "c", "tion"],
+      typed: "action",
+    },
+  ],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+  usageAsOfMs: PROVISIONING_USAGE_AFTER_INTERVAL_MS,
+});
+const reviewDueTargetWords = provisionedWithReviewDueUsage.plan.pupilPlans[0].words
+  .filter((word) => word.assignmentRole === "target")
+  .map((word) => word.word);
+assert.deepEqual(reviewDueTargetWords, ["action"]);
+
+const provisionedIgnoringExcludedAttemptSources = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [
+    ...baselineAttemptRows,
+    ...["practice", "learn", "extra-challenge", "spelling bee", "demo", "sample", "presenter", "presentation", "baseline-v2"]
+      .map((attemptSource, index) => ({
+        pupil_id: "pupil-one",
+        assignment_id: `excluded-live-${index}`,
+        test_word_id: `excluded-action-${index}`,
+        word_text: "action",
+        correct: true,
+        attempt_number: 1,
+        mode: "no_support_assessment",
+        attempt_source: attemptSource,
+        created_at: "2026-05-10T12:10:00.000Z",
+        focus_grapheme: "tion",
+        target_graphemes: ["a", "c", "tion"],
+        typed: "action",
+      })),
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "baseline-assignment",
+      test_word_id: "blank-baseline-action",
+      word_text: "action",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["a", "c", "tion"],
+      typed: "action",
+    },
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "standard-motion-assignment",
+      test_word_id: "standard-motion",
+      word_text: "motion",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "teacher assigned",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["m", "o", "tion"],
+      typed: "motion",
+    },
+  ],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
+});
+const excludedAttemptSourceTargetWords = provisionedIgnoringExcludedAttemptSources.plan.pupilPlans[0].words
+  .filter((word) => word.assignmentRole === "target")
+  .map((word) => word.word);
+assert.deepEqual(excludedAttemptSourceTargetWords, ["action"]);
+
+const provisionedIgnoringExcludedTargetRows = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: baselineAttemptRows,
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildUsageAwareCoreBankRowsForProvisioning(),
+  assignmentTargetRows: [
+    generatedTargetRow({ id: "target-extra-action", assignmentId: "extra-generated", testWordId: "extra-action", word: "action", evidenceSource: "extra_challenge" }),
+    generatedTargetRow({ id: "target-bee-action", assignmentId: "bee-generated", testWordId: "bee-action", word: "action", evidenceSource: "assigned_core", automationKind: "spelling bee", joinedAsArray: true }),
+    generatedTargetRow({ id: "target-practice-action", assignmentId: "practice-generated", testWordId: "practice-action", word: "action", evidenceSource: "assigned_core", mode: "practice" }),
+    generatedTargetRow({ id: "target-baseline-action", assignmentId: "baseline-assignment", testWordId: "baseline-target-action", word: "action", evidenceSource: "" }),
+    generatedTargetRow({ id: "target-standard-motion", assignmentId: "standard-generated", testWordId: "standard-motion", word: "motion" }),
+  ],
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
+});
+const excludedTargetRowTargetWords = provisionedIgnoringExcludedTargetRows.plan.pupilPlans[0].words
+  .filter((word) => word.assignmentRole === "target")
+  .map((word) => word.word);
+assert.deepEqual(excludedTargetRowTargetWords, ["action"]);
+
+const provisionedWithSmallBankCooldownRelaxation = buildProvisioningPlan({
+  pupilId: "pupil-one",
+  teacherTests: [],
+  attemptRows: [
+    ...baselineAttemptRows,
+    {
+      pupil_id: "pupil-one",
+      assignment_id: "recent-single-target",
+      test_word_id: "recent-action",
+      word_text: "action",
+      correct: true,
+      attempt_number: 1,
+      mode: "no_support_assessment",
+      attempt_source: "auto_assigned",
+      created_at: "2026-05-10T12:10:00.000Z",
+      focus_grapheme: "tion",
+      target_graphemes: ["a", "c", "tion"],
+      typed: "action",
+    },
+  ],
+  baselineAssignments: [baselineAssignment],
+  baselineStatusRows: attemptDerivedBaselineStatusRows,
+  wordloomCoreWordRows: buildSingleTargetUsageCoreBankRowsForProvisioning(),
+  policy: {
+    assignment_length: 4,
+    support_preset: "balanced",
+    allow_starter_fallback: false,
+  },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
+});
+const smallBankWords = provisionedWithSmallBankCooldownRelaxation.plan.pupilPlans[0].words;
+assert.equal(smallBankWords.length, 4);
+assert.equal(new Set(smallBankWords.map((word) => word.word)).size, smallBankWords.length);
+assert.deepEqual(
+  smallBankWords
+    .filter((word) => word.assignmentRole === "target")
+    .map((word) => word.word),
+  ["action"],
 );
 
 const provisionedWithLowCoverageFallback = buildProvisioningPlan({
@@ -526,23 +745,18 @@ const provisionedWithLowCoverageFallback = buildProvisioningPlan({
   baselineAssignments: [baselineAssignment],
   baselineStatusRows: [baselineStatusWithResultJson],
   wordloomCoreWordRows: buildLowCoverageCoreBankRowsForProvisioning(),
-  assignmentTargetRows: [{
+  assignmentTargetRows: [generatedTargetRow({
     id: "target-action-low-coverage",
-    assignment_id: "generated-low-coverage",
-    pupil_id: "pupil-one",
-    test_word_id: "generated-low-coverage-action",
-    target_source: "assignment_engine_v1",
-    created_at: "2026-05-10T12:10:00.000Z",
-    test_words: {
-      id: "generated-low-coverage-action",
-      word: "action",
-    },
-  }],
+    assignmentId: "generated-low-coverage",
+    testWordId: "generated-low-coverage-action",
+    word: "action",
+  })],
   policy: {
     assignment_length: 10,
     support_preset: "balanced",
     allow_starter_fallback: false,
   },
+  usageAsOfMs: PROVISIONING_USAGE_AS_OF_MS,
 });
 assert.equal(provisionedWithLowCoverageFallback.plan.pupilPlans.length, 1);
 assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings.length, 1);

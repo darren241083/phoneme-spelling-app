@@ -417,6 +417,13 @@ async function readPriorGeneratedAssignmentTargetRowsForPupil(
       target_source,
       target_reason,
       created_at,
+      assignments_v2 (
+        id,
+        created_at,
+        evidence_source,
+        automation_kind,
+        mode
+      ),
       test_words (
         id,
         word,
@@ -1047,6 +1054,7 @@ async function handleExtraChallengeProvisioning(serviceClient: ServiceClient, pu
 
   let plan: Record<string, unknown> | null = null;
   try {
+    const usageAsOfMs = Date.now();
     const built = buildProvisioningPlan({
       pupilId: context.pupilId,
       teacherTests: inputs.teacherTests,
@@ -1060,6 +1068,7 @@ async function handleExtraChallengeProvisioning(serviceClient: ServiceClient, pu
         allow_starter_fallback: false,
       },
       resolvedWordMap: null,
+      usageAsOfMs,
     });
     plan = built.plan;
   } catch (error) {
@@ -1238,6 +1247,7 @@ Deno.serve(async (req) => {
     });
 
     const provisioningPolicy = buildProvisioningPolicy(context.runRow) as Record<string, unknown>;
+    const usageAsOfMs = Date.now();
     const { plan } = buildProvisioningPlan({
       pupilId: context.pupilId,
       teacherTests,
@@ -1248,6 +1258,7 @@ Deno.serve(async (req) => {
       assignmentTargetRows,
       policy: provisioningPolicy,
       resolvedWordMap: null,
+      usageAsOfMs,
     });
 
     const created = await createGeneratedAssignment(serviceClient, {

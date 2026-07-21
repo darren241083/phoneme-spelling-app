@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { loadBrowserModule } from "./load-browser-module.mjs";
 
 const {
+  ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS,
   APPROVED_TARGET_SELECTOR_STATUS_NOT_ENOUGH_WORDS,
   APPROVED_TARGET_SELECTOR_STATUS_READY,
   buildAssignmentEngineWordPayload,
@@ -14,6 +15,11 @@ const {
 } = await loadBrowserModule("../js/baselinePlacement.js", import.meta.url);
 
 const TESTS = [];
+const USAGE_RECENT_AS_OF_MS = Date.parse("2026-05-03T10:00:00.000Z");
+const USAGE_ATTEMPT_AT_MS = Date.parse("2026-05-01T10:00:00.000Z");
+const USAGE_JUST_INSIDE_WINDOW_AS_OF_MS = USAGE_ATTEMPT_AT_MS + ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS - 1;
+const USAGE_EXACT_WINDOW_AS_OF_MS = USAGE_ATTEMPT_AT_MS + ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS;
+const USAGE_OUTSIDE_WINDOW_AS_OF_MS = USAGE_ATTEMPT_AT_MS + ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS + 1;
 
 function test(name, fn) {
   TESTS.push({ name, fn });
@@ -118,16 +124,21 @@ function makeBaselineAttempts(rows, correctWords = new Set()) {
 
 function usageAttempt({
   pupilId = "pupil-1",
+  assignmentId = `${pupilId}-assignment`,
   word,
   correct = true,
   attemptNumber = 1,
   focus = "ph",
   segments = null,
   createdAt = "2026-05-01T10:00:00.000Z",
+  attemptSource = "auto_assigned",
+  evidenceCategory = "",
+  supportState = "",
+  deliveryModel = "",
 } = {}) {
   return {
     pupil_id: pupilId,
-    assignment_id: `${pupilId}-assignment`,
+    assignment_id: assignmentId,
     test_word_id: `${pupilId}-${word}`,
     word_text: word,
     correct,
@@ -135,23 +146,40 @@ function usageAttempt({
     mode: "no_support_assessment",
     focus_grapheme: focus,
     target_graphemes: Array.isArray(segments) ? segments : [focus],
-    attempt_source: "auto_assigned",
+    attempt_source: attemptSource,
     created_at: createdAt,
+    ...(evidenceCategory ? { evidence_category: evidenceCategory } : {}),
+    ...(supportState ? { support_state: supportState } : {}),
+    ...(deliveryModel ? { delivery_model: deliveryModel } : {}),
   };
 }
 
 function assignmentTargetRow({
   pupilId = "pupil-1",
+  assignmentId = `${pupilId}-generated-assignment`,
   word,
   createdAt = "2026-05-02T10:00:00.000Z",
+  assignmentCreatedAt = createdAt,
+  evidenceSource = "assigned_core",
+  automationKind = "personalised",
+  mode = "test",
+  joinedAsArray = false,
 } = {}) {
+  const assignmentRow = {
+    id: assignmentId,
+    created_at: assignmentCreatedAt,
+    evidence_source: evidenceSource,
+    automation_kind: automationKind,
+    mode,
+  };
   return {
     id: `${pupilId}-${word}-target`,
-    assignment_id: `${pupilId}-generated-assignment`,
+    assignment_id: assignmentId,
     pupil_id: pupilId,
     test_word_id: `${pupilId}-${word}-word`,
     target_source: "assignment_engine_v1",
     created_at: createdAt,
+    assignments_v2: joinedAsArray ? [assignmentRow] : assignmentRow,
     test_words: {
       id: `${pupilId}-${word}-word`,
       word,
@@ -505,9 +533,13 @@ test("generated assignment avoids recently secure approved words when equivalent
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
+  const selectedWords = plan.pupilPlans[0]?.words.map((item) => item.word) || [];
+  assert.equal(selectedWords.length, 4);
+  assert.equal(new Set(selectedWords).size, selectedWords.length);
   assertJsonEqual(targetWordsFor(plan), ["phase"]);
 });
 
@@ -527,6 +559,7 @@ test("generated assignment prefers previously incorrect words within the same so
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -549,6 +582,7 @@ test("recently secure words are reduced in priority but remain eligible as fallb
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -570,6 +604,7 @@ test("generated assignment avoids recently assigned approved words when equivale
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -599,6 +634,7 @@ test("generated assignment prefers incorrect words over recent assignment spacin
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -620,10 +656,227 @@ test("recently assigned words are reduced in priority but remain eligible as fal
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
   assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("secure usage cooldown boundary is deterministic around the 14-day interval", () => {
+  const buildPlanAt = (usageAsOfMs) => buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      usageAttempt({
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+    usageAsOfMs,
+  });
+
+  const inside = buildPlanAt(USAGE_JUST_INSIDE_WINDOW_AS_OF_MS);
+  const exact = buildPlanAt(USAGE_EXACT_WINDOW_AS_OF_MS);
+  const outside = buildPlanAt(USAGE_OUTSIDE_WINDOW_AS_OF_MS);
+
+  assert.equal(inside.error, "");
+  assert.equal(exact.error, "");
+  assert.equal(outside.error, "");
+  assertJsonEqual(targetWordsFor(inside), ["phase"]);
+  assertJsonEqual(targetWordsFor(exact), ["phase"]);
+  assertJsonEqual(targetWordsFor(outside), ["phone"]);
+});
+
+test("excluded attempt sources and baseline assignment ids do not cool selector history", () => {
+  const excludedSources = [
+    "baseline",
+    "baseline-v1",
+    "practice",
+    "learn",
+    "extra-challenge",
+    "spelling bee",
+    "spellingbee",
+    "demo",
+    "sample",
+    "presenter",
+    "presentation",
+    "public-presentation",
+  ];
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [
+      ...excludedSources.map((attemptSource, index) => usageAttempt({
+        assignmentId: `excluded-attempt-${index}`,
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+        attemptSource,
+      })),
+      usageAttempt({
+        assignmentId: "blank-baseline-assignment",
+        word: "phone",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "o", "n", "e"],
+        attemptSource: "",
+      }),
+      usageAttempt({
+        assignmentId: "standard-phase-assignment",
+        word: "phase",
+        correct: true,
+        attemptNumber: 1,
+        segments: ["ph", "a", "s", "e"],
+        attemptSource: "Teacher Assigned",
+      }),
+    ],
+    excludedUsageAssignmentIds: ["blank-baseline-assignment"],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("excluded prior target-row assignment sources do not cool selector history", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: usageAwareTeacherTests(),
+    attempts: [],
+    assignmentTargetRows: [
+      assignmentTargetRow({
+        assignmentId: "target-extra-challenge",
+        word: "phone",
+        evidenceSource: "extra-challenge",
+      }),
+      assignmentTargetRow({
+        assignmentId: "target-spelling-bee",
+        word: "phone",
+        evidenceSource: "assigned_core",
+        automationKind: "Spelling Bee",
+        joinedAsArray: true,
+      }),
+      assignmentTargetRow({
+        assignmentId: "target-practice",
+        word: "phone",
+        evidenceSource: "assigned_core",
+        mode: "Practice",
+      }),
+      assignmentTargetRow({
+        assignmentId: "target-presenter",
+        word: "phone",
+        evidenceSource: "public-presentation",
+      }),
+      assignmentTargetRow({
+        assignmentId: "target-standard",
+        word: "phase",
+        evidenceSource: "assigned_core",
+        automationKind: "personalised",
+        mode: "test",
+      }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(targetWordsFor(plan), ["phone"]);
+});
+
+test("support ladder outcome priority keeps supported target evidence above recent secure evidence", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-rain", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        wordRow({ id: "review-train", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "review-seed", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        wordRow({ id: "review-green", word: "green", score: 25, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        wordRow({ id: "review-boat", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        wordRow({ id: "review-coat", word: "coat", score: 27, focus: ["oa"], segments: ["c", "oa", "t"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        wordRow({ id: "target-phase", word: "phase", score: 31, focus: ["ph"], segments: ["ph", "a", "s", "e"] }),
+        wordRow({ id: "target-photo", word: "photo", score: 32, focus: ["ph"], segments: ["ph", "o", "t", "o"] }),
+        wordRow({ id: "target-phonics", word: "phonics", score: 33, focus: ["ph"], segments: ["ph", "o", "n", "i", "ck", "s"] }),
+        wordRow({ id: "stretch-storm", word: "storm", score: 42, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        wordRow({ id: "stretch-short", word: "short", score: 44, focus: ["or"], segments: ["sh", "or", "t"] }),
+      ],
+    }],
+    attempts: [
+      usageAttempt({ word: "phone", correct: true, attemptNumber: 1, focus: "ph", segments: ["ph", "o", "n", "e"], evidenceCategory: "correct_first_time", deliveryModel: "support_ladder" }),
+      usageAttempt({ word: "phase", correct: false, attemptNumber: 3, focus: "ph", segments: ["ph", "a", "s", "e"], evidenceCategory: "incorrect_with_support", supportState: "supported", deliveryModel: "support_ladder" }),
+      usageAttempt({ word: "photo", correct: true, attemptNumber: 2, focus: "ph", segments: ["ph", "o", "t", "o"], evidenceCategory: "correct_with_support", supportState: "supported", deliveryModel: "support_ladder" }),
+      usageAttempt({ word: "phonics", correct: true, attemptNumber: 2, focus: "ph", segments: ["ph", "o", "n", "i", "ck", "s"], evidenceCategory: "correct_after_retry", deliveryModel: "support_ladder" }),
+    ],
+    totalWords: 8,
+    currentProfiles: {
+      "pupil-1": {
+        concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+        secureRows: [
+          { target: "ai", total: 4, securityBand: "secure" },
+          { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+        ],
+        developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+        confusionByTarget: new Map(),
+        placementMeta: { targetChallengeLevel: "needs_support" },
+      },
+    },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
+  });
+
+  assert.equal(plan.error, "");
+  const targetWords = targetWordsFor(plan);
+  assertJsonEqual(targetWords, ["phase", "photo", "phonics"]);
+  assert.equal(targetWords.includes("phone"), false);
+  assert.equal(plan.selectorDiagnostics.repeatedProtectedWords.some((item) =>
+    item.word === "phase" && item.supportedIncorrectCount === 1
+  ), true);
+  assert.equal(plan.selectorDiagnostics.repeatedProtectedWords.some((item) =>
+    item.word === "photo" && item.supportedDependenceCount === 1
+  ), true);
+});
+
+test("access_issue evidence is ignored for spelling-review priority", () => {
+  const plan = buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [{
+      test_words: [
+        wordRow({ id: "review-brain", word: "brain", score: 24, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+        wordRow({ id: "review-chain", word: "chain", score: 24, focus: ["ai"], segments: ["ch", "ai", "n"] }),
+        wordRow({ id: "review-train", word: "train", score: 24, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        wordRow({ id: "target-phone", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        wordRow({ id: "stretch-storm", word: "storm", score: 42, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+      ],
+    }],
+    attempts: [
+      usageAttempt({ word: "train", correct: false, attemptNumber: 1, focus: "ai", segments: ["t", "r", "ai", "n"], evidenceCategory: "access_issue", supportState: "access_issue", deliveryModel: "support_ladder" }),
+    ],
+    totalWords: 4,
+    currentProfiles: {
+      "pupil-1": usageAwareProfile(),
+    },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
+  });
+
+  assert.equal(plan.error, "");
+  assertJsonEqual(reviewWordsFor(plan).map((item) => item.word), ["brain", "chain"]);
+  assert.equal(plan.selectorDiagnostics.evidenceDiagnostics.excludedAccessIssueRows, 1);
 });
 
 test("review prefers previously incorrect evidence over neutral easy secure words", () => {
@@ -645,6 +898,7 @@ test("review prefers previously incorrect evidence over neutral easy secure word
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -670,6 +924,7 @@ test("review avoids recently secure easy words when equivalent alternatives exis
     currentProfiles: {
       "pupil-1": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -701,6 +956,7 @@ test("review uses nearly secure consolidation before generic secure review", () 
         placementMeta: { targetChallengeLevel: "needs_support" },
       },
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");
@@ -816,6 +1072,7 @@ test("multi-pupil generated assignment uses pupil-specific word usage history", 
       "pupil-1": usageAwareProfile(),
       "pupil-2": usageAwareProfile(),
     },
+    usageAsOfMs: USAGE_RECENT_AS_OF_MS,
   });
 
   assert.equal(plan.error, "");

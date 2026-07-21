@@ -180,13 +180,30 @@ const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
   secure_expected: 1,
   early_stretch: 1,
 };
-const USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+export const ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const SELECTOR_EVIDENCE_CATEGORY_CORRECT_FIRST_TIME = "correct_first_time";
 const SELECTOR_EVIDENCE_CATEGORY_CORRECT_AFTER_RETRY = "correct_after_retry";
 const SELECTOR_EVIDENCE_CATEGORY_CORRECT_WITH_SUPPORT = "correct_with_support";
 const SELECTOR_EVIDENCE_CATEGORY_INCORRECT_WITH_SUPPORT = "incorrect_with_support";
 const SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE = "access_issue";
 const SELECTOR_EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
+const SELECTOR_EXCLUDED_USAGE_SOURCE_KEYS = new Set([
+  "baseline",
+  "baseline_v1",
+  "baseline_v2",
+  "practice",
+  "learn",
+  "extra_challenge",
+  "extrachallenge",
+  "spelling_bee",
+  "spellingbee",
+  "demo",
+  "sample",
+  "presenter",
+  "presentation",
+  "public_presentation",
+  "publicpresentation",
+]);
 const SELECTOR_SUPPORTED_DEPENDENCE_RECYCLE_CAP = 1;
 const SELECTOR_SUPPORTED_FAILURE_RECYCLE_CAP = 2;
 
@@ -202,6 +219,40 @@ function normalizeMetadataKey(value) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, "");
+}
+
+function normalizeSelectorUsageSourceKey(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+export function isSelectorExcludedUsageSource(value = "") {
+  return SELECTOR_EXCLUDED_USAGE_SOURCE_KEYS.has(normalizeSelectorUsageSourceKey(value));
+}
+
+export function isSelectorStandardUsageSource(value = "") {
+  return !isSelectorExcludedUsageSource(value);
+}
+
+function buildIdSet(items = []) {
+  return new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function collectUsageSourceValues(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+function hasExcludedUsageSource(values = []) {
+  return collectUsageSourceValues(values).some(isSelectorExcludedUsageSource);
 }
 
 function normalizeWord(value) {
@@ -496,7 +547,7 @@ function getAttemptNumberValue(attempt) {
 }
 
 function getAttemptSeenAt(attempt) {
-  const seenAt = new Date(attempt?.created_at || 0).getTime();
+  const seenAt = new Date(attempt?.created_at || attempt?.createdAt || 0).getTime();
   return Number.isFinite(seenAt) ? seenAt : 0;
 }
 
@@ -506,6 +557,25 @@ function getAttemptSourceKey(attempt) {
 
 function isExtraChallengeAttempt(attempt) {
   return getAttemptSourceKey(attempt) === SELECTOR_EVIDENCE_SOURCE_EXTRA_CHALLENGE;
+}
+
+function getAttemptUsageSources(attempt = {}) {
+  return collectUsageSourceValues([
+    attempt?.attempt_source,
+    attempt?.attemptSource,
+    attempt?.evidence_source,
+    attempt?.evidenceSource,
+    attempt?.assignment_source,
+    attempt?.assignmentSource,
+    attempt?.source,
+  ]);
+}
+
+export function isSelectorStandardUsageAttempt(attempt = {}, { excludedAssignmentIds = [] } = {}) {
+  const assignmentId = String(attempt?.assignment_id || attempt?.assignmentId || "").trim();
+  const excludedIds = excludedAssignmentIds instanceof Set ? excludedAssignmentIds : buildIdSet(excludedAssignmentIds);
+  if (assignmentId && excludedIds.has(assignmentId)) return false;
+  return !hasExcludedUsageSource(getAttemptUsageSources(attempt));
 }
 
 function hasSelectorFieldValue(value) {
@@ -749,6 +819,16 @@ function getJoinedAssignmentTargetWordRow(row) {
   return joined && typeof joined === "object" ? joined : null;
 }
 
+function getJoinedAssignmentTargetAssignmentRow(row) {
+  const joined = row?.assignments_v2
+    || row?.assignment_v2
+    || row?.assignment
+    || row?.assignments
+    || null;
+  if (Array.isArray(joined)) return joined[0] || null;
+  return joined && typeof joined === "object" ? joined : null;
+}
+
 function getAssignmentTargetRowWordText(row) {
   const direct = normalizeWord(row?.word_text || row?.word || "");
   if (direct) return direct;
@@ -757,14 +837,53 @@ function getAssignmentTargetRowWordText(row) {
 }
 
 function getAssignmentTargetAssignedAt(row) {
+  const assignmentRow = getJoinedAssignmentTargetAssignmentRow(row);
   const assignedAt = new Date(
     row?.created_at
     || row?.createdAt
     || row?.assignment_created_at
     || row?.assignmentCreatedAt
+    || assignmentRow?.created_at
+    || assignmentRow?.createdAt
     || 0
   ).getTime();
   return Number.isFinite(assignedAt) ? assignedAt : 0;
+}
+
+function getAssignmentTargetUsageSources(row = {}) {
+  const assignmentRow = getJoinedAssignmentTargetAssignmentRow(row);
+  return collectUsageSourceValues([
+    row?.evidence_source,
+    row?.evidenceSource,
+    row?.assignment_source,
+    row?.assignmentSource,
+    row?.attempt_source,
+    row?.attemptSource,
+    row?.source,
+    assignmentRow?.evidence_source,
+    assignmentRow?.evidenceSource,
+    assignmentRow?.assignment_source,
+    assignmentRow?.assignmentSource,
+    assignmentRow?.attempt_source,
+    assignmentRow?.attemptSource,
+    assignmentRow?.automation_kind,
+    assignmentRow?.automationKind,
+    assignmentRow?.mode,
+  ]);
+}
+
+export function isSelectorStandardUsageAssignmentTargetRow(row = {}, { excludedAssignmentIds = [] } = {}) {
+  const assignmentId = String(row?.assignment_id || row?.assignmentId || "").trim();
+  const excludedIds = excludedAssignmentIds instanceof Set ? excludedAssignmentIds : buildIdSet(excludedAssignmentIds);
+  if (assignmentId && excludedIds.has(assignmentId)) return false;
+  return !hasExcludedUsageSource(getAssignmentTargetUsageSources(row));
+}
+
+function resolveUsageAsOfMs(value = null) {
+  const explicit = Number(value);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const now = Date.now();
+  return Number.isFinite(now) && now > 0 ? now : 0;
 }
 
 function buildDefaultUsageMeta(word = "") {
@@ -793,9 +912,8 @@ function buildDefaultUsageMeta(word = "") {
   };
 }
 
-function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
+function buildWordUsageStats(attempts, { assignmentTargetRows = [], usageAsOfMs = null } = {}) {
   const usage = new Map();
-  const events = [];
 
   for (const attempt of attempts || []) {
     const word = getAttemptWordText(attempt);
@@ -839,7 +957,6 @@ function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
       current.latestAttemptNumber = attemptNumber;
     }
     usage.set(word, current);
-    events.push({ word, seenAt });
   }
 
   for (const row of assignmentTargetRows || []) {
@@ -854,11 +971,10 @@ function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
       current.lastSeenAt = assignedAt;
     }
     usage.set(word, current);
-    events.push({ word, seenAt: assignedAt });
   }
 
-  const latestEvidenceAt = events.reduce((latest, event) => Math.max(latest, event.seenAt), 0);
-  const recentCutoff = latestEvidenceAt > 0 ? latestEvidenceAt - USAGE_RECENT_WINDOW_MS : 0;
+  const usageAsOf = resolveUsageAsOfMs(usageAsOfMs);
+  const recentCutoff = usageAsOf > 0 ? usageAsOf - ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS : 0;
 
   for (const current of usage.values()) {
     const assignmentIsLatest = current.assignedCount > 0 && current.lastAssignedAt >= current.lastSeenAt;
@@ -1032,7 +1148,7 @@ function mergeCandidates(existing, candidate) {
   };
 }
 
-function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null, assignmentTargetRows = [] }) {
+function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null, assignmentTargetRows = [], usageAsOfMs = null }) {
   const pool = new Map();
 
   for (const test of teacherTests || []) {
@@ -1052,7 +1168,7 @@ function buildCandidatePool({ teacherTests, attempts, resolvedWordMap = null, as
 
   return {
     candidates: Array.from(pool.values()),
-    usageByWord: buildWordUsageStats(attempts, { assignmentTargetRows }),
+    usageByWord: buildWordUsageStats(attempts, { assignmentTargetRows, usageAsOfMs }),
   };
 }
 
@@ -3083,10 +3199,12 @@ export function buildGeneratedAssignmentPlan({
   attempts = [],
   assignmentTargetRows = [],
   priorAssignmentTargetRows = [],
+  excludedUsageAssignmentIds = [],
   totalWords = ASSIGNMENT_ENGINE_DEFAULT_LENGTH,
   currentProfiles = null,
   resolvedWordMap = null,
   policy = null,
+  usageAsOfMs = null,
 } = {}) {
   const normalizedPolicy = normalizeAutoAssignPolicy({
     ...(policy && typeof policy === "object" ? policy : {}),
@@ -3098,20 +3216,28 @@ export function buildGeneratedAssignmentPlan({
   });
   const pupils = normalizePupilList(pupilIds);
   const composition = buildAutoAssignmentComposition(normalizedPolicy.assignment_length);
+  const usageAsOf = resolveUsageAsOfMs(usageAsOfMs);
+  const excludedUsageAssignmentIdSet = buildIdSet(excludedUsageAssignmentIds);
   const rawSortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
-    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+    .filter((attempt) => isSelectorStandardUsageAttempt(attempt, { excludedAssignmentIds: excludedUsageAssignmentIdSet }))
+    .sort((a, b) => getAttemptSeenAt(a) - getAttemptSeenAt(b));
   const selectorEvidence = normalizeSelectorEvidenceAttempts(rawSortedAttempts, { resolvedWordMap });
   const sortedAttempts = [...selectorEvidence.attempts]
-    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+    .sort((a, b) => getAttemptSeenAt(a) - getAttemptSeenAt(b));
   const sortedAssignmentTargetRows = [
     ...(Array.isArray(assignmentTargetRows) ? assignmentTargetRows : []),
     ...(Array.isArray(priorAssignmentTargetRows) ? priorAssignmentTargetRows : []),
-  ].sort((a, b) => getAssignmentTargetAssignedAt(a) - getAssignmentTargetAssignedAt(b));
+  ]
+    .filter((row) => isSelectorStandardUsageAssignmentTargetRow(row, {
+      excludedAssignmentIds: excludedUsageAssignmentIdSet,
+    }))
+    .sort((a, b) => getAssignmentTargetAssignedAt(a) - getAssignmentTargetAssignedAt(b));
   const pool = buildCandidatePool({
     teacherTests,
     attempts: sortedAttempts,
     resolvedWordMap,
     assignmentTargetRows: sortedAssignmentTargetRows,
+    usageAsOfMs: usageAsOf,
   });
 
   // Future baseline placement can inject a richer profile object here without changing the planner shape.
@@ -3138,7 +3264,10 @@ export function buildGeneratedAssignmentPlan({
       composition,
       pool,
       engineOptions,
-      usageByWord: buildWordUsageStats(pupilAttempts, { assignmentTargetRows: pupilAssignmentTargetRows }),
+      usageByWord: buildWordUsageStats(pupilAttempts, {
+        assignmentTargetRows: pupilAssignmentTargetRows,
+        usageAsOfMs: usageAsOf,
+      }),
     });
 
     if (plan?.error) errors.push(plan.error);

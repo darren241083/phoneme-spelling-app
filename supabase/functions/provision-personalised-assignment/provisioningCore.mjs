@@ -5,6 +5,7 @@ import {
   buildAssignmentEngineWordSignature,
   buildGeneratedAssignmentPlan,
   buildProfileFromAttempts,
+  isSelectorStandardUsageAttempt,
 } from "./pure/assignmentEngine.js";
 import {
   buildPlacementSeedProfiles,
@@ -51,6 +52,13 @@ export function normalizeIdList(items = []) {
       .map((item) => normalizeId(item))
       .filter(Boolean)
   )];
+}
+
+function resolveUsageAsOfMs(value = null) {
+  const explicit = Number(value);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const now = Date.now();
+  return Number.isFinite(now) && now > 0 ? now : 0;
 }
 
 export function buildPublicProvisioningResponse({ status = "", assignmentId = "" } = {}) {
@@ -496,11 +504,10 @@ export function buildPlacementCurrentProfiles({
 
     const pupilAttempts = (Array.isArray(attempts) ? attempts : [])
       .filter((attempt) => normalizeId(attempt?.pupil_id) === pupilId);
+    const baselineAssignmentIds = new Set(baselineAssignmentMetaById.keys());
     const liveAttempts = pupilAttempts
       .filter((attempt) =>
-        !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
-        && !isPracticeAttemptRow(attempt)
-        && !isExtraChallengeAttemptRow(attempt)
+        isSelectorStandardUsageAttempt(attempt, { excludedAssignmentIds: baselineAssignmentIds })
       );
     const liveIndependentAttempts = getIndependentAttemptRows(liveAttempts);
     if (liveIndependentAttempts.length >= BASELINE_LIVE_INDEPENDENT_MIN_ATTEMPTS) continue;
@@ -587,6 +594,7 @@ export function buildProvisioningPlan({
   assignmentTargetRows = [],
   policy = null,
   resolvedWordMap = null,
+  usageAsOfMs = null,
 } = {}) {
   const safePupilId = normalizeId(pupilId);
   const effectivePolicy = {
@@ -597,6 +605,9 @@ export function buildProvisioningPlan({
 
   const safeBaselineAssignments = filterBaselineAssignments(baselineAssignments);
   const baselineAssignmentMetaById = buildBaselineAssignmentMetaMap(safeBaselineAssignments);
+  const baselineAssignmentIds = new Set(baselineAssignmentMetaById.keys());
+  const excludedUsageAssignmentIds = Array.from(baselineAssignmentIds);
+  const effectiveUsageAsOfMs = resolveUsageAsOfMs(usageAsOfMs);
   const currentProfiles = buildPlacementCurrentProfiles({
     pupilIds: [safePupilId],
     attempts: attemptRows,
@@ -606,9 +617,7 @@ export function buildProvisioningPlan({
   });
   const nonBaselineAttempts = (Array.isArray(attemptRows) ? attemptRows : [])
     .filter((attempt) =>
-      !isBaselineAttemptRow(attempt, baselineAssignmentMetaById)
-      && !isPracticeAttemptRow(attempt)
-      && !isExtraChallengeAttemptRow(attempt)
+      isSelectorStandardUsageAttempt(attempt, { excludedAssignmentIds: baselineAssignmentIds })
     );
   const wordloomCoreTests = Array.isArray(wordloomCoreWordRows) && wordloomCoreWordRows.length
     ? [{
@@ -624,10 +633,12 @@ export function buildProvisioningPlan({
     teacherTests: personalisedSourceTests,
     attempts: nonBaselineAttempts,
     assignmentTargetRows,
+    excludedUsageAssignmentIds,
     totalWords: effectivePolicy.assignment_length,
     currentProfiles,
     resolvedWordMap,
     policy: effectivePolicy,
+    usageAsOfMs: effectiveUsageAsOfMs,
   });
 
   if (effectivePolicy.allow_starter_fallback && needsStarterCatalogFallback(plan, [safePupilId])) {
@@ -636,10 +647,12 @@ export function buildProvisioningPlan({
       teacherTests: [...personalisedSourceTests, ...buildStarterCatalogVirtualTests()],
       attempts: nonBaselineAttempts,
       assignmentTargetRows,
+      excludedUsageAssignmentIds,
       totalWords: effectivePolicy.assignment_length,
       currentProfiles,
       resolvedWordMap,
       policy: effectivePolicy,
+      usageAsOfMs: effectiveUsageAsOfMs,
     });
   }
 

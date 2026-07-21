@@ -11,7 +11,18 @@ const {
   normalizeSelectorEvidenceAttempts,
 } = browserEngine;
 
+assert.equal(
+  browserEngine.ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS,
+  edgeEngine.ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS,
+);
+
 const TESTS = [];
+const USAGE_PARITY_RECENT_AS_OF_MS = Date.parse("2026-05-03T10:00:00.000Z");
+const USAGE_PARITY_ATTEMPT_AT_MS = Date.parse("2026-05-01T10:00:00.000Z");
+const USAGE_PARITY_JUST_INSIDE_AS_OF_MS =
+  USAGE_PARITY_ATTEMPT_AT_MS + browserEngine.ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS - 1;
+const USAGE_PARITY_OUTSIDE_AS_OF_MS =
+  USAGE_PARITY_ATTEMPT_AT_MS + browserEngine.ASSIGNMENT_ENGINE_USAGE_RECENT_WINDOW_MS + 1;
 
 function test(name, fn) {
   TESTS.push({ name, fn });
@@ -181,6 +192,72 @@ function buildLowCoverageParityProfile() {
   };
 }
 
+function buildUsageParityProfile() {
+  return {
+    concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+    secureRows: [
+      { target: "ai", total: 4, securityBand: "secure" },
+      { target: "ee", total: 4, securityBand: "secure" },
+      { target: "oa", total: 4, securityBand: "secure" },
+    ],
+    developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+    confusionByTarget: new Map(),
+    placementMeta: { targetChallengeLevel: "needs_support" },
+  };
+}
+
+function buildUsageParityWordRows({ includePhase = true, includeOutcomeTargets = false } = {}) {
+  return [
+    coreWordRow({ word: "rain", focus: "ai", segments: ["r", "ai", "n"], score: 24 }),
+    coreWordRow({ word: "train", focus: "ai", segments: ["t", "r", "ai", "n"], score: 25 }),
+    coreWordRow({ word: "seed", focus: "ee", segments: ["s", "ee", "d"], score: 24 }),
+    coreWordRow({ word: "boat", focus: "oa", segments: ["b", "oa", "t"], score: 26 }),
+    coreWordRow({ word: "storm", focus: "or", segments: ["s", "t", "or", "m"], score: 42 }),
+    coreWordRow({ word: "short", focus: "or", segments: ["sh", "or", "t"], score: 44 }),
+    coreWordRow({ word: "phone", focus: "ph", segments: ["ph", "o", "n", "e"], score: 30 }),
+    ...(includePhase
+      ? [coreWordRow({ word: "phase", focus: "ph", segments: ["ph", "a", "s", "e"], score: 31 })]
+      : []),
+    ...(includeOutcomeTargets
+      ? [
+        coreWordRow({ word: "photo", focus: "ph", segments: ["ph", "o", "t", "o"], score: 32 }),
+        coreWordRow({ word: "phonics", focus: "ph", segments: ["ph", "o", "n", "i", "ck", "s"], score: 33 }),
+      ]
+      : []),
+  ];
+}
+
+function usageTargetRow({
+  assignmentId = "generated-assignment",
+  word,
+  createdAt = "2026-05-02T10:00:00.000Z",
+  evidenceSource = "assigned_core",
+  automationKind = "personalised",
+  mode = "test",
+  joinedAsArray = false,
+} = {}) {
+  const assignmentRow = {
+    id: assignmentId,
+    created_at: createdAt,
+    evidence_source: evidenceSource,
+    automation_kind: automationKind,
+    mode,
+  };
+  return {
+    id: `${assignmentId}-${word}`,
+    assignment_id: assignmentId,
+    pupil_id: "pupil-1",
+    test_word_id: `${assignmentId}-${word}-word`,
+    target_source: "assignment_engine_v1",
+    created_at: createdAt,
+    assignments_v2: joinedAsArray ? [assignmentRow] : assignmentRow,
+    test_words: {
+      id: `${assignmentId}-${word}-word`,
+      word,
+    },
+  };
+}
+
 function buildLowCoverageParityPlan(engine) {
   return engine.buildGeneratedAssignmentPlan({
     pupilIds: ["pupil-1"],
@@ -196,6 +273,39 @@ function buildLowCoverageParityPlan(engine) {
       "pupil-1": buildLowCoverageParityProfile(),
     },
   });
+}
+
+function buildUsageParityPlan(engine, {
+  words = buildUsageParityWordRows(),
+  attempts = [],
+  assignmentTargetRows = [],
+  excludedUsageAssignmentIds = [],
+  usageAsOfMs = USAGE_PARITY_RECENT_AS_OF_MS,
+  totalWords = 4,
+} = {}) {
+  return engine.buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [sourceTest(words)],
+    attempts,
+    assignmentTargetRows,
+    excludedUsageAssignmentIds,
+    totalWords,
+    policy: {
+      assignment_length: totalWords,
+      support_preset: "balanced",
+      allow_starter_fallback: false,
+    },
+    currentProfiles: {
+      "pupil-1": buildUsageParityProfile(),
+    },
+    usageAsOfMs,
+  });
+}
+
+function roleWords(plan, role = "target") {
+  return Array.from(plan.pupilPlans?.[0]?.words || [])
+    .filter((word) => word.assignmentRole === role)
+    .map((word) => String(word.word || "").trim().toLowerCase());
 }
 
 function normalizeWordList(words = []) {
@@ -535,6 +645,197 @@ test("browser and edge low-coverage generation keep stable selector parity", () 
   );
 });
 
+test("browser and edge usage cooldown select the same stable target words", () => {
+  const attempts = [
+    legacyAttempt({
+      word: "phone",
+      focus: "ph",
+      correct: true,
+      attemptNumber: 1,
+      attemptSource: "auto_assigned",
+      createdAt: "2026-05-01T10:00:00.000Z",
+    }),
+  ];
+  const browserPlan = buildUsageParityPlan(browserEngine, { attempts });
+  const edgePlan = buildUsageParityPlan(edgeEngine, { attempts });
+
+  assert.equal(browserPlan.error, "");
+  assert.equal(edgePlan.error, "");
+  assert.deepEqual(roleWords(browserPlan, "target"), ["phase"]);
+  assert.deepEqual(roleWords(edgePlan, "target"), ["phase"]);
+});
+
+test("browser and edge usage cooldown boundary behaviour matches", () => {
+  const attempts = [
+    legacyAttempt({
+      word: "phone",
+      focus: "ph",
+      correct: true,
+      attemptNumber: 1,
+      attemptSource: "auto_assigned",
+      createdAt: "2026-05-01T10:00:00.000Z",
+    }),
+  ];
+  const browserInside = buildUsageParityPlan(browserEngine, {
+    attempts,
+    usageAsOfMs: USAGE_PARITY_JUST_INSIDE_AS_OF_MS,
+  });
+  const edgeInside = buildUsageParityPlan(edgeEngine, {
+    attempts,
+    usageAsOfMs: USAGE_PARITY_JUST_INSIDE_AS_OF_MS,
+  });
+  const browserOutside = buildUsageParityPlan(browserEngine, {
+    attempts,
+    usageAsOfMs: USAGE_PARITY_OUTSIDE_AS_OF_MS,
+  });
+  const edgeOutside = buildUsageParityPlan(edgeEngine, {
+    attempts,
+    usageAsOfMs: USAGE_PARITY_OUTSIDE_AS_OF_MS,
+  });
+
+  assert.deepEqual(roleWords(browserInside, "target"), ["phase"]);
+  assert.deepEqual(roleWords(edgeInside, "target"), ["phase"]);
+  assert.deepEqual(roleWords(browserOutside, "target"), ["phone"]);
+  assert.deepEqual(roleWords(edgeOutside, "target"), ["phone"]);
+});
+
+test("browser and edge source exclusions keep equivalent usage history", () => {
+  const attempts = [
+    legacyAttempt({
+      word: "phone",
+      focus: "ph",
+      correct: true,
+      attemptNumber: 1,
+      attemptSource: "extra-challenge",
+      id: "phone-extra",
+    }),
+    {
+      ...legacyAttempt({
+        word: "phone",
+        focus: "ph",
+        correct: true,
+        attemptNumber: 1,
+        attemptSource: "",
+        id: "phone-hidden-baseline",
+      }),
+      assignment_id: "hidden-baseline",
+    },
+    legacyAttempt({
+      word: "phase",
+      focus: "ph",
+      correct: true,
+      attemptNumber: 1,
+      attemptSource: "teacher assigned",
+      id: "phase-standard",
+    }),
+  ];
+  const assignmentTargetRows = [
+    usageTargetRow({
+      assignmentId: "extra-target",
+      word: "phone",
+      evidenceSource: "extra_challenge",
+    }),
+    usageTargetRow({
+      assignmentId: "bee-target",
+      word: "phone",
+      evidenceSource: "assigned_core",
+      automationKind: "spelling bee",
+      joinedAsArray: true,
+    }),
+    usageTargetRow({
+      assignmentId: "standard-target",
+      word: "phase",
+    }),
+  ];
+  const options = {
+    attempts,
+    assignmentTargetRows,
+    excludedUsageAssignmentIds: ["hidden-baseline"],
+  };
+  const browserPlan = buildUsageParityPlan(browserEngine, options);
+  const edgePlan = buildUsageParityPlan(edgeEngine, options);
+
+  assert.deepEqual(roleWords(browserPlan, "target"), ["phone"]);
+  assert.deepEqual(roleWords(edgePlan, "target"), ["phone"]);
+});
+
+test("browser and edge outcome priority matches for support ladder usage", () => {
+  const attempts = [
+    supportAttempt({ word: "phone", focus: "ph", category: "correct_first_time" }),
+    supportAttempt({
+      word: "phase",
+      focus: "ph",
+      category: "incorrect_with_support",
+      supportState: "supported",
+      correct: false,
+      attemptNumber: 3,
+      id: "phase-supported-incorrect",
+    }),
+    supportAttempt({
+      word: "photo",
+      focus: "ph",
+      category: "correct_with_support",
+      supportState: "supported",
+      correct: true,
+      attemptNumber: 2,
+      id: "photo-supported-correct",
+    }),
+    supportAttempt({
+      word: "phonics",
+      focus: "ph",
+      category: "correct_after_retry",
+      supportState: "retry",
+      correct: true,
+      attemptNumber: 2,
+      id: "phonics-retry",
+    }),
+    supportAttempt({
+      word: "train",
+      focus: "ai",
+      category: "access_issue",
+      supportState: "access_issue",
+      correct: null,
+      id: "train-access",
+    }),
+  ];
+  const options = {
+    words: buildUsageParityWordRows({ includeOutcomeTargets: true }),
+    attempts,
+    totalWords: 8,
+  };
+  const browserPlan = buildUsageParityPlan(browserEngine, options);
+  const edgePlan = buildUsageParityPlan(edgeEngine, options);
+
+  assert.deepEqual(roleWords(browserPlan, "target"), ["phase", "photo", "phonics"]);
+  assert.deepEqual(roleWords(edgePlan, "target"), ["phase", "photo", "phonics"]);
+  assert.equal(browserPlan.selectorDiagnostics.evidenceDiagnostics.excludedAccessIssueRows, 1);
+  assert.equal(edgePlan.selectorDiagnostics.evidenceDiagnostics.excludedAccessIssueRows, 1);
+});
+
+test("browser and edge cooldown fallback matches when alternatives are insufficient", () => {
+  const attempts = [
+    legacyAttempt({
+      word: "phone",
+      focus: "ph",
+      correct: true,
+      attemptNumber: 1,
+      attemptSource: "auto_assigned",
+      createdAt: "2026-05-01T10:00:00.000Z",
+    }),
+  ];
+  const options = {
+    words: buildUsageParityWordRows({ includePhase: false }),
+    attempts,
+  };
+  const browserPlan = buildUsageParityPlan(browserEngine, options);
+  const edgePlan = buildUsageParityPlan(edgeEngine, options);
+
+  assert.equal(browserPlan.error, "");
+  assert.equal(edgePlan.error, "");
+  assert.deepEqual(roleWords(browserPlan, "target"), ["phone"]);
+  assert.deepEqual(roleWords(edgePlan, "target"), ["phone"]);
+});
+
 test("class and edge read paths request Support Ladder fields and class path excludes extra challenge", () => {
   const teacherViewSource = readFileSync(new URL("../js/teacherView.js", import.meta.url), "utf8");
   const edgeSource = readFileSync(
@@ -546,8 +847,12 @@ test("class and edge read paths request Support Ladder fields and class path exc
     assert.match(teacherViewSource, new RegExp(field));
     assert.match(edgeSource, new RegExp(field));
   }
-  assert.match(teacherViewSource, /function isExtraChallengeAttemptRow/);
-  assert.match(teacherViewSource, /&& !isExtraChallengeAttemptRow\(attempt\)/);
+  for (const sourceField of ["assignments_v2", "evidence_source", "automation_kind", "mode"]) {
+    assert.match(teacherViewSource, new RegExp(sourceField));
+    assert.match(edgeSource, new RegExp(sourceField));
+  }
+  assert.match(teacherViewSource, /isSelectorStandardUsageAttempt/);
+  assert.match(edgeSource, /assignments_v2 \(/);
 });
 
 for (const { name, fn } of TESTS) {
