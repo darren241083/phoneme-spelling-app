@@ -182,8 +182,7 @@ const SCENARIOS = new Map([
     expectedAttempts: 0,
     steps: [
       "Leave the independent input blank.",
-      "Click Check.",
-      'Confirm the UI shows "Type an answer first."',
+      'Confirm "Check word" remains disabled while the answer is blank.',
       "Do not complete the word; return here and press Enter.",
     ],
   }],
@@ -1203,7 +1202,7 @@ function printManualInstructions(config) {
   }
   console.log("");
   console.log("Behaviors to watch for:");
-  console.log('  - blank independent attempt shows "Type an answer first." and records no attempt');
+  console.log('  - blank independent input keeps "Check word" disabled and records no attempt');
   console.log("  - first incorrect answer advances to retry without reveal");
   console.log("  - second incorrect answer advances to supported segmented input");
   console.log("  - supported segmented input is shown only after two incorrect spellings");
