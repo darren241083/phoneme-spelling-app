@@ -45,7 +45,8 @@
       "Rows with source_version wordloom_core_v1_phase_7h_2026_05_13 are reviewed Wordloom-owned Phase 7H production final core-bank expansion batch content.",
       "Rows with source_version wordloom_core_v1_phase_8b_2026_05_13 are reviewed Wordloom-owned Phase 8B structured expansion batch 1 content for ci, ure, dge, ie, oi, oy, tch, au, and ear.",
       "Rows with source_version wordloom_core_v1_phase_8c_2026_05_14 are reviewed Wordloom-owned Phase 8C structured expansion batch 2 content for air, aw, ew, igh, tion, ck, oa, ur, ch, ng, ou, ow, sh, ai, ay, ee, or, th, ar, ea, and er.",
-      "Rows with source_version wordloom_core_v1_phase_8d_2026_05_14 are reviewed Wordloom-owned Phase 8D structured expansion batch 3 content for ar, er, ea, ee, oa, ai, igh, or, air, ear, oy, ou, ow, sh, ch, th, ng, ck, tion, ur, ie, ci, au, ay, ew, ure, aw, and tch."
+      "Rows with source_version wordloom_core_v1_phase_8d_2026_05_14 are reviewed Wordloom-owned Phase 8D structured expansion batch 3 content for ar, er, ea, ee, oa, ai, igh, or, air, ear, oy, ou, ow, sh, ch, th, ng, ck, tion, ur, ie, ci, au, ay, ew, ure, aw, and tch.",
+      "Rows with source_version wordloom_core_v1_phase_4d1_tion_repair_2026_07_21 are reviewed Wordloom-owned Phase 4D1 repair content for low-band tion selector coverage."
     ]
   },
   "targets": [
@@ -54603,6 +54604,269 @@
       "target_links": [
         {
           "focus_grapheme": "tch",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "action",
+      "normalised_word": "action",
+      "grapheme_segments": [
+        "a",
+        "c",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 38,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short, common word with the target clearly positioned at the end.",
+      "sentence": "The quick action helped the team.",
+      "meaning": "Something that someone does.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "station",
+      "normalised_word": "station",
+      "grapheme_segments": [
+        "s",
+        "t",
+        "a",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common two-syllable word with a clear final `tion` spelling.",
+      "sentence": "We waited at the station for the train.",
+      "meaning": "A place where people catch a train or bus.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "nation",
+      "normalised_word": "nation",
+      "grapheme_segments": [
+        "n",
+        "a",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 40,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Short, common word with one consonant before the final pattern.",
+      "sentence": "A nation is made up of many communities.",
+      "meaning": "A country and its people.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "section",
+      "normalised_word": "section",
+      "grapheme_segments": [
+        "s",
+        "e",
+        "c",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Familiar classroom vocabulary with a clearly identifiable final pattern.",
+      "sentence": "Read the first section of the story.",
+      "meaning": "One part of something larger.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "fiction",
+      "normalised_word": "fiction",
+      "grapheme_segments": [
+        "f",
+        "i",
+        "c",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 42,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Familiar reading vocabulary with the target after a consonant.",
+      "sentence": "Fiction stories can be full of adventure.",
+      "meaning": "Writing about people or events that are imagined.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "mention",
+      "normalised_word": "mention",
+      "grapheme_segments": [
+        "m",
+        "e",
+        "n",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common word with the target following `n`.",
+      "sentence": "Please mention the title in your answer.",
+      "meaning": "To speak or write briefly about something.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "emotion",
+      "normalised_word": "emotion",
+      "grapheme_segments": [
+        "e",
+        "m",
+        "o",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 44,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common feelings vocabulary with a short and clear final pattern.",
+      "sentence": "Joy is a happy emotion.",
+      "meaning": "A feeling such as joy, anger, or sadness.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
+          "target_role": "primary",
+          "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "relation",
+      "normalised_word": "relation",
+      "grapheme_segments": [
+        "r",
+        "e",
+        "l",
+        "a",
+        "tion"
+      ],
+      "focus_graphemes": [
+        "tion"
+      ],
+      "primary_focus_grapheme": "tion",
+      "stage_band": "ceiling_challenge",
+      "difficulty_score": 45,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Common word that adds slightly greater grapheme complexity while remaining accessible.",
+      "sentence": "The chart showed the relation between plants and sunlight.",
+      "meaning": "A connection between people, things, or ideas.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "tion",
           "target_role": "primary",
           "pattern_type": "trigraph",
           "difficulty_modifier": 0

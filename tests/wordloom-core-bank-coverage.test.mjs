@@ -39,6 +39,8 @@ const PHASE_7H_SOURCE_VERSION = "wordloom_core_v1_phase_7h_2026_05_13";
 const PHASE_8B_SOURCE_VERSION = "wordloom_core_v1_phase_8b_2026_05_13";
 const PHASE_8C_SOURCE_VERSION = "wordloom_core_v1_phase_8c_2026_05_14";
 const PHASE_8D_SOURCE_VERSION = "wordloom_core_v1_phase_8d_2026_05_14";
+const PHASE_4D1_TION_SOURCE_VERSION =
+  "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21";
 const EXPECTED_LOW_COVERAGE_WARNINGS = new Map();
 const EXPECTED_PHASE_7B_COUNTS = new Map([
   ["ay", 8],
@@ -1040,6 +1042,10 @@ const phase7HSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, P
 const phase8BSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_8B_SOURCE_VERSION);
 const phase8CSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_8C_SOURCE_VERSION);
 const phase8DSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_8D_SOURCE_VERSION);
+const phase4D1TionSourceWordCountByGrapheme =
+  countSourceWordsByVersion(sourceData, PHASE_4D1_TION_SOURCE_VERSION);
+const phase4D1TionSourceRows = (Array.isArray(sourceData?.words) ? sourceData.words : [])
+  .filter((word) => word?.source_version === PHASE_4D1_TION_SOURCE_VERSION);
 const proofTargets = parseProofTargets(proofMigrationSql);
 const proofWords = parseProofWords(proofMigrationSql);
 const phase7BTargets = parsePhase7BTargets(phase7BMigrationSql);
@@ -1378,9 +1384,58 @@ assert.equal(
 );
 assert.equal(
   sourceCoverageReport.sourceWordCount,
-  1602,
-  "Phase 8D source data should contain 1,602 rows after structured expansion batch 3.",
+  1610,
+  "Phase 8D plus Phase 4D1 tion repair source data should contain 1,610 rows.",
 );
+assert.equal(phase4D1TionSourceRows.length, 8, "Phase 4D1 tion repair should define exactly 8 source rows.");
+assert.equal(
+  phase4D1TionSourceWordCountByGrapheme.get("tion") || 0,
+  8,
+  "Phase 4D1 tion repair should include exactly 8 active primary tion rows.",
+);
+assert.deepEqual(
+  [...phase4D1TionSourceWordCountByGrapheme.keys()].sort(),
+  ["tion"],
+  "Phase 4D1 tion repair should not include rows for any other primary grapheme.",
+);
+
+const expectedPhase4D1TionWords = [
+  "action",
+  "emotion",
+  "fiction",
+  "mention",
+  "nation",
+  "relation",
+  "section",
+  "station",
+];
+assert.deepEqual(
+  phase4D1TionSourceRows
+    .map((word) => normalizeSourceText(word?.normalised_word || word?.word))
+    .sort(),
+  expectedPhase4D1TionWords,
+  "Phase 4D1 tion repair should contain the exact approved normalised word set.",
+);
+
+const activeTionTarget = (Array.isArray(sourceData?.targets) ? sourceData.targets : [])
+  .find((target) => normalizeSourceText(target?.focus_grapheme) === "tion" && target?.is_active === true);
+assert.ok(activeTionTarget, "Phase 4D1 tion repair requires an active tion focus target.");
+for (const word of phase4D1TionSourceRows) {
+  const normalisedWord = normalizeSourceText(word?.normalised_word || word?.word);
+  const primaryLinks = (Array.isArray(word?.target_links) ? word.target_links : [])
+    .filter((link) =>
+      normalizeSourceText(link?.focus_grapheme) === "tion"
+      && normalizeSourceText(link?.target_role) === "primary"
+    );
+  assert.equal(word?.source, "wordloom_core", `${normalisedWord} should be Wordloom core source.`);
+  assert.equal(word?.is_active, true, `${normalisedWord} should be active.`);
+  assert.equal(normalizeSourceText(word?.approval_status), "approved", `${normalisedWord} should be approved.`);
+  assert.equal(normalizeSourceText(word?.suitability_status), "suitable", `${normalisedWord} should be suitable.`);
+  assert.equal(normalizeSourceText(word?.primary_focus_grapheme), "tion", `${normalisedWord} should be primary tion.`);
+  assert.equal(primaryLinks.length, 1, `${normalisedWord} should have one active primary tion target link.`);
+  assert.equal(Number(word?.difficulty_score) <= 50, true, `${normalisedWord} should stay eligible for low-band tion coverage.`);
+  assert.equal(word?.difficulty_label, "Core", `${normalisedWord} should be Core difficulty.`);
+}
 
 for (const [focus, expectedCount] of EXPECTED_PHASE_7B_COUNTS) {
   assert.equal(
