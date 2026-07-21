@@ -54,6 +54,31 @@ function coreWordRow({
   };
 }
 
+function teacherWordRow({
+  id,
+  word,
+  focus,
+  segments = [focus],
+  score = 42,
+} = {}) {
+  return {
+    id: id || `legacy-${word}`,
+    word,
+    sentence: `${word} legacy sentence.`,
+    segments,
+    choice: {
+      source: "teacher",
+      focus_graphemes: [focus],
+      selection_suitability: "standard",
+      difficulty: {
+        coreScore: score,
+        score,
+        band: score <= 35 ? "easier" : score <= 55 ? "core" : "stretch",
+      },
+    },
+  };
+}
+
 function sourceTest(words = []) {
   return {
     id: "selector-evidence-bank",
@@ -120,6 +145,80 @@ function legacyAttempt({
     target_graphemes: [focus],
     created_at: createdAt,
   };
+}
+
+function buildLowCoverageParityWordRows() {
+  return [
+    coreWordRow({ word: "phone", focus: "ph", segments: ["ph", "o", "n", "e"], score: 40 }),
+    coreWordRow({ word: "phonics", focus: "ph", segments: ["ph", "o", "n", "i", "ck", "s"], score: 42 }),
+    coreWordRow({ word: "rain", focus: "ai", segments: ["r", "ai", "n"], score: 28 }),
+    coreWordRow({ word: "train", focus: "ai", segments: ["t", "r", "ai", "n"], score: 30 }),
+    coreWordRow({ word: "seed", focus: "ee", segments: ["s", "ee", "d"], score: 28 }),
+    coreWordRow({ word: "green", focus: "ee", segments: ["g", "r", "ee", "n"], score: 30 }),
+    coreWordRow({ word: "boat", focus: "oa", segments: ["b", "oa", "t"], score: 30 }),
+    coreWordRow({ word: "coat", focus: "oa", segments: ["c", "oa", "t"], score: 32 }),
+    coreWordRow({ word: "farm", focus: "ar", segments: ["f", "ar", "m"], score: 32 }),
+    coreWordRow({ word: "start", focus: "ar", segments: ["s", "t", "ar", "t"], score: 34 }),
+    coreWordRow({ word: "storm", focus: "or", segments: ["s", "t", "or", "m"], score: 38 }),
+    coreWordRow({ word: "short", focus: "or", segments: ["sh", "or", "t"], score: 40 }),
+    teacherWordRow({ word: "brain", focus: "ai", segments: ["b", "r", "ai", "n"], score: 28 }),
+    teacherWordRow({ word: "sleep", focus: "ee", segments: ["s", "l", "ee", "p"], score: 28 }),
+  ];
+}
+
+function buildLowCoverageParityProfile() {
+  return {
+    concernRows: [{ target: "ph", total: 4, securityBand: "insecure" }],
+    secureRows: [
+      { target: "ai", total: 4, securityBand: "secure" },
+      { target: "ee", total: 4, securityBand: "secure" },
+      { target: "oa", total: 4, securityBand: "secure" },
+      { target: "ar", total: 4, securityBand: "secure" },
+    ],
+    developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
+    confusionByTarget: new Map(),
+    placementMeta: { targetChallengeLevel: "needs_support" },
+  };
+}
+
+function buildLowCoverageParityPlan(engine) {
+  return engine.buildGeneratedAssignmentPlan({
+    pupilIds: ["pupil-1"],
+    teacherTests: [sourceTest(buildLowCoverageParityWordRows())],
+    attempts: [],
+    totalWords: 10,
+    policy: {
+      assignment_length: 10,
+      support_preset: "balanced",
+      allow_starter_fallback: false,
+    },
+    currentProfiles: {
+      "pupil-1": buildLowCoverageParityProfile(),
+    },
+  });
+}
+
+function normalizeWordList(words = []) {
+  return Array.from(
+    Array.isArray(words) ? words : [],
+    (item) => String(item?.word || item || "").trim().toLowerCase(),
+  )
+    .filter(Boolean)
+    .sort();
+}
+
+function stableCoverageWarning(warning = {}) {
+  return {
+    type: warning?.type || "",
+    focusGrapheme: warning?.focusGrapheme || "",
+    requestedTargetCount: warning?.requestedTargetCount || 0,
+    selectedTargetCount: warning?.selectedTargetCount || 0,
+    fallbackCount: warning?.fallbackCount || 0,
+  };
+}
+
+function stableCoverageWarnings(warnings = []) {
+  return Array.from(Array.isArray(warnings) ? warnings : [], stableCoverageWarning);
 }
 
 const mixedEvidence = [
@@ -370,6 +469,70 @@ test("selector diagnostics report target purity and low-bank fallback", () => {
   assert.equal(targetPurity.requestedTargetCount, 4);
   assert.equal(targetPurity.selectedPrimaryTargetCount, 2);
   assert.ok(targetPurity.ratio < 1);
+});
+
+test("browser and edge low-coverage generation keep stable selector parity", () => {
+  const browserPlan = buildLowCoverageParityPlan(browserEngine);
+  const edgePlan = buildLowCoverageParityPlan(edgeEngine);
+  const plans = [browserPlan, edgePlan];
+
+  for (const plan of plans) {
+    assert.equal(plan.error, "");
+    assert.equal(plan.pupilPlans.length, 1);
+    assert.equal(plan.coverageWarnings.length, 1);
+    assert.deepEqual(stableCoverageWarning(plan.coverageWarnings[0]), {
+      type: "target_coverage_low",
+      focusGrapheme: "ph",
+      requestedTargetCount: 4,
+      selectedTargetCount: 2,
+      fallbackCount: 2,
+    });
+    assert.equal(plan.selectorDiagnostics.lowBankFallback.used, true);
+    assert.equal(plan.selectorDiagnostics.lowBankFallback.warningCount, 1);
+
+    const pupilWords = plan.pupilPlans[0]?.words || [];
+    const normalizedWords = normalizeWordList(pupilWords);
+    assert.equal(pupilWords.length, 10);
+    assert.equal(new Set(normalizedWords).size, normalizedWords.length);
+    assert.deepEqual(
+      normalizeWordList(pupilWords.filter((word) => word.assignmentRole === "target")),
+      ["phone", "phonics"],
+    );
+    assert.equal(normalizedWords.includes("brain"), false);
+    assert.equal(normalizedWords.includes("sleep"), false);
+    assert.equal(
+      pupilWords
+        .filter((word) => word.assignmentRole !== "target")
+        .every((word) => word.originWordSource === "wordloom_core"),
+      true,
+    );
+    assert.equal(plan.pupilPlans[0].selectorDiagnostics.lowBankFallback.used, true);
+  }
+
+  const browserWords = browserPlan.pupilPlans[0].words;
+  const edgeWords = edgePlan.pupilPlans[0].words;
+  assert.deepEqual(normalizeWordList(browserWords), normalizeWordList(edgeWords));
+  assert.deepEqual(
+    normalizeWordList(browserWords.filter((word) => word.assignmentRole === "target")),
+    normalizeWordList(edgeWords.filter((word) => word.assignmentRole === "target")),
+  );
+  assert.equal(browserWords.length, edgeWords.length);
+  assert.deepEqual(
+    stableCoverageWarnings(browserPlan.coverageWarnings),
+    stableCoverageWarnings(edgePlan.coverageWarnings),
+  );
+  assert.deepEqual(
+    {
+      used: browserPlan.selectorDiagnostics.lowBankFallback.used,
+      warningCount: browserPlan.selectorDiagnostics.lowBankFallback.warningCount,
+      warnings: stableCoverageWarnings(browserPlan.selectorDiagnostics.lowBankFallback.warnings),
+    },
+    {
+      used: edgePlan.selectorDiagnostics.lowBankFallback.used,
+      warningCount: edgePlan.selectorDiagnostics.lowBankFallback.warningCount,
+      warnings: stableCoverageWarnings(edgePlan.selectorDiagnostics.lowBankFallback.warnings),
+    },
+  );
 });
 
 test("class and edge read paths request Support Ladder fields and class path excludes extra challenge", () => {

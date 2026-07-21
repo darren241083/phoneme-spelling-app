@@ -113,7 +113,16 @@ assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([completedExtraChallenge
 assert.equal(isRequiredCoreRuntimeAssignment(legacyMissingEvidenceSourceRuntime), true);
 assert.equal(hasIncompleteRequiredCoreRuntimeAssignment([legacyMissingEvidenceSourceRuntime]), true);
 
-function coreBankWord({ id, word, segments, focus, score = 42 }) {
+function coreBankWord({
+  id,
+  word,
+  segments,
+  focus,
+  score = 42,
+  approvalStatus = "approved",
+  suitabilityStatus = "suitable",
+  active = true,
+}) {
   return {
     id,
     word,
@@ -125,10 +134,10 @@ function coreBankWord({ id, word, segments, focus, score = 42 }) {
     difficulty_reason: `${focus} smoke-test word.`,
     sentence: `Spell ${word}.`,
     meaning: `${word} meaning.`,
-    suitability_status: "suitable",
-    approval_status: "approved",
+    suitability_status: suitabilityStatus,
+    approval_status: approvalStatus,
     source_version: "test",
-    is_active: true,
+    is_active: active,
   };
 }
 
@@ -185,6 +194,7 @@ function buildUsageAwareCoreBankRowsForProvisioning() {
 function buildLowCoverageCoreBankRowsForProvisioning() {
   const wordRows = [
     coreBankWord({ id: "core-action", word: "action", segments: ["a", "c", "tion"], focus: "tion", score: 46 }),
+    coreBankWord({ id: "core-motion", word: "motion", segments: ["m", "o", "tion"], focus: "tion", score: 48 }),
     coreBankWord({ id: "core-boat", word: "boat", segments: ["b", "oa", "t"], focus: "oa", score: 28 }),
     coreBankWord({ id: "core-seed", word: "seed", segments: ["s", "ee", "d"], focus: "ee", score: 28 }),
     coreBankWord({ id: "core-train", word: "train", segments: ["t", "r", "ai", "n"], focus: "ai", score: 30 }),
@@ -195,6 +205,10 @@ function buildLowCoverageCoreBankRowsForProvisioning() {
     coreBankWord({ id: "core-short", word: "short", segments: ["sh", "or", "t"], focus: "or", score: 40 }),
     coreBankWord({ id: "core-green", word: "green", segments: ["g", "r", "ee", "n"], focus: "ee", score: 30 }),
     coreBankWord({ id: "core-paint", word: "paint", segments: ["p", "ai", "n", "t"], focus: "ai", score: 32 }),
+    coreBankWord({ id: "core-pending-section", word: "section", segments: ["s", "e", "c", "tion"], focus: "tion", score: 46, approvalStatus: "pending" }),
+    coreBankWord({ id: "core-blocked-fiction", word: "fiction", segments: ["f", "i", "c", "tion"], focus: "tion", score: 48, suitabilityStatus: "blocked" }),
+    coreBankWord({ id: "core-unsuitable-station", word: "station", segments: ["s", "t", "a", "tion"], focus: "tion", score: 50, suitabilityStatus: "unsuitable" }),
+    coreBankWord({ id: "core-inactive-nation", word: "nation", segments: ["n", "a", "tion"], focus: "tion", score: 44, active: false }),
   ];
   const focusTargetRows = [...new Set(wordRows.map((row) => row.primary_focus_grapheme))]
     .map((focus) => ({ id: `target-${focus}`, focus_grapheme: focus, is_active: true }));
@@ -534,15 +548,34 @@ assert.equal(provisionedWithLowCoverageFallback.plan.pupilPlans.length, 1);
 assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings.length, 1);
 assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].focusGrapheme, "tion");
 assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].requestedTargetCount, 4);
-assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].selectedTargetCount, 1);
-assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].fallbackCount, 3);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].selectedTargetCount, 2);
+assert.equal(provisionedWithLowCoverageFallback.plan.coverageWarnings[0].fallbackCount, 2);
 const lowCoverageWords = provisionedWithLowCoverageFallback.plan.pupilPlans[0].words;
 assert.equal(lowCoverageWords.length, 10);
-assert.equal(new Set(lowCoverageWords.map((word) => word.word)).size, 10);
-assert.equal(
-  lowCoverageWords.filter((word) => word.assignmentRole === "target" && word.focusGrapheme === "tion").length,
-  1,
+const lowCoverageWordTexts = lowCoverageWords.map((word) => String(word.word || "").trim().toLowerCase());
+assert.equal(new Set(lowCoverageWordTexts).size, lowCoverageWordTexts.length);
+assert.deepEqual(
+  lowCoverageWords
+    .filter((word) => word.assignmentRole === "target" && word.focusGrapheme === "tion")
+    .map((word) => word.word)
+    .sort(),
+  ["action", "motion"],
 );
+for (const excluded of ["section", "fiction", "station", "nation"]) {
+  assert.equal(lowCoverageWordTexts.includes(excluded), false, `${excluded} should not be selected`);
+}
+const lowCoverageFallbackWords = lowCoverageWords.filter((word) => word.assignmentRole !== "target");
+assert.equal(lowCoverageFallbackWords.length, 8);
+assert.equal(lowCoverageFallbackWords.every((word) => word.originWordSource === "wordloom_core"), true);
+assert.equal(lowCoverageWords.every((word) => word.originWordSource === "wordloom_core"), true);
+assert.equal(provisionedWithLowCoverageFallback.plan.selectorDiagnostics.lowBankFallback.used, true);
+assert.equal(provisionedWithLowCoverageFallback.plan.selectorDiagnostics.lowBankFallback.warningCount, 1);
+assert.deepEqual(
+  provisionedWithLowCoverageFallback.plan.selectorDiagnostics.lowBankFallback.warnings[0],
+  provisionedWithLowCoverageFallback.plan.coverageWarnings[0],
+);
+assert.equal(provisionedWithLowCoverageFallback.plan.pupilPlans[0].selectorDiagnostics.lowBankFallback.used, true);
+assert.equal(provisionedWithLowCoverageFallback.plan.pupilPlans[0].selectorDiagnostics.targetPurity.selectedPrimaryTargetCount, 2);
 
 assert.throws(
   () => buildProvisioningPlan({

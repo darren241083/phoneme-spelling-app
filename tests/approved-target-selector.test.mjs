@@ -864,22 +864,23 @@ test("generated assignment uses partial primary target coverage and fills safely
     pupilIds: ["pupil-1"],
     teacherTests: [{
       test_words: [
-        wordRow({ id: "review-ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
-        wordRow({ id: "review-ai-2", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
-        wordRow({ id: "review-ai-3", word: "paint", score: 26, focus: ["ai"], segments: ["p", "ai", "n", "t"] }),
-        wordRow({ id: "review-ai-4", word: "snail", score: 30, focus: ["ai"], segments: ["s", "n", "ai", "l"] }),
-        wordRow({ id: "review-ai-5", word: "brain", score: 32, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
-        wordRow({ id: "review-ee-1", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
-        wordRow({ id: "review-ee-2", word: "green", score: 25, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
-        wordRow({ id: "review-ee-3", word: "sleep", score: 26, focus: ["ee"], segments: ["s", "l", "ee", "p"] }),
-        wordRow({ id: "review-ee-4", word: "queen", score: 30, focus: ["ee"], segments: ["qu", "ee", "n"] }),
-        wordRow({ id: "review-ee-5", word: "three", score: 34, focus: ["ee"], segments: ["th", "r", "ee"] }),
-        wordRow({ id: "stretch-or-1", word: "storm", score: 58, focus: ["or"], segments: ["s", "t", "or", "m"] }),
-        wordRow({ id: "stretch-or-2", word: "short", score: 60, focus: ["or"], segments: ["sh", "or", "t"] }),
-        wordRow({ id: "target-ph-1", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
-        wordRow({ id: "target-sh-1", word: "shell", score: 31, focus: ["sh"], segments: ["sh", "e", "ll"] }),
+        coreWordRow({ id: "review-ai-1", word: "rain", score: 24, focus: ["ai"], segments: ["r", "ai", "n"] }),
+        coreWordRow({ id: "review-ai-2", word: "train", score: 25, focus: ["ai"], segments: ["t", "r", "ai", "n"] }),
+        coreWordRow({ id: "review-ee-1", word: "seed", score: 24, focus: ["ee"], segments: ["s", "ee", "d"] }),
+        coreWordRow({ id: "review-ee-2", word: "green", score: 25, focus: ["ee"], segments: ["g", "r", "ee", "n"] }),
+        coreWordRow({ id: "review-oa-1", word: "boat", score: 26, focus: ["oa"], segments: ["b", "oa", "t"] }),
+        coreWordRow({ id: "review-oa-2", word: "coat", score: 28, focus: ["oa"], segments: ["c", "oa", "t"] }),
+        coreWordRow({ id: "review-ar-1", word: "farm", score: 30, focus: ["ar"], segments: ["f", "ar", "m"] }),
+        coreWordRow({ id: "review-ar-2", word: "start", score: 32, focus: ["ar"], segments: ["s", "t", "ar", "t"] }),
+        coreWordRow({ id: "stretch-or-1", word: "storm", score: 38, focus: ["or"], segments: ["s", "t", "or", "m"] }),
+        coreWordRow({ id: "stretch-or-2", word: "short", score: 40, focus: ["or"], segments: ["sh", "or", "t"] }),
+        wordRow({ id: "legacy-ai-1", word: "brain", score: 24, focus: ["ai"], segments: ["b", "r", "ai", "n"] }),
+        wordRow({ id: "legacy-ee-1", word: "sleep", score: 24, focus: ["ee"], segments: ["s", "l", "ee", "p"] }),
+        coreWordRow({ id: "target-ph-1", word: "phone", score: 30, focus: ["ph"], segments: ["ph", "o", "n", "e"] }),
+        coreWordRow({ id: "target-ph-2", word: "phonics", score: 32, focus: ["ph"], segments: ["ph", "o", "n", "i", "ck", "s"] }),
         wordRow({ id: "generated-ph", word: "phase", score: 30, focus: ["ph"], segments: ["ph", "a", "s", "e"], source: "assignment_engine_pool" }),
         wordRow({ id: "pending-ph", word: "photo", score: 31, focus: ["ph"], segments: ["ph", "o", "t", "o"], approvalStatus: "pending" }),
+        wordRow({ id: "rejected-ph", word: "phrase", score: 31, focus: ["ph"], segments: ["ph", "r", "a", "s", "e"], approvalStatus: "rejected" }),
         wordRow({ id: "blocked-ph", word: "graph", score: 32, focus: ["ph"], segments: ["g", "r", "a", "ph"], suitability: "blocked" }),
         wordRow({ id: "unsuitable-ph", word: "phantom", score: 33, focus: ["ph"], segments: ["ph", "a", "n", "t", "o", "m"], suitabilityStatus: "unsuitable" }),
         wordRow({ id: "inactive-ph", word: "sphere", score: 34, focus: ["ph"], segments: ["s", "ph", "ere"], active: false }),
@@ -891,11 +892,12 @@ test("generated assignment uses partial primary target coverage and fills safely
       "pupil-1": {
         concernRows: [
           { target: "ph", total: 4, securityBand: "insecure" },
-          { target: "sh", total: 3, securityBand: "insecure" },
         ],
         secureRows: [
           { target: "ai", total: 4, securityBand: "secure" },
           { target: "ee", total: 4, securityBand: "secure" },
+          { target: "oa", total: 4, securityBand: "secure" },
+          { target: "ar", total: 4, securityBand: "secure" },
         ],
         developingRows: [{ target: "or", total: 3, securityBand: "nearly_secure" }],
         confusionByTarget: new Map(),
@@ -911,32 +913,49 @@ test("generated assignment uses partial primary target coverage and fills safely
     pupilId: "pupil-1",
     focusGrapheme: "ph",
     requestedTargetCount: 4,
-    selectedTargetCount: 1,
-    fallbackCount: 3,
-    message: "Only 1 of 4 requested target slots could use approved ph words; 3 slots will use safe fallback, review, or consolidation words.",
+    selectedTargetCount: 2,
+    fallbackCount: 2,
+    message: "Only 2 of 4 requested target slots could use approved ph words; 2 slots will use safe fallback, review, or consolidation words.",
   });
 
   const pupilPlan = plan.pupilPlans[0];
   const pupilWords = pupilPlan?.words || [];
   assert.equal(pupilPlan.coverageWarnings.length, 1);
-  assert.equal(pupilWords.length, 10);
-  assert.equal(new Set(pupilWords.map((item) => item.word)).size, pupilWords.length);
+  assert.equal(pupilWords.length, plan.totalWords);
+  const normalizedWords = pupilWords.map((item) => String(item.word || "").trim().toLowerCase());
+  assert.equal(new Set(normalizedWords).size, normalizedWords.length);
 
   const selectedWords = pupilWords.map((item) => item.word);
-  assert.equal(selectedWords.includes("phone"), true);
-  for (const blocked of ["phase", "photo", "graph", "phantom", "sphere"]) {
+  for (const exactTarget of ["phone", "phonics"]) {
+    assert.equal(selectedWords.includes(exactTarget), true, `${exactTarget} should be retained`);
+  }
+  for (const blocked of ["phase", "photo", "phrase", "graph", "phantom", "sphere"]) {
     assert.equal(selectedWords.includes(blocked), false, `${blocked} should not be selected`);
   }
 
-  const targetWords = pupilWords
-    .filter((item) => item.assignmentRole === "target")
-    .map((item) => item.word);
-  assertJsonEqual(targetWords, ["phone"]);
+  const targetWords = pupilWords.filter((item) => item.assignmentRole === "target");
+  assertJsonEqual(targetWords.map((item) => item.word).sort(), ["phone", "phonics"]);
 
-  const fallbackReviewWords = pupilWords
-    .filter((item) => item.assignmentRole === "review")
-    .map((item) => `${item.word}:${item.focusGrapheme}`);
-  assert.equal(fallbackReviewWords.some((item) => !item.endsWith(":ph")), true);
+  const reviewWords = pupilWords.filter((item) => item.assignmentRole === "review");
+  const stretchWords = pupilWords.filter((item) => item.assignmentRole === "stretch");
+  const fallbackWords = [...reviewWords, ...stretchWords];
+  assert.equal(reviewWords.length, 6);
+  assert.equal(stretchWords.length, 2);
+  assert.equal(fallbackWords.length, 8);
+  assert.equal(fallbackWords.every((item) => item.focusGrapheme !== "ph"), true);
+  assert.equal(fallbackWords.every((item) => item.originWordSource === "wordloom_core"), true);
+  assert.equal(selectedWords.includes("brain"), false, "legacy fallback should lose to approved Core Bank words");
+  assert.equal(selectedWords.includes("sleep"), false, "legacy fallback should lose to approved Core Bank words");
+
+  assertJsonEqual(Object.keys(plan.selectorDiagnostics.lowBankFallback).sort(), ["used", "warningCount", "warnings"]);
+  assert.equal(plan.selectorDiagnostics.lowBankFallback.used, true);
+  assert.equal(plan.selectorDiagnostics.lowBankFallback.warningCount, 1);
+  assertJsonEqual(plan.selectorDiagnostics.lowBankFallback.warnings[0], plan.coverageWarnings[0]);
+  assert.equal(pupilPlan.selectorDiagnostics.lowBankFallback.used, true);
+  assert.equal(pupilPlan.selectorDiagnostics.targetPurity.requestedTargetCount, 4);
+  assert.equal(pupilPlan.selectorDiagnostics.targetPurity.targetWordCount, 2);
+  assert.equal(pupilPlan.selectorDiagnostics.targetPurity.selectedPrimaryTargetCount, 2);
+  assert.equal(pupilPlan.selectorDiagnostics.targetPurity.ratio, 0.5);
 });
 
 test("generated assignment with zero exact primary coverage fills safely with review warnings", () => {
