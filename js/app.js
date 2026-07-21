@@ -1,24 +1,20 @@
 const ROLE_STORAGE_KEY = "ps_role_v1";
 const LEGACY_ROLE_STORAGE_KEY = "ps_role";
+const PUPIL_SESSION_STORAGE_KEY = "ps_pupil_session_v2";
 
-const viewRole = document.getElementById("viewRole");
-const viewTeacherAuth = document.getElementById("viewTeacherAuth");
+const viewLogin = document.getElementById("viewLogin");
 const viewTeacher = document.getElementById("viewTeacher");
-const viewPupilAuth = document.getElementById("viewPupilAuth");
 const viewPupil = document.getElementById("viewPupil");
 
-const btnTeacher = document.getElementById("btnTeacher");
-const btnPupil = document.getElementById("btnPupil");
-const btnTryLesson = document.getElementById("btnTryLesson");
 const btnGoogle = document.getElementById("btnGoogle");
+const credentialLoginForm = document.getElementById("credentialLoginForm");
+const btnCredentialLogin = document.getElementById("btnCredentialLogin");
 const btnSignOut = document.getElementById("btnSignOut");
-const btnBackFromTeacher = document.getElementById("btnBackFromTeacher");
-const btnBackFromPupil = document.getElementById("btnBackFromPupil");
-const btnPupilLogin = document.getElementById("btnPupilLogin");
-const pupilUsername = document.getElementById("pupilClassCode");
-const pupilPin = document.getElementById("pupilCode");
-const pupilAuthMsg = document.getElementById("pupilAuthMsg");
-const teacherAuthMsg = document.getElementById("teacherAuthMsg");
+const loginIdentifier = document.getElementById("pupilClassCode");
+const loginPassword = document.getElementById("pupilCode");
+const loginAuthMsg = document.getElementById("loginAuthMsg");
+const pupilAuthMsg = loginAuthMsg;
+const teacherAuthMsg = loginAuthMsg;
 const banner = document.getElementById("banner");
 
 const oldRole = localStorage.getItem(LEGACY_ROLE_STORAGE_KEY);
@@ -202,6 +198,15 @@ function clearRole() {
   localStorage.removeItem(ROLE_STORAGE_KEY);
 }
 
+function hasStoredPupilSessionHint() {
+  try {
+    return !!localStorage.getItem(PUPIL_SESSION_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Could not read pupil session hint:", error);
+    return false;
+  }
+}
+
 function setBanner(msg = "", kind = "info") {
   if (!banner) return;
   if (!msg) {
@@ -227,10 +232,8 @@ function setNotice(el, msg = "") {
 }
 
 function hideAll() {
-  viewRole.style.display = "none";
-  viewTeacherAuth.style.display = "none";
+  viewLogin.style.display = "none";
   viewTeacher.style.display = "none";
-  viewPupilAuth.style.display = "none";
   viewPupil.style.display = "none";
 }
 
@@ -238,15 +241,9 @@ function show(el) {
   el.style.display = "block";
 }
 
-function showRolePicker() {
+function showLoginScreen() {
   hideAll();
-  show(viewRole);
-  btnSignOut.style.display = "none";
-}
-
-function showTeacherAuth() {
-  hideAll();
-  show(viewTeacherAuth);
+  show(viewLogin);
   btnSignOut.style.display = "none";
 }
 
@@ -254,12 +251,6 @@ function showTeacherView() {
   hideAll();
   show(viewTeacher);
   btnSignOut.style.display = "inline-block";
-}
-
-function showPupilAuth() {
-  hideAll();
-  show(viewPupilAuth);
-  btnSignOut.style.display = "none";
 }
 
 function showPupilDashboard() {
@@ -329,6 +320,87 @@ function buildTeacherLoadError(error) {
   `;
 }
 
+async function readCurrentStaffSession({ reportErrors = true } = {}) {
+  let supabase = null;
+  try {
+    supabase = await withTimeout(loadSupabase(), 4000, "load sign-in");
+  } catch (error) {
+    if (reportErrors) {
+      setBanner("Teacher sign-in is unavailable right now. Please refresh and try again.", "error");
+      showLoginScreen();
+      setNotice(teacherAuthMsg, error?.message || "Could not load teacher sign-in.");
+    }
+    return null;
+  }
+
+  const sessionRes = await withTimeout(
+    supabase.auth.getSession(),
+    2500,
+    "getSession",
+  ).catch((error) => ({ data: { session: null }, error }));
+
+  if (sessionRes?.error && reportErrors) {
+    setNotice(teacherAuthMsg, sessionRes.error?.message || "Could not check teacher sign-in.");
+  }
+
+  return sessionRes?.data?.session || null;
+}
+
+async function renderTeacherDashboardForSession(session) {
+  setBanner("");
+  showTeacherView();
+
+  try {
+    const renderTeacherDashboard = await withTimeout(loadTeacherDashboard(), 5000, "load teacher dashboard");
+    let lastRenderStage = "starting";
+    const renderPromise = renderTeacherDashboard(viewTeacher, {
+      onStage(stage) {
+        lastRenderStage = String(stage || lastRenderStage);
+      },
+    });
+    await withTimeout(renderPromise, 8000, "renderTeacherDashboard", {
+      getLastStage: () => lastRenderStage,
+      logLateOutcome: true,
+    });
+    displayedTeacherUserId = String(session?.user?.id || "").trim();
+  } catch (error) {
+    displayedTeacherUserId = "";
+    viewTeacher.innerHTML = buildTeacherLoadError(error);
+  }
+}
+
+async function tryRenderStoredPupilSession({ rememberRole = false } = {}) {
+  displayedTeacherUserId = "";
+  setBanner("");
+
+  try {
+    const { getPupilSession, validatePupilSession, pupilLogout } = await loadPupilAuth();
+    const session = getPupilSession();
+    if (!session) return false;
+
+    const validatedSession = await validatePupilSession(session);
+    if (!validatedSession) {
+      await stopPupilGameplayAudio();
+      pupilLogout();
+      showLoginScreen();
+      setNotice(pupilAuthMsg, "This pupil login is no longer active. Please ask a teacher for help.");
+      return true;
+    }
+
+    if (rememberRole) setRole("pupil");
+    await applyAccessibilitySettingsSafely();
+    showPupilDashboard();
+    const renderPupilView = await withTimeout(loadPupilView(), 4000, "load pupil view");
+    await renderPupilView(viewPupil, validatedSession);
+    setNotice(pupilAuthMsg, "");
+    return true;
+  } catch (error) {
+    showLoginScreen();
+    setNotice(pupilAuthMsg, error?.message || "Could not open the pupil area.");
+    return true;
+  }
+}
+
 async function route() {
   if (routing) return;
   routing = true;
@@ -336,156 +408,104 @@ async function route() {
   try {
     const role = getRole();
 
-    if (!role) {
-      displayedTeacherUserId = "";
-      setBanner("");
-      setNotice(pupilAuthMsg, "");
-      setNotice(teacherAuthMsg, "");
-      showRolePicker();
-      return;
-    }
-
     if (role === "pupil") {
-      displayedTeacherUserId = "";
-      setBanner("");
-      showPupilAuth();
+      const displayedPupilSession = await tryRenderStoredPupilSession();
+      if (displayedPupilSession) return;
 
-      try {
-        const { getPupilSession, validatePupilSession, pupilLogout } = await loadPupilAuth();
-        const session = getPupilSession();
-        if (!session) return;
-        const validatedSession = await validatePupilSession(session);
-        if (!validatedSession) {
-          await stopPupilGameplayAudio();
-          pupilLogout();
-          showPupilAuth();
-          setNotice(pupilAuthMsg, "This pupil login is no longer active. Please ask a teacher for help.");
-          return;
-        }
-
-        await applyAccessibilitySettingsSafely();
-        showPupilDashboard();
-        const renderPupilView = await withTimeout(loadPupilView(), 4000, "load pupil view");
-        await renderPupilView(viewPupil, validatedSession);
-        setNotice(pupilAuthMsg, "");
-      } catch (error) {
-        showPupilAuth();
-        setNotice(pupilAuthMsg, error?.message || "Could not open the pupil area.");
+      const storedStaffSession = await readCurrentStaffSession({ reportErrors: false });
+      if (storedStaffSession?.user) {
+        setRole("teacher");
+        await renderTeacherDashboardForSession(storedStaffSession);
+        return;
       }
 
+      showLoginScreen();
       return;
     }
 
-    setNotice(teacherAuthMsg, "");
+    if (role) {
+      setNotice(teacherAuthMsg, "");
+      displayedTeacherUserId = "";
+      setBanner("Checking sign-in...", "info");
+      showLoginScreen();
+      const session = await readCurrentStaffSession({ reportErrors: true });
+      if (!session?.user) {
+        displayedTeacherUserId = "";
+        setBanner("");
+        showLoginScreen();
+        return;
+      }
+      await renderTeacherDashboardForSession(session);
+      return;
+    }
+
     displayedTeacherUserId = "";
-    setBanner("Checking sign-in...", "info");
-    showRolePicker();
-
-    let supabase = null;
-    try {
-      supabase = await withTimeout(loadSupabase(), 4000, "load sign-in");
-    } catch (error) {
-      setBanner("Teacher sign-in is unavailable right now. Please refresh and try again.", "error");
-      showTeacherAuth();
-      setNotice(teacherAuthMsg, error?.message || "Could not load teacher sign-in.");
-      return;
-    }
-
-    const sessionRes = await withTimeout(
-      supabase.auth.getSession(),
-      2500,
-      "getSession",
-    ).catch((error) => ({ data: { session: null }, error }));
-
-    const session = sessionRes?.data?.session || null;
-    if (!session?.user) {
-      displayedTeacherUserId = "";
-      setBanner("");
-      showTeacherAuth();
-      return;
-    }
-
     setBanner("");
-    showTeacherView();
+    setNotice(pupilAuthMsg, "");
+    setNotice(teacherAuthMsg, "");
+    showLoginScreen();
 
-    try {
-      const renderTeacherDashboard = await withTimeout(loadTeacherDashboard(), 5000, "load teacher dashboard");
-      let lastRenderStage = "starting";
-      const renderPromise = renderTeacherDashboard(viewTeacher, {
-        onStage(stage) {
-          lastRenderStage = String(stage || lastRenderStage);
-        },
-      });
-      await withTimeout(renderPromise, 8000, "renderTeacherDashboard", {
-        getLastStage: () => lastRenderStage,
-        logLateOutcome: true,
-      });
-      displayedTeacherUserId = String(session.user.id || "").trim();
-    } catch (error) {
-      displayedTeacherUserId = "";
-      viewTeacher.innerHTML = buildTeacherLoadError(error);
+    const automaticStaffSession = await readCurrentStaffSession({ reportErrors: false });
+    if (automaticStaffSession?.user) {
+      setRole("teacher");
+      await renderTeacherDashboardForSession(automaticStaffSession);
+      return;
     }
+
+    if (hasStoredPupilSessionHint()) {
+      const displayedPupilSession = await tryRenderStoredPupilSession({ rememberRole: true });
+      if (displayedPupilSession) return;
+    }
+
+    showLoginScreen();
   } finally {
     routing = false;
   }
 }
 
-btnTeacher?.addEventListener("click", async () => {
-  setRole("teacher");
-  await route();
-});
-
-btnPupil?.addEventListener("click", async () => {
-  setRole("pupil");
-  await route();
-});
-
-btnTryLesson?.addEventListener("click", () => {
-  const url = new URL("./present.html", window.location.href);
-  url.searchParams.set("demo", "focus_sound");
-  window.location.href = url.toString();
-});
-
-btnBackFromTeacher?.addEventListener("click", async () => {
-  clearRole();
-  setBanner("");
-  setNotice(teacherAuthMsg, "");
-  setNotice(pupilAuthMsg, "");
-  await route();
-});
-
-btnBackFromPupil?.addEventListener("click", async () => {
-  await stopPupilGameplayAudio();
-  try {
-    const { pupilLogout } = await loadPupilAuth();
-    pupilLogout();
-  } catch (error) {
-    console.warn("pupil logout unavailable:", error);
+credentialLoginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const identifier = String(loginIdentifier?.value || "").trim();
+  const password = String(loginPassword?.value || "");
+  if (!identifier || !password.trim()) {
+    setNotice(loginAuthMsg, "Enter your login details.");
+    return;
   }
-  clearRole();
-  setNotice(pupilAuthMsg, "");
-  await route();
-});
 
-btnPupilLogin?.addEventListener("click", async () => {
-  const username = String(pupilUsername?.value || "").trim();
-  const pin = String(pupilPin?.value || "").trim();
-
+  const previousText = btnCredentialLogin?.textContent || "";
+  const isStaffLogin = identifier.includes("@");
   try {
-    const { pupilLogin } = await loadPupilAuth();
-    setNotice(pupilAuthMsg, "Signing in...");
-    await pupilLogin(username, pin);
-    setNotice(pupilAuthMsg, "");
+    if (btnCredentialLogin) {
+      btnCredentialLogin.disabled = true;
+      btnCredentialLogin.textContent = "Signing in...";
+    }
+    setNotice(loginAuthMsg, "Signing in...");
+
+    if (isStaffLogin) {
+      const email = identifier.toLowerCase();
+      const supabase = await loadSupabase();
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      setRole("teacher");
+    } else {
+      const username = identifier;
+      const pin = password.trim();
+      const { pupilLogin } = await loadPupilAuth();
+      await pupilLogin(username, pin);
+      setRole("pupil");
+    }
+
+    if (loginPassword) loginPassword.value = "";
+    setNotice(loginAuthMsg, "");
     await route();
   } catch (error) {
-    setNotice(pupilAuthMsg, error?.message || "Could not start pupil session.");
+    setNotice(loginAuthMsg, error?.message || "Could not sign in with those details.");
+  } finally {
+    if (btnCredentialLogin) {
+      btnCredentialLogin.disabled = false;
+      btnCredentialLogin.textContent = previousText || "Sign in";
+    }
   }
-});
-
-pupilPin?.addEventListener("keydown", async (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  btnPupilLogin?.click();
 });
 
 btnGoogle?.addEventListener("click", async () => {
@@ -493,6 +513,7 @@ btnGoogle?.addEventListener("click", async () => {
     const supabase = await loadSupabase();
     const redirectTo = buildLoginRedirectTo();
 
+    setRole("teacher");
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -505,7 +526,7 @@ btnGoogle?.addEventListener("click", async () => {
   } catch (error) {
     setBanner("Google sign-in is unavailable right now. Please refresh and try again.", "error");
     setNotice(teacherAuthMsg, error?.message || "Could not start Google sign-in.");
-    showTeacherAuth();
+    showLoginScreen();
   }
 });
 
@@ -525,7 +546,7 @@ btnSignOut?.addEventListener("click", async () => {
     setBanner("");
     setNotice(pupilAuthMsg, "");
     setNotice(teacherAuthMsg, "");
-    showRolePicker();
+    showLoginScreen();
 
     try {
       const supabase = await loadSupabase();
@@ -554,7 +575,7 @@ btnSignOut?.addEventListener("click", async () => {
   setBanner("");
   setNotice(pupilAuthMsg, "");
   setNotice(teacherAuthMsg, "");
-  showRolePicker();
+  showLoginScreen();
 });
 
 void applyAccessibilitySettingsSafely();

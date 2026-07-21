@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Wordloom Login</title>
-  <link rel="stylesheet" href="./styles.css?v=1.17" />
+  <link rel="stylesheet" href="./styles.css?v=1.20" />
 </head>
 <body class="loginPage">
   <div class="wrap loginWrap">
@@ -14,7 +14,6 @@
           <span class="loginWordmarkMark" aria-hidden="true">W</span>
           <span>Wordloom</span>
         </a>
-        <div class="brandSub loginBrandSub">Teacher tests, class presentation and pupil practice</div>
       </div>
       <div class="topbarRight loginTopbarRight">
         <a class="loginHomeLink" href="./index.html">&#8592; Back to homepage</a>
@@ -24,23 +23,10 @@
 
     <div id="banner" class="banner" style="display:none;"></div>
 
-    <section id="viewRole" class="card loginCard loginRoleCard">
-      <span class="loginEyebrow">Wordloom login</span>
-      <h2>Choose role</h2>
-      <p class="muted loginLead">Choose how you want to use Wordloom today.</p>
-      <div class="row loginActionRow">
-        <button id="btnTeacher" class="btn" type="button">I&rsquo;m a teacher</button>
-        <button id="btnPupil" class="btn secondary" type="button">I&rsquo;m a pupil</button>
-        <button id="btnTryLesson" class="btn secondary" type="button">Try sample test</button>
-      </div>
-      <p class="muted loginHint">Launch a quick sample without signing in.</p>
-    </section>
+    <section id="viewLogin" class="card loginCard loginUnifiedCard">
+      <h2>Sign in</h2>
 
-    <section id="viewTeacherAuth" class="card loginCard" style="display:none;">
-      <span class="loginEyebrow">Teacher access</span>
-      <h2>Teacher sign in</h2>
-      <p class="muted">Continue with Google to create tests, classes and assignments.</p>
-      <div class="row loginActionRow">
+      <div class="loginCredentialBox">
         <button id="btnGoogle" class="btn loginGoogleButton" type="button">
           <svg class="loginGoogleIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path fill="#4285F4" d="M21.6 12.23c0-.78-.07-1.53-.2-2.23H12v4.22h5.38a4.6 4.6 0 0 1-1.99 3.02v2.51h3.23c1.89-1.74 2.98-4.3 2.98-7.52Z"/>
@@ -50,38 +36,27 @@
           </svg>
           <span>Continue with Google</span>
         </button>
-        <button id="btnBackFromTeacher" class="btn secondary" type="button">Back to role choice</button>
+
+        <form id="credentialLoginForm" class="loginForm">
+          <div>
+            <label for="pupilClassCode">Email or pupil username</label>
+            <input id="pupilClassCode" class="input" autocomplete="username" />
+          </div>
+          <div>
+            <label for="pupilCode">Password or PIN</label>
+            <input id="pupilCode" class="input" type="password" inputmode="text" autocomplete="current-password" />
+          </div>
+          <button id="btnCredentialLogin" class="btn" type="submit">Sign in</button>
+        </form>
+        <div id="loginAuthMsg" class="notice" style="display:none;"></div>
       </div>
-      <div id="teacherAuthMsg" class="notice" style="display:none;"></div>
     </section>
 
     <section id="viewTeacher" class="card" style="display:none;"></section>
-
-    <section id="viewPupilAuth" class="card loginCard" style="display:none;">
-      <span class="loginEyebrow">Pupil access</span>
-      <h2>Pupil login</h2>
-      <p class="muted">Enter your username and PIN.</p>
-      <div class="grid2">
-        <div>
-          <label>Username</label>
-          <input id="pupilClassCode" class="input" placeholder="e.g. honeill1001" />
-        </div>
-        <div>
-          <label>PIN</label>
-          <input id="pupilCode" class="input" type="password" placeholder="4 digit PIN" />
-        </div>
-      </div>
-      <div class="row">
-        <button id="btnPupilLogin" class="btn" type="button">Login</button>
-        <button id="btnBackFromPupil" class="btn secondary" type="button">Back to role choice</button>
-      </div>
-      <div id="pupilAuthMsg" class="notice" style="display:none;"></div>
-    </section>
-
     <section id="viewPupil" class="card" style="display:none;"></section>
   </div>
 
   <script src="./vendor/xlsx.full.min.js?v=0.18.5"></script>
-  <script type="module" src="./js/app.js?v=5.140"></script>
+  <script type="module" src="./js/app.js?v=5.143"></script>
 </body>
 </html>

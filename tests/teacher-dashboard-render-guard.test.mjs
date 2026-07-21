@@ -277,6 +277,6 @@ assert.equal(teacherViewSource.includes("MANUAL_ASSIGNMENT_DELIVERY_COPY.label")
 assert.equal(teacherViewSource.includes('name="delivery_model"'), true);
 assert.equal(teacherViewSource.includes('data-field="manual-assignment-delivery"'), true);
 assert.equal(appSource.includes('teacherView.js?v=7.10'), true);
-assert.equal(loginSource.includes('app.js?v=5.140'), true);
+assert.equal(loginSource.includes('app.js?v=5.143'), true);
 
 console.log("Passed teacher dashboard initial-render guard checks.");
