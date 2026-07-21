@@ -14,6 +14,10 @@ import {
   buildAutoAssignEngineOptions,
   normalizeAutoAssignPolicy,
 } from "./autoAssignPolicy.js?v=1.0";
+import {
+  buildSelectorEvidenceSignal,
+  interpretWordEvidence,
+} from "./supportLadderEvidence.js?v=1.0";
 
 export const ASSIGNMENT_ENGINE_WORD_SOURCE = "assignment_engine_pool";
 export const ASSIGNMENT_ENGINE_TARGET_SOURCE = "assignment_engine_v1";
@@ -177,6 +181,14 @@ const SUPPORT_LADDER_FOCUS_LIMIT_BY_BAND = {
   early_stretch: 1,
 };
 const USAGE_RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const SELECTOR_EVIDENCE_CATEGORY_CORRECT_FIRST_TIME = "correct_first_time";
+const SELECTOR_EVIDENCE_CATEGORY_CORRECT_AFTER_RETRY = "correct_after_retry";
+const SELECTOR_EVIDENCE_CATEGORY_CORRECT_WITH_SUPPORT = "correct_with_support";
+const SELECTOR_EVIDENCE_CATEGORY_INCORRECT_WITH_SUPPORT = "incorrect_with_support";
+const SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE = "access_issue";
+const SELECTOR_EVIDENCE_SOURCE_EXTRA_CHALLENGE = "extra_challenge";
+const SELECTOR_SUPPORTED_DEPENDENCE_RECYCLE_CAP = 1;
+const SELECTOR_SUPPORTED_FAILURE_RECYCLE_CAP = 2;
 
 function normalizeToken(value) {
   return String(value || "")
@@ -488,6 +500,241 @@ function getAttemptSeenAt(attempt) {
   return Number.isFinite(seenAt) ? seenAt : 0;
 }
 
+function getAttemptSourceKey(attempt) {
+  return normalizeMetadataKey(attempt?.attempt_source || attempt?.attemptSource || "");
+}
+
+function isExtraChallengeAttempt(attempt) {
+  return getAttemptSourceKey(attempt) === SELECTOR_EVIDENCE_SOURCE_EXTRA_CHALLENGE;
+}
+
+function hasSelectorFieldValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === "object") return Object.keys(value).length > 0;
+  return String(value ?? "").trim() !== "";
+}
+
+function hasSupportLadderAttemptMetadata(attempt = {}) {
+  return hasSelectorFieldValue(attempt?.delivery_model ?? attempt?.deliveryModel)
+    || hasSelectorFieldValue(attempt?.support_state ?? attempt?.supportState)
+    || hasSelectorFieldValue(attempt?.evidence_category ?? attempt?.evidenceCategory)
+    || hasSelectorFieldValue(attempt?.support_actions ?? attempt?.supportActions);
+}
+
+function incrementDiagnosticCount(target, key, amount = 1) {
+  const safeKey = normalizeMetadataKey(key);
+  if (!safeKey || !target || typeof target !== "object") return;
+  target[safeKey] = Math.max(0, Number(target[safeKey] || 0)) + amount;
+}
+
+function getAttemptSelectorEvidenceCategory(attempt = {}) {
+  return normalizeMetadataKey(
+    attempt?.selector_evidence_category
+    || attempt?.selectorEvidenceCategory
+    || attempt?.evidence_category
+    || attempt?.evidenceCategory
+    || ""
+  );
+}
+
+function getAttemptSelectorEvidenceSignal(attempt = {}) {
+  const signal = attempt?.selectorEvidenceSignal || attempt?.selector_evidence_signal || null;
+  return signal && typeof signal === "object" && !Array.isArray(signal) ? signal : null;
+}
+
+function getSelectorEvidenceGroupKey(attempt = {}, resolvedWordMap = null) {
+  const pupilId = String(attempt?.pupil_id || attempt?.pupilId || "").trim() || "__unknown_pupil__";
+  const identity = getAttemptIdentity(attempt) || getAttemptWordText(attempt) || "__unknown_word__";
+  const target = analyticsTargetForAttempt(attempt, resolvedWordMap) || "__general__";
+  return `${pupilId}::${identity}::${target}`;
+}
+
+function buildSupportLadderCategoryCountsByGroup(attempts = [], {
+  excludeExtraChallenge = true,
+  resolvedWordMap = null,
+} = {}) {
+  const countsByGroup = new Map();
+  for (const attempt of attempts || []) {
+    if (excludeExtraChallenge && isExtraChallengeAttempt(attempt)) continue;
+    if (!hasSupportLadderAttemptMetadata(attempt)) continue;
+    const interpreted = interpretWordEvidence(attempt, { source: getAttemptSourceKey(attempt) });
+    const category = normalizeMetadataKey(interpreted?.category || "");
+    if (!category) continue;
+    const groupKey = getSelectorEvidenceGroupKey(attempt, resolvedWordMap);
+    const categoryCounts = countsByGroup.get(groupKey) || {};
+    incrementDiagnosticCount(categoryCounts, category);
+    countsByGroup.set(groupKey, categoryCounts);
+  }
+  return countsByGroup;
+}
+
+function normalizeSupportLadderAttemptForSelector(attempt = {}, {
+  categoryCounts = null,
+  resolvedWordMap = null,
+} = {}) {
+  const interpreted = interpretWordEvidence(attempt, { source: getAttemptSourceKey(attempt) });
+  const signal = buildSelectorEvidenceSignal(attempt, {
+    source: getAttemptSourceKey(attempt),
+    categoryCounts: categoryCounts && typeof categoryCounts === "object" ? categoryCounts : null,
+  });
+  const category = normalizeMetadataKey(signal?.category || interpreted?.category || "");
+  if (signal?.accessFlag || category === SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE) {
+    return {
+      attempt: null,
+      category: SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE,
+      signal,
+    };
+  }
+  if (!interpreted?.terminal && interpreted?.rawCorrect === null) {
+    return {
+      attempt: null,
+      category: category || "unscored_support_ladder",
+      signal,
+    };
+  }
+
+  let correct = getAttemptCorrectValue(attempt);
+  let attemptNumber = getAttemptNumberValue(attempt);
+  if (category === SELECTOR_EVIDENCE_CATEGORY_CORRECT_FIRST_TIME) {
+    correct = true;
+    attemptNumber = 1;
+  } else if (category === SELECTOR_EVIDENCE_CATEGORY_CORRECT_AFTER_RETRY) {
+    correct = true;
+    attemptNumber = Math.max(2, attemptNumber);
+  } else if (category === SELECTOR_EVIDENCE_CATEGORY_CORRECT_WITH_SUPPORT) {
+    correct = false;
+    attemptNumber = Math.max(2, attemptNumber);
+  } else if (category === SELECTOR_EVIDENCE_CATEGORY_INCORRECT_WITH_SUPPORT) {
+    correct = false;
+    attemptNumber = Math.max(3, attemptNumber);
+  } else if (typeof interpreted?.rawCorrect === "boolean") {
+    correct = interpreted.rawCorrect;
+  }
+
+  return {
+    attempt: {
+      ...attempt,
+      correct,
+      is_correct: correct,
+      attempt_number: attemptNumber,
+      selectorEvidenceNormalized: true,
+      selector_evidence_category: category,
+      selectorEvidenceCategory: category,
+      selector_evidence_priority: Number(signal?.priority || 0),
+      selectorEvidencePriority: Number(signal?.priority || 0),
+      selector_evidence_rationale: String(signal?.rationale || ""),
+      selectorEvidenceRationale: String(signal?.rationale || ""),
+      selector_secure_evidence: signal?.secureEvidence === true,
+      selectorSecureEvidence: signal?.secureEvidence === true,
+      selector_spelling_need: signal?.spellingNeed === true,
+      selectorSpellingNeed: signal?.spellingNeed === true,
+      selector_supported_dependence: signal?.supportedDependence === true,
+      selectorSupportedDependence: signal?.supportedDependence === true,
+      selector_access_issue: false,
+      selectorAccessIssue: false,
+      selectorEvidenceSignal: signal,
+      selector_evidence_signal: signal,
+      selector_evidence_target: analyticsTargetForAttempt(attempt, resolvedWordMap),
+    },
+    category,
+    signal,
+  };
+}
+
+function buildDefaultSelectorEvidenceDiagnostics() {
+  return {
+    totalAttemptRows: 0,
+    scoreableAttemptRows: 0,
+    supportLadderAttemptRows: 0,
+    legacyAttemptRows: 0,
+    excludedExtraChallengeRows: 0,
+    excludedAccessIssueRows: 0,
+    excludedUnscoredRows: 0,
+    categoryCounts: {},
+    categoryCountsByPupil: {},
+  };
+}
+
+function addSelectorEvidenceDiagnostic(diagnostics, attempt = {}, category = "") {
+  const safeCategory = normalizeMetadataKey(category) || "unknown";
+  incrementDiagnosticCount(diagnostics.categoryCounts, safeCategory);
+  const pupilId = String(attempt?.pupil_id || attempt?.pupilId || "").trim() || "__unknown__";
+  const pupilCounts = diagnostics.categoryCountsByPupil[pupilId] || {};
+  incrementDiagnosticCount(pupilCounts, safeCategory);
+  diagnostics.categoryCountsByPupil[pupilId] = pupilCounts;
+}
+
+export function normalizeSelectorEvidenceAttempts(attempts = [], {
+  excludeExtraChallenge = true,
+  resolvedWordMap = null,
+} = {}) {
+  const rows = Array.isArray(attempts) ? attempts : [];
+  const diagnostics = buildDefaultSelectorEvidenceDiagnostics();
+  const categoryCountsByGroup = buildSupportLadderCategoryCountsByGroup(rows, {
+    excludeExtraChallenge,
+    resolvedWordMap,
+  });
+  const normalizedAttempts = [];
+
+  for (const attempt of rows) {
+    diagnostics.totalAttemptRows += 1;
+    if (excludeExtraChallenge && isExtraChallengeAttempt(attempt)) {
+      diagnostics.excludedExtraChallengeRows += 1;
+      continue;
+    }
+
+    if (attempt?.selectorEvidenceNormalized === true) {
+      diagnostics.supportLadderAttemptRows += hasSupportLadderAttemptMetadata(attempt) ? 1 : 0;
+      diagnostics.legacyAttemptRows += hasSupportLadderAttemptMetadata(attempt) ? 0 : 1;
+      diagnostics.scoreableAttemptRows += 1;
+      normalizedAttempts.push(attempt);
+      addSelectorEvidenceDiagnostic(
+        diagnostics,
+        attempt,
+        getAttemptSelectorEvidenceCategory(attempt) || (getAttemptCorrectValue(attempt) ? "legacy_correct" : "legacy_incorrect"),
+      );
+      continue;
+    }
+
+    if (!hasSupportLadderAttemptMetadata(attempt)) {
+      diagnostics.legacyAttemptRows += 1;
+      diagnostics.scoreableAttemptRows += 1;
+      normalizedAttempts.push(attempt);
+      addSelectorEvidenceDiagnostic(
+        diagnostics,
+        attempt,
+        getAttemptCorrectValue(attempt) ? "legacy_correct" : "legacy_incorrect",
+      );
+      continue;
+    }
+
+    diagnostics.supportLadderAttemptRows += 1;
+    const groupKey = getSelectorEvidenceGroupKey(attempt, resolvedWordMap);
+    const normalized = normalizeSupportLadderAttemptForSelector(attempt, {
+      categoryCounts: categoryCountsByGroup.get(groupKey) || null,
+      resolvedWordMap,
+    });
+    addSelectorEvidenceDiagnostic(diagnostics, attempt, normalized.category);
+
+    if (!normalized.attempt) {
+      if (normalized.category === SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE) {
+        diagnostics.excludedAccessIssueRows += 1;
+      } else {
+        diagnostics.excludedUnscoredRows += 1;
+      }
+      continue;
+    }
+
+    diagnostics.scoreableAttemptRows += 1;
+    normalizedAttempts.push(normalized.attempt);
+  }
+
+  return {
+    attempts: normalizedAttempts,
+    diagnostics,
+  };
+}
+
 function getAssignmentTargetRowPupilId(row) {
   return String(row?.pupil_id || row?.pupilId || "").trim();
 }
@@ -527,6 +774,11 @@ function buildDefaultUsageMeta(word = "") {
     assignedCount: 0,
     correctCount: 0,
     incorrectCount: 0,
+    supportedDependenceCount: 0,
+    supportedIncorrectCount: 0,
+    accessIssueCount: 0,
+    protectedRecycleCapped: false,
+    evidenceCategoryCounts: {},
     lastSeenAt: 0,
     lastAttemptAt: 0,
     lastAssignedAt: 0,
@@ -552,14 +804,33 @@ function buildWordUsageStats(attempts, { assignmentTargetRows = [] } = {}) {
     const correct = getAttemptCorrectValue(attempt);
     const attemptNumber = getAttemptNumberValue(attempt);
     const seenAt = getAttemptSeenAt(attempt);
+    const selectorCategory = getAttemptSelectorEvidenceCategory(attempt);
 
     current.count += 1;
     current.lastAttemptAt = Math.max(current.lastAttemptAt, seenAt);
+    if (selectorCategory) {
+      incrementDiagnosticCount(current.evidenceCategoryCounts, selectorCategory);
+    }
     if (correct) {
       current.correctCount += 1;
       current.lastCorrectAt = Math.max(current.lastCorrectAt, seenAt);
     } else {
-      current.incorrectCount += 1;
+      let shouldCountIncorrect = true;
+      if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_ACCESS_ISSUE) {
+        current.accessIssueCount += 1;
+        shouldCountIncorrect = false;
+      } else if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_CORRECT_WITH_SUPPORT) {
+        current.supportedDependenceCount += 1;
+        shouldCountIncorrect = current.supportedDependenceCount <= SELECTOR_SUPPORTED_DEPENDENCE_RECYCLE_CAP;
+      } else if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_INCORRECT_WITH_SUPPORT) {
+        current.supportedIncorrectCount += 1;
+        shouldCountIncorrect = current.supportedIncorrectCount <= SELECTOR_SUPPORTED_FAILURE_RECYCLE_CAP;
+      }
+      if (shouldCountIncorrect) {
+        current.incorrectCount += 1;
+      } else {
+        current.protectedRecycleCapped = true;
+      }
       current.lastIncorrectAt = Math.max(current.lastIncorrectAt, seenAt);
     }
     if (seenAt >= current.lastSeenAt) {
@@ -809,6 +1080,11 @@ function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null)
       attemptTotal: 0,
       firstTrySuccessCount: 0,
       lastSeenAt: 0,
+      selectorPriorityMax: 0,
+      secureEvidenceCount: 0,
+      supportedDependenceCount: 0,
+      supportedIncorrectCount: 0,
+      evidenceCategoryCounts: {},
     };
 
     current.total += 1;
@@ -820,6 +1096,24 @@ function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null)
     }
     const seenAt = new Date(attempt?.created_at || 0).getTime();
     if (Number.isFinite(seenAt)) current.lastSeenAt = Math.max(current.lastSeenAt, seenAt);
+    const selectorSignal = getAttemptSelectorEvidenceSignal(attempt);
+    const selectorCategory = getAttemptSelectorEvidenceCategory(attempt);
+    current.selectorPriorityMax = Math.max(
+      current.selectorPriorityMax,
+      Number(selectorSignal?.priority ?? attempt?.selector_evidence_priority ?? attempt?.selectorEvidencePriority ?? 0) || 0,
+    );
+    if (selectorCategory) {
+      incrementDiagnosticCount(current.evidenceCategoryCounts, selectorCategory);
+      if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_CORRECT_FIRST_TIME) {
+        current.secureEvidenceCount += 1;
+      }
+      if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_CORRECT_WITH_SUPPORT) {
+        current.supportedDependenceCount += 1;
+      } else if (selectorCategory === SELECTOR_EVIDENCE_CATEGORY_INCORRECT_WITH_SUPPORT) {
+        current.supportedDependenceCount += 1;
+        current.supportedIncorrectCount += 1;
+      }
+    }
     statsByTarget.set(target, current);
   }
 
@@ -832,7 +1126,10 @@ function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null)
       const accuracy = item.total ? item.correct / item.total : 0;
       const averageAttempts = item.total ? item.attemptTotal / item.total : 0;
       const firstTrySuccessRate = item.total ? item.firstTrySuccessCount / item.total : 0;
-      const securityBand = getSecurityBand({
+      const selectorSecureEvidence = item.total > 0
+        && Number(item.secureEvidenceCount || 0) >= item.total
+        && Number(item.incorrect || 0) === 0;
+      const securityBand = selectorSecureEvidence ? "secure" : getSecurityBand({
         total: item.total,
         accuracy,
         firstTrySuccessRate,
@@ -857,6 +1154,9 @@ function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null)
       if (bandRank(a.securityBand) !== bandRank(b.securityBand)) {
         return bandRank(a.securityBand) - bandRank(b.securityBand);
       }
+      if (Number(b.selectorPriorityMax || 0) !== Number(a.selectorPriorityMax || 0)) {
+        return Number(b.selectorPriorityMax || 0) - Number(a.selectorPriorityMax || 0);
+      }
       if (a.accuracy !== b.accuracy) return a.accuracy - b.accuracy;
       if (b.averageAttempts !== a.averageAttempts) return b.averageAttempts - a.averageAttempts;
       if (b.total !== a.total) return b.total - a.total;
@@ -865,7 +1165,8 @@ function buildGraphemeStats(latestAttempts, allAttempts, resolvedWordMap = null)
 }
 
 export function buildProfileFromAttempts(attempts, resolvedWordMap = null) {
-  const ordered = [...(Array.isArray(attempts) ? attempts : [])]
+  const selectorEvidence = normalizeSelectorEvidenceAttempts(attempts, { resolvedWordMap });
+  const ordered = [...selectorEvidence.attempts]
     .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
   const latestByIdentity = new Map();
 
@@ -886,6 +1187,7 @@ export function buildProfileFromAttempts(attempts, resolvedWordMap = null) {
     secureRows: graphemeRows.filter((item) => item.securityBand === "secure"),
     developingRows: graphemeRows.filter((item) => item.securityBand === "nearly_secure"),
     confusionByTarget,
+    selectorEvidenceDiagnostics: selectorEvidence.diagnostics,
   };
 }
 
@@ -2636,6 +2938,76 @@ function buildPupilPlan({
     words,
     missingGraphemes: [],
     coverageWarnings,
+    selectorDiagnostics: buildPupilSelectorDiagnostics({
+      pupilId,
+      words,
+      composition,
+      primaryTarget,
+      usageByWord: effectiveUsageByWord,
+      coverageWarnings,
+      profile,
+    }),
+  };
+}
+
+function buildPupilSelectorDiagnostics({
+  pupilId = "",
+  words = [],
+  composition = {},
+  primaryTarget = "",
+  usageByWord = new Map(),
+  coverageWarnings = [],
+  profile = null,
+} = {}) {
+  const targetWords = (Array.isArray(words) ? words : [])
+    .filter((word) => normalizeMetadataKey(word?.assignmentRole || word?.assignment_role) === "target");
+  const selectedPrimaryTargetCount = targetWords
+    .filter((word) => normalizeToken(word?.focusGrapheme || word?.focus_grapheme) === normalizeToken(primaryTarget))
+    .length;
+  const requestedTargetCount = Math.max(0, Number(composition?.target || 0));
+  const repeatedProtectedWords = (Array.isArray(words) ? words : [])
+    .map((word) => {
+      const usage = usageByWord instanceof Map
+        ? usageByWord.get(normalizeWord(word?.word || ""))
+        : null;
+      if (!usage) return null;
+      const protectedByEvidence = Number(usage.incorrectCount || 0) > 0
+        || Number(usage.supportedDependenceCount || 0) > 0
+        || Number(usage.supportedIncorrectCount || 0) > 0
+        || usage.reviewDue === true;
+      if (!protectedByEvidence) return null;
+      return {
+        word: normalizeWord(word?.word || ""),
+        role: normalizeMetadataKey(word?.assignmentRole || word?.assignment_role),
+        incorrectCount: Math.max(0, Number(usage.incorrectCount || 0)),
+        supportedDependenceCount: Math.max(0, Number(usage.supportedDependenceCount || 0)),
+        supportedIncorrectCount: Math.max(0, Number(usage.supportedIncorrectCount || 0)),
+        reviewDue: usage.reviewDue === true,
+        capped: usage.protectedRecycleCapped === true,
+      };
+    })
+    .filter(Boolean);
+  const lowBankFallbackWarnings = (Array.isArray(coverageWarnings) ? coverageWarnings : [])
+    .filter((warning) => normalizeMetadataKey(warning?.type) === "target_coverage_low");
+  const evidenceDiagnostics = profile?.selectorEvidenceDiagnostics || {};
+
+  return {
+    pupilId: String(pupilId || ""),
+    targetPurity: {
+      primaryTargetGrapheme: normalizeToken(primaryTarget),
+      requestedTargetCount,
+      targetWordCount: targetWords.length,
+      selectedPrimaryTargetCount,
+      ratio: requestedTargetCount ? selectedPrimaryTargetCount / requestedTargetCount : 1,
+    },
+    repeatedProtectedWords,
+    repeatedProtectedWordCount: repeatedProtectedWords.length,
+    lowBankFallback: {
+      used: lowBankFallbackWarnings.length > 0,
+      warningCount: lowBankFallbackWarnings.length,
+      warnings: lowBankFallbackWarnings,
+    },
+    evidenceCategoryMix: evidenceDiagnostics?.categoryCounts || {},
   };
 }
 
@@ -2726,7 +3098,10 @@ export function buildGeneratedAssignmentPlan({
   });
   const pupils = normalizePupilList(pupilIds);
   const composition = buildAutoAssignmentComposition(normalizedPolicy.assignment_length);
-  const sortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
+  const rawSortedAttempts = [...(Array.isArray(attempts) ? attempts : [])]
+    .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
+  const selectorEvidence = normalizeSelectorEvidenceAttempts(rawSortedAttempts, { resolvedWordMap });
+  const sortedAttempts = [...selectorEvidence.attempts]
     .sort((a, b) => new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime());
   const sortedAssignmentTargetRows = [
     ...(Array.isArray(assignmentTargetRows) ? assignmentTargetRows : []),
@@ -2779,6 +3154,7 @@ export function buildGeneratedAssignmentPlan({
         primaryTargetGrapheme: plan.primaryTargetGrapheme || "",
         words: plan.words.slice(0, composition.totalWords),
         coverageWarnings: Array.isArray(plan.coverageWarnings) ? plan.coverageWarnings : [],
+        selectorDiagnostics: plan.selectorDiagnostics || null,
       });
     }
   }
@@ -2801,6 +3177,17 @@ export function buildGeneratedAssignmentPlan({
     pupilPlans,
     missingGraphemes: [...missingGraphemes],
     coverageWarnings,
+    selectorDiagnostics: {
+      evidenceCategoryMix: selectorEvidence.diagnostics.categoryCounts,
+      evidenceDiagnostics: selectorEvidence.diagnostics,
+      targetPurity: pupilPlans.map((plan) => plan.selectorDiagnostics?.targetPurity).filter(Boolean),
+      repeatedProtectedWords: pupilPlans.flatMap((plan) => plan.selectorDiagnostics?.repeatedProtectedWords || []),
+      lowBankFallback: {
+        used: coverageWarnings.some((warning) => normalizeMetadataKey(warning?.type) === "target_coverage_low"),
+        warningCount: coverageWarnings.filter((warning) => normalizeMetadataKey(warning?.type) === "target_coverage_low").length,
+        warnings: coverageWarnings.filter((warning) => normalizeMetadataKey(warning?.type) === "target_coverage_low"),
+      },
+    },
     error: missingGraphemes.size
       ? `Not enough saved words are available for ${[...missingGraphemes].join(", ")}.`
       : (errors[0] || ""),

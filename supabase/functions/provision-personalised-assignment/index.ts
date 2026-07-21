@@ -390,7 +390,7 @@ async function readAttemptsForPupil(
 ) {
   let query = serviceClient
     .from("attempts")
-    .select("pupil_id, assignment_id, test_word_id, assignment_target_id, mode, attempt_source, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes")
+    .select("pupil_id, assignment_id, test_word_id, assignment_target_id, mode, attempt_source, correct, attempt_number, created_at, focus_grapheme, pattern_type, word_text, typed, target_graphemes, delivery_model, support_state, evidence_category, support_actions")
     .eq("pupil_id", pupilId)
     .or(buildNonPracticeAttemptFilter(schoolId));
   const { data, error } = await query

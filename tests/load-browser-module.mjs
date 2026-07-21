@@ -17,24 +17,45 @@ function transformModuleSource(modulePath, seen = new Set(), isEntry = false) {
   let sourceText = readFileSync(safePath, "utf8");
   const dependencyBlocks = [];
 
-  sourceText = sourceText.replace(/import\s*\{([\s\S]*?)\}\s*from\s*["'](.+?)["'];?\s*/g, (_match, _bindings, specifier) => {
+  sourceText = sourceText.replace(/import\s*\{([\s\S]*?)\}\s*from\s*["'](.+?)["'];?\s*/g, (_match, bindings, specifier) => {
     const resolvedPath = path.resolve(path.dirname(safePath), stripQueryString(specifier));
-    const dependency = transformModuleSource(resolvedPath, seen, false);
-    dependencyBlocks.push(dependency.code);
-    return "";
+    const dependency = transformModuleSource(resolvedPath, new Set([safePath]), false);
+    const importedBindings = String(bindings || "")
+      .split(",")
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .map((item) => {
+        const [imported, local = imported] = item
+          .split(/\s+as\s+/i)
+          .map((part) => String(part || "").trim())
+          .filter(Boolean);
+        return imported && local ? `${imported}: ${local}` : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+    return `const { ${importedBindings} } = (() => {
+const module = { exports: {} };
+const exports = module.exports;
+${dependency.code}
+module.exports = {
+  ${dependency.exportNames.join(",\n  ")}
+};
+return module.exports;
+})();
+`;
   });
 
   const exportNames = [];
   sourceText = sourceText.replace(/export\s+async\s+function\s+([A-Za-z0-9_]+)/g, (_match, name) => {
-    if (isEntry) exportNames.push(name);
+    exportNames.push(name);
     return `async function ${name}`;
   });
   sourceText = sourceText.replace(/export function\s+([A-Za-z0-9_]+)/g, (_match, name) => {
-    if (isEntry) exportNames.push(name);
+    exportNames.push(name);
     return `function ${name}`;
   });
   sourceText = sourceText.replace(/export const\s+([A-Za-z0-9_]+)/g, (_match, name) => {
-    if (isEntry) exportNames.push(name);
+    exportNames.push(name);
     return `const ${name}`;
   });
   sourceText = sourceText.replace(/export\s*\{([^}]+)\};?\s*/g, (_match, names) => {
