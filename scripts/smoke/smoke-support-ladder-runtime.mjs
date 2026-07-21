@@ -168,12 +168,14 @@ const SCENARIOS = new Map([
       score_rate: 0,
     },
     steps: [
-      'Click "I\'m not sure which word you mean".',
+      'Click "Need help knowing the word?".',
       "Confirm safe clarification opens and no spelling reveal is shown.",
       'Click "Try spelling it" and confirm it returns to spelling without reveal.',
-      'Click "I\'m not sure which word you mean" again.',
+      'Click "Need help knowing the word?" again.',
       'Click "Still not sure".',
       "Confirm the feedback marks a word-meaning issue and still does not reveal the spelling.",
+      'Click "Finish test".',
+      "Confirm the assignment completes without revealing the spelling.",
     ],
   }],
   ["blank-attempt", {
