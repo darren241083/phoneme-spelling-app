@@ -23,6 +23,28 @@ const FIXED_RECENT_ATTEMPT_ISO = "2026-07-20T12:00:00.000Z";
 const VALID_PROFILE_IDS = new Set(ALL_PROFILE_IDS);
 const PROFILE_FALLBACK_TARGET_LIMIT = 12;
 const CELL_FALLBACK_ROWS_PER_FOCUS = 8;
+const TARGET_COVERAGE_LOW_WARNING = "target_coverage_low";
+const SELECTOR_STATUS_READY = "ready";
+const AUDIT_SELECTOR_WIDENING_DELTA = 10;
+const AUDIT_SELECTOR_CHALLENGE_WINDOWS = {
+  needs_support: { min: 15, max: 45, center: 30, hardMax: 50 },
+  core_developing: { min: 25, max: 55, center: 40, hardMax: 60 },
+  secure_expected: { min: 35, max: 60, center: 48, hardMax: 65 },
+  early_stretch: { min: 55, max: 75, center: 65, hardMax: 80 },
+};
+const GUARDED_PROFILE_TARGET_MISMATCH_EXPECTATIONS = [
+  {
+    focusGrapheme: "ure",
+    profileId: "needs_support",
+    matrixKind: "headline_pupil_profile",
+    minTotalPrimaryCount: 58,
+    minWidenedWindowCount: 2,
+    minHardCeilingCount: 2,
+    minSelectedExactTargetCount: 2,
+    maxFallbackCount: 2,
+    warningType: TARGET_COVERAGE_LOW_WARNING,
+  },
+];
 
 function normalizeToken(value = "") {
   return String(value || "")
@@ -63,6 +85,11 @@ function countBy(items = [], getter) {
     incrementCount(counts, getter(item));
   }
   return counts;
+}
+
+function numericValue(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function readCoreBankSource(sourceUrl = SOURCE_DATA_URL) {
@@ -316,6 +343,304 @@ function runSelectorProbe(engine, {
     window: result?.window || null,
     attemptCount: Array.isArray(attempts) ? attempts.length : 0,
   };
+}
+
+function resolveAuditSelectorChallengeWindow(profileId = "") {
+  const key = normalizeMetadataKey(profileId);
+  return {
+    key: AUDIT_SELECTOR_CHALLENGE_WINDOWS[key] ? key : "secure_expected",
+    ...(AUDIT_SELECTOR_CHALLENGE_WINDOWS[key] || AUDIT_SELECTOR_CHALLENGE_WINDOWS.secure_expected),
+  };
+}
+
+function buildAuditSelectorWindow(window = {}, { widened = false } = {}) {
+  if (!widened) {
+    return {
+      min: numericValue(window.min),
+      max: Math.min(numericValue(window.max), numericValue(window.hardMax)),
+      center: numericValue(window.center),
+      hardMax: numericValue(window.hardMax),
+      widened: false,
+    };
+  }
+  return {
+    min: Math.max(0, numericValue(window.min) - AUDIT_SELECTOR_WIDENING_DELTA),
+    max: Math.min(numericValue(window.hardMax), numericValue(window.max) + AUDIT_SELECTOR_WIDENING_DELTA),
+    center: numericValue(window.center),
+    hardMax: numericValue(window.hardMax),
+    widened: true,
+  };
+}
+
+function isWithinAuditSelectorWindow(score, window = {}) {
+  const value = Number(score);
+  return Number.isFinite(value)
+    && value >= numericValue(window.min)
+    && value <= numericValue(window.max)
+    && value <= numericValue(window.hardMax);
+}
+
+function buildTargetSupplyProbe({
+  focus = "",
+  profileId = "",
+  sourceWordRows = [],
+  sourceWordTargetRows = [],
+} = {}) {
+  const cleanFocus = normalizeToken(focus);
+  const primaryWordIds = new Set(
+    (Array.isArray(sourceWordTargetRows) ? sourceWordTargetRows : [])
+      .filter((link) =>
+        normalizeToken(link?.focus_grapheme || link?.focusGrapheme) === cleanFocus
+        && normalizeMetadataKey(link?.target_role || link?.targetRole) === "primary"
+      )
+      .map((link) => String(link?.word_id || "").trim())
+      .filter(Boolean)
+  );
+  const primaryRows = (Array.isArray(sourceWordRows) ? sourceWordRows : [])
+    .filter((row) =>
+      primaryWordIds.has(String(row?.id || "").trim())
+      && row?.is_active === true
+      && normalizeSourceText(row?.approval_status) === "approved"
+      && normalizeSourceText(row?.suitability_status) === "suitable"
+      && normalizeSourceText(row?.source) === "wordloom_core"
+    );
+  const challengeWindow = resolveAuditSelectorChallengeWindow(profileId);
+  const baseWindow = buildAuditSelectorWindow(challengeWindow);
+  const widenedWindow = buildAuditSelectorWindow(challengeWindow, { widened: true });
+
+  return {
+    totalPrimaryCount: primaryRows.length,
+    baseWindowCount: primaryRows.filter((row) => isWithinAuditSelectorWindow(row?.difficulty_score, baseWindow)).length,
+    widenedWindowCount: primaryRows.filter((row) => isWithinAuditSelectorWindow(row?.difficulty_score, widenedWindow)).length,
+    hardCeilingCount: primaryRows.filter((row) => numericValue(row?.difficulty_score, Number.POSITIVE_INFINITY) <= challengeWindow.hardMax).length,
+  };
+}
+
+function stableCoverageClassificationReasons(reasons = []) {
+  return [...new Set((Array.isArray(reasons) ? reasons : [])
+    .map((reason) => String(reason || "").trim())
+    .filter(Boolean))];
+}
+
+function buildCoverageClassificationResult({
+  category,
+  safety,
+  acceptedAmber,
+  actionRecommendation,
+  reasons = [],
+} = {}) {
+  return {
+    category: category || "genuine_low_band_gap",
+    safety: safety || "blocked",
+    acceptedAmber: acceptedAmber === true,
+    actionRecommendation: actionRecommendation || "top_up_low_band",
+    reasons: stableCoverageClassificationReasons(reasons),
+  };
+}
+
+function getCellWarnings(cell = {}) {
+  if (Array.isArray(cell.allCoverageWarnings)) return cell.allCoverageWarnings;
+  return Array.isArray(cell.coverageWarnings) ? cell.coverageWarnings : [];
+}
+
+function getCellFallbackCount(cell = {}) {
+  return Math.max(0, numericValue(cell?.reviewFallback?.targetShortfallFilledByNonTargetWords));
+}
+
+function hasCooldownSafetyFailure(cell = {}) {
+  const cooldown = cell?.cooldownPressure || {};
+  return cooldown?.canRelaxSafely === false && cooldown?.status !== "not_applicable_no_target_candidate";
+}
+
+function hasSelectorSafetyIssue(cell = {}) {
+  return cell?.browserEdgeParity?.match === false
+    || (Array.isArray(cell?.selectorLogicFailures) && cell.selectorLogicFailures.length > 0)
+    || (Array.isArray(cell?.duplicateWords) && cell.duplicateWords.length > 0)
+    || (Array.isArray(cell?.invalidSelections) && cell.invalidSelections.length > 0)
+    || hasCooldownSafetyFailure(cell);
+}
+
+function selectorSafetyReasons(cell = {}) {
+  const reasons = [];
+  if (cell?.browserEdgeParity?.match === false) reasons.push("browser_edge_parity_failed");
+  if (Array.isArray(cell?.selectorLogicFailures) && cell.selectorLogicFailures.length > 0) reasons.push("selector_logic_failures");
+  if (Array.isArray(cell?.duplicateWords) && cell.duplicateWords.length > 0) reasons.push("duplicate_selected_words");
+  if (Array.isArray(cell?.invalidSelections) && cell.invalidSelections.length > 0) reasons.push("invalid_selected_source_rows");
+  if (hasCooldownSafetyFailure(cell)) reasons.push("cooldown_safety_failed");
+  return reasons;
+}
+
+function hasLowBandGapEvidence(cell = {}) {
+  const requestedTargetCount = Math.max(0, numericValue(cell?.requestedTargetCount));
+  const requestedAvailableCount = Math.max(0, numericValue(cell?.requestedTargetWordsAvailable));
+  const widenedWindowCount = Math.max(0, numericValue(cell?.targetSupplyProbe?.widenedWindowCount, requestedAvailableCount));
+  const targetAvailabilityStatus = String(cell?.targetAvailabilityProbe?.status || "");
+  return requestedTargetCount > 0 && (
+    targetAvailabilityStatus !== SELECTOR_STATUS_READY
+    || requestedAvailableCount < requestedTargetCount
+    || widenedWindowCount < requestedTargetCount
+    || Math.max(0, numericValue(cell?.targetShortfall)) > 0
+    || getCellWarnings(cell).length > 0
+  );
+}
+
+function findGuardedProfileTargetMismatchExpectation(cell = {}) {
+  const focus = normalizeToken(cell?.focusGrapheme);
+  const profileId = normalizeMetadataKey(cell?.profileId);
+  const matrixKind = normalizeMetadataKey(cell?.matrixKind);
+  return GUARDED_PROFILE_TARGET_MISMATCH_EXPECTATIONS.find((expectation) =>
+    expectation.focusGrapheme === focus
+    && expectation.profileId === profileId
+    && expectation.matrixKind === matrixKind
+  ) || null;
+}
+
+function passesGuardedProfileTargetMismatch(cell = {}) {
+  const expectation = findGuardedProfileTargetMismatchExpectation(cell);
+  if (!expectation) return false;
+  const warnings = getCellWarnings(cell);
+  const supply = cell?.targetSupplyProbe || {};
+  return cell?.status === "amber"
+    && cell?.matrixKind === expectation.matrixKind
+    && cell?.completeAssignment === true
+    && !hasSelectorSafetyIssue(cell)
+    && numericValue(supply.totalPrimaryCount) >= expectation.minTotalPrimaryCount
+    && numericValue(supply.widenedWindowCount) >= expectation.minWidenedWindowCount
+    && numericValue(supply.hardCeilingCount) >= expectation.minHardCeilingCount
+    && numericValue(cell?.selectedExactTargetCount) >= expectation.minSelectedExactTargetCount
+    && getCellFallbackCount(cell) <= expectation.maxFallbackCount
+    && warnings.length === 1
+    && warnings.every((warning) => warning?.type === expectation.warningType);
+}
+
+function constrainedCoverageSafety(cell = {}) {
+  return cell?.completeAssignment === true && !hasSelectorSafetyIssue(cell)
+    ? "constrained_but_safe"
+    : "blocked";
+}
+
+function buildLowBandGapReasons(cell = {}) {
+  const reasons = [];
+  const requestedTargetCount = Math.max(0, numericValue(cell?.requestedTargetCount));
+  const targetShortfall = Math.max(0, numericValue(cell?.targetShortfall));
+  const warnings = getCellWarnings(cell);
+  if (String(cell?.targetAvailabilityProbe?.status || "") !== SELECTOR_STATUS_READY) {
+    reasons.push("widened_exact_target_supply_below_request");
+  }
+  if (numericValue(cell?.requestedTargetWordsAvailable) < requestedTargetCount) {
+    reasons.push(`requestedAvailability:${numericValue(cell?.requestedTargetWordsAvailable)}/${requestedTargetCount}`);
+  }
+  if (numericValue(cell?.targetSupplyProbe?.widenedWindowCount, requestedTargetCount) < requestedTargetCount) {
+    reasons.push(`widenedWindowCount:${numericValue(cell?.targetSupplyProbe?.widenedWindowCount)}/${requestedTargetCount}`);
+  }
+  if (targetShortfall > 0) reasons.push(`targetShortfall:${targetShortfall}`);
+  for (const warning of warnings) {
+    reasons.push(`warning:${warning.type || "unknown"}`);
+  }
+  return reasons.length ? reasons : ["remaining_amber_coverage_issue"];
+}
+
+export function classifyCoverageCell(cell = {}) {
+  if (hasSelectorSafetyIssue(cell)) {
+    return buildCoverageClassificationResult({
+      category: "selector_logic_issue",
+      safety: "blocked",
+      acceptedAmber: false,
+      actionRecommendation: "investigate_selector",
+      reasons: selectorSafetyReasons(cell),
+    });
+  }
+
+  if (cell?.status === "green") {
+    return buildCoverageClassificationResult({
+      category: "none",
+      safety: "none",
+      acceptedAmber: false,
+      actionRecommendation: "none",
+      reasons: [],
+    });
+  }
+
+  if (cell?.completeAssignment !== true) {
+    return buildCoverageClassificationResult({
+      category: "assignment_blocked",
+      safety: "blocked",
+      acceptedAmber: false,
+      actionRecommendation: "repair_bank",
+      reasons: ["assignment_completion_failed"],
+    });
+  }
+
+  if (hasLowBandGapEvidence(cell)) {
+    if (passesGuardedProfileTargetMismatch(cell)) {
+      return buildCoverageClassificationResult({
+        category: "profile_target_mismatch",
+        safety: "constrained_but_safe",
+        acceptedAmber: true,
+        actionRecommendation: "monitor",
+        reasons: [
+          "guarded_profile_target_mismatch",
+          `totalPrimaryCount:${cell.targetSupplyProbe.totalPrimaryCount}`,
+          `hardCeilingCount:${cell.targetSupplyProbe.hardCeilingCount}`,
+          `fallbackCount:${getCellFallbackCount(cell)}`,
+        ],
+      });
+    }
+
+    return buildCoverageClassificationResult({
+      category: "genuine_low_band_gap",
+      safety: constrainedCoverageSafety(cell),
+      acceptedAmber: false,
+      actionRecommendation: "top_up_low_band",
+      reasons: buildLowBandGapReasons(cell),
+    });
+  }
+
+  const bufferAvailableCount = Math.max(0, numericValue(cell?.targetBufferProbe?.availableCount));
+  const exactRequestSatisfied = numericValue(cell?.selectedExactTargetCount) >= numericValue(cell?.requestedTargetCount);
+  if (
+    exactRequestSatisfied
+    && (String(cell?.targetBufferProbe?.status || "") !== SELECTOR_STATUS_READY || bufferAvailableCount < TARGET_BUFFER_COUNT)
+  ) {
+    return buildCoverageClassificationResult({
+      category: "insufficient_target_buffer",
+      safety: "complete_exact",
+      acceptedAmber: false,
+      actionRecommendation: "top_up_buffer",
+      reasons: [`targetBuffer:${bufferAvailableCount}/${TARGET_BUFFER_COUNT}`],
+    });
+  }
+
+  if (
+    cell?.completeAssignment === true
+    && exactRequestSatisfied
+    && numericValue(cell?.targetShortfall) === 0
+    && cell?.reviewFallback?.required !== true
+    && getCellWarnings(cell).length === 0
+    && cell?.widenedDifficultyWindowRequired === true
+    && cell?.widenedWindowSatisfiedRequest === true
+    && String(cell?.targetBufferProbe?.status || "") === SELECTOR_STATUS_READY
+    && bufferAvailableCount >= TARGET_BUFFER_COUNT
+  ) {
+    return buildCoverageClassificationResult({
+      category: "expected_widening",
+      safety: "complete_exact",
+      acceptedAmber: true,
+      actionRecommendation: "none",
+      reasons: [
+        "widened_window_satisfied_request",
+        `targetBuffer:${bufferAvailableCount}/${TARGET_BUFFER_COUNT}`,
+      ],
+    });
+  }
+
+  return buildCoverageClassificationResult({
+    category: "genuine_low_band_gap",
+    safety: constrainedCoverageSafety(cell),
+    acceptedAmber: false,
+    actionRecommendation: "top_up_low_band",
+    reasons: ["remaining_amber_coverage_issue"],
+  });
 }
 
 function stableCoverageWarnings(warnings = []) {
@@ -801,8 +1126,9 @@ function buildCellReport({
   const requestedTargetCount = Math.max(0, Number(browserPlan?.composition?.target || 0));
   const exactSelectedCount = selectedExactTargetCount(words, focus);
   const targetShortfall = Math.max(0, requestedTargetCount - exactSelectedCount);
-  const lowBankWarnings = stableCoverageWarnings(browserPlan?.coverageWarnings)
-    .filter((warning) => warning.type === "target_coverage_low");
+  const allCoverageWarnings = stableCoverageWarnings(browserPlan?.coverageWarnings);
+  const lowBankWarnings = allCoverageWarnings
+    .filter((warning) => warning.type === TARGET_COVERAGE_LOW_WARNING);
   const requestedProbe = runSelectorProbe(browserEngine, {
     focus,
     profileId,
@@ -821,6 +1147,12 @@ function buildCellReport({
     profile: profileDefinition.profile,
     fullWordRows: cellWordRows,
     rawWordById: inputs.rawWordById,
+  });
+  const targetSupplyProbe = buildTargetSupplyProbe({
+    focus,
+    profileId,
+    sourceWordRows: inputs.sourceWordRows,
+    sourceWordTargetRows: inputs.sourceWordTargetRows,
   });
   const selectorLogicFailures = buildSelectorLogicFailures({
     focus,
@@ -842,7 +1174,7 @@ function buildCellReport({
     selectorLogicFailureCount: selectorLogicFailures.length,
   });
 
-  return {
+  const cell = {
     focusGrapheme: focus,
     displayLabel: target.display_label,
     stageBand: target.stage_band,
@@ -864,6 +1196,7 @@ function buildCellReport({
     widenedWindowSatisfiedRequest: requestedProbe.status === browserEngine.APPROVED_TARGET_SELECTOR_STATUS_READY && requestedProbe.widened,
     targetAvailabilityProbe: requestedProbe,
     targetBufferProbe: bufferProbe,
+    targetSupplyProbe,
     reviewFallback: {
       reviewWordCount: words.filter((word) => normalizeMetadataKey(word?.assignmentRole || word?.assignment_role) === "review").length,
       stretchWordCount: words.filter((word) => normalizeMetadataKey(word?.assignmentRole || word?.assignment_role) === "stretch").length,
@@ -871,6 +1204,7 @@ function buildCellReport({
       required: targetShortfall > 0,
     },
     coverageWarnings: lowBankWarnings,
+    allCoverageWarnings,
     lowBankWarningProduced: lowBankWarnings.length > 0,
     duplicateWords,
     invalidSelections,
@@ -884,6 +1218,10 @@ function buildCellReport({
     roleCounts: roleCounts(words),
     supportCounts: supportCounts(words),
     questionTypeCounts: questionTypeCounts(words),
+  };
+  return {
+    ...cell,
+    coverageClassification: classifyCoverageCell(cell),
   };
 }
 
@@ -921,6 +1259,62 @@ function summarizeCells(cells = []) {
     if (cell.cooldownPressure?.status === "not_applicable_no_target_candidate") totals.cooldownNotApplicableCount += 1;
   }
   return totals;
+}
+
+function buildClassifiedCellSummary(cell = {}) {
+  const classification = cell?.coverageClassification || {};
+  return {
+    focusGrapheme: normalizeToken(cell?.focusGrapheme),
+    profileId: normalizeMetadataKey(cell?.profileId),
+    matrixKind: normalizeMetadataKey(cell?.matrixKind),
+    category: classification.category || "unknown",
+    actionRecommendation: classification.actionRecommendation || "none",
+    reason: (Array.isArray(classification.reasons) ? classification.reasons : []).slice(0, 4).join("; "),
+    evidence: {
+      status: cell?.status || "",
+      selectedExactTargetCount: Math.max(0, numericValue(cell?.selectedExactTargetCount)),
+      requestedTargetCount: Math.max(0, numericValue(cell?.requestedTargetCount)),
+      requestedTargetWordsAvailable: Math.max(0, numericValue(cell?.requestedTargetWordsAvailable)),
+      targetBufferAvailable: Math.max(0, numericValue(cell?.targetBufferProbe?.availableCount)),
+      targetShortfall: Math.max(0, numericValue(cell?.targetShortfall)),
+      fallbackCount: getCellFallbackCount(cell),
+      totalPrimaryCount: Math.max(0, numericValue(cell?.targetSupplyProbe?.totalPrimaryCount)),
+      baseWindowCount: Math.max(0, numericValue(cell?.targetSupplyProbe?.baseWindowCount)),
+      widenedWindowCount: Math.max(0, numericValue(cell?.targetSupplyProbe?.widenedWindowCount)),
+      hardCeilingCount: Math.max(0, numericValue(cell?.targetSupplyProbe?.hardCeilingCount)),
+    },
+  };
+}
+
+function summarizeCoverageClassifications(cells = []) {
+  const classificationCounts = {};
+  const acceptedAmberCells = [];
+  const actionableAmberCells = [];
+
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    const classification = cell?.coverageClassification || {};
+    const category = classification.category || "unknown";
+    incrementCount(classificationCounts, category);
+    if (cell?.status !== "amber") continue;
+    if (classification.acceptedAmber === true) {
+      acceptedAmberCells.push(buildClassifiedCellSummary(cell));
+    } else {
+      actionableAmberCells.push(buildClassifiedCellSummary(cell));
+    }
+  }
+
+  const sortCell = (a, b) =>
+    a.category.localeCompare(b.category)
+    || a.focusGrapheme.localeCompare(b.focusGrapheme)
+    || a.profileId.localeCompare(b.profileId);
+
+  return {
+    classificationCounts,
+    acceptedAmberCount: acceptedAmberCells.length,
+    actionableAmberCount: actionableAmberCells.length,
+    acceptedAmberCells: acceptedAmberCells.sort(sortCell),
+    actionableAmberCells: actionableAmberCells.sort(sortCell),
+  };
 }
 
 function summarizeProfiles(cells = []) {
@@ -1035,6 +1429,7 @@ export function buildCoreBankSelectorCoverageAuditReport({ source = readCoreBank
   const headlineCells = cells.filter((cell) => cell.matrixKind === "headline_pupil_profile");
   const diagnosticCells = cells.filter((cell) => cell.matrixKind === "diagnostic_selector_band");
   const selectorLogicFailures = flattenSelectorLogicFailures(cells);
+  const coverageClassificationSummary = summarizeCoverageClassifications(cells);
   const report = {
     auditVersion: AUDIT_VERSION,
     generatedAt: AUDIT_NOW_ISO,
@@ -1053,6 +1448,11 @@ export function buildCoreBankSelectorCoverageAuditReport({ source = readCoreBank
     totals: summarizeCells(cells),
     headlineTotals: summarizeCells(headlineCells),
     diagnosticTotals: summarizeCells(diagnosticCells),
+    classificationCounts: coverageClassificationSummary.classificationCounts,
+    acceptedAmberCount: coverageClassificationSummary.acceptedAmberCount,
+    actionableAmberCount: coverageClassificationSummary.actionableAmberCount,
+    acceptedAmberCells: coverageClassificationSummary.acceptedAmberCells,
+    actionableAmberCells: coverageClassificationSummary.actionableAmberCells,
     profileTotals: summarizeProfiles(cells),
     weakestGraphemes: buildWeakestGraphemeSummary(headlineCells),
     diagnosticWeakestGraphemes: buildWeakestGraphemeSummary(diagnosticCells),
@@ -1084,17 +1484,48 @@ function formatWeakest(items = [], limit = 10) {
     .join(", ") || "none";
 }
 
+function formatCountMap(counts = {}) {
+  const entries = Object.entries(counts || {})
+    .sort(([left], [right]) => left.localeCompare(right));
+  return entries.length
+    ? entries.map(([key, value]) => `${key}:${value}`).join(", ")
+    : "none";
+}
+
+function formatClassifiedCellSummary(cell = {}) {
+  const evidence = cell.evidence || {};
+  const exact = `${evidence.selectedExactTargetCount || 0}/${evidence.requestedTargetCount || 0}`;
+  const buffer = `${evidence.targetBufferAvailable || 0}/${TARGET_BUFFER_COUNT}`;
+  const supply = `supply:${evidence.totalPrimaryCount || 0}/base:${evidence.baseWindowCount || 0}/wide:${evidence.widenedWindowCount || 0}/hard:${evidence.hardCeilingCount || 0}`;
+  const fallback = `fallback:${evidence.fallbackCount || 0}`;
+  const reason = cell.reason ? ` reason:${cell.reason}` : "";
+  return `${cell.focusGrapheme}/${cell.profileId} ${cell.category} action:${cell.actionRecommendation} exact:${exact} buffer:${buffer} ${fallback} ${supply}${reason}`;
+}
+
+function formatAcceptedAmberSummary(cells = []) {
+  const safeCells = Array.isArray(cells) ? cells : [];
+  const counts = countBy(safeCells, (cell) => cell.category || "unknown");
+  const notableCells = safeCells
+    .filter((cell) => cell.category !== "expected_widening")
+    .map(formatClassifiedCellSummary)
+    .join(" | ");
+  return notableCells
+    ? `${formatCountMap(counts)} | ${notableCells}`
+    : formatCountMap(counts);
+}
+
 export function printCoreBankSelectorCoverageSummary(report = {}) {
   console.log("CORE_BANK_SELECTOR_COVERAGE_AUDIT_SUMMARY");
   console.log(`version ${report.auditVersion} generatedAt ${report.generatedAt}`);
   console.log(`source ${report.source?.sourceVersion || "unknown"} activeTargets ${report.source?.activeTargetCount || 0} usableWords ${report.source?.mappedUsableWordCount || 0}`);
   console.log(`headlineProfiles ${report.headlineProfileIds?.join(",") || ""} ${formatTotals(report.headlineTotals)}`);
   console.log(`diagnosticSelectorBands ${report.diagnosticSelectorBandIds?.join(",") || ""} ${formatTotals(report.diagnosticTotals)}`);
-  console.log(`allCells ${formatTotals(report.totals)}`);
-  console.log(`weakestHeadline ${formatWeakest(report.weakestGraphemes)}`);
-  console.log(`weakestDiagnostic ${formatWeakest(report.diagnosticWeakestGraphemes, 5)}`);
+  console.log(`acceptedAmberCount ${report.acceptedAmberCount || 0}`);
+  console.log(`actionableAmberCount ${report.actionableAmberCount || 0}`);
+  console.log(`classificationTotals ${formatCountMap(report.classificationCounts)}`);
+  console.log(`actionableAmberCells ${(report.actionableAmberCells || []).map(formatClassifiedCellSummary).join(" | ") || "none"}`);
+  console.log(`acceptedAmberSummary ${formatAcceptedAmberSummary(report.acceptedAmberCells)}`);
   console.log(`selectorLogicFailures ${report.selectorLogicFailures?.length || 0}`);
-  console.log(`CORE_BANK_SELECTOR_COVERAGE_AUDIT_JSON ${JSON.stringify(report)}`);
 }
 
 function isDirectRun() {
