@@ -1132,6 +1132,29 @@ async function maybeProvisionPersonalisedAfterReadyBaseline({ pupilId = "", gate
   return result;
 }
 
+function buildBaselineCompleteWaitingMainActionModel() {
+  return {
+    kind: "baseline_waiting",
+    title: "Your next challenge is being prepared",
+    body: "Your baseline is complete. Your next Wordloom challenge will appear here when it is ready.",
+    buttonLabel: "",
+    assignmentId: "",
+    assignment: null,
+  };
+}
+
+function shouldShowBaselineCompleteWaitingMainAction({
+  gateState = null,
+  assignments = [],
+  mainActionModel = null,
+} = {}) {
+  if (String(gateState?.status || "").trim().toLowerCase() !== "ready") return false;
+  if (String(mainActionModel?.kind || "").trim() !== "complete") return false;
+  if (getRequiredCoreAssignments(assignments).length > 0) return false;
+  if (findActiveExtraChallengeAssignment(assignments)) return false;
+  return true;
+}
+
 function hasVisibleBaselineProgress(assignment) {
   if (!assignment || assignment?.completed) return false;
   if (assignment?.started_at) return true;
@@ -1498,6 +1521,7 @@ function renderPupilAnalyticsHero(name, assignments, practiceModel, progress, se
 function getPupilDashboardMainActionIcon(kind = "") {
   const safeKind = String(kind || "").trim();
   const isExtraAction = safeKind === "extra_start" || safeKind === "extra_continue";
+  if (safeKind === "baseline_waiting") return "target";
   if (safeKind === "daily_complete") return "checkCircle";
   if (safeKind === "core") return "target";
   if (isExtraAction) return "target";
@@ -2473,6 +2497,20 @@ function renderCompletionActions(item) {
   `;
 }
 
+function isBaselineCompletionItem(item = null) {
+  const source = String(item?.attempt_source || item?.attemptSource || item?.assignment_source || item?.assignmentSource || "").trim().toLowerCase();
+  return item?.isBaseline === true
+    || item?.is_baseline === true
+    || source === "baseline";
+}
+
+function getCompletionSummaryMessage(item, completionLabel = "the test") {
+  if (isBaselineCompletionItem(item)) {
+    return "Your baseline is complete. Wordloom will use it to prepare your next challenge. Return to your dashboard; the next activity will appear when it is ready.";
+  }
+  return `You finished ${completionLabel}.`;
+}
+
 function renderCompletionSummary(item, result) {
   const rows = Array.isArray(result?.results) ? result.results : [];
   const totalWords = Number(result?.totalWords || rows.length || 0);
@@ -2486,7 +2524,7 @@ function renderCompletionSummary(item, result) {
   return `
     <div class="pupil-header">
       <h2>${escapeHtml(getDisplayedAssignmentTitle(item) || "Activity complete")}</h2>
-      <p class="muted">You finished ${completionLabel}.</p>
+      <p class="muted">${escapeHtml(getCompletionSummaryMessage(item, completionLabel))}</p>
     </div>
     <section class="card test-card resultCardInline">
       <div class="resultSummaryGrid">
@@ -3029,10 +3067,17 @@ async function renderPupilHome(containerEl, session, { autoOpenBaseline = true }
       assignments: loadedAssignments,
       pupilId,
     });
-    const dashboardMainActionModel = buildPupilDashboardMainActionModel({
+    let dashboardMainActionModel = buildPupilDashboardMainActionModel({
       assignments: loadedAssignments,
       pupilId,
     });
+    if (shouldShowBaselineCompleteWaitingMainAction({
+      gateState: readyGateState,
+      assignments: loadedAssignments,
+      mainActionModel: dashboardMainActionModel,
+    })) {
+      dashboardMainActionModel = buildBaselineCompleteWaitingMainActionModel();
+    }
     if (!extraChallengeModel) {
       pupilDashboardState.extraChallenge = {
         busy: false,

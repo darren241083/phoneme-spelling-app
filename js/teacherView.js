@@ -223,6 +223,12 @@ const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS = new Set(["bankMonitor", "upcoming", "classes", "tests"]);
 const ADVANCED_MANUAL_TOOLS_COPY = "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.";
+const TEACHER_FIRST_USE_ACTIONS = {
+  OPEN_PUPIL_ONBOARDING: { id: "open_pupil_onboarding", label: "Open pupil onboarding" },
+  CHECK_BASELINE_STATUS: { id: "check_baseline_status", label: "Check baseline status" },
+  VIEW_ASSIGNMENT_PROGRESS: { id: "view_assignment_progress", label: "View assignment progress" },
+  OPEN_ANALYTICS: { id: "open_analytics", label: "Open analytics" },
+};
 const ALL_CLASSES_SCOPE_VALUE = "__all_classes__";
 const ALL_PUPILS_EXPORT_SCOPE_VALUE = "__all_pupils__";
 const ALL_CLASSES_EXPORT_SCOPE_VALUE = "__all_classes__";
@@ -372,6 +378,327 @@ const GROUP_COMPARISON_PAIR_FALLBACKS = {
     { value: "other", label: "Other" },
   ],
 };
+
+function normalizeTeacherFirstUseCount(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : null;
+}
+
+function normalizeTeacherFirstUseKey(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function cloneTeacherFirstUseAction(action) {
+  return action ? { id: action.id, label: action.label } : null;
+}
+
+function buildTeacherFirstUseModel({
+  state,
+  title,
+  message,
+  primaryAction = null,
+  pupilAccessMessage,
+  isLoading = false,
+}) {
+  return {
+    state,
+    title,
+    message,
+    primaryAction: cloneTeacherFirstUseAction(primaryAction),
+    pupilAccessMessage,
+    isLoading: !!isLoading,
+  };
+}
+
+function getTeacherFirstUseAssignmentSourceKey(assignment = {}) {
+  const direct = normalizeTeacherFirstUseKey(
+    assignment.sourceKey
+    || assignment.source_key
+    || assignment.assignmentSourceKey
+    || assignment.assignment_source
+    || assignment.evidence_source
+    || assignment.attempt_source
+    || assignment.assignmentOrigin
+  );
+  if (assignment.isBaseline === true || assignment.is_baseline === true || direct === "baseline") return "baseline";
+  if (assignment.isPersonalised === true || assignment.is_personalised === true) return "generated_by_policy";
+  if (
+    direct === "generated_by_policy"
+    || direct === "legacy_personalised"
+    || direct === "auto_assigned"
+    || normalizeTeacherFirstUseKey(assignment.automation_kind) === "personalised"
+    || normalizeTeacherFirstUseKey(assignment.automation_source)
+    || normalizeTeacherFirstUseKey(assignment.automation_run_id)
+  ) {
+    return direct === "legacy_personalised" ? direct : "generated_by_policy";
+  }
+  return direct || "teacher_created";
+}
+
+function getTeacherFirstUseLifecycle(assignment = {}) {
+  const lifecycle = assignment.lifecycle && typeof assignment.lifecycle === "object"
+    ? assignment.lifecycle
+    : (assignment.summary && typeof assignment.summary === "object" ? assignment.summary : {});
+  return lifecycle || {};
+}
+
+function getTeacherFirstUseLifecycleKey(assignment = {}) {
+  return normalizeTeacherFirstUseKey(
+    assignment.lifecycleKey
+    || assignment.lifecycle_key
+    || getTeacherFirstUseLifecycle(assignment).key
+    || assignment.status
+  );
+}
+
+function isTeacherFirstUseAssignmentComplete(assignment = {}) {
+  const lifecycle = getTeacherFirstUseLifecycle(assignment);
+  const key = getTeacherFirstUseLifecycleKey(assignment);
+  const totalPupilCount = normalizeTeacherFirstUseCount(lifecycle.totalPupilCount ?? lifecycle.total_pupil_count);
+  const completedCount = normalizeTeacherFirstUseCount(lifecycle.completedCount ?? lifecycle.completed_count);
+  return assignment.completed === true
+    || assignment.isComplete === true
+    || assignment.is_complete === true
+    || key === "complete"
+    || key === "completed"
+    || (!!totalPupilCount && completedCount !== null && completedCount >= totalPupilCount);
+}
+
+function hasTeacherFirstUseStartedEvidence(assignment = {}) {
+  const lifecycle = getTeacherFirstUseLifecycle(assignment);
+  const key = getTeacherFirstUseLifecycleKey(assignment);
+  const startedCount = normalizeTeacherFirstUseCount(lifecycle.startedCount ?? lifecycle.started_count);
+  const completedCount = normalizeTeacherFirstUseCount(lifecycle.completedCount ?? lifecycle.completed_count);
+  const inProgressCount = normalizeTeacherFirstUseCount(lifecycle.inProgressCount ?? lifecycle.in_progress_count);
+  return key === "in_progress"
+    || key === "stale"
+    || key === "expired"
+    || key === "ended"
+    || (startedCount !== null && startedCount > 0)
+    || (completedCount !== null && completedCount > 0)
+    || (inProgressCount !== null && inProgressCount > 0)
+    || !!assignment.started_at
+    || !!assignment.last_opened_at
+    || !!assignment.completed_at;
+}
+
+function isTeacherFirstUseAssignmentLive(assignment = {}) {
+  const key = getTeacherFirstUseLifecycleKey(assignment);
+  if (isTeacherFirstUseAssignmentComplete(assignment)) return false;
+  return key !== "expired" && key !== "ended";
+}
+
+function hasTeacherFirstUseCompletedEvidence(assignments = []) {
+  return (Array.isArray(assignments) ? assignments : []).some((assignment) => {
+    const lifecycle = getTeacherFirstUseLifecycle(assignment);
+    const completedCount = normalizeTeacherFirstUseCount(lifecycle.completedCount ?? lifecycle.completed_count);
+    return isTeacherFirstUseAssignmentComplete(assignment)
+      || (completedCount !== null && completedCount > 0)
+      || !!assignment.completed_at;
+  });
+}
+
+function getTeacherFirstUsePupilAccessMessage(loginPath = "./login.html") {
+  const safeLoginPath = String(loginPath || "./login.html").trim() || "./login.html";
+  return `Pupils sign in at ${safeLoginPath} with their username and PIN. Imported and reset PINs are shown once; reset PINs from Pupil onboarding when needed.`;
+}
+
+export function buildTeacherFirstUseReadiness({
+  classDataKnown = false,
+  formGroupCount = null,
+  ownedFormGroupCount = null,
+  pupilDataKnown = false,
+  activePupilCount = null,
+  canImportCsv = false,
+  canProvisionBaseline = false,
+  assignments = [],
+  hasAnalyticsEvidence = false,
+  loginPath = "./login.html",
+} = {}) {
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const knownFormGroupCount = normalizeTeacherFirstUseCount(formGroupCount);
+  const knownOwnedFormGroupCount = normalizeTeacherFirstUseCount(ownedFormGroupCount);
+  const knownActivePupilCount = normalizeTeacherFirstUseCount(activePupilCount);
+  const hasClassData = classDataKnown === true || (classDataKnown !== false && knownFormGroupCount !== null);
+  const hasPupilData = pupilDataKnown === true || (pupilDataKnown !== false && knownActivePupilCount !== null);
+  const hasOwnedFormGroup = (knownOwnedFormGroupCount || 0) > 0;
+  const pupilAccessMessage = getTeacherFirstUsePupilAccessMessage(loginPath);
+  const onboardingAction = canImportCsv ? TEACHER_FIRST_USE_ACTIONS.OPEN_PUPIL_ONBOARDING : null;
+
+  const baselineAssignments = safeAssignments.filter((assignment) =>
+    getTeacherFirstUseAssignmentSourceKey(assignment) === "baseline"
+  );
+  const incompleteBaselineAssignments = baselineAssignments.filter((assignment) =>
+    !isTeacherFirstUseAssignmentComplete(assignment)
+  );
+  const completedBaselineAssignments = baselineAssignments.filter(isTeacherFirstUseAssignmentComplete);
+  const personalisedAssignments = safeAssignments.filter((assignment) => {
+    const sourceKey = getTeacherFirstUseAssignmentSourceKey(assignment);
+    return sourceKey === "generated_by_policy" || sourceKey === "legacy_personalised";
+  });
+  const livePersonalisedAssignments = personalisedAssignments.filter(isTeacherFirstUseAssignmentLive);
+  const hasPersonalisedAssignmentEvidence = personalisedAssignments.length > 0;
+  const hasCompletedEvidence = !!hasAnalyticsEvidence || hasTeacherFirstUseCompletedEvidence(safeAssignments);
+  const allVisibleAssignmentsComplete = safeAssignments.length > 0
+    && safeAssignments.every(isTeacherFirstUseAssignmentComplete);
+
+  if (livePersonalisedAssignments.length) {
+    return buildTeacherFirstUseModel({
+      state: "personalised_assignment_live",
+      title: "Personalised assignments are live",
+      message: "Pupils have personalised Wordloom work available. Use assignment progress to see who has started and who needs a reminder.",
+      primaryAction: TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS,
+      pupilAccessMessage,
+    });
+  }
+
+  if (incompleteBaselineAssignments.length) {
+    const hasPartialBaseline = incompleteBaselineAssignments.some(hasTeacherFirstUseStartedEvidence);
+    return buildTeacherFirstUseModel({
+      state: hasPartialBaseline ? "baseline_partially_complete" : "baseline_active",
+      title: hasPartialBaseline ? "Baseline is in progress" : "Baseline is ready for pupils",
+      message: hasPartialBaseline
+        ? "Some pupils have started or completed baseline. Use assignment progress to see who still needs to finish."
+        : "Baseline assignments are live. Pupils start or continue baseline when they sign in.",
+      primaryAction: TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS,
+      pupilAccessMessage,
+    });
+  }
+
+  if (hasAnalyticsEvidence && hasPersonalisedAssignmentEvidence) {
+    return buildTeacherFirstUseModel({
+      state: "assignment_evidence_available",
+      title: "Assignment evidence is ready",
+      message: "Use analytics to review current attainment, recent attempts, and where pupils may need support next.",
+      primaryAction: TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS,
+      pupilAccessMessage,
+    });
+  }
+
+  if (
+    allVisibleAssignmentsComplete
+    && (hasPersonalisedAssignmentEvidence || !completedBaselineAssignments.length)
+  ) {
+    return buildTeacherFirstUseModel({
+      state: "all_current_work_complete",
+      title: "Current work is complete",
+      message: "Visible assignments appear complete. Analytics can help decide what pupils need next.",
+      primaryAction: hasCompletedEvidence ? TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS : null,
+      pupilAccessMessage,
+    });
+  }
+
+  if (
+    completedBaselineAssignments.length
+    && !livePersonalisedAssignments.length
+    && !hasPersonalisedAssignmentEvidence
+  ) {
+    return buildTeacherFirstUseModel({
+      state: "baseline_complete_waiting_for_personalised",
+      title: "Baseline complete, next challenge preparing",
+      message: "Personalised practice is prepared automatically after baseline. Pupils may need to return to their dashboard, and a short waiting state is normal.",
+      primaryAction: TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS,
+      pupilAccessMessage,
+    });
+  }
+
+  if (!hasClassData) {
+    return buildTeacherFirstUseModel({
+      state: "loading_or_unknown",
+      title: "Checking setup...",
+      message: "Wordloom is checking classes, pupils, and current assignments before suggesting the next setup action.",
+      pupilAccessMessage,
+      isLoading: true,
+    });
+  }
+
+  if ((knownFormGroupCount || 0) <= 0) {
+    if (!onboardingAction) {
+      return buildTeacherFirstUseModel({
+        state: "setup_blocked_by_permissions",
+        title: "Setup needs admin help",
+        message: "No usable form group is visible from this staff view. Ask an administrator to create or import the right form group.",
+        pupilAccessMessage,
+      });
+    }
+    return buildTeacherFirstUseModel({
+      state: "no_form_groups",
+      title: "Import pupils to create form groups",
+      message: "Start with Pupil onboarding. A CSV with form_class and year_group can create the form groups pupils need for baseline.",
+      primaryAction: onboardingAction,
+      pupilAccessMessage,
+    });
+  }
+
+  if (!hasPupilData && !safeAssignments.length) {
+    return buildTeacherFirstUseModel({
+      state: "loading_or_unknown",
+      title: "Checking setup...",
+      message: "Wordloom is checking whether pupils are already attached to the visible form groups.",
+      pupilAccessMessage,
+      isLoading: true,
+    });
+  }
+
+  if (hasPupilData && (knownActivePupilCount || 0) <= 0) {
+    if (!onboardingAction) {
+      return buildTeacherFirstUseModel({
+        state: "setup_blocked_by_permissions",
+        title: "Setup needs admin help",
+        message: "Form groups are visible, but no active pupils are attached from this staff view. Ask an administrator to import or place pupils.",
+        pupilAccessMessage,
+      });
+    }
+    return buildTeacherFirstUseModel({
+      state: "form_groups_without_pupils",
+      title: "Add pupils to form groups",
+      message: "Use Pupil onboarding to import pupils and place them in their current form groups before baseline starts.",
+      primaryAction: onboardingAction,
+      pupilAccessMessage,
+    });
+  }
+
+  if (!baselineAssignments.length && !safeAssignments.length) {
+    if (hasOwnedFormGroup && canProvisionBaseline) {
+      return buildTeacherFirstUseModel({
+        state: "pupils_without_baseline",
+        title: "Check baseline status",
+        message: "Pupils are attached to form groups. Provision or repair the standard baseline before personalised work unlocks.",
+        primaryAction: TEACHER_FIRST_USE_ACTIONS.CHECK_BASELINE_STATUS,
+        pupilAccessMessage,
+      });
+    }
+    return buildTeacherFirstUseModel({
+      state: "setup_blocked_by_permissions",
+      title: "Baseline setup needs admin help",
+      message: hasOwnedFormGroup
+        ? "Pupils are visible, but this staff account cannot provision baseline. Ask an administrator to check baseline status."
+        : "Pupils are visible, but this staff account does not own a usable form group. Use Pupil onboarding or ask an administrator to connect the right form group.",
+      primaryAction: onboardingAction,
+      pupilAccessMessage,
+    });
+  }
+
+  if (hasAnalyticsEvidence) {
+    return buildTeacherFirstUseModel({
+      state: "assignment_evidence_available",
+      title: "Assignment evidence is ready",
+      message: "Use analytics to review current attainment, recent attempts, and where pupils may need support next.",
+      primaryAction: TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS,
+      pupilAccessMessage,
+    });
+  }
+
+  return buildTeacherFirstUseModel({
+    state: "assignment_evidence_available",
+    title: "Review the latest evidence",
+    message: "Wordloom has setup evidence available. Open analytics to review progress and decide what pupils need next.",
+    primaryAction: TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS,
+    pupilAccessMessage,
+  });
+}
+
 const AUTOMATION_TARGET_YEAR_ALL = "__all_year_groups__";
 const AUTOMATION_ELIGIBLE_CLASS_TYPES = new Set([CLASS_TYPE_FORM]);
 const AUTOMATION_CLASS_TYPE_FALLBACK = CLASS_TYPE_SUBJECT;
@@ -1199,6 +1526,118 @@ function getOwnedClasses() {
 
 function getOwnedAssignableClasses() {
   return getOwnedClasses().sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+}
+
+function getTeacherFirstUseOwnedFormClasses() {
+  return getOwnedClasses().filter((cls) =>
+    getNormalizedClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM
+  );
+}
+
+function getTeacherFirstUseAssignmentSourceKeyForRecord(assignment = {}) {
+  if (assignment?.isBaseline === true || assignment?.is_baseline === true) return "baseline";
+  const direct = String(
+    assignment?.assignment_source
+    || assignment?.evidence_source
+    || assignment?.attempt_source
+    || assignment?.assignmentOrigin
+    || ""
+  ).trim().toLowerCase();
+  if (direct === "baseline") return "baseline";
+  if (direct === "generated_by_policy" || direct === "legacy_personalised") return direct;
+  if (
+    direct === "auto_assigned"
+    || String(assignment?.automation_kind || "").trim().toLowerCase() === ASSIGNMENT_AUTOMATION_KIND_PERSONALISED
+    || String(assignment?.automation_run_id || "").trim()
+  ) {
+    return "generated_by_policy";
+  }
+  return direct || "teacher_created";
+}
+
+function buildTeacherFirstUseAssignmentRows() {
+  return (state.assignments || []).map((assignment) => {
+    const assignmentId = String(assignment?.id || "").trim();
+    return {
+      ...assignment,
+      sourceKey: getTeacherFirstUseAssignmentSourceKeyForRecord(assignment),
+      lifecycle: assignmentId ? state.assignmentLifecycle.summariesByAssignmentId?.[assignmentId] || null : null,
+    };
+  });
+}
+
+function getTeacherFirstUseActiveFormPupilCount() {
+  const onboarding = getPupilOnboardingState();
+  if (!onboarding?.referenceLoaded) return null;
+  return getPupilPlacementActiveFormPupilIds().size;
+}
+
+function isTeacherFirstUseClassDataLoaded() {
+  const lifecycleStatus = String(state.assignmentLifecycle?.status || "").trim().toLowerCase();
+  return lifecycleStatus === "ready" || lifecycleStatus === "error";
+}
+
+function hasTeacherFirstUseAnalyticsEvidence() {
+  const attempts = state.visualAnalytics?.sourceData?.attempts;
+  if (Array.isArray(attempts) && attempts.length > 0) return true;
+  return Object.values(state.analyticsByAssignment || {}).some((entry) =>
+    entry?.status === "ready" && entry?.data
+  );
+}
+
+function buildCurrentTeacherFirstUseReadiness() {
+  const formClasses = getPupilOnboardingFormClasses();
+  const ownedFormClasses = getTeacherFirstUseOwnedFormClasses();
+  const activePupilCount = getTeacherFirstUseActiveFormPupilCount();
+  const classDataLoaded = isTeacherFirstUseClassDataLoaded();
+  return buildTeacherFirstUseReadiness({
+    classDataKnown: classDataLoaded,
+    formGroupCount: classDataLoaded ? formClasses.length : null,
+    ownedFormGroupCount: classDataLoaded ? ownedFormClasses.length : null,
+    pupilDataKnown: activePupilCount !== null,
+    activePupilCount,
+    canImportCsv: canImportCsv(),
+    canProvisionBaseline: canManageOwnContent() && canAssignTests(),
+    assignments: buildTeacherFirstUseAssignmentRows(),
+    hasAnalyticsEvidence: hasTeacherFirstUseAnalyticsEvidence(),
+    loginPath: "./login.html",
+  });
+}
+
+function renderTeacherFirstUseReadinessPanel() {
+  const model = buildCurrentTeacherFirstUseReadiness();
+  const action = model.primaryAction;
+  const actionHtml = action
+    ? `
+      <button
+        class="td-btn td-btn--primary td-first-use-action"
+        type="button"
+        data-action="teacher-first-use-action"
+        data-first-use-action="${escapeAttr(action.id)}"
+      >
+        ${escapeHtml(action.label)}
+      </button>
+    `
+    : "";
+
+  return `
+    <section
+      class="td-first-use-panel td-first-use-panel--${escapeAttr(model.state)}"
+      data-role="teacher-first-use-readiness"
+      aria-busy="${model.isLoading ? "true" : "false"}"
+    >
+      <div class="td-first-use-copy">
+        <p class="td-first-use-eyebrow">First-use readiness</p>
+        <h3>${escapeHtml(model.title)}</h3>
+        <p>${escapeHtml(model.message)}</p>
+      </div>
+      ${actionHtml ? `<div class="td-first-use-actions">${actionHtml}</div>` : ""}
+      <div class="td-first-use-access-note">
+        <strong>Pupil access</strong>
+        <p>${escapeHtml(model.pupilAccessMessage)}</p>
+      </div>
+    </section>
+  `;
 }
 
 function getNormalizedClassType(value, { legacyFallback = CLASS_TYPE_FORM } = {}) {
@@ -5373,8 +5812,10 @@ async function runDeferredTeacherDashboardEnrichment(renderContext) {
 
   if (canImportCsv()) {
     tasks.push(
-      runDeferredTeacherDashboardTask("pupil import preflight", renderContext, () =>
-        loadPupilOnboardingPreflight({ repaint: false })
+      runDeferredTeacherDashboardTask("pupil onboarding setup data", renderContext, async () => {
+        await loadPupilOnboardingPreflight({ repaint: false });
+        await ensurePupilOnboardingReferenceDataLoaded();
+      }
       )
     );
   }
@@ -11030,11 +11471,73 @@ function onRootKeyDown(event) {
   }
 }
 
+function scrollTeacherFirstUseTarget(selector = "") {
+  requestAnimationFrame(() => {
+    const target = rootEl?.querySelector(selector);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (typeof target.focus === "function" && target.matches("button, [href], input, select, textarea, [tabindex]")) {
+        target.focus({ preventScroll: true });
+      }
+    }
+  });
+}
+
+function handleTeacherFirstUseAction(actionId = "") {
+  const action = String(actionId || "").trim();
+
+  if (action === TEACHER_FIRST_USE_ACTIONS.OPEN_PUPIL_ONBOARDING.id) {
+    if (!canImportCsv()) {
+      showNotice("Admin access is required to open pupil onboarding.", "error");
+      paint();
+      return;
+    }
+    openDashboardSection("pupilOnboarding");
+    paint();
+    void loadPupilPlacementRows({ force: true });
+    scrollTeacherFirstUseTarget('[data-section="pupilOnboarding"]');
+    return;
+  }
+
+  if (action === TEACHER_FIRST_USE_ACTIONS.CHECK_BASELINE_STATUS.id) {
+    if (!(canManageOwnContent() && canAssignTests())) {
+      showNotice("Teacher or admin access is required to check baseline status.", "error");
+      paint();
+      return;
+    }
+    state.createBaselineOpen = true;
+    state.createClassOpen = false;
+    state.createInterventionGroupOpen = false;
+    state.createAutoAssignOpen = false;
+    paint();
+    scrollTeacherFirstUseTarget("#tdBaselineClassInput");
+    return;
+  }
+
+  if (action === TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS.id) {
+    openDashboardSection("upcoming");
+    paint();
+    scrollTeacherFirstUseTarget('[data-role="assignment-lifecycle-body"]');
+    return;
+  }
+
+  if (action === TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS.id) {
+    openDashboardSection("analytics");
+    paint();
+    scrollTeacherFirstUseTarget('[data-role="analytics-bar"]');
+  }
+}
+
 async function onRootClick(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
 
   const action = button.dataset.action;
+
+  if (action === "teacher-first-use-action") {
+    handleTeacherFirstUseAction(button.dataset.firstUseAction || "");
+    return;
+  }
 
   if (action === "toggle-section") {
     const key = button.dataset.section;
@@ -15702,6 +16205,7 @@ function paint() {
       </div>
 
       ${renderNotice()}
+      ${renderTeacherFirstUseReadinessPanel()}
       ${renderCreateBar()}
       ${renderSectionStaffAccess()}
       ${renderSectionPupilOnboarding()}
@@ -16502,8 +17006,18 @@ function renderCreateBar() {
               .map((cls) => `<option value="${escapeAttr(cls.id)}">${escapeHtml(cls.name || "Untitled class")}</option>`)
               .join("")}
           </select>
-          <div class="td-action-inline-copy">Wordloom uses a standard baseline automatically. Pupils start or continue baseline when they log in, and personalised tests unlock after baseline is complete.</div>
-          <button class="td-btn td-btn--ghost" type="submit">Provision standard baseline</button>
+          ${
+            ownedFormClasses.length
+              ? `<div class="td-action-inline-copy">Wordloom uses a standard baseline automatically. Pupils start or continue baseline when they log in, and personalised tests unlock after baseline is complete.</div>`
+              : `
+                <div class="td-empty td-empty--compact td-empty--notice">
+                  <strong>No owned form group is available.</strong>
+                  <p>Open Pupil onboarding and import pupils with form_class and year_group, or ask an administrator to create or import the appropriate form group.</p>
+                  ${canImportCsv() ? `<button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="teacher-first-use-action" data-first-use-action="${escapeAttr(TEACHER_FIRST_USE_ACTIONS.OPEN_PUPIL_ONBOARDING.id)}">Open pupil onboarding</button>` : ""}
+                </div>
+              `
+          }
+          <button class="td-btn td-btn--ghost" type="submit" ${ownedFormClasses.length ? "" : "disabled"}>Provision standard baseline</button>
         </form>
       </div>
 
@@ -30758,6 +31272,81 @@ function injectStyles() {
       transform:rotate(45deg);
     }
 
+    .td-first-use-panel{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:14px 18px;
+      align-items:center;
+      margin-top:22px;
+      padding:16px;
+      border:1px solid #dbe3ee;
+      border-radius:16px;
+      background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);
+      box-shadow:0 12px 28px rgba(15,23,42,0.04);
+    }
+
+    .td-first-use-copy{
+      min-width:0;
+    }
+
+    .td-first-use-eyebrow{
+      margin:0 0 4px;
+      color:#2563eb;
+      font-size:.78rem;
+      font-weight:800;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+
+    .td-first-use-copy h3{
+      margin:0;
+      color:#0f172a;
+      font-size:1.08rem;
+      line-height:1.22;
+      font-weight:800;
+      letter-spacing:0;
+    }
+
+    .td-first-use-copy p:not(.td-first-use-eyebrow){
+      margin:6px 0 0;
+      color:#475569;
+      font-size:.95rem;
+      line-height:1.45;
+    }
+
+    .td-first-use-actions{
+      display:flex;
+      justify-content:flex-end;
+      min-width:0;
+    }
+
+    .td-first-use-action{
+      white-space:normal;
+      text-align:center;
+    }
+
+    .td-first-use-access-note{
+      grid-column:1 / -1;
+      display:grid;
+      gap:4px;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#fff;
+      color:#475569;
+      font-size:.9rem;
+      line-height:1.4;
+    }
+
+    .td-first-use-access-note strong{
+      color:#0f172a;
+      font-size:.92rem;
+    }
+
+    .td-first-use-access-note p{
+      margin:0;
+    }
+
     .td-section{
       margin-top:28px;
     }
@@ -37807,6 +38396,19 @@ function injectStyles() {
 
       .td-assignment-lifecycle-helper{
         margin-left:0;
+      }
+
+      .td-first-use-panel{
+        grid-template-columns:1fr;
+        align-items:stretch;
+      }
+
+      .td-first-use-actions{
+        justify-content:stretch;
+      }
+
+      .td-first-use-action{
+        width:100%;
       }
 
       .td-assignment-lifecycle-group-head{

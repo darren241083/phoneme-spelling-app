@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Wordloom Login</title>
-  <link rel="stylesheet" href="./styles.css?v=1.20" />
+  <link rel="stylesheet" href="./styles.css?v=1.21" />
 </head>
 <body class="loginPage">
   <div class="wrap loginWrap">
@@ -24,7 +24,8 @@
     <div id="banner" class="banner" style="display:none;"></div>
 
     <section id="viewLogin" class="card loginCard loginUnifiedCard">
-      <h2>Sign in</h2>
+      <h2>Sign in to Wordloom</h2>
+      <p class="loginUnifiedHelper">Staff can use Google or their school email. Pupils use the username and PIN given by their teacher.</p>
 
       <div class="loginCredentialBox">
         <button id="btnGoogle" class="btn loginGoogleButton" type="button">
@@ -36,10 +37,11 @@
           </svg>
           <span>Continue with Google</span>
         </button>
+        <p class="loginGoogleHelper">For staff accounts</p>
 
         <form id="credentialLoginForm" class="loginForm">
           <div>
-            <label for="pupilClassCode">Email or pupil username</label>
+            <label for="pupilClassCode">School email or pupil username</label>
             <input id="pupilClassCode" class="input" autocomplete="username" />
           </div>
           <div>
@@ -57,6 +59,6 @@
   </div>
 
   <script src="./vendor/xlsx.full.min.js?v=0.18.5"></script>
-  <script type="module" src="./js/app.js?v=5.143"></script>
+  <script type="module" src="./js/app.js?v=5.144"></script>
 </body>
 </html>

@@ -80,6 +80,7 @@ function createDashboardContext() {
     escapeHtml: (value) => String(value ?? ""),
     renderCurrentSchoolContextRow: () => "",
     renderNotice: () => "",
+    renderTeacherFirstUseReadinessPanel: () => "<section>First-use readiness</section>",
     renderCreateBar: () => "",
     renderSectionStaffAccess: () => "",
     renderSectionPupilOnboarding: () => "",
@@ -118,6 +119,11 @@ for (const [functionName, title] of [
 }
 
 const paintBlock = paintSource;
+assert.ok(
+  paintBlock.indexOf("renderNotice()") < paintBlock.indexOf("renderTeacherFirstUseReadinessPanel()")
+    && paintBlock.indexOf("renderTeacherFirstUseReadinessPanel()") < paintBlock.indexOf("renderCreateBar()"),
+  "first-use readiness should render after notices and before create/analytics content"
+);
 assert.match(paintBlock, /renderDashboardSection\("bankMonitor", renderSectionWordloomCoreBankMonitor\)/);
 assert.match(paintBlock, /renderDashboardSection\("upcoming", renderSectionUpcomingAssignments\)/);
 assert.match(paintBlock, /renderDashboardSection\("classes", renderSectionClasses\)/);
@@ -129,6 +135,7 @@ assert.doesNotMatch(paintBlock, /\$\{renderSectionTests\(\)\}/);
 
 const normalContext = createDashboardContext();
 const normalHtml = vm.runInNewContext(`${helperSource}\n${paintSource}\npaint(); rootEl.innerHTML;`, normalContext);
+assert.match(normalHtml, /First-use readiness/);
 assert.match(normalHtml, /Analytics/);
 assert.doesNotMatch(normalHtml, /Core bank monitor/);
 assert.doesNotMatch(normalHtml, /Assignment lifecycle/);

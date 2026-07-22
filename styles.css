@@ -5022,6 +5022,13 @@ body.loginPage{
   line-height:1.08;
 }
 
+.loginUnifiedHelper{
+  margin:10px 0 0;
+  color:var(--wl-muted);
+  font-size:15px;
+  line-height:1.45;
+}
+
 .loginActionRow{
   gap:12px;
   margin-top:18px;
@@ -5060,6 +5067,14 @@ body.loginPage{
   width:100%;
   justify-content:center;
   min-width:0;
+}
+
+.loginGoogleHelper{
+  margin:-10px 0 0;
+  color:var(--wl-muted);
+  font-size:13px;
+  font-weight:700;
+  text-align:center;
 }
 
 .loginGoogleIcon{

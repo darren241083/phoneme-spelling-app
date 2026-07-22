@@ -56,11 +56,13 @@ for (const removedMarker of [
 assert.equal(loginViewSource.includes("Wordloom Login"), false, "visible login card should not repeat the page title");
 
 for (const unifiedLoginMarker of [
-  "<h2>Sign in</h2>",
+  "<h2>Sign in to Wordloom</h2>",
+  "Staff can use Google or their school email. Pupils use the username and PIN given by their teacher.",
   'id="btnGoogle"',
   "Continue with Google",
+  "For staff accounts",
   'id="credentialLoginForm"',
-  "Email or pupil username",
+  "School email or pupil username",
   'id="pupilClassCode"',
   "Password or PIN",
   'id="pupilCode"',
