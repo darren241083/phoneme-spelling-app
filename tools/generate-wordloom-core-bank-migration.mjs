@@ -315,6 +315,22 @@ const PHASE_CONFIGS = new Map([
     includeExplicitHintSqlCheck: true,
     includeSchoolScopeSqlCheck: true,
   }],
+  ["4d1", {
+    key: "4d1",
+    sourceVersion: "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21",
+    migrationFilename: "20260721120000_wordloom_core_spelling_bank_phase_4d1_tion_repair.sql",
+    tempTablePrefix: "phase_4d1_tion_repair",
+    expectedCountColumn: "expected_phase_4d1_tion_repair_word_count",
+    title: "Phase 4D1 tion repair",
+    noteText: "Wordloom core v1 Phase 4D1 tion repair target",
+    linkNoteText: "Wordloom core v1 Phase 4D1 tion repair target link",
+    expectedCounts: new Map([
+      ["tion", 8],
+    ]),
+    allowedExistingActiveSourceVersions: [PROOF_SOURCE_VERSION],
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -570,7 +586,7 @@ function parsePhaseArg(argv = []) {
   const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
   const config = PHASE_CONFIGS.get(phase);
   if (!config) {
-    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, --phase=7h, --phase=8b, --phase=8c, or --phase=8d.`);
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, --phase=7h, --phase=8b, --phase=8c, --phase=8d, or --phase=4d1.`);
   }
   return config;
 }
@@ -584,6 +600,7 @@ function validateSource(source, config) {
   const phaseNormalised = new Set();
   const duplicateNormalised = new Set();
   const expectedTotal = [...config.expectedCounts.values()].reduce((total, count) => total + count, 0);
+  const allowedExistingActiveSourceVersions = new Set(config.allowedExistingActiveSourceVersions || []);
 
   for (const target of targets) {
     const focus = normalizeText(target?.focus_grapheme);
@@ -673,7 +690,10 @@ function validateSource(source, config) {
     .filter((word) => word.normalised_word);
   const existingWords = [...activeOtherSourceWords, ...parseProofWords()];
   for (const existing of existingWords) {
-    if (phaseNormalised.has(existing.normalised_word)) {
+    if (
+      phaseNormalised.has(existing.normalised_word)
+      && !allowedExistingActiveSourceVersions.has(existing.source_version)
+    ) {
       errors.push(`${config.key}_word_${existing.normalised_word}_collides_with_${existing.source_version || "unknown_source"}`);
     }
   }
@@ -762,6 +782,13 @@ function buildMigrationSql({ config, targetRows, wordRows, expectedTotal }) {
   const targetsTable = `wordloom_core_${config.tempTablePrefix}_targets`;
   const wordsTable = `wordloom_core_${config.tempTablePrefix}_words`;
   const wordTargetsTable = `wordloom_core_${config.tempTablePrefix}_word_targets`;
+  const allowedExistingActiveSourceVersions = (config.allowedExistingActiveSourceVersions || [])
+    .map((sourceVersion) => String(sourceVersion || "").trim())
+    .filter(Boolean);
+  const allowedExistingActiveSourceVersionSql = allowedExistingActiveSourceVersions.length
+    ? `
+      and coalesce(existing.source_version, '') not in (${allowedExistingActiveSourceVersions.map(sqlString).join(", ")})`
+    : "";
   const wordTargetRows = wordRows.flatMap((word) =>
     word.target_links.map((link) => ({
       normalised_word: word.normalised_word,
@@ -922,7 +949,7 @@ begin
     inner join ${wordsTable} as phase_words
       on phase_words.normalised_word = existing.normalised_word
     where existing.is_active is true
-      and coalesce(existing.source_version, '') <> '${config.sourceVersion}'
+      and coalesce(existing.source_version, '') <> '${config.sourceVersion}'${allowedExistingActiveSourceVersionSql}
   ) then
     raise exception 'Wordloom core ${config.title} batch collides with existing active core words.';
   end if;
