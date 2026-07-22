@@ -46,7 +46,8 @@
       "Rows with source_version wordloom_core_v1_phase_8b_2026_05_13 are reviewed Wordloom-owned Phase 8B structured expansion batch 1 content for ci, ure, dge, ie, oi, oy, tch, au, and ear.",
       "Rows with source_version wordloom_core_v1_phase_8c_2026_05_14 are reviewed Wordloom-owned Phase 8C structured expansion batch 2 content for air, aw, ew, igh, tion, ck, oa, ur, ch, ng, ou, ow, sh, ai, ay, ee, or, th, ar, ea, and er.",
       "Rows with source_version wordloom_core_v1_phase_8d_2026_05_14 are reviewed Wordloom-owned Phase 8D structured expansion batch 3 content for ar, er, ea, ee, oa, ai, igh, or, air, ear, oy, ou, ow, sh, ch, th, ng, ck, tion, ur, ie, ci, au, ay, ew, ure, aw, and tch.",
-      "Rows with source_version wordloom_core_v1_phase_4d1_tion_repair_2026_07_21 are reviewed Wordloom-owned Phase 4D1 repair content for low-band tion selector coverage."
+      "Rows with source_version wordloom_core_v1_phase_4d1_tion_repair_2026_07_21 are reviewed Wordloom-owned Phase 4D1 repair content for low-band tion selector coverage.",
+      "Rows with source_version wordloom_core_v1_phase_4f_ee_buffer_2026_07_22 are reviewed Wordloom-owned Phase 4F repair content for ee early-stretch target buffer coverage."
     ]
   },
   "targets": [
@@ -54869,6 +54870,113 @@
           "focus_grapheme": "tion",
           "target_role": "primary",
           "pattern_type": "trigraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "needle",
+      "normalised_word": "needle",
+      "grapheme_segments": [
+        "n",
+        "ee",
+        "d",
+        "l",
+        "e"
+      ],
+      "focus_graphemes": [
+        "ee"
+      ],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 48,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Core ee word selected for Phase 4F early-stretch buffer repair.",
+      "sentence": "Maya used a blunt needle to pull thread through the cloth.",
+      "meaning": "A thin tool used for sewing.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "greenhouse",
+      "normalised_word": "greenhouse",
+      "grapheme_segments": [
+        "g",
+        "r",
+        "ee",
+        "n",
+        "h",
+        "ou",
+        "s",
+        "e"
+      ],
+      "focus_graphemes": [
+        "ee"
+      ],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 52,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Core ee word selected for Phase 4F early-stretch buffer repair.",
+      "sentence": "The class grew tomatoes in the greenhouse.",
+      "meaning": "A glass building used for growing plants.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
+          "difficulty_modifier": 0
+        }
+      ]
+    },
+    {
+      "word": "sleepover",
+      "normalised_word": "sleepover",
+      "grapheme_segments": [
+        "s",
+        "l",
+        "ee",
+        "p",
+        "o",
+        "v",
+        "er"
+      ],
+      "focus_graphemes": [
+        "ee"
+      ],
+      "primary_focus_grapheme": "ee",
+      "stage_band": "floor_core",
+      "difficulty_score": 54,
+      "difficulty_label": "Core",
+      "difficulty_reason": "Core ee word selected for Phase 4F early-stretch buffer repair.",
+      "sentence": "Maya packed a toothbrush for the sleepover.",
+      "meaning": "A visit where someone stays overnight.",
+      "approval_status": "approved",
+      "suitability_status": "suitable",
+      "source": "wordloom_core",
+      "source_version": "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22",
+      "is_active": true,
+      "target_links": [
+        {
+          "focus_grapheme": "ee",
+          "target_role": "primary",
+          "pattern_type": "vowel_digraph",
           "difficulty_modifier": 0
         }
       ]

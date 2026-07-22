@@ -331,6 +331,21 @@ const PHASE_CONFIGS = new Map([
     includeExplicitHintSqlCheck: true,
     includeSchoolScopeSqlCheck: true,
   }],
+  ["4f", {
+    key: "4f",
+    sourceVersion: "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22",
+    migrationFilename: "20260722120000_wordloom_core_spelling_bank_phase_4f_ee_buffer.sql",
+    tempTablePrefix: "phase_4f_ee_buffer",
+    expectedCountColumn: "expected_phase_4f_ee_buffer_word_count",
+    title: "Phase 4F ee buffer",
+    noteText: "Wordloom core v1 Phase 4F ee early-stretch buffer target",
+    linkNoteText: "Wordloom core v1 Phase 4F ee early-stretch buffer target link",
+    expectedCounts: new Map([
+      ["ee", 3],
+    ]),
+    includeExplicitHintSqlCheck: true,
+    includeSchoolScopeSqlCheck: true,
+  }],
 ]);
 const REQUIRED_WORD_FIELDS = [
   "word",
@@ -586,7 +601,7 @@ function parsePhaseArg(argv = []) {
   const phase = normalizeText(phaseArg ? phaseArg.split("=").slice(1).join("=") : "7b");
   const config = PHASE_CONFIGS.get(phase);
   if (!config) {
-    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, --phase=7h, --phase=8b, --phase=8c, --phase=8d, or --phase=4d1.`);
+    fail(`Unsupported phase "${phase || "(missing)"}". Use --phase=7b, --phase=7c, --phase=7d, --phase=7e, --phase=7f, --phase=7g, --phase=7h, --phase=8b, --phase=8c, --phase=8d, --phase=4d1, or --phase=4f.`);
   }
   return config;
 }

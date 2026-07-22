@@ -18,6 +18,8 @@ const PHASE_8C_SOURCE_VERSION = "wordloom_core_v1_phase_8c_2026_05_14";
 const PHASE_8D_SOURCE_VERSION = "wordloom_core_v1_phase_8d_2026_05_14";
 const PHASE_4D1_TION_SOURCE_VERSION =
   "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21";
+const PHASE_4F_EE_BUFFER_SOURCE_VERSION =
+  "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22";
 const EXPECTED_PHASE_7B_COUNTS = new Map([
   ["ay", 8],
   ["ea", 8],
@@ -212,6 +214,32 @@ const EXPECTED_PHASE_8D_COUNTS = new Map([
 const EXPECTED_PHASE_4D1_TION_COUNTS = new Map([
   ["tion", 8],
 ]);
+const EXPECTED_PHASE_4F_EE_BUFFER_COUNTS = new Map([
+  ["ee", 3],
+]);
+const EXPECTED_PHASE_4F_EE_BUFFER_WORDS = new Map([
+  ["greenhouse", {
+    difficultyScore: 52,
+    difficultyLabel: "Core",
+    graphemeSegments: ["g", "r", "ee", "n", "h", "ou", "s", "e"],
+    sentence: "The class grew tomatoes in the greenhouse.",
+    meaning: "A glass building used for growing plants.",
+  }],
+  ["needle", {
+    difficultyScore: 48,
+    difficultyLabel: "Core",
+    graphemeSegments: ["n", "ee", "d", "l", "e"],
+    sentence: "Maya used a blunt needle to pull thread through the cloth.",
+    meaning: "A thin tool used for sewing.",
+  }],
+  ["sleepover", {
+    difficultyScore: 54,
+    difficultyLabel: "Core",
+    graphemeSegments: ["s", "l", "ee", "p", "o", "v", "er"],
+    sentence: "Maya packed a toothbrush for the sleepover.",
+    meaning: "A visit where someone stays overnight.",
+  }],
+]);
 
 const TARGET_REQUIRED_FIELDS = [
   "focus_grapheme",
@@ -373,6 +401,9 @@ function buildValidationReport(source) {
   const phase4D1TionPrimaryCounts = Object.fromEntries(
     [...EXPECTED_PHASE_4D1_TION_COUNTS.keys()].map((focus) => [focus, 0]),
   );
+  const phase4FEeBufferPrimaryCounts = Object.fromEntries(
+    [...EXPECTED_PHASE_4F_EE_BUFFER_COUNTS.keys()].map((focus) => [focus, 0]),
+  );
   const phase7BWords = [];
   const phase7CWords = [];
   const phase7DWords = [];
@@ -384,6 +415,7 @@ function buildValidationReport(source) {
   const phase8CWords = [];
   const phase8DWords = [];
   const phase4D1TionWords = [];
+  const phase4FEeBufferWords = [];
 
   if (!metadata) errors.push("metadata_missing");
   if (!isNonEmptyText(metadata?.schema_version)) errors.push("metadata_schema_version_missing");
@@ -439,6 +471,7 @@ function buildValidationReport(source) {
     const isPhase8CWord = String(word.source_version || "") === PHASE_8C_SOURCE_VERSION;
     const isPhase8DWord = String(word.source_version || "") === PHASE_8D_SOURCE_VERSION;
     const isPhase4D1TionWord = String(word.source_version || "") === PHASE_4D1_TION_SOURCE_VERSION;
+    const isPhase4FEeBufferWord = String(word.source_version || "") === PHASE_4F_EE_BUFFER_SOURCE_VERSION;
 
     if (!cleanWord) errors.push(`${label}_word_missing`);
     if (!normalisedWord) errors.push(`${label}_normalised_word_missing`);
@@ -654,6 +687,34 @@ function buildValidationReport(source) {
       }
     }
 
+    if (isPhase4FEeBufferWord) {
+      phase4FEeBufferWords.push(word);
+      const expectedWord = EXPECTED_PHASE_4F_EE_BUFFER_WORDS.get(normalisedWord);
+      if (!expectedWord) errors.push(`${label}_phase4f_ee_buffer_unexpected_word`);
+      if (word.is_active !== true) errors.push(`${label}_phase4f_ee_buffer_not_active`);
+      if (normalizeText(word.approval_status) !== "approved") errors.push(`${label}_phase4f_ee_buffer_not_approved`);
+      if (normalizeText(word.suitability_status) !== "suitable") errors.push(`${label}_phase4f_ee_buffer_not_suitable`);
+      if (normalizeText(word.source) !== "wordloom_core") errors.push(`${label}_phase4f_ee_buffer_wrong_source`);
+      if (!EXPECTED_PHASE_4F_EE_BUFFER_COUNTS.has(primaryFocus)) errors.push(`${label}_phase4f_ee_buffer_unexpected_target_${primaryFocus || "missing"}`);
+      if (normalizeText(word.difficulty_label) !== "core") errors.push(`${label}_phase4f_ee_buffer_wrong_difficulty_label`);
+      if (score < 45 || score > 54) errors.push(`${label}_phase4f_ee_buffer_score_outside_widened_only_range`);
+      if (isWeakContext(word.sentence)) errors.push(`${label}_phase4f_ee_buffer_sentence_weak`);
+      if (isWeakContext(word.meaning)) errors.push(`${label}_phase4f_ee_buffer_meaning_weak`);
+      if (isCircularMeaning(normalisedWord, word.meaning)) errors.push(`${label}_phase4f_ee_buffer_meaning_circular`);
+      if (hasExplicitHintText(word.sentence)) errors.push(`${label}_phase4f_ee_buffer_sentence_spelling_hint`);
+      if (hasExplicitHintText(word.meaning)) errors.push(`${label}_phase4f_ee_buffer_meaning_spelling_hint`);
+      if (expectedWord) {
+        if (score !== expectedWord.difficultyScore) errors.push(`${label}_phase4f_ee_buffer_wrong_score`);
+        if (word.difficulty_label !== expectedWord.difficultyLabel) errors.push(`${label}_phase4f_ee_buffer_wrong_label`);
+        if (JSON.stringify(segments) !== JSON.stringify(expectedWord.graphemeSegments)) errors.push(`${label}_phase4f_ee_buffer_wrong_segments`);
+        if (word.sentence !== expectedWord.sentence) errors.push(`${label}_phase4f_ee_buffer_wrong_sentence`);
+        if (word.meaning !== expectedWord.meaning) errors.push(`${label}_phase4f_ee_buffer_wrong_meaning`);
+      }
+      if (phase4FEeBufferPrimaryCounts[primaryFocus] !== undefined) {
+        phase4FEeBufferPrimaryCounts[primaryFocus] += 1;
+      }
+    }
+
     const primaryTargetLinks = [];
     for (const [linkIndex, link] of targetLinks.entries()) {
       const linkLabel = `${label}_target_link[${linkIndex}]`;
@@ -759,6 +820,13 @@ function buildValidationReport(source) {
     const actual = Number(phase4D1TionPrimaryCounts[focus] || 0);
     if (actual !== expected) errors.push(`phase4d1_tion_target_${focus}_count_${actual}_expected_${expected}`);
   }
+  if (phase4FEeBufferWords.length !== 3) {
+    errors.push(`phase4f_ee_buffer_word_count_${phase4FEeBufferWords.length}_expected_3`);
+  }
+  for (const [focus, expected] of EXPECTED_PHASE_4F_EE_BUFFER_COUNTS) {
+    const actual = Number(phase4FEeBufferPrimaryCounts[focus] || 0);
+    if (actual !== expected) errors.push(`phase4f_ee_buffer_target_${focus}_count_${actual}_expected_${expected}`);
+  }
 
   const primaryCountsByTarget = {};
   const difficultyWindowCountsByTarget = {};
@@ -860,6 +928,26 @@ function buildValidationReport(source) {
       wordCount: phase4D1TionWords.length,
       primaryCountsByTarget: phase4D1TionPrimaryCounts,
     },
+    phase4FEeBuffer: {
+      sourceVersion: PHASE_4F_EE_BUFFER_SOURCE_VERSION,
+      wordCount: phase4FEeBufferWords.length,
+      primaryCountsByTarget: phase4FEeBufferPrimaryCounts,
+      words: phase4FEeBufferWords
+        .map((word) => ({
+          word: word.word,
+          normalisedWord: word.normalised_word,
+          difficultyScore: word.difficulty_score,
+          difficultyLabel: word.difficulty_label,
+          graphemeSegments: word.grapheme_segments,
+          sentence: word.sentence,
+          meaning: word.meaning,
+          targetLinks: word.target_links,
+          isActive: word.is_active,
+          approvalStatus: word.approval_status,
+          suitabilityStatus: word.suitability_status,
+        }))
+        .sort((a, b) => a.normalisedWord.localeCompare(b.normalisedWord)),
+    },
     difficultyBands: Object.fromEntries(
       ["easier", "core", "stretch"].map((band) => [
         band,
@@ -875,7 +963,7 @@ const report = buildValidationReport(source);
 assert.deepEqual(report.errors, [], `Wordloom source data errors: ${report.errors.join(", ")}`);
 assert.equal(report.sourceVersion, "wordloom_core_v1_foundation_2026_05_13");
 assert.equal(report.sourceTargetCount, 30);
-assert.equal(report.sourceWordCount, 1610);
+assert.equal(report.sourceWordCount, 1613);
 assert.equal(report.context.missingSentenceCount, 0);
 assert.equal(report.context.missingMeaningCount, 0);
 assert.equal(report.context.weakSentenceCount, 0);
@@ -1086,6 +1174,33 @@ assert.equal(report.phase4D1Tion.wordCount, 8);
 assert.deepEqual(report.phase4D1Tion.primaryCountsByTarget, {
   tion: 8,
 });
+assert.equal(report.phase4FEeBuffer.wordCount, 3);
+assert.deepEqual(report.phase4FEeBuffer.primaryCountsByTarget, {
+  ee: 3,
+});
+assert.equal(report.primaryCountsByTarget.ee, 57);
+assert.deepEqual(report.phase4FEeBuffer.words, [...EXPECTED_PHASE_4F_EE_BUFFER_WORDS.entries()]
+  .map(([normalisedWord, expected]) => ({
+    word: normalisedWord,
+    normalisedWord,
+    difficultyScore: expected.difficultyScore,
+    difficultyLabel: expected.difficultyLabel,
+    graphemeSegments: expected.graphemeSegments,
+    sentence: expected.sentence,
+    meaning: expected.meaning,
+    targetLinks: [
+      {
+        focus_grapheme: "ee",
+        target_role: "primary",
+        pattern_type: "vowel_digraph",
+        difficulty_modifier: 0,
+      },
+    ],
+    isActive: true,
+    approvalStatus: "approved",
+    suitabilityStatus: "suitable",
+  }))
+  .sort((a, b) => a.normalisedWord.localeCompare(b.normalisedWord)));
 
 console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   sourceVersion: report.sourceVersion,
@@ -1104,6 +1219,7 @@ console.log(`WORDLOOM_CORE_SOURCE_REPORT ${JSON.stringify({
   phase8C: report.phase8C,
   phase8D: report.phase8D,
   phase4D1Tion: report.phase4D1Tion,
+  phase4FEeBuffer: report.phase4FEeBuffer,
   primaryCountsByTarget: report.primaryCountsByTarget,
   difficultyWindowCountsByTarget: report.difficultyWindowCountsByTarget,
 })}`);

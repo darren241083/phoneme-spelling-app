@@ -51,6 +51,7 @@ const EXPECTED_WIDENING_CELLS = [
   "au/needs_support",
   "ay/early_stretch",
   "ea/early_stretch",
+  "ee/early_stretch",
 ].sort();
 
 function captureConsoleLog(fn) {
@@ -184,33 +185,38 @@ test("current amber cells receive the expected classification baseline", () => {
     .map(cellKey);
 
   assert.deepEqual(expectedWideningCells, EXPECTED_WIDENING_CELLS);
-  assert.deepEqual(insufficientBufferCells, ["ee/early_stretch"]);
+  assert.deepEqual(insufficientBufferCells, []);
   assert.deepEqual(profileMismatchCells, ["ure/needs_support"]);
   assert.deepEqual(REPORT.classificationCounts, {
     none: 100,
-    expected_widening: 18,
-    insufficient_target_buffer: 1,
+    expected_widening: 19,
     profile_target_mismatch: 1,
   });
-  assert.equal(REPORT.acceptedAmberCount, 19);
-  assert.equal(REPORT.actionableAmberCount, 1);
-  assert.deepEqual(REPORT.actionableAmberCells.map(cellKey), ["ee/early_stretch"]);
+  assert.equal(REPORT.acceptedAmberCount, 20);
+  assert.equal(REPORT.actionableAmberCount, 0);
+  assert.deepEqual(REPORT.actionableAmberCells.map(cellKey), []);
 });
 
-test("ee early-stretch is the only actionable target-buffer amber", () => {
+test("ee early-stretch is an accepted widened-buffer amber", () => {
   const ee = findCell("ee", "early_stretch");
   assert.equal(ee.status, "amber");
   assert.equal(ee.selectedExactTargetCount, 4);
   assert.equal(ee.requestedTargetCount, 4);
-  assert.equal(ee.targetBufferProbe.availableCount, 7);
-  assert.equal(ee.targetBufferProbe.status, "not_enough_approved_words");
-  assert.equal(ee.targetSupplyProbe.widenedWindowCount, 7);
+  assert.equal(ee.targetBufferProbe.availableCount, TARGET_BUFFER_COUNT);
+  assert.equal(ee.targetBufferProbe.status, "ready");
+  assert.equal(ee.targetSupplyProbe.totalPrimaryCount, 57);
+  assert.equal(ee.targetSupplyProbe.baseWindowCount, 0);
+  assert.equal(ee.targetSupplyProbe.widenedWindowCount, 10);
+  assert.equal(ee.reviewFallback.targetShortfallFilledByNonTargetWords, 0);
   assert.deepEqual(ee.coverageClassification, {
-    category: "insufficient_target_buffer",
+    category: "expected_widening",
     safety: "complete_exact",
-    acceptedAmber: false,
-    actionRecommendation: "top_up_buffer",
-    reasons: [`targetBuffer:7/${TARGET_BUFFER_COUNT}`],
+    acceptedAmber: true,
+    actionRecommendation: "none",
+    reasons: [
+      "widened_window_satisfied_request",
+      `targetBuffer:${TARGET_BUFFER_COUNT}/${TARGET_BUFFER_COUNT}`,
+    ],
   });
 });
 
@@ -337,10 +343,10 @@ test("classification layer preserves selected words, counts, and parity-sensitiv
     "reappear",
     "repair",
     "toadstool",
+    "sleepover",
     "between",
+    "greenhouse",
     "screech",
-    "beehive",
-    "agree",
     "cheerleader",
     "seesawing",
   ]);
@@ -358,7 +364,7 @@ test("classification layer preserves selected words, counts, and parity-sensitiv
     "creature",
     "border",
     "employer",
-    "screen",
+    "sweet",
     "after",
   ]);
   assert.deepEqual(ure.roleCounts, { review: 6, target: 2, stretch: 2 });
@@ -401,10 +407,10 @@ test("summary formatter prints a concise human summary without the full JSON pay
   assert.equal(lines[0], "CORE_BANK_SELECTOR_COVERAGE_AUDIT_SUMMARY");
   assert.ok(lines.some((line) => line.startsWith("headlineProfiles needs_support,secure_expected,early_stretch")));
   assert.ok(lines.some((line) => line.startsWith("diagnosticSelectorBands core_developing")));
-  assert.ok(lines.some((line) => line === "acceptedAmberCount 19"));
-  assert.ok(lines.some((line) => line === "actionableAmberCount 1"));
-  assert.ok(lines.some((line) => line.includes("expected_widening:18")));
-  assert.ok(lines.some((line) => line.includes("ee/early_stretch insufficient_target_buffer action:top_up_buffer")));
+  assert.ok(lines.some((line) => line === "acceptedAmberCount 20"));
+  assert.ok(lines.some((line) => line === "actionableAmberCount 0"));
+  assert.ok(lines.some((line) => line.includes("expected_widening:19")));
+  assert.equal(lines.some((line) => line.includes("insufficient_target_buffer")), false);
   assert.ok(lines.some((line) => line.includes("profile_target_mismatch:1")));
   assert.equal(lines.some((line) => line.startsWith("CORE_BANK_SELECTOR_COVERAGE_AUDIT_JSON ")), false);
   assert.equal(lines.some((line) => line.includes('"cells"')), false);
@@ -416,9 +422,10 @@ test("JSON-only payload is parseable and contains complete classification data",
   const parsed = JSON.parse(payload);
   assert.equal(parsed.auditVersion, AUDIT_VERSION);
   assert.equal(parsed.totals.cellCount, REPORT.totals.cellCount);
-  assert.equal(parsed.acceptedAmberCount, 19);
-  assert.equal(parsed.actionableAmberCount, 1);
+  assert.equal(parsed.acceptedAmberCount, 20);
+  assert.equal(parsed.actionableAmberCount, 0);
   assert.equal(parsed.cells.every((cell) => cell.coverageClassification && cell.targetSupplyProbe), true);
   assert.equal(parsed.acceptedAmberCells.some((cell) => cell.focusGrapheme === "ure" && cell.profileId === "needs_support"), true);
-  assert.deepEqual(parsed.actionableAmberCells.map(cellKey), ["ee/early_stretch"]);
+  assert.equal(parsed.acceptedAmberCells.some((cell) => cell.focusGrapheme === "ee" && cell.profileId === "early_stretch"), true);
+  assert.deepEqual(parsed.actionableAmberCells.map(cellKey), []);
 });

@@ -29,6 +29,8 @@ const EXPECTED_PHASE_8D_TARGET_COUNT = 28;
 const EXPECTED_PHASE_8D_WORD_COUNT = 250;
 const EXPECTED_PHASE_4D1_TION_TARGET_COUNT = 1;
 const EXPECTED_PHASE_4D1_TION_WORD_COUNT = 8;
+const EXPECTED_PHASE_4F_EE_BUFFER_TARGET_COUNT = 1;
+const EXPECTED_PHASE_4F_EE_BUFFER_WORD_COUNT = 3;
 const EXPECTED_ASSIGNMENT_WORD_COUNT = 10;
 const PROOF_SOURCE_VERSION = "wordloom_core_proof_v1";
 const PHASE_7B_SOURCE_VERSION = "wordloom_core_v1_phase_7b_2026_05_13";
@@ -43,6 +45,8 @@ const PHASE_8C_SOURCE_VERSION = "wordloom_core_v1_phase_8c_2026_05_14";
 const PHASE_8D_SOURCE_VERSION = "wordloom_core_v1_phase_8d_2026_05_14";
 const PHASE_4D1_TION_SOURCE_VERSION =
   "wordloom_core_v1_phase_4d1_tion_repair_2026_07_21";
+const PHASE_4F_EE_BUFFER_SOURCE_VERSION =
+  "wordloom_core_v1_phase_4f_ee_buffer_2026_07_22";
 const EXPECTED_LOW_COVERAGE_WARNINGS = new Map();
 const EXPECTED_PHASE_7B_COUNTS = new Map([
   ["ay", 8],
@@ -238,9 +242,35 @@ const EXPECTED_PHASE_8D_COUNTS = new Map([
 const EXPECTED_PHASE_4D1_TION_COUNTS = new Map([
   ["tion", 8],
 ]);
-const EXPECTED_PHASE_4D1_PRODUCTION_TOTALS = new Map([
+const EXPECTED_PHASE_4F_EE_BUFFER_COUNTS = new Map([
+  ["ee", 3],
+]);
+const EXPECTED_PHASE_4F_EE_BUFFER_WORDS = new Map([
+  ["greenhouse", {
+    difficultyScore: 52,
+    difficultyLabel: "Core",
+    graphemeSegments: ["g", "r", "ee", "n", "h", "ou", "s", "e"],
+    sentence: "The class grew tomatoes in the greenhouse.",
+    meaning: "A glass building used for growing plants.",
+  }],
+  ["needle", {
+    difficultyScore: 48,
+    difficultyLabel: "Core",
+    graphemeSegments: ["n", "ee", "d", "l", "e"],
+    sentence: "Maya used a blunt needle to pull thread through the cloth.",
+    meaning: "A thin tool used for sewing.",
+  }],
+  ["sleepover", {
+    difficultyScore: 54,
+    difficultyLabel: "Core",
+    graphemeSegments: ["s", "l", "ee", "p", "o", "v", "er"],
+    sentence: "Maya packed a toothbrush for the sleepover.",
+    meaning: "A visit where someone stays overnight.",
+  }],
+]);
+const EXPECTED_PHASE_4F_PRODUCTION_TOTALS = new Map([
   ["ai", 58],
-  ["ee", 60],
+  ["ee", 63],
   ["oa", 60],
   ["igh", 58],
   ["ar", 60],
@@ -346,6 +376,12 @@ const phase4D1TionMigrationPath = path.join(
   "supabase",
   "migrations",
   "20260721120000_wordloom_core_spelling_bank_phase_4d1_tion_repair.sql",
+);
+const phase4FEeBufferMigrationPath = path.join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260722120000_wordloom_core_spelling_bank_phase_4f_ee_buffer.sql",
 );
 const sourceDataPath = path.join(repoRoot, "data", "wordloom-core-bank-v1.json");
 const SOURCE_PLACEHOLDER_PATTERNS = [
@@ -730,6 +766,18 @@ function parsePhase4D1TionWordTargets(source) {
   return parsePhaseWordTargets(source, "wordloom_core_phase_4d1_tion_repair_word_targets", "Phase 4D1 tion repair");
 }
 
+function parsePhase4FEeBufferTargets(source) {
+  return parsePhaseTargets(source, "wordloom_core_phase_4f_ee_buffer_targets", "Phase 4F ee buffer");
+}
+
+function parsePhase4FEeBufferWords(source) {
+  return parsePhaseWords(source, "wordloom_core_phase_4f_ee_buffer_words", "Phase 4F ee buffer");
+}
+
+function parsePhase4FEeBufferWordTargets(source) {
+  return parsePhaseWordTargets(source, "wordloom_core_phase_4f_ee_buffer_word_targets", "Phase 4F ee buffer");
+}
+
 function difficultyBandForLabel(label = "") {
   const clean = String(label || "").trim().toLowerCase();
   if (clean.includes("stretch") || clean.includes("challenge")) return "challenge";
@@ -1054,6 +1102,7 @@ const phase8BMigrationSql = readFileSync(phase8BMigrationPath, "utf8");
 const phase8CMigrationSql = readFileSync(phase8CMigrationPath, "utf8");
 const phase8DMigrationSql = readFileSync(phase8DMigrationPath, "utf8");
 const phase4D1TionMigrationSql = readFileSync(phase4D1TionMigrationPath, "utf8");
+const phase4FEeBufferMigrationSql = readFileSync(phase4FEeBufferMigrationPath, "utf8");
 const sourceData = JSON.parse(readFileSync(sourceDataPath, "utf8"));
 const sourceCoverageReport = buildSourceDataCoverageReport(sourceData);
 const phase7BSourceWordCountByGrapheme = countSourceWordsByVersion(sourceData, PHASE_7B_SOURCE_VERSION);
@@ -1070,6 +1119,10 @@ const phase4D1TionSourceWordCountByGrapheme =
   countSourceWordsByVersion(sourceData, PHASE_4D1_TION_SOURCE_VERSION);
 const phase4D1TionSourceRows = (Array.isArray(sourceData?.words) ? sourceData.words : [])
   .filter((word) => word?.source_version === PHASE_4D1_TION_SOURCE_VERSION);
+const phase4FEeBufferSourceWordCountByGrapheme =
+  countSourceWordsByVersion(sourceData, PHASE_4F_EE_BUFFER_SOURCE_VERSION);
+const phase4FEeBufferSourceRows = (Array.isArray(sourceData?.words) ? sourceData.words : [])
+  .filter((word) => word?.source_version === PHASE_4F_EE_BUFFER_SOURCE_VERSION);
 const proofTargets = parseProofTargets(proofMigrationSql);
 const proofWords = parseProofWords(proofMigrationSql);
 const phase7BTargets = parsePhase7BTargets(phase7BMigrationSql);
@@ -1105,6 +1158,9 @@ const phase8DWordTargets = parsePhase8DWordTargets(phase8DMigrationSql);
 const phase4D1TionTargets = parsePhase4D1TionTargets(phase4D1TionMigrationSql);
 const phase4D1TionWords = parsePhase4D1TionWords(phase4D1TionMigrationSql);
 const phase4D1TionWordTargets = parsePhase4D1TionWordTargets(phase4D1TionMigrationSql);
+const phase4FEeBufferTargets = parsePhase4FEeBufferTargets(phase4FEeBufferMigrationSql);
+const phase4FEeBufferWords = parsePhase4FEeBufferWords(phase4FEeBufferMigrationSql);
+const phase4FEeBufferWordTargets = parsePhase4FEeBufferWordTargets(phase4FEeBufferMigrationSql);
 const proofWordCountByGrapheme = new Map();
 const phase7BWordCountByGrapheme = new Map();
 const phase7CWordCountByGrapheme = new Map();
@@ -1117,6 +1173,7 @@ const phase8BWordCountByGrapheme = new Map();
 const phase8CWordCountByGrapheme = new Map();
 const phase8DWordCountByGrapheme = new Map();
 const phase4D1TionWordCountByGrapheme = new Map();
+const phase4FEeBufferWordCountByGrapheme = new Map();
 const combinedWordCountByGrapheme = new Map();
 const proofWordsByNormalised = new Set(proofWords.map((word) => word.normalisedWord));
 const phase7BWordsByNormalised = new Set(phase7BWords.map((word) => word.normalisedWord));
@@ -1130,6 +1187,7 @@ const phase8BWordsByNormalised = new Set(phase8BWords.map((word) => word.normali
 const phase8CWordsByNormalised = new Set(phase8CWords.map((word) => word.normalisedWord));
 const phase8DWordsByNormalised = new Set(phase8DWords.map((word) => word.normalisedWord));
 const phase4D1TionWordsByNormalised = new Set(phase4D1TionWords.map((word) => word.normalisedWord));
+const phase4FEeBufferWordsByNormalised = new Set(phase4FEeBufferWords.map((word) => word.normalisedWord));
 const effectiveProofWords = proofWords.filter((word) => !phase4D1TionWordsByNormalised.has(word.normalisedWord));
 
 for (const proofWord of proofWords) {
@@ -1260,6 +1318,17 @@ for (const phaseWord of phase4D1TionWords) {
   phase4D1TionWordCountByGrapheme.set(
     phaseWord.primaryFocusGrapheme,
     (phase4D1TionWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
+  );
+  combinedWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (combinedWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
+  );
+}
+
+for (const phaseWord of phase4FEeBufferWords) {
+  phase4FEeBufferWordCountByGrapheme.set(
+    phaseWord.primaryFocusGrapheme,
+    (phase4FEeBufferWordCountByGrapheme.get(phaseWord.primaryFocusGrapheme) || 0) + 1,
   );
   combinedWordCountByGrapheme.set(
     phaseWord.primaryFocusGrapheme,
@@ -1443,9 +1512,24 @@ assert.equal(
   "Phase 4D1 tion repair migration should define one word-target link per word.",
 );
 assert.equal(
+  phase4FEeBufferTargets.length,
+  EXPECTED_PHASE_4F_EE_BUFFER_TARGET_COUNT,
+  `Expected ${EXPECTED_PHASE_4F_EE_BUFFER_TARGET_COUNT} Phase 4F ee buffer target in ${phase4FEeBufferMigrationPath}.`,
+);
+assert.equal(
+  phase4FEeBufferWords.length,
+  EXPECTED_PHASE_4F_EE_BUFFER_WORD_COUNT,
+  `Expected ${EXPECTED_PHASE_4F_EE_BUFFER_WORD_COUNT} Phase 4F ee buffer words in ${phase4FEeBufferMigrationPath}.`,
+);
+assert.equal(
+  phase4FEeBufferWordTargets.length,
+  EXPECTED_PHASE_4F_EE_BUFFER_WORD_COUNT,
+  "Phase 4F ee buffer migration should define one word-target link per word.",
+);
+assert.equal(
   sourceCoverageReport.sourceWordCount,
-  1610,
-  "Phase 8D plus Phase 4D1 tion repair source data should contain 1,610 rows.",
+  1613,
+  "Phase 8D plus Phase 4F ee buffer source data should contain 1,613 rows.",
 );
 assert.equal(phase4D1TionSourceRows.length, 8, "Phase 4D1 tion repair should define exactly 8 source rows.");
 assert.equal(
@@ -1495,6 +1579,53 @@ for (const word of phase4D1TionSourceRows) {
   assert.equal(primaryLinks.length, 1, `${normalisedWord} should have one active primary tion target link.`);
   assert.equal(Number(word?.difficulty_score) <= 50, true, `${normalisedWord} should stay eligible for low-band tion coverage.`);
   assert.equal(word?.difficulty_label, "Core", `${normalisedWord} should be Core difficulty.`);
+}
+
+const expectedPhase4FEeBufferWords = [...EXPECTED_PHASE_4F_EE_BUFFER_WORDS.keys()].sort();
+assert.equal(phase4FEeBufferSourceRows.length, 3, "Phase 4F ee buffer should define exactly 3 source rows.");
+assert.equal(
+  phase4FEeBufferSourceWordCountByGrapheme.get("ee") || 0,
+  3,
+  "Phase 4F ee buffer should include exactly 3 active primary ee rows.",
+);
+assert.deepEqual(
+  [...phase4FEeBufferSourceWordCountByGrapheme.keys()].sort(),
+  ["ee"],
+  "Phase 4F ee buffer should not include rows for any other primary grapheme.",
+);
+assert.deepEqual(
+  phase4FEeBufferSourceRows
+    .map((word) => normalizeSourceText(word?.normalised_word || word?.word))
+    .sort(),
+  expectedPhase4FEeBufferWords,
+  "Phase 4F ee buffer should contain the exact approved normalised word set.",
+);
+
+const activeEeTarget = (Array.isArray(sourceData?.targets) ? sourceData.targets : [])
+  .find((target) => normalizeSourceText(target?.focus_grapheme) === "ee" && target?.is_active === true);
+assert.ok(activeEeTarget, "Phase 4F ee buffer requires an active ee focus target.");
+for (const word of phase4FEeBufferSourceRows) {
+  const normalisedWord = normalizeSourceText(word?.normalised_word || word?.word);
+  const expected = EXPECTED_PHASE_4F_EE_BUFFER_WORDS.get(normalisedWord);
+  const segments = Array.isArray(word?.grapheme_segments) ? word.grapheme_segments : [];
+  const primaryLinks = (Array.isArray(word?.target_links) ? word.target_links : [])
+    .filter((link) =>
+      normalizeSourceText(link?.focus_grapheme) === "ee"
+      && normalizeSourceText(link?.target_role) === "primary"
+    );
+  assert.ok(expected, `${normalisedWord} should be an expected Phase 4F ee word.`);
+  assert.equal(word?.source, "wordloom_core", `${normalisedWord} should be Wordloom core source.`);
+  assert.equal(word?.source_version, PHASE_4F_EE_BUFFER_SOURCE_VERSION, `${normalisedWord} should carry Phase 4F source_version.`);
+  assert.equal(word?.is_active, true, `${normalisedWord} should be active.`);
+  assert.equal(normalizeSourceText(word?.approval_status), "approved", `${normalisedWord} should be approved.`);
+  assert.equal(normalizeSourceText(word?.suitability_status), "suitable", `${normalisedWord} should be suitable.`);
+  assert.equal(normalizeSourceText(word?.primary_focus_grapheme), "ee", `${normalisedWord} should be primary ee.`);
+  assert.equal(primaryLinks.length, 1, `${normalisedWord} should have one active primary ee target link.`);
+  assert.equal(Number(word?.difficulty_score), expected.difficultyScore, `${normalisedWord} should have the planned score.`);
+  assert.equal(word?.difficulty_label, expected.difficultyLabel, `${normalisedWord} should be Core difficulty.`);
+  assert.deepEqual(segments, expected.graphemeSegments, `${normalisedWord} should have the planned grapheme segments.`);
+  assert.equal(word?.sentence, expected.sentence, `${normalisedWord} should have the planned sentence.`);
+  assert.equal(word?.meaning, expected.meaning, `${normalisedWord} should have the planned meaning.`);
 }
 
 for (const [focus, expectedCount] of EXPECTED_PHASE_7B_COUNTS) {
@@ -1772,6 +1903,12 @@ for (const link of phase4D1TionWordTargets) {
   const next = phase4D1TionLinksByWord.get(link.normalisedWord) || [];
   next.push(link);
   phase4D1TionLinksByWord.set(link.normalisedWord, next);
+}
+const phase4FEeBufferLinksByWord = new Map();
+for (const link of phase4FEeBufferWordTargets) {
+  const next = phase4FEeBufferLinksByWord.get(link.normalisedWord) || [];
+  next.push(link);
+  phase4FEeBufferLinksByWord.set(link.normalisedWord, next);
 }
 
 for (const phaseWord of phase7BWords) {
@@ -2137,6 +2274,71 @@ for (const phaseWord of phase4D1TionWords) {
   assert.equal(primaryLinks[0]?.focusGrapheme, "tion", `${phaseWord.normalisedWord} primary link should point to tion.`);
 }
 
+assert.deepEqual(
+  phase4FEeBufferWords
+    .map((word) => word.normalisedWord)
+    .sort(),
+  expectedPhase4FEeBufferWords,
+  "Phase 4F ee buffer migration should contain the exact word set.",
+);
+assert.deepEqual(
+  phase4FEeBufferTargets.map((target) => [target.focusGrapheme, target.expectedPrimaryWordCount]),
+  [["ee", 3]],
+  "Phase 4F ee buffer migration should target exactly three ee rows.",
+);
+assert.deepEqual(
+  phase4FEeBufferWords
+    .filter((word) => proofWordsByNormalised.has(word.normalisedWord))
+    .map((word) => word.normalisedWord)
+    .sort(),
+  [],
+  "Phase 4F ee buffer should not reclaim proof-set words.",
+);
+for (const phaseWord of phase4FEeBufferWords) {
+  const expected = EXPECTED_PHASE_4F_EE_BUFFER_WORDS.get(phaseWord.normalisedWord);
+  assert.ok(expected, `${phaseWord.normalisedWord} should be an expected Phase 4F ee buffer word.`);
+  assert.equal(phaseWord.source, "wordloom_core", `${phaseWord.normalisedWord} should be Wordloom core source.`);
+  assert.equal(phaseWord.sourceVersion, PHASE_4F_EE_BUFFER_SOURCE_VERSION, `${phaseWord.normalisedWord} should carry Phase 4F ee buffer source_version.`);
+  assert.equal(phaseWord.approvalStatus, "approved", `${phaseWord.normalisedWord} should be approved.`);
+  assert.equal(phaseWord.suitabilityStatus, "suitable", `${phaseWord.normalisedWord} should be suitable.`);
+  assert.equal(phaseWord.active, true, `${phaseWord.normalisedWord} should be active.`);
+  assert.equal(phaseWord.primaryFocusGrapheme, "ee", `${phaseWord.normalisedWord} should be primary ee.`);
+  assert.equal(phaseWord.difficultyScore, expected.difficultyScore, `${phaseWord.normalisedWord} should have the planned score.`);
+  assert.equal(phaseWord.difficultyLabel, expected.difficultyLabel, `${phaseWord.normalisedWord} should use Core difficulty label.`);
+  assert.deepEqual(phaseWord.graphemeSegments, expected.graphemeSegments, `${phaseWord.normalisedWord} should have the planned segments.`);
+  assert.equal(phaseWord.sentence, expected.sentence, `${phaseWord.normalisedWord} should have the planned sentence.`);
+  assert.equal(phaseWord.meaning, expected.meaning, `${phaseWord.normalisedWord} should have the planned meaning.`);
+  assert.equal(String(phaseWord.sentence || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful sentence.`);
+  assert.equal(String(phaseWord.meaning || "").trim().length >= 12, true, `${phaseWord.normalisedWord} should have a useful meaning.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be placeholder text.`);
+  assert.equal(hasSourcePlaceholderText(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be placeholder text.`);
+  assert.equal(isWeakSourceContext(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be weak context.`);
+  assert.equal(isWeakSourceContext(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be weak context.`);
+  assert.equal(isCircularMeaning(phaseWord.normalisedWord, phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be circular.`);
+  assert.equal(hasExplicitHintText(phaseWord.sentence), false, `${phaseWord.normalisedWord} sentence should not be spelling-hint text.`);
+  assert.equal(hasExplicitHintText(phaseWord.meaning), false, `${phaseWord.normalisedWord} meaning should not be spelling-hint text.`);
+  assert.equal(phaseWord.graphemeSegments.join(""), phaseWord.normalisedWord, `${phaseWord.normalisedWord} segments should reconstruct the word.`);
+  assert.equal(phaseWord.graphemeSegments.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in segments.`);
+  assert.equal(phaseWord.focusGraphemes.includes(phaseWord.primaryFocusGrapheme), true, `${phaseWord.normalisedWord} primary focus should be in focus_graphemes.`);
+  assert.equal(proofWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a proof word.`);
+  assert.equal(phase7BWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7B word.`);
+  assert.equal(phase7CWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7C word.`);
+  assert.equal(phase7DWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7D word.`);
+  assert.equal(phase7EWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7E word.`);
+  assert.equal(phase7FWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7F word.`);
+  assert.equal(phase7GWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7G word.`);
+  assert.equal(phase7HWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 7H word.`);
+  assert.equal(phase8BWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 8B word.`);
+  assert.equal(phase8CWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 8C word.`);
+  assert.equal(phase8DWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 8D word.`);
+  assert.equal(phase4D1TionWordsByNormalised.has(phaseWord.normalisedWord), false, `${phaseWord.normalisedWord} should not duplicate a Phase 4D1 word.`);
+
+  const primaryLinks = (phase4FEeBufferLinksByWord.get(phaseWord.normalisedWord) || [])
+    .filter((link) => link.targetRole === "primary");
+  assert.equal(primaryLinks.length, 1, `${phaseWord.normalisedWord} should have exactly one primary Phase 4F ee buffer target link.`);
+  assert.equal(primaryLinks[0]?.focusGrapheme, "ee", `${phaseWord.normalisedWord} primary link should point to ee.`);
+}
+
 const combinedTargetByFocus = new Map();
 for (const target of proofTargets) combinedTargetByFocus.set(target.focusGrapheme, target);
 for (const target of phase7BTargets) {
@@ -2235,9 +2437,15 @@ for (const target of phase4D1TionTargets) {
   assert.equal(target.challengeBand, existing.challengeBand, `${target.focusGrapheme} Phase 4D1 tion repair target should preserve challenge band.`);
   assert.equal(target.stageBand, existing.stageBand, `${target.focusGrapheme} Phase 4D1 tion repair target should preserve stage band.`);
 }
+for (const target of phase4FEeBufferTargets) {
+  const existing = combinedTargetByFocus.get(target.focusGrapheme);
+  assert.ok(existing, `${target.focusGrapheme} Phase 4F ee buffer target should resolve an existing production target.`);
+  assert.equal(target.challengeBand, existing.challengeBand, `${target.focusGrapheme} Phase 4F ee buffer target should preserve challenge band.`);
+  assert.equal(target.stageBand, existing.stageBand, `${target.focusGrapheme} Phase 4F ee buffer target should preserve stage band.`);
+}
 const combinedTargets = [...combinedTargetByFocus.values()]
   .sort((a, b) => a.sortOrder - b.sortOrder || a.focusGrapheme.localeCompare(b.focusGrapheme));
-assert.equal(combinedTargets.length, 30, "Proof plus Phase 7B through Phase 4D1 tion repair should cover 30 production targets.");
+assert.equal(combinedTargets.length, 30, "Proof plus Phase 7B through Phase 4F ee buffer should cover 30 production targets.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "aw"), true, "Combined production coverage should include aw.");
 assert.equal(combinedTargets.some((target) => target.focusGrapheme === "ure"), true, "Combined production coverage should include ure.");
 const productionWords = [
@@ -2253,6 +2461,7 @@ const productionWords = [
   ...phase8CWords,
   ...phase8DWords,
   ...phase4D1TionWords,
+  ...phase4FEeBufferWords,
 ];
 const assignmentRows = [
   ...effectiveProofWords.map((proofWord) => toAssignmentWordRow(proofWord, PROOF_SOURCE_VERSION)),
@@ -2267,8 +2476,9 @@ const assignmentRows = [
   ...phase8CWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_8C_SOURCE_VERSION)),
   ...phase8DWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_8D_SOURCE_VERSION)),
   ...phase4D1TionWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_4D1_TION_SOURCE_VERSION)),
+  ...phase4FEeBufferWords.map((phaseWord) => toAssignmentWordRow(phaseWord, PHASE_4F_EE_BUFFER_SOURCE_VERSION)),
 ];
-assert.equal(assignmentRows.length, 1753, "Proof plus Phase 7B through Phase 4D1 tion repair should provide 1,753 active production words.");
+assert.equal(assignmentRows.length, 1756, "Proof plus Phase 7B through Phase 4F ee buffer should provide 1,756 active production words.");
 
 const targetByFocus = new Map(combinedTargets.map((target) => [target.focusGrapheme, target]));
 const normalisedWordCounts = countRowsByKey(productionWords, (word) => word.normalisedWord);
@@ -2281,7 +2491,7 @@ const productionBankAudit = {
   missingSentenceCount: productionWords.filter((word) => !String(word.sentence || "").trim()).length,
   missingMeaningCount: productionWords.filter((word) => !String(word.meaning || "").trim()).length,
   primaryCoverage: Object.fromEntries(
-    [...EXPECTED_PHASE_4D1_PRODUCTION_TOTALS.keys()].map((focus) => [
+    [...EXPECTED_PHASE_4F_PRODUCTION_TOTALS.keys()].map((focus) => [
       focus,
       combinedWordCountByGrapheme.get(focus) || 0,
     ]),
@@ -2300,18 +2510,18 @@ const productionBankAudit = {
   },
 };
 
-assert.equal(productionBankAudit.activeApprovedSuitableWordloomCoreCount, 1753, "Current production bank audit should cover exactly 1,753 active approved suitable Wordloom core words after Phase 4D1 tion repair.");
+assert.equal(productionBankAudit.activeApprovedSuitableWordloomCoreCount, 1756, "Current production bank audit should cover exactly 1,756 active approved suitable Wordloom core words after Phase 4F ee buffer.");
 assert.deepEqual(productionBankAudit.duplicateNormalisedWords, [], "Current production bank audit should not find duplicate active normalised words.");
 assert.equal(productionBankAudit.missingSentenceCount, 0, "Current production bank audit should not find missing sentence support.");
 assert.equal(productionBankAudit.missingMeaningCount, 0, "Current production bank audit should not find missing meaning support.");
-assert.deepEqual(productionBankAudit.primaryCoverage, Object.fromEntries(EXPECTED_PHASE_4D1_PRODUCTION_TOTALS), "Current production bank audit should match expected per-focus primary coverage after Phase 4D1 tion repair.");
+assert.deepEqual(productionBankAudit.primaryCoverage, Object.fromEntries(EXPECTED_PHASE_4F_PRODUCTION_TOTALS), "Current production bank audit should match expected per-focus primary coverage after Phase 4F ee buffer.");
 assert.deepEqual(productionBankAudit.stageCoverage, {
-  floor_core: 905,
+  floor_core: 908,
   diagnostic: 491,
   ceiling_challenge: 357,
 });
 assert.deepEqual(productionBankAudit.challengeCoverage, {
-  needs_support: 410,
+  needs_support: 413,
   core_developing: 584,
   secure_expected: 524,
   early_stretch: 235,
@@ -2324,11 +2534,11 @@ assert.equal(productionBankAudit.difficultyWindowCoverage.core_developing > 0, t
 assert.equal(productionBankAudit.difficultyWindowCoverage.secure_expected > 0, true, "Current production bank audit should include secure-expected score coverage.");
 assert.equal(productionBankAudit.difficultyWindowCoverage.early_stretch > 0, true, "Current production bank audit should include early-stretch score coverage.");
 
-for (const [focus, expectedCount] of EXPECTED_PHASE_4D1_PRODUCTION_TOTALS) {
+for (const [focus, expectedCount] of EXPECTED_PHASE_4F_PRODUCTION_TOTALS) {
   assert.equal(
     combinedWordCountByGrapheme.get(focus) || 0,
     expectedCount,
-    `${focus} should have ${expectedCount} production words after Phase 4D1 tion repair.`,
+    `${focus} should have ${expectedCount} production words after Phase 4F ee buffer.`,
   );
 }
 
@@ -2395,6 +2605,7 @@ for (const target of combinedTargets) {
     phase8CWordCount: phase8CWordCountByGrapheme.get(target.focusGrapheme) || 0,
     phase8DWordCount: phase8DWordCountByGrapheme.get(target.focusGrapheme) || 0,
     phase4D1TionWordCount: phase4D1TionWordCountByGrapheme.get(target.focusGrapheme) || 0,
+    phase4FEeBufferWordCount: phase4FEeBufferWordCountByGrapheme.get(target.focusGrapheme) || 0,
     combinedWordCount: combinedWordCountByGrapheme.get(target.focusGrapheme) || 0,
     selectedWordCount: selectedWords.length,
     selectedPrimaryTargetCount,
@@ -2437,6 +2648,7 @@ const report = {
   phase8CTargetCount: phase8CTargets.length,
   phase8DTargetCount: phase8DTargets.length,
   phase4D1TionTargetCount: phase4D1TionTargets.length,
+  phase4FEeBufferTargetCount: phase4FEeBufferTargets.length,
   targetCount: combinedTargets.length,
   proofWordCount: proofWords.length,
   phase7BWordCount: phase7BWords.length,
@@ -2450,6 +2662,7 @@ const report = {
   phase8CWordCount: phase8CWords.length,
   phase8DWordCount: phase8DWords.length,
   phase4D1TionWordCount: phase4D1TionWords.length,
+  phase4FEeBufferWordCount: phase4FEeBufferWords.length,
   combinedWordCount: assignmentRows.length,
   assignmentWordCount: EXPECTED_ASSIGNMENT_WORD_COUNT,
   sourceVersion: sourceCoverageReport.sourceVersion,
