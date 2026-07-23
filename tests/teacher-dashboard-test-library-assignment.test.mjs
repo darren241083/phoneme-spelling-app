@@ -414,6 +414,11 @@ assert.doesNotMatch(
   /data-action="create-test"/,
   "normal dashboard Create bar should not expose prominent manual test creation"
 );
+assert.doesNotMatch(renderCreateBarSource, /seed-demo-data|clear-demo-data|demoData|Need sample data/);
+assert.equal(teacherViewSource.includes("handleManageDemoData"), false);
+assert.equal(teacherViewSource.includes("manageDemoSchoolData"), false);
+assert.equal(teacherViewSource.includes('data-action="seed-demo-data"'), false);
+assert.equal(teacherViewSource.includes('data-action="clear-demo-data"'), false);
 
 const renderSectionTestsSource = extractFunctionSource(teacherViewSource, "renderSectionTests");
 assert.match(renderSectionTestsSource, /if \(!canUseAdvancedManualTools\(\)\) return "";/);

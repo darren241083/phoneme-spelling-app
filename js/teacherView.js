@@ -1,5 +1,5 @@
 // /js/teacherView.js
-import { fetchTeacherGroupComparison, manageDemoSchoolData, teacherAnalyticsChat } from "../ai.js?v=3.2";
+import { fetchTeacherGroupComparison, teacherAnalyticsChat } from "../ai.js?v=3.2";
 import { supabase } from "./supabaseClient.js";
 import {
   persistAssignmentTargetRows,
@@ -216,10 +216,15 @@ import {
   normalizeManualAssignmentDeliveryModel,
 } from "./manualAssignmentDelivery.js?v=1.0";
 
-const DEMO_CLASS_PREFIX = "[Demo]";
-const DEMO_TEST_PREFIX = "[Demo]";
 const REGULAR_PERSONALISED_DELIVERY_MODEL = DELIVERY_MODEL_SUPPORT_LADDER;
 const VISUAL_ANALYTICS_WINDOW_DAYS = 180;
+const PRIMARY_DASHBOARD_VIEWS = [
+  { key: "home", label: "Home" },
+  { key: "pupils", label: "Pupils" },
+  { key: "insights", label: "Insights" },
+  { key: "setup", label: "Setup" },
+];
+const PRIMARY_DASHBOARD_VIEW_KEYS = PRIMARY_DASHBOARD_VIEWS.map((item) => item.key);
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS = new Set(["bankMonitor", "upcoming", "classes", "tests"]);
 const ADVANCED_MANUAL_TOOLS_COPY = "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.";
@@ -1014,6 +1019,7 @@ const state = {
   classes: [],
   tests: [],
   assignments: [],
+  primaryView: "home",
   sections: {
     staffAccess: false,
     pupilOnboarding: false,
@@ -1123,10 +1129,6 @@ const state = {
   staffAccess: createDefaultStaffAccessState(),
   pupilOnboarding: createDefaultPupilOnboardingState(),
   bankMonitor: createDefaultBankMonitorState(),
-  demoData: {
-    loading: false,
-    action: "",
-  },
 };
 
 let rootEl = null;
@@ -1436,7 +1438,7 @@ function getTestAssignmentAvailability(record) {
   if (record?.is_auto_generated) {
     return {
       canAssign: false,
-      reason: "Use Generate Personalised Test to create a fresh personalised set for a class.",
+      reason: "Use personalised learning generation to create a fresh set for a class.",
       assignableClasses: [],
     };
   }
@@ -1607,6 +1609,7 @@ function buildCurrentTeacherFirstUseReadiness() {
 function renderTeacherFirstUseReadinessPanel() {
   const model = buildCurrentTeacherFirstUseReadiness();
   const action = model.primaryAction;
+  const statusMeta = mapTeacherHomeReadinessState(model);
   const actionHtml = action
     ? `
       <button
@@ -1615,7 +1618,7 @@ function renderTeacherFirstUseReadinessPanel() {
         data-action="teacher-first-use-action"
         data-first-use-action="${escapeAttr(action.id)}"
       >
-        ${escapeHtml(action.label)}
+        ${escapeHtml(getTeacherFirstUseActionDisplayLabel(action))}
       </button>
     `
     : "";
@@ -1627,9 +1630,10 @@ function renderTeacherFirstUseReadinessPanel() {
       aria-busy="${model.isLoading ? "true" : "false"}"
     >
       <div class="td-first-use-copy">
-        <p class="td-first-use-eyebrow">First-use readiness</p>
-        <h3>${escapeHtml(model.title)}</h3>
-        <p>${escapeHtml(model.message)}</p>
+        <p class="td-first-use-eyebrow">Home</p>
+        <h3>Wordloom status</h3>
+        <span class="td-status-chip td-status-chip--${escapeAttr(statusMeta.tone)}">${escapeHtml(statusMeta.label)}</span>
+        <p><strong>${escapeHtml(model.title)}</strong> ${escapeHtml(model.message)}</p>
       </div>
       ${actionHtml ? `<div class="td-first-use-actions">${actionHtml}</div>` : ""}
       <div class="td-first-use-access-note">
@@ -5508,11 +5512,91 @@ function renderDashboardSection(sectionKey, renderer) {
   return typeof renderer === "function" ? renderer() : "";
 }
 
+function normalizePrimaryDashboardView(value) {
+  const key = String(value || "").trim().toLowerCase();
+  return PRIMARY_DASHBOARD_VIEW_KEYS.includes(key) ? key : "home";
+}
+
+function getPrimaryViewForDashboardSection(sectionKey) {
+  const key = String(sectionKey || "");
+  if (key === "analytics") return "insights";
+  if (key === "upcoming" || key === "classes") return "pupils";
+  if (key === "staffAccess" || key === "pupilOnboarding" || key === "bankMonitor" || key === "tests") return "setup";
+  return "home";
+}
+
+function selectPrimaryDashboardView(viewKey) {
+  const nextView = normalizePrimaryDashboardView(viewKey);
+  state.primaryView = nextView;
+
+  if (nextView === "insights") {
+    openDashboardSection("analytics");
+    return;
+  }
+
+  if (nextView === "pupils" && !state.sections.upcoming && !state.sections.classes) {
+    openDashboardSection("upcoming");
+    return;
+  }
+
+  if (nextView !== "insights") {
+    state.analyticsAssistant.open = false;
+  }
+}
+
+function closePrimaryDashboardSections() {
+  for (const key of DASHBOARD_SECTION_KEYS) {
+    state.sections[key] = false;
+  }
+}
+
+function closeQuarantinedDashboardSections() {
+  for (const key of Object.keys(state.revealedQuarantinedSections || {})) {
+    state.revealedQuarantinedSections[key] = false;
+  }
+}
+
+function resetPrimaryDashboardViewForFreshRender() {
+  state.primaryView = "home";
+  closePrimaryDashboardSections();
+  closeQuarantinedDashboardSections();
+  state.analyticsAssistant.open = false;
+  state.createBaselineOpen = false;
+  state.createAutoAssignOpen = false;
+  state.createInterventionGroupOpen = false;
+  state.activePanel = null;
+  state.flashTestId = null;
+  state.flashClassId = null;
+}
+
+function openSetupDashboardTool(toolKey = "") {
+  const key = String(toolKey || "").trim();
+  state.primaryView = "setup";
+  closePrimaryDashboardSections();
+  state.analyticsAssistant.open = false;
+
+  if (key === "baseline") {
+    state.createBaselineOpen = true;
+    state.createClassOpen = false;
+    state.createInterventionGroupOpen = false;
+    state.createAutoAssignOpen = false;
+    return;
+  }
+
+  if (key === "automation") {
+    state.createAutoAssignOpen = true;
+    state.createBaselineOpen = false;
+    state.createClassOpen = false;
+    state.createInterventionGroupOpen = false;
+  }
+}
+
 function openDashboardSection(sectionKey) {
   revealQuarantinedDashboardSection(sectionKey);
   for (const key of DASHBOARD_SECTION_KEYS) {
     state.sections[key] = key === sectionKey;
   }
+  state.primaryView = getPrimaryViewForDashboardSection(sectionKey);
   if (sectionKey !== "analytics") {
     state.analyticsAssistant.open = false;
   }
@@ -5846,6 +5930,7 @@ export async function renderTeacherDashboard(containerEl, { onStage } = {}) {
     deferEnrichment: true,
     onStage,
   });
+  resetPrimaryDashboardViewForFreshRender();
   applyUrlState();
   paint();
 
@@ -11505,10 +11590,7 @@ function handleTeacherFirstUseAction(actionId = "") {
       paint();
       return;
     }
-    state.createBaselineOpen = true;
-    state.createClassOpen = false;
-    state.createInterventionGroupOpen = false;
-    state.createAutoAssignOpen = false;
+    openSetupDashboardTool("baseline");
     paint();
     scrollTeacherFirstUseTarget("#tdBaselineClassInput");
     return;
@@ -11533,6 +11615,42 @@ async function onRootClick(event) {
   if (!button) return;
 
   const action = button.dataset.action;
+
+  if (action === "select-primary-view") {
+    selectPrimaryDashboardView(button.dataset.primaryView || "");
+    paint();
+    return;
+  }
+
+  if (action === "open-dashboard-area") {
+    const section = String(button.dataset.section || "");
+    if (section && Object.prototype.hasOwnProperty.call(state.sections, section)) {
+      openDashboardSection(section);
+    } else {
+      selectPrimaryDashboardView(button.dataset.primaryView || "");
+    }
+    paint();
+    if (section === "pupilOnboarding" && state.sections.pupilOnboarding) {
+      void loadPupilPlacementRows({ force: true });
+    }
+    if (section === "bankMonitor" && state.sections.bankMonitor) {
+      void ensureWordloomCoreBankMonitorLoaded();
+    }
+    return;
+  }
+
+  if (action === "open-setup-tool") {
+    const tool = String(button.dataset.setupTool || "");
+    openSetupDashboardTool(tool);
+    paint();
+    if (tool === "baseline") {
+      scrollTeacherFirstUseTarget("#tdBaselineClassInput");
+    }
+    if (tool === "automation") {
+      scrollTeacherFirstUseTarget("#tdAutomationPolicyPanel");
+    }
+    return;
+  }
 
   if (action === "teacher-first-use-action") {
     handleTeacherFirstUseAction(button.dataset.firstUseAction || "");
@@ -12190,26 +12308,6 @@ async function onRootClick(event) {
       getInterventionBuilderSelectedPupilIds().filter((item) => item !== pupilId)
     );
     paint();
-    return;
-  }
-
-  if (action === "seed-demo-data") {
-    if (!canManageAutomation()) {
-      showNotice("Admin access is required to load demo data.", "error");
-      paint();
-      return;
-    }
-    await handleManageDemoData("seed");
-    return;
-  }
-
-  if (action === "clear-demo-data") {
-    if (!canManageAutomation()) {
-      showNotice("Admin access is required to clear demo data.", "error");
-      paint();
-      return;
-    }
-    await handleManageDemoData("clear");
     return;
   }
 
@@ -15563,112 +15661,9 @@ function showNotice(message, type = "info") {
   state.noticeType = type;
 }
 
-function hasDemoData() {
-  const classMatch = (state.classes || []).some((cls) =>
-    String(cls?.name || "").trim().startsWith(DEMO_CLASS_PREFIX)
-  );
-  const testMatch = (state.tests || []).some((test) =>
-    String(test?.title || "").trim().startsWith(DEMO_TEST_PREFIX)
-  );
-  return classMatch || testMatch;
-}
-
 function formatCountLabel(value, singular, plural = `${singular}s`) {
   const count = Number(value || 0);
   return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function buildDemoSeedNotice(result, hadDemoDataBefore) {
-  const summary = [
-    formatCountLabel(result?.classesCreated, "class", "classes"),
-    formatCountLabel(result?.pupilsCreated, "pupil", "pupils"),
-    formatCountLabel(result?.testsCreated, "test", "tests"),
-    formatCountLabel(result?.assignmentsCreated, "assignment", "assignments"),
-    formatCountLabel(result?.attemptsCreated, "attempt", "attempts"),
-  ].join(", ");
-  const verb = hadDemoDataBefore ? "refreshed" : "loaded";
-  return `Demo data ${verb}: ${summary}. Demo pupils use PIN 1234 and usernames like demo_y7_maple_1. PP, SEN, and gender group values are included in the seeded sample data.`;
-}
-
-function buildDemoClearNotice(result) {
-  const removedTotal =
-    Number(result?.classesCleared || 0) +
-    Number(result?.testsCleared || 0) +
-    Number(result?.pupilsCleared || 0) +
-    Number(result?.assignmentsCleared || 0);
-
-  if (!removedTotal) return "No demo data found to clear.";
-
-  const summary = [
-    formatCountLabel(result?.classesCleared, "class", "classes"),
-    formatCountLabel(result?.pupilsCleared, "pupil", "pupils"),
-    formatCountLabel(result?.testsCleared, "test", "tests"),
-    formatCountLabel(result?.assignmentsCleared, "assignment", "assignments"),
-  ].join(", ");
-
-  return `Demo data cleared: ${summary}.`;
-}
-
-async function handleManageDemoData(action = "seed") {
-  if (!canManageAutomation()) {
-    showNotice("Admin access is required to manage demo data.", "error");
-    paint();
-    return;
-  }
-
-  if (state.demoData.loading) return;
-
-  const normalizedAction = action === "clear" ? "clear" : "seed";
-  const hadDemoDataBefore = hasDemoData();
-
-  if (normalizedAction === "clear" && !hadDemoDataBefore) {
-    showNotice("No demo data is loaded yet.", "info");
-    paint();
-    return;
-  }
-
-  if (normalizedAction === "clear") {
-    const confirmed = window.confirm("Remove all demo classes, pupils, tests, assignments, and attempt history?");
-    if (!confirmed) return;
-  }
-
-  state.demoData.loading = true;
-  state.demoData.action = normalizedAction;
-  showNotice(
-    normalizedAction === "seed"
-      ? (hadDemoDataBefore ? "Refreshing demo data..." : "Loading demo data...")
-      : "Removing demo data...",
-    "info"
-  );
-  paint();
-
-  try {
-    const accessToken = await getTeacherAccessTokenOrThrow();
-    const result = await manageDemoSchoolData({
-      action: normalizedAction,
-      accessToken,
-      schoolId: getActiveSchoolIdFromAccessContext(state.accessContext),
-    });
-
-    await loadDashboardData();
-    state.activePanel = null;
-    if (normalizedAction === "seed") {
-      openDashboardSection("classes");
-      showNotice(buildDemoSeedNotice(result, hadDemoDataBefore), "success");
-    } else {
-      showNotice(buildDemoClearNotice(result), "success");
-    }
-  } catch (error) {
-    console.error("manage demo data error:", error);
-    showNotice(
-      error?.message || (normalizedAction === "seed" ? "Could not load demo data." : "Could not clear demo data."),
-      "error"
-    );
-  } finally {
-    state.demoData.loading = false;
-    state.demoData.action = "";
-    paint();
-  }
 }
 
 function normalizeYearGroup(value) {
@@ -16193,6 +16188,494 @@ function getAssignmentStatus(item) {
   return "Upcoming";
 }
 
+function renderPrimaryDashboardNav() {
+  const currentView = normalizePrimaryDashboardView(state.primaryView);
+  return `
+    <nav class="td-primary-nav" aria-label="Teacher dashboard views">
+      <div class="td-primary-tabs" role="tablist">
+        ${PRIMARY_DASHBOARD_VIEWS.map((item) => {
+          const isSelected = item.key === currentView;
+          return `
+            <button
+              type="button"
+              class="td-primary-tab ${isSelected ? "is-selected" : ""}"
+              role="tab"
+              id="td-primary-tab-${escapeAttr(item.key)}"
+              aria-selected="${isSelected ? "true" : "false"}"
+              aria-controls="td-primary-view-${escapeAttr(item.key)}"
+              data-action="select-primary-view"
+              data-primary-view="${escapeAttr(item.key)}"
+            >
+              ${escapeHtml(item.label)}
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </nav>
+  `;
+}
+
+function renderPrimaryViewHeader(title, description = "") {
+  return `
+    <div class="td-view-header">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderDashboardAreaActionCard({
+  title,
+  description,
+  actionLabel,
+  primaryView = "",
+  section = "",
+  action = "open-dashboard-area",
+  setupTool = "",
+  tone = "neutral",
+}) {
+  return `
+    <article class="td-view-action-card td-view-action-card--${escapeAttr(tone)}">
+      <div>
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(description)}</p>
+      </div>
+      <button
+        class="td-btn td-btn--ghost td-btn--small"
+        type="button"
+        data-action="${escapeAttr(action)}"
+        data-primary-view="${escapeAttr(primaryView)}"
+        data-section="${escapeAttr(section)}"
+        data-setup-tool="${escapeAttr(setupTool)}"
+      >
+        ${escapeHtml(actionLabel)}
+      </button>
+    </article>
+  `;
+}
+
+function getHomeOverviewSummary() {
+  const viewModel = getVisualAnalyticsViewModel();
+  const overviewKey = createVisualScopeKey("overview", "");
+  return (
+    viewModel?.summaries?.[overviewKey] ||
+    state.visualAnalytics?.summaries?.[overviewKey] ||
+    null
+  );
+}
+
+function mapTeacherHomeReadinessState(model) {
+  const key = String(model?.state || "");
+  if (model?.isLoading) return { label: "In progress", tone: "neutral" };
+  if ([
+    "no_form_groups",
+    "form_groups_without_pupils",
+    "pupils_without_baseline",
+    "baseline_active",
+    "baseline_partially_complete",
+    "baseline_complete_waiting_for_personalised",
+    "personalised_assignment_live",
+  ].includes(key)) {
+    return { label: "In progress", tone: "amber" };
+  }
+  if (key === "setup_blocked_by_permissions") {
+    return { label: "Needs attention", tone: "red" };
+  }
+  if (key === "assignment_evidence_available" || key === "all_current_work_complete") {
+    return { label: "On track", tone: "green" };
+  }
+  return { label: "Not started", tone: "neutral" };
+}
+
+function getTeacherFirstUseActionDisplayLabel(action) {
+  const actionId = String(action?.id || "");
+  if (actionId === TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS.id) return "View current learning";
+  if (actionId === TEACHER_FIRST_USE_ACTIONS.OPEN_ANALYTICS.id) return "Open insights";
+  return String(action?.label || "");
+}
+
+function getLifecycleFollowUpPupilIds(lifecycle, groupKeys = []) {
+  const groups = lifecycle?.pupilFollowUp?.groups || {};
+  const ids = new Set();
+  for (const key of groupKeys) {
+    const group = groups?.[key];
+    const rows = Array.isArray(group?.pupils)
+      ? group.pupils
+      : Array.isArray(group?.people)
+        ? group.people
+        : [];
+    for (const item of rows) {
+      const pupilId = String(item?.pupilId || item?.pupil_id || item?.id || "").trim();
+      if (pupilId) ids.add(pupilId);
+    }
+  }
+  return ids;
+}
+
+function getTeacherHomeAttentionReasons(summary = getHomeOverviewSummary()) {
+  const reasons = [];
+  const currentLearningRows = buildTeacherFirstUseAssignmentRows();
+  const followUpIds = new Set();
+  let followUpFallbackCount = 0;
+
+  for (const assignment of currentLearningRows) {
+    const lifecycle = assignment?.lifecycle;
+    const ids = getLifecycleFollowUpPupilIds(lifecycle, ["not_started", "in_progress", "check_data"]);
+    for (const id of ids) followUpIds.add(id);
+    if (!ids.size && lifecycle) {
+      followUpFallbackCount += Math.max(
+        0,
+        Number(lifecycle.notStartedCount || lifecycle.waitingCount || 0) +
+          Number(lifecycle.inProgressCount || lifecycle.startedCount || 0)
+      );
+    }
+  }
+
+  const currentLearningCount = followUpIds.size || followUpFallbackCount;
+  if (currentLearningCount > 0) {
+    reasons.push({
+      key: "current-learning",
+      label: "Current learning follow-up",
+      count: currentLearningCount,
+      helper: "Pupils still need a look in the current learning cycle.",
+      actionLabel: "Review current learning",
+      primaryView: "pupils",
+      section: "upcoming",
+    });
+  }
+
+  const pupilRows = Array.isArray(summary?.pupilRows) ? summary.pupilRows : [];
+  const noEvidenceRows = pupilRows.filter((item) => Number(item?.checkedWords || 0) === 0);
+  if (noEvidenceRows.length > 0) {
+    reasons.push({
+      key: "no-recent-evidence",
+      label: "No recent evidence",
+      count: noEvidenceRows.length,
+      helper: "Pupils have no checked words in the current evidence window.",
+      actionLabel: "Open pupil progress",
+      primaryView: "insights",
+      section: "analytics",
+    });
+  }
+
+  const reviewRows = pupilRows.filter((item) => item?.needsIntervention);
+  if (reviewRows.length > 0) {
+    reasons.push({
+      key: "needs-attention",
+      label: "Needs attention",
+      count: reviewRows.length,
+      helper: "Recent spelling evidence suggests follow-up would help.",
+      actionLabel: "Open insights",
+      primaryView: "insights",
+      section: "analytics",
+    });
+  }
+
+  return reasons.slice(0, 3);
+}
+
+function getTeacherHomeSummaryCards(readinessModel, summary = getHomeOverviewSummary(), attentionReasons = []) {
+  const readinessMeta = mapTeacherHomeReadinessState(readinessModel);
+  const cards = [
+    {
+      label: "Operational status",
+      value: readinessMeta.label,
+      helper: readinessModel?.title || "Wordloom is checking setup and recent pupil evidence.",
+      tone: readinessMeta.tone,
+    },
+  ];
+
+  if (summary) {
+    const pupilCount = Math.max(0, Number(summary.pupilCount || 0));
+    const activeCount = Math.max(0, Number(summary.activePupilCount || 0));
+    cards.push({
+      label: "Participation",
+      value: pupilCount ? `${activeCount}/${pupilCount}` : "Not started",
+      helper: pupilCount ? "pupils with recent checked-word evidence" : "No pupils found in the current view",
+      tone: activeCount ? "green" : "neutral",
+    });
+
+    cards.push({
+      label: "Pupils needing attention",
+      value: String(Math.max(0, Number(summary.interventionCount || 0))),
+      helper: attentionReasons.length ? "grouped from current learning and recent evidence" : "No grouped attention reasons available yet",
+      tone: Number(summary.interventionCount || 0) ? "red" : "green",
+    });
+  } else {
+    const attentionCount = attentionReasons.reduce((sum, item) => sum + Math.max(0, Number(item.count || 0)), 0);
+    cards.push({
+      label: "Pupils needing attention",
+      value: attentionCount ? String(attentionCount) : "No recent evidence",
+      helper: attentionCount ? "grouped from current learning follow-up" : "Recent pupil evidence has not loaded yet",
+      tone: attentionCount ? "red" : "neutral",
+    });
+  }
+
+  const currentLearningRows = buildTeacherFirstUseAssignmentRows();
+  const liveLearningCount = currentLearningRows.filter((item) =>
+    ["generated_by_policy", "legacy_personalised", "baseline", "teacher_created"].includes(String(item?.sourceKey || ""))
+    && item?.lifecycle
+    && !["complete", "expired", "cancelled"].includes(String(item.lifecycle.key || ""))
+  ).length;
+  cards.push({
+    label: "Current learning",
+    value: liveLearningCount ? String(liveLearningCount) : "Not started",
+    helper: liveLearningCount ? "live learning cycles visible to this dashboard" : "No live learning cycle found yet",
+    tone: liveLearningCount ? "amber" : "neutral",
+  });
+
+  return cards.slice(0, 3);
+}
+
+function getTeacherHomeTrendMeta(summary = getHomeOverviewSummary()) {
+  const status = String(state.visualAnalytics?.status || "idle");
+  if (status === "loading") {
+    return {
+      label: "In progress",
+      text: "Wordloom is still checking recent pupil activity.",
+      tone: "neutral",
+    };
+  }
+
+  const trend = summary?.recentTrend || null;
+  const dayCount = Math.max(0, Number(trend?.dayCount || 0));
+  const rawLabel = String(trend?.label || "").trim();
+  if (!summary?.checkedWords || dayCount < 2 || rawLabel === "Low evidence") {
+    return {
+      label: "Not enough evidence",
+      text: "What changed will appear once there is enough recent checked-word evidence.",
+      tone: "neutral",
+    };
+  }
+
+  const direction = String(trend?.direction || "");
+  const label = direction === "up" || rawLabel === "Improving"
+    ? "Improving"
+    : direction === "down" || rawLabel === "Needs attention"
+      ? "Declining"
+      : "Stable";
+  const tone = label === "Improving" ? "green" : label === "Declining" ? "red" : "amber";
+  const rangeLabel = trend.startLabel && trend.endLabel
+    ? trend.startLabel === trend.endLabel
+      ? trend.startLabel
+      : `${trend.startLabel} to ${trend.endLabel}`
+    : trend.startLabel || trend.endLabel || "recent activity";
+
+  return {
+    label,
+    text: `${label} across ${rangeLabel}, based on ${dayCount} activity days.`,
+    tone,
+  };
+}
+
+function renderTeacherHomeSummaryCard(card) {
+  return `
+    <article class="td-home-summary-card td-home-summary-card--${escapeAttr(card?.tone || "neutral")}">
+      <span>${escapeHtml(card?.label || "")}</span>
+      <strong>${escapeHtml(card?.value || "")}</strong>
+      <p>${escapeHtml(card?.helper || "")}</p>
+    </article>
+  `;
+}
+
+function renderTeacherHomeAttention(reason) {
+  return `
+    <article class="td-attention-row">
+      <div>
+        <span class="td-attention-count">${escapeHtml(String(reason.count || 0))}</span>
+        <div>
+          <strong>${escapeHtml(reason.label)}</strong>
+          <p>${escapeHtml(reason.helper)}</p>
+        </div>
+      </div>
+      <button
+        class="td-btn td-btn--ghost td-btn--small"
+        type="button"
+        data-action="open-dashboard-area"
+        data-primary-view="${escapeAttr(reason.primaryView || "")}"
+        data-section="${escapeAttr(reason.section || "")}"
+      >
+        ${escapeHtml(reason.actionLabel || "Open")}
+      </button>
+    </article>
+  `;
+}
+
+function renderHomeView() {
+  const readinessModel = buildCurrentTeacherFirstUseReadiness();
+  const summary = getHomeOverviewSummary();
+  const attentionReasons = getTeacherHomeAttentionReasons(summary);
+  const cards = getTeacherHomeSummaryCards(readinessModel, summary, attentionReasons);
+  const trendMeta = getTeacherHomeTrendMeta(summary);
+
+  return `
+    <section
+      class="td-primary-view td-primary-view--home"
+      id="td-primary-view-home"
+      role="tabpanel"
+      aria-labelledby="td-primary-tab-home"
+      data-primary-view-panel="home"
+    >
+      ${renderTeacherFirstUseReadinessPanel()}
+      <div class="td-home-summary-grid">
+        ${cards.map(renderTeacherHomeSummaryCard).join("")}
+      </div>
+      <div class="td-home-grid">
+        <section class="td-home-panel">
+          <div class="td-home-panel-head">
+            <h3>Attention</h3>
+            <span>${escapeHtml(attentionReasons.length ? "Needs attention" : "On track")}</span>
+          </div>
+          ${
+            attentionReasons.length
+              ? `<div class="td-attention-list">${attentionReasons.map(renderTeacherHomeAttention).join("")}</div>`
+              : `
+                <div class="td-empty td-empty--compact">
+                  <strong>On track</strong>
+                  <p>No grouped attention reasons are available from current learning or recent evidence.</p>
+                </div>
+              `
+          }
+        </section>
+        <section class="td-home-panel">
+          <div class="td-home-panel-head">
+            <h3>What changed</h3>
+            <span class="td-status-chip td-status-chip--${escapeAttr(trendMeta.tone)}">${escapeHtml(trendMeta.label)}</span>
+          </div>
+          <p class="td-home-change-text">${escapeHtml(trendMeta.text)}</p>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderPupilsView() {
+  return `
+    <section
+      class="td-primary-view td-primary-view--pupils"
+      id="td-primary-view-pupils"
+      role="tabpanel"
+      aria-labelledby="td-primary-tab-pupils"
+      data-primary-view-panel="pupils"
+    >
+      ${renderPrimaryViewHeader("Pupils", "Review baseline status, current learning, pupil follow-up, and class or form-group views.")}
+      <div class="td-view-action-grid">
+        ${renderDashboardAreaActionCard({
+          title: "Baseline status",
+          description: "Check who is ready for personalised learning and who still needs a baseline.",
+          actionLabel: "Open setup",
+          primaryView: "setup",
+          section: "pupilOnboarding",
+          tone: "amber",
+        })}
+        ${renderDashboardAreaActionCard({
+          title: "Current learning",
+          description: "See live learning cycles and pupil follow-up from the existing lifecycle view.",
+          actionLabel: "Review current learning",
+          primaryView: "pupils",
+          section: "upcoming",
+          tone: "green",
+        })}
+        ${renderDashboardAreaActionCard({
+          title: "Classes and form groups",
+          description: "Open class and form-group views using the data already loaded for this dashboard.",
+          actionLabel: "Open groups",
+          primaryView: "pupils",
+          section: "classes",
+          tone: "neutral",
+        })}
+      </div>
+      ${renderDashboardSection("upcoming", renderSectionUpcomingAssignments)}
+      ${renderDashboardSection("classes", renderSectionClasses)}
+    </section>
+  `;
+}
+
+function renderInsightsView() {
+  return `
+    <section
+      class="td-primary-view td-primary-view--insights"
+      id="td-primary-view-insights"
+      role="tabpanel"
+      aria-labelledby="td-primary-tab-insights"
+      data-primary-view-panel="insights"
+    >
+      ${renderPrimaryViewHeader("Insights", "Explore progress, trends, comparisons, exports, and AI-supported analysis.")}
+      ${renderAnalyticsBar()}
+    </section>
+  `;
+}
+
+function renderSetupActionCards() {
+  const cards = [];
+
+  if (canImportCsv()) {
+    cards.push(renderDashboardAreaActionCard({
+      title: "Pupil onboarding",
+      description: "Import pupils, confirm form groups, and manage pupil access details.",
+      actionLabel: "Open onboarding",
+      primaryView: "setup",
+      section: "pupilOnboarding",
+      tone: "green",
+    }));
+  }
+
+  if (canManageOwnContent() && canAssignTests()) {
+    cards.push(renderDashboardAreaActionCard({
+      title: "Baseline readiness",
+      description: "Prepare the baseline check that unlocks personalised learning.",
+      actionLabel: "Baseline status",
+      action: "open-setup-tool",
+      setupTool: "baseline",
+      tone: "amber",
+    }));
+  }
+
+  if (canManageAutomation()) {
+    cards.push(renderDashboardAreaActionCard({
+      title: "Automation controls",
+      description: "Review personalised generation policies and run them when allowed.",
+      actionLabel: "Open controls",
+      action: "open-setup-tool",
+      setupTool: "automation",
+      tone: "neutral",
+    }));
+  }
+
+  return cards.length ? `<div class="td-view-action-grid">${cards.join("")}</div>` : "";
+}
+
+function renderSetupView() {
+  return `
+    <section
+      class="td-primary-view td-primary-view--setup"
+      id="td-primary-view-setup"
+      role="tabpanel"
+      aria-labelledby="td-primary-tab-setup"
+      data-primary-view-panel="setup"
+    >
+      ${renderPrimaryViewHeader("Setup", "Manage onboarding, staff access, classes, baseline readiness, automation, and advanced manual tools.")}
+      ${renderSetupActionCards()}
+      ${renderCreateBar()}
+      ${renderSectionStaffAccess()}
+      ${renderSectionPupilOnboarding()}
+      ${canViewWordloomCoreBankMonitor() ? renderSectionWordloomCoreBankMonitor() : ""}
+      ${renderSectionClasses()}
+      ${renderSectionTests()}
+    </section>
+  `;
+}
+
+function renderPrimaryDashboardContent() {
+  const currentView = normalizePrimaryDashboardView(state.primaryView);
+  if (currentView === "pupils") return renderPupilsView();
+  if (currentView === "insights") return renderInsightsView();
+  if (currentView === "setup") return renderSetupView();
+  return renderHomeView();
+}
+
 function paint() {
   rootEl.innerHTML = `
     <section class="td-shell">
@@ -16205,16 +16688,9 @@ function paint() {
       </div>
 
       ${renderNotice()}
-      ${renderTeacherFirstUseReadinessPanel()}
-      ${renderCreateBar()}
-      ${renderSectionStaffAccess()}
-      ${renderSectionPupilOnboarding()}
-      ${renderDashboardSection("bankMonitor", renderSectionWordloomCoreBankMonitor)}
-      ${renderAnalyticsBar()}
-      ${renderDashboardSection("upcoming", renderSectionUpcomingAssignments)}
-      ${renderDashboardSection("classes", renderSectionClasses)}
-      ${renderDashboardSection("tests", renderSectionTests)}
-      ${renderFloatingAIButton()}
+      ${renderPrimaryDashboardNav()}
+      ${renderPrimaryDashboardContent()}
+      ${normalizePrimaryDashboardView(state.primaryView) === "insights" ? renderFloatingAIButton() : ""}
     </section>
   `;
 
@@ -16305,23 +16781,13 @@ function renderNotice() {
 }
 
 function renderCreateBar() {
-  const demoLoaded = hasDemoData();
-  const demoBusy = state.demoData.loading;
-  const demoBusyAction = state.demoData.action;
-  const demoSeedLabel = demoBusy && demoBusyAction === "seed"
-    ? (demoLoaded ? "Refreshing demo data..." : "Loading demo data...")
-    : (demoLoaded ? "Refresh demo data" : "Load demo data");
-  const showClearDemoButton = demoLoaded || (demoBusy && demoBusyAction === "clear");
-  const demoClearLabel = demoBusy && demoBusyAction === "clear" ? "Removing demo data..." : "Clear demo data";
   const showBaselineAction = canManageOwnContent() && canAssignTests();
   const showRunNowAutomation = canManageAutomation();
   const showCreateInterventionGroup = canManageInterventionGroups();
-  const showDemoDataControls = canManageAutomation();
   const hasVisibleCreateControls =
     showBaselineAction
     || showRunNowAutomation
-    || showCreateInterventionGroup
-    || showDemoDataControls;
+    || showCreateInterventionGroup;
   if (!hasVisibleCreateControls) return "";
   const automationPolicies = getAutomationPolicies();
   const automationPoliciesCurrentOrScheduled = automationPolicies.filter((policy) => {
@@ -16752,7 +17218,7 @@ function renderCreateBar() {
 
   return `
     <section class="td-action-bar">
-      <div class="td-action-kicker">Create</div>
+      <div class="td-action-kicker">Setup tools</div>
 
       <div class="td-action-row">
         ${showBaselineAction ? `
@@ -16769,9 +17235,9 @@ function renderCreateBar() {
         ` : ""}
         ${showRunNowAutomation ? `
           <div class="td-action-button-shell">
-            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-auto-assign">Generate Personalised Test</button>
+            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-auto-assign">Generate personalised learning</button>
             ${renderInfoTip(getGeneratePersonalisedActionTooltipText(), {
-              label: "About Generate Personalised Test",
+              label: "About Generate personalised learning",
               className: "td-action-info-tip",
               triggerClassName: "td-action-info-tip-trigger",
               bubbleClassName: "td-action-info-tip-bubble",
@@ -16781,19 +17247,6 @@ function renderCreateBar() {
         ` : ""}
         ${showCreateInterventionGroup ? `<button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-intervention-group">Create intervention group</button>` : ""}
       </div>
-
-      ${showDemoDataControls ? `
-        <div class="td-action-support">
-          <div class="td-action-support-copy">
-            <strong>Need sample data for a proper trial run?</strong>
-            <span>Populate demo classes, pupils, tests, assignments, attempt history, and seeded PP, SEN, and gender group values. Demo pupils use PIN 1234 and usernames like demo_y7_maple_1.</span>
-          </div>
-          <div class="td-action-row td-action-row--support">
-            <button class="td-btn td-btn--ghost" type="button" data-action="seed-demo-data" ${demoBusy ? "disabled" : ""}>${demoSeedLabel}</button>
-            ${showClearDemoButton ? `<button class="td-btn td-btn--ghost" type="button" data-action="clear-demo-data" ${demoBusy ? "disabled" : ""}>${demoClearLabel}</button>` : ""}
-          </div>
-        </div>
-      ` : ""}
 
       ${showCreateInterventionGroup ? `
         <div class="td-create-class-inline ${state.createInterventionGroupOpen ? "is-open" : ""}">
@@ -17022,7 +17475,7 @@ function renderCreateBar() {
       </div>
 
       ${showRunNowAutomation ? `
-        <div class="td-create-class-inline ${state.createAutoAssignOpen ? "is-open" : ""}">
+        <div id="tdAutomationPolicyPanel" class="td-create-class-inline ${state.createAutoAssignOpen ? "is-open" : ""}" tabindex="-1">
           <div class="td-create-class-form td-create-class-form--automation-run">
             <div class="td-form-stack td-form-stack--automation">
               <div class="td-automation-run-head">
@@ -17389,7 +17842,7 @@ function renderAnalyticsBar() {
   return `
     <section class="td-section td-section--analytics" data-role="analytics-bar">
       ${renderCollapsibleSectionHeader({
-        title: "Analytics",
+        title: "Insights",
         section: "analytics",
         isOpen,
       })}
@@ -25300,7 +25753,7 @@ function renderAssignmentLifecycleFilters(model) {
   return `
     <div class="td-assignment-filter-group">
       <span class="td-assignment-filter-label">Status</span>
-      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment lifecycle filters">
+      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Current learning filters">
         ${ASSIGNMENT_LIFECYCLE_FILTER_OPTIONS.map((option) => `
           <button
             type="button"
@@ -25318,7 +25771,7 @@ function renderAssignmentLifecycleFilters(model) {
     </div>
     <div class="td-assignment-filter-group td-assignment-filter-group--source">
       <span class="td-assignment-filter-label">Source</span>
-      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Assignment source filters">
+      <div class="td-filter-chip-row td-assignment-lifecycle-filters" role="tablist" aria-label="Learning source filters">
         ${sourceOptions.map((option) => `
           <button
             type="button"
@@ -25430,7 +25883,7 @@ function renderSectionUpcomingAssignments() {
   return `
     <section class="td-section td-section--upcoming">
       ${renderCollapsibleSectionHeader({
-        title: "Assignment lifecycle",
+        title: "Current learning",
         section: "upcoming",
         isOpen,
       })}
@@ -25747,7 +26200,7 @@ function renderSectionClasses() {
   return `
     <section class="td-section td-section--classes">
       ${renderCollapsibleSectionHeader({
-        title: "Your classes",
+        title: "Classes and form groups",
         section: "classes",
         isOpen,
       })}
@@ -25762,7 +26215,7 @@ function renderSectionClasses() {
               : `
             <div class="td-empty">
               <strong>No classes yet.</strong>
-              <p>Create a class above so tests can be assigned later.</p>
+              <p>Add a class or form group in Setup so pupils can be organised for learning cycles.</p>
             </div>
           `
           }
@@ -28151,7 +28604,7 @@ function renderTestCard(test) {
             <button
               class="td-btn td-btn--ghost"
               type="button"
-              ${test?.is_auto_generated ? "disabled title=\"Use Generate Personalised Test to create a fresh personalised set.\"" : `data-action="open-assign-test" data-test-id="${escapeAttr(test.id)}"`}
+              ${test?.is_auto_generated ? "disabled title=\"Use personalised learning generation to create a fresh set.\"" : `data-action="open-assign-test" data-test-id="${escapeAttr(test.id)}"`}
             >
               ${test?.is_auto_generated ? "Generated" : "Assign"}
             </button>
@@ -29011,6 +29464,283 @@ function injectStyles() {
       font-size:1.1rem;
       cursor:pointer;
       color:#475569;
+    }
+
+    .td-primary-nav{
+      margin:0 0 18px;
+    }
+
+    .td-primary-tabs{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      padding:6px;
+      border:1px solid #dbe3ee;
+      border-radius:16px;
+      background:#f8fafc;
+    }
+
+    .td-primary-tab{
+      appearance:none;
+      border:1px solid transparent;
+      border-radius:12px;
+      background:transparent;
+      color:#475569;
+      padding:10px 12px;
+      font:inherit;
+      font-size:.95rem;
+      font-weight:800;
+      cursor:pointer;
+      transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease;
+      min-width:0;
+    }
+
+    .td-primary-tab:hover{
+      background:#fff;
+      color:#0f172a;
+    }
+
+    .td-primary-tab:focus-visible{
+      outline:3px solid rgba(14,165,233,.28);
+      outline-offset:2px;
+    }
+
+    .td-primary-tab.is-selected{
+      background:#fff;
+      border-color:#cbd5e1;
+      color:#0f172a;
+      box-shadow:0 10px 22px rgba(15,23,42,.06);
+    }
+
+    .td-primary-view{
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
+
+    .td-view-header{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+    }
+
+    .td-view-header h3{
+      margin:0;
+      color:#0f172a;
+      font-size:1.22rem;
+      line-height:1.25;
+      letter-spacing:0;
+      font-weight:850;
+    }
+
+    .td-view-header p{
+      margin:6px 0 0;
+      color:#64748b;
+      font-size:.95rem;
+      line-height:1.45;
+      max-width:760px;
+    }
+
+    .td-view-action-grid,
+    .td-home-summary-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:12px;
+    }
+
+    .td-view-action-card,
+    .td-home-summary-card,
+    .td-home-panel{
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,.04);
+    }
+
+    .td-view-action-card{
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      gap:14px;
+      min-height:156px;
+      padding:16px;
+    }
+
+    .td-view-action-card h4,
+    .td-home-panel h3{
+      margin:0;
+      color:#0f172a;
+      font-size:1rem;
+      line-height:1.3;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-view-action-card p,
+    .td-home-summary-card p,
+    .td-home-change-text,
+    .td-attention-row p{
+      margin:6px 0 0;
+      color:#64748b;
+      font-size:.9rem;
+      line-height:1.45;
+    }
+
+    .td-home-summary-card{
+      padding:16px;
+      min-height:132px;
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+    }
+
+    .td-home-summary-card span{
+      color:#64748b;
+      font-size:.78rem;
+      font-weight:850;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+
+    .td-home-summary-card strong{
+      color:#0f172a;
+      font-size:1.55rem;
+      line-height:1.1;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-home-summary-card--green,
+    .td-view-action-card--green{
+      border-color:#bbf7d0;
+    }
+
+    .td-home-summary-card--amber,
+    .td-view-action-card--amber{
+      border-color:#fde68a;
+    }
+
+    .td-home-summary-card--red{
+      border-color:#fecaca;
+    }
+
+    .td-home-grid{
+      display:grid;
+      grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);
+      gap:12px;
+    }
+
+    .td-home-panel{
+      padding:16px;
+      min-width:0;
+    }
+
+    .td-home-panel-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+
+    .td-home-panel-head > span:not(.td-status-chip){
+      color:#64748b;
+      font-size:.82rem;
+      font-weight:800;
+    }
+
+    .td-attention-list{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .td-attention-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+    }
+
+    .td-attention-row > div{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      min-width:0;
+    }
+
+    .td-attention-row strong{
+      color:#0f172a;
+      font-size:.94rem;
+      line-height:1.3;
+    }
+
+    .td-attention-count{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:34px;
+      height:34px;
+      border-radius:10px;
+      background:#fff7ed;
+      color:#9a3412;
+      font-weight:850;
+      flex:0 0 34px;
+    }
+
+    .td-status-chip{
+      display:inline-flex;
+      align-items:center;
+      width:max-content;
+      max-width:100%;
+      border-radius:999px;
+      padding:4px 9px;
+      font-size:.75rem;
+      line-height:1.2;
+      font-weight:850;
+      background:#f1f5f9;
+      color:#475569;
+      border:1px solid #e2e8f0;
+    }
+
+    .td-status-chip--green{
+      background:#f0fdf4;
+      border-color:#bbf7d0;
+      color:#166534;
+    }
+
+    .td-status-chip--amber{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+
+    .td-status-chip--red{
+      background:#fef2f2;
+      border-color:#fecaca;
+      color:#991b1b;
+    }
+
+    @media (max-width: 760px){
+      .td-primary-tabs{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+
+      .td-view-action-grid,
+      .td-home-summary-grid,
+      .td-home-grid{
+        grid-template-columns:1fr;
+      }
+
+      .td-attention-row{
+        align-items:flex-start;
+        flex-direction:column;
+      }
     }
 
     .td-action-bar{
@@ -31305,6 +32035,14 @@ function injectStyles() {
       line-height:1.22;
       font-weight:800;
       letter-spacing:0;
+    }
+
+    .td-primary-view--home .td-first-use-panel{
+      margin-top:0;
+    }
+
+    .td-first-use-copy .td-status-chip{
+      margin-top:8px;
     }
 
     .td-first-use-copy p:not(.td-first-use-eyebrow){

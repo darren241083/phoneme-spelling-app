@@ -218,10 +218,21 @@ const actionHandlerSource = teacherViewSource.slice(actionHandlerStart, actionHa
 assert.match(actionHandlerSource, /openDashboardSection\("pupilOnboarding"\)/);
 assert.match(actionHandlerSource, /openDashboardSection\("upcoming"\)/);
 assert.match(actionHandlerSource, /openDashboardSection\("analytics"\)/);
-assert.match(actionHandlerSource, /state\.createBaselineOpen = true/);
+assert.match(actionHandlerSource, /openSetupDashboardTool\("baseline"\)/);
 assert.doesNotMatch(actionHandlerSource, /openDashboardSection\("tests"\)/);
 assert.equal(teacherViewSource.includes('data-action="teacher-first-use-action"'), true);
 assert.equal(teacherViewSource.includes("renderTeacherFirstUseReadinessPanel()"), true);
+assert.equal(teacherViewSource.includes("Wordloom status"), true);
+assert.equal(teacherViewSource.includes("First-use readiness"), false);
+
+const setupToolStart = teacherViewSource.indexOf("function openSetupDashboardTool(");
+const setupToolEnd = teacherViewSource.indexOf("\nfunction openDashboardSection", setupToolStart);
+assert.notEqual(setupToolStart, -1, "setup tool opener should exist");
+assert.notEqual(setupToolEnd, -1, "setup tool opener slice should be bounded");
+const setupToolSource = teacherViewSource.slice(setupToolStart, setupToolEnd);
+assert.match(setupToolSource, /state\.primaryView = "setup"/);
+assert.match(setupToolSource, /state\.createBaselineOpen = true/);
+assert.match(setupToolSource, /state\.createAutoAssignOpen = true/);
 
 const currentBuilderStart = teacherViewSource.indexOf("function buildCurrentTeacherFirstUseReadiness()");
 const currentBuilderEnd = teacherViewSource.indexOf("\nfunction renderTeacherFirstUseReadinessPanel", currentBuilderStart);
