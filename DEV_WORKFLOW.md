@@ -1,15 +1,12 @@
-Development workflow for this project
+# Development Workflow
 
-1. When fixing bugs or adding features, always rebuild full files rather than sending code snippets.
+The source of truth for Wordloom Codex work is now the root `AGENTS.md`, supported by project agents in `.codex/agents/` and reusable skills in `.agents/skills/`.
 
-2. Provide downloadable rebuilt files when possible.
+This file remains only as a short compatibility note:
 
-3. Keep explanations minimal. Assume the user does not read code.
-
-4. Give instructions one step at a time.
-
-5. Avoid long chats with lots of code as this causes lag.
-
-6. If multiple changes are required, plan the full rebuild first, then deliver it in one batch.
-
-7. Focus on stability and usability over experimental features.
+- inspect the working tree before work;
+- protect unrelated dirty, parked, ignored, and untracked files;
+- keep one focused feature/change per build;
+- use the approval gates in `AGENTS.md`;
+- prefer scoped edits and targeted tests;
+- focus on stability, usability, low teacher workload, and pupil clarity.
