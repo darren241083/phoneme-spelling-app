@@ -225,6 +225,26 @@ const PRIMARY_DASHBOARD_VIEWS = [
   { key: "setup", label: "Setup" },
 ];
 const PRIMARY_DASHBOARD_VIEW_KEYS = PRIMARY_DASHBOARD_VIEWS.map((item) => item.key);
+const PUPIL_WORKSPACE_TABS = [
+  { key: "overview", label: "Pupil overview" },
+  { key: "currentLearning", label: "Current learning" },
+  { key: "classes", label: "Classes and groups" },
+];
+const PUPIL_WORKSPACE_TAB_KEYS = PUPIL_WORKSPACE_TABS.map((item) => item.key);
+const PUPIL_OVERVIEW_FILTERS = [
+  { key: "needs_attention", label: "Needs attention" },
+  { key: "no_recent_evidence", label: "No recent evidence" },
+  { key: "all", label: "All pupils" },
+];
+const PUPIL_OVERVIEW_FILTER_KEYS = PUPIL_OVERVIEW_FILTERS.map((item) => item.key);
+const HOME_ACTIVITY_DEFAULT_PERIOD_DAYS = 7;
+const HOME_ACTIVITY_PERIOD_OPTIONS = [
+  { value: 7, label: "Last 7 days", phrase: "last 7 days" },
+  { value: 30, label: "Last 30 days", phrase: "last 30 days" },
+  { value: 180, label: "Last 180 days", phrase: "last 180 days" },
+];
+const HOME_ACTIVITY_GROUP_ACTIVE = "active";
+const HOME_ACTIVITY_GROUP_NO_RECENT = "no_recent";
 const DASHBOARD_SECTION_KEYS = ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"];
 const NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS = new Set(["bankMonitor", "upcoming", "classes", "tests"]);
 const ADVANCED_MANUAL_TOOLS_COPY = "For occasional custom lists or legacy manual tests. Wordloom's recommended route is automated personalised assignments.";
@@ -1020,6 +1040,23 @@ const state = {
   tests: [],
   assignments: [],
   primaryView: "home",
+  pupilWorkspace: {
+    activeTab: "overview",
+    overviewFilter: "needs_attention",
+  },
+  homeActivity: {
+    yearGroup: "",
+    classId: "",
+    periodDays: HOME_ACTIVITY_DEFAULT_PERIOD_DAYS,
+    expandedGroup: "",
+    draft: {
+      open: false,
+      group: "",
+      text: "",
+      statusMessage: "",
+      statusTone: "info",
+    },
+  },
   sections: {
     staffAccess: false,
     pupilOnboarding: false,
@@ -1631,9 +1668,9 @@ function renderTeacherFirstUseReadinessPanel() {
     >
       <div class="td-first-use-copy">
         <p class="td-first-use-eyebrow">Home</p>
-        <h3>Wordloom status</h3>
+        <h3>${escapeHtml(model.title)}</h3>
         <span class="td-status-chip td-status-chip--${escapeAttr(statusMeta.tone)}">${escapeHtml(statusMeta.label)}</span>
-        <p><strong>${escapeHtml(model.title)}</strong> ${escapeHtml(model.message)}</p>
+        <p>${escapeHtml(model.message)}</p>
       </div>
       ${actionHtml ? `<div class="td-first-use-actions">${actionHtml}</div>` : ""}
       <div class="td-first-use-access-note">
@@ -5517,12 +5554,68 @@ function normalizePrimaryDashboardView(value) {
   return PRIMARY_DASHBOARD_VIEW_KEYS.includes(key) ? key : "home";
 }
 
+function normalizePupilWorkspaceTab(value) {
+  const key = String(value || "").trim();
+  return PUPIL_WORKSPACE_TAB_KEYS.includes(key) ? key : "overview";
+}
+
+function normalizePupilOverviewFilter(value) {
+  const key = String(value || "").trim();
+  return PUPIL_OVERVIEW_FILTER_KEYS.includes(key) ? key : "needs_attention";
+}
+
+function ensurePupilWorkspaceState() {
+  const current = state.pupilWorkspace && typeof state.pupilWorkspace === "object"
+    ? state.pupilWorkspace
+    : {};
+  state.pupilWorkspace = {
+    activeTab: normalizePupilWorkspaceTab(current.activeTab),
+    overviewFilter: normalizePupilOverviewFilter(current.overviewFilter),
+  };
+  return state.pupilWorkspace;
+}
+
+function closeSetupInlineToolPanels() {
+  state.createBaselineOpen = false;
+  state.createClassOpen = false;
+  state.createInterventionGroupOpen = false;
+  state.createAutoAssignOpen = false;
+}
+
 function getPrimaryViewForDashboardSection(sectionKey) {
   const key = String(sectionKey || "");
   if (key === "analytics") return "insights";
   if (key === "upcoming" || key === "classes") return "pupils";
   if (key === "staffAccess" || key === "pupilOnboarding" || key === "bankMonitor" || key === "tests") return "setup";
   return "home";
+}
+
+function openPupilWorkspaceTab(tabKey = "overview", { filter = "" } = {}) {
+  const tab = normalizePupilWorkspaceTab(tabKey);
+  const workspace = ensurePupilWorkspaceState();
+  workspace.activeTab = tab;
+  if (filter) workspace.overviewFilter = normalizePupilOverviewFilter(filter);
+  state.primaryView = "pupils";
+  state.analyticsAssistant.open = false;
+  closeSetupInlineToolPanels();
+
+  if (tab === "currentLearning") {
+    revealQuarantinedDashboardSection("upcoming");
+    for (const key of DASHBOARD_SECTION_KEYS) {
+      state.sections[key] = key === "upcoming";
+    }
+    return;
+  }
+
+  if (tab === "classes") {
+    revealQuarantinedDashboardSection("classes");
+    for (const key of DASHBOARD_SECTION_KEYS) {
+      state.sections[key] = key === "classes";
+    }
+    return;
+  }
+
+  closePrimaryDashboardSections();
 }
 
 function selectPrimaryDashboardView(viewKey) {
@@ -5534,10 +5627,13 @@ function selectPrimaryDashboardView(viewKey) {
     return;
   }
 
-  if (nextView === "pupils" && !state.sections.upcoming && !state.sections.classes) {
-    openDashboardSection("upcoming");
+  if (nextView === "pupils") {
+    openPupilWorkspaceTab("overview");
     return;
   }
+
+  closePrimaryDashboardSections();
+  closeSetupInlineToolPanels();
 
   if (nextView !== "insights") {
     state.analyticsAssistant.open = false;
@@ -5558,12 +5654,14 @@ function closeQuarantinedDashboardSections() {
 
 function resetPrimaryDashboardViewForFreshRender() {
   state.primaryView = "home";
+  state.pupilWorkspace = {
+    activeTab: "overview",
+    overviewFilter: "needs_attention",
+  };
   closePrimaryDashboardSections();
   closeQuarantinedDashboardSections();
   state.analyticsAssistant.open = false;
-  state.createBaselineOpen = false;
-  state.createAutoAssignOpen = false;
-  state.createInterventionGroupOpen = false;
+  closeSetupInlineToolPanels();
   state.activePanel = null;
   state.flashTestId = null;
   state.flashClassId = null;
@@ -5574,24 +5672,56 @@ function openSetupDashboardTool(toolKey = "") {
   state.primaryView = "setup";
   closePrimaryDashboardSections();
   state.analyticsAssistant.open = false;
+  closeSetupInlineToolPanels();
 
   if (key === "baseline") {
     state.createBaselineOpen = true;
-    state.createClassOpen = false;
-    state.createInterventionGroupOpen = false;
-    state.createAutoAssignOpen = false;
     return;
   }
 
   if (key === "automation") {
     state.createAutoAssignOpen = true;
-    state.createBaselineOpen = false;
-    state.createClassOpen = false;
-    state.createInterventionGroupOpen = false;
+    return;
+  }
+
+  if (key === "intervention") {
+    state.createInterventionGroupOpen = true;
   }
 }
 
+function openSetupDashboardPanel(panelKey = "") {
+  const key = String(panelKey || "").trim();
+  state.primaryView = "setup";
+  closePrimaryDashboardSections();
+  closeSetupInlineToolPanels();
+  state.analyticsAssistant.open = false;
+
+  if (key === "baseline" || key === "automation" || key === "intervention") {
+    openSetupDashboardTool(key);
+    return;
+  }
+
+  const sectionKey = {
+    staffAccess: "staffAccess",
+    pupilOnboarding: "pupilOnboarding",
+    bankMonitor: "bankMonitor",
+    classes: "classes",
+    tests: "tests",
+  }[key] || "";
+  if (!sectionKey) return;
+  revealQuarantinedDashboardSection(sectionKey);
+  state.sections[sectionKey] = true;
+}
+
 function openDashboardSection(sectionKey) {
+  if (sectionKey === "upcoming") {
+    openPupilWorkspaceTab("currentLearning");
+    return;
+  }
+  if (sectionKey === "classes") {
+    openPupilWorkspaceTab("classes");
+    return;
+  }
   revealQuarantinedDashboardSection(sectionKey);
   for (const key of DASHBOARD_SECTION_KEYS) {
     state.sections[key] = key === sectionKey;
@@ -5599,6 +5729,9 @@ function openDashboardSection(sectionKey) {
   state.primaryView = getPrimaryViewForDashboardSection(sectionKey);
   if (sectionKey !== "analytics") {
     state.analyticsAssistant.open = false;
+  }
+  if (state.primaryView === "setup") {
+    closeSetupInlineToolPanels();
   }
 }
 
@@ -6194,6 +6327,15 @@ async function loadDashboardData({
       ...state.visualAnalytics,
       status: "loading",
       message: "",
+      sourceData: null,
+      selectedGrapheme: "",
+      catalog: {
+        overview: null,
+        yearGroups: [],
+        classes: [],
+        pupils: [],
+      },
+      summaries: {},
     };
     state.analyticsAssistant.threadsLoading = true;
   } else {
@@ -8704,6 +8846,15 @@ async function refreshVisualAnalyticsSummary() {
     ...state.visualAnalytics,
     status: "loading",
     message: "",
+    sourceData: null,
+    selectedGrapheme: "",
+    catalog: {
+      overview: null,
+      yearGroups: [],
+      classes: [],
+      pupils: [],
+    },
+    summaries: {},
   };
 
   try {
@@ -10730,12 +10881,41 @@ function onRootInput(event) {
 
   if (target.matches('[data-field="automation-policy-description"]')) {
     setAutomationRunPolicy({ description: target.value || "" });
+    return;
+  }
+
+  if (target.matches('[data-field="home-activity-draft-text"]')) {
+    const activityState = ensureHomeActivityState();
+    activityState.draft = {
+      ...activityState.draft,
+      text: target.value || "",
+      statusMessage: "",
+      statusTone: "info",
+    };
   }
 }
 
 function onRootChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  if (target.matches('[data-field="home-activity-year"]')) {
+    setTeacherHomeActivityFilters({ yearGroup: target instanceof HTMLSelectElement ? target.value : "" });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="home-activity-class"]')) {
+    setTeacherHomeActivityFilters({ classId: target instanceof HTMLSelectElement ? target.value : "" });
+    paint();
+    return;
+  }
+
+  if (target.matches('[data-field="home-activity-period"]')) {
+    setTeacherHomeActivityFilters({ periodDays: target instanceof HTMLSelectElement ? target.value : "" });
+    paint();
+    return;
+  }
 
   if (target.matches('[data-field="active-school-dev-select"]')) {
     handleDeveloperSchoolSwitch(target instanceof HTMLSelectElement ? target.value : "");
@@ -11610,6 +11790,101 @@ function handleTeacherFirstUseAction(actionId = "") {
   }
 }
 
+function getCurrentTeacherHomeActivityModel() {
+  const data = getHomeVisualSourceData();
+  const filters = getTeacherHomeActivityFilters(data);
+  const activityState = ensureHomeActivityState();
+  return buildTeacherHomeActivityModel({
+    data,
+    filters,
+    expandedGroup: activityState.expandedGroup,
+    draft: activityState.draft,
+  });
+}
+
+function toggleTeacherHomeActivityGroup(group) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  if (!normalizedGroup) return;
+  const activityState = ensureHomeActivityState();
+  activityState.expandedGroup = activityState.expandedGroup === normalizedGroup ? "" : normalizedGroup;
+  activityState.draft = createDefaultHomeActivityDraftState();
+}
+
+function openTeacherHomeActivityDraft(group) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  if (!normalizedGroup) return;
+  ensureHomeActivityState().expandedGroup = normalizedGroup;
+  const model = getCurrentTeacherHomeActivityModel();
+  const rows = getTeacherHomeActivityGroupRows(model, normalizedGroup);
+  const activityState = ensureHomeActivityState();
+  activityState.expandedGroup = normalizedGroup;
+  activityState.draft = {
+    open: true,
+    group: normalizedGroup,
+    text: prepareTeacherHomeActivityDraft(normalizedGroup, rows, model.filters),
+    statusMessage: "",
+    statusTone: "info",
+  };
+}
+
+function closeTeacherHomeActivityDraft() {
+  ensureHomeActivityState().draft = createDefaultHomeActivityDraftState();
+}
+
+function setTeacherHomeActivityDraftStatus(message, tone = "info") {
+  const activityState = ensureHomeActivityState();
+  activityState.draft = {
+    ...activityState.draft,
+    statusMessage: String(message || ""),
+    statusTone: String(tone || "info"),
+  };
+}
+
+async function copyTextToClipboard(text) {
+  const safeText = String(text || "");
+  if (!safeText.trim()) return false;
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") return false;
+  await clipboard.writeText(safeText);
+  return true;
+}
+
+async function handleCopyTeacherHomeActivityDraftText() {
+  const text = ensureHomeActivityState().draft.text || "";
+  try {
+    const copied = await copyTextToClipboard(text);
+    setTeacherHomeActivityDraftStatus(
+      copied ? "Text copied." : "Clipboard access is not available. The text is still available to copy manually.",
+      copied ? "success" : "warning",
+    );
+  } catch {
+    setTeacherHomeActivityDraftStatus("Clipboard access failed. The text is still available to copy manually.", "warning");
+  }
+  paint();
+}
+
+async function handleCopyTeacherHomeActivityPupilNames() {
+  const activityState = ensureHomeActivityState();
+  const group = activityState.draft.group || activityState.expandedGroup;
+  const model = getCurrentTeacherHomeActivityModel();
+  const names = getTeacherHomeActivityPupilNames(model, group);
+  if (!names.trim()) {
+    setTeacherHomeActivityDraftStatus("No pupil names are available to copy.", "warning");
+    paint();
+    return;
+  }
+  try {
+    const copied = await copyTextToClipboard(names);
+    setTeacherHomeActivityDraftStatus(
+      copied ? "Pupil names copied." : "Clipboard access is not available. The pupil names are still visible for manual copying.",
+      copied ? "success" : "warning",
+    );
+  } catch {
+    setTeacherHomeActivityDraftStatus("Clipboard access failed. The pupil names are still visible for manual copying.", "warning");
+  }
+  paint();
+}
+
 async function onRootClick(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -11652,14 +11927,94 @@ async function onRootClick(event) {
     return;
   }
 
+  if (action === "open-setup-panel") {
+    const panel = String(button.dataset.setupPanel || "");
+    openSetupDashboardPanel(panel);
+    paint();
+    if (panel === "pupilOnboarding" && state.sections.pupilOnboarding) {
+      void loadPupilPlacementRows({ force: true });
+    }
+    if (panel === "bankMonitor" && state.sections.bankMonitor) {
+      void ensureWordloomCoreBankMonitorLoaded();
+    }
+    if (panel === "baseline") {
+      scrollTeacherFirstUseTarget("#tdBaselineClassInput");
+    }
+    if (panel === "automation") {
+      scrollTeacherFirstUseTarget("#tdAutomationPolicyPanel");
+    }
+    return;
+  }
+
+  if (action === "open-pupil-workspace") {
+    openPupilWorkspaceTab(button.dataset.pupilTab || "overview", {
+      filter: button.dataset.pupilFilter || "",
+    });
+    paint();
+    return;
+  }
+
+  if (action === "set-pupil-overview-filter") {
+    ensurePupilWorkspaceState().overviewFilter = normalizePupilOverviewFilter(button.dataset.pupilFilter || "");
+    paint();
+    return;
+  }
+
   if (action === "teacher-first-use-action") {
     handleTeacherFirstUseAction(button.dataset.firstUseAction || "");
+    return;
+  }
+
+  if (action === "toggle-home-activity-group") {
+    toggleTeacherHomeActivityGroup(button.dataset.activityGroup || "");
+    paint();
+    return;
+  }
+
+  if (action === "prepare-home-activity-draft") {
+    openTeacherHomeActivityDraft(button.dataset.activityGroup || "");
+    paint();
+    return;
+  }
+
+  if (action === "copy-home-activity-draft-text") {
+    await handleCopyTeacherHomeActivityDraftText();
+    return;
+  }
+
+  if (action === "copy-home-activity-pupil-names") {
+    await handleCopyTeacherHomeActivityPupilNames();
+    return;
+  }
+
+  if (action === "close-home-activity-draft") {
+    closeTeacherHomeActivityDraft();
+    paint();
     return;
   }
 
   if (action === "toggle-section") {
     const key = button.dataset.section;
     if (!key || !Object.prototype.hasOwnProperty.call(state.sections, key)) return;
+    const currentPrimaryView = normalizePrimaryDashboardView(state.primaryView);
+    if (
+      currentPrimaryView === "setup"
+      && ["staffAccess", "pupilOnboarding", "bankMonitor", "classes", "tests"].includes(key)
+    ) {
+      if (state.sections[key]) {
+        state.sections[key] = false;
+      } else {
+        openSetupDashboardPanel(key);
+      }
+      paint();
+      if (key === "pupilOnboarding" && state.sections.pupilOnboarding) {
+        void loadPupilPlacementRows({ force: true });
+      }
+      if (key === "bankMonitor" && state.sections.bankMonitor) {
+        void ensureWordloomCoreBankMonitorLoaded();
+      }
+      return;
+    }
     if (state.sections[key]) {
       state.sections[key] = false;
     } else {
@@ -12139,6 +12494,7 @@ async function onRootClick(event) {
     }
     state.createBaselineOpen = !state.createBaselineOpen;
     if (state.createBaselineOpen) {
+      closePrimaryDashboardSections();
       state.createClassOpen = false;
       state.createInterventionGroupOpen = false;
       state.createAutoAssignOpen = false;
@@ -12162,6 +12518,7 @@ async function onRootClick(event) {
     }
     state.createInterventionGroupOpen = !state.createInterventionGroupOpen;
     if (state.createInterventionGroupOpen) {
+      closePrimaryDashboardSections();
       state.createClassOpen = false;
       state.createBaselineOpen = false;
       state.createAutoAssignOpen = false;
@@ -12200,6 +12557,7 @@ async function onRootClick(event) {
     }
     state.createAutoAssignOpen = !state.createAutoAssignOpen;
     if (state.createAutoAssignOpen) {
+      closePrimaryDashboardSections();
       state.createClassOpen = false;
       state.createInterventionGroupOpen = false;
       state.createBaselineOpen = false;
@@ -16257,6 +16615,8 @@ function renderDashboardAreaActionCard({
 }
 
 function getHomeOverviewSummary() {
+  const status = String(state.visualAnalytics?.status || "").trim().toLowerCase();
+  if (status !== "ready") return null;
   const viewModel = getVisualAnalyticsViewModel();
   const overviewKey = createVisualScopeKey("overview", "");
   return (
@@ -16264,6 +16624,63 @@ function getHomeOverviewSummary() {
     state.visualAnalytics?.summaries?.[overviewKey] ||
     null
   );
+}
+
+function getHomeVisualSourceData() {
+  const status = String(state.visualAnalytics?.status || "").trim().toLowerCase();
+  if (status !== "ready") return null;
+  return getVisualAnalyticsViewModel()?.sourceData || state.visualAnalytics?.sourceData || null;
+}
+
+function getTeacherHomeEvidenceState(summary = getHomeOverviewSummary()) {
+  if (summary) {
+    return {
+      key: "loaded",
+      label: "Evidence loaded",
+      title: "",
+      detail: "",
+    };
+  }
+
+  const status = String(state.visualAnalytics?.status || "").trim().toLowerCase();
+  if (status === "error") {
+    return {
+      key: "error",
+      label: "Evidence unavailable",
+      title: "Recent pupil evidence is not available yet.",
+      detail: state.visualAnalytics?.message || "Wordloom could not load recent pupil evidence.",
+    };
+  }
+
+  if (status === "loading" || status === "idle") {
+    return {
+      key: "loading",
+      label: "Checking evidence",
+      title: "Checking recent pupil evidence...",
+      detail: "Attention reasons will appear once recent pupil evidence has loaded.",
+    };
+  }
+
+  return {
+    key: "unknown",
+    label: "Evidence unavailable",
+    title: "Recent pupil evidence is not available yet.",
+    detail: "Attention reasons will appear when recent pupil evidence is available.",
+  };
+}
+
+function getUniquePupilRows(rows = [], predicate = () => true) {
+  const seenIds = new Set();
+  const result = [];
+  for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
+    if (!predicate(row)) continue;
+    const pupilId = String(row?.pupilId || row?.pupil_id || row?.id || "").trim();
+    const uniqueKey = pupilId || `row-${index}`;
+    if (seenIds.has(uniqueKey)) continue;
+    seenIds.add(uniqueKey);
+    result.push(row);
+  }
+  return result;
 }
 
 function mapTeacherHomeReadinessState(model) {
@@ -16314,13 +16731,13 @@ function getLifecycleFollowUpPupilIds(lifecycle, groupKeys = []) {
   return ids;
 }
 
-function getTeacherHomeAttentionReasons(summary = getHomeOverviewSummary()) {
-  const reasons = [];
+function getCurrentLearningFollowUpSummary({ sourceKey = "" } = {}) {
   const currentLearningRows = buildTeacherFirstUseAssignmentRows();
   const followUpIds = new Set();
   let followUpFallbackCount = 0;
 
   for (const assignment of currentLearningRows) {
+    if (sourceKey && String(assignment?.sourceKey || "") !== sourceKey) continue;
     const lifecycle = assignment?.lifecycle;
     const ids = getLifecycleFollowUpPupilIds(lifecycle, ["not_started", "in_progress", "check_data"]);
     for (const id of ids) followUpIds.add(id);
@@ -16333,182 +16750,1361 @@ function getTeacherHomeAttentionReasons(summary = getHomeOverviewSummary()) {
     }
   }
 
-  const currentLearningCount = followUpIds.size || followUpFallbackCount;
-  if (currentLearningCount > 0) {
+  return {
+    pupilIds: followUpIds,
+    fallbackCount: followUpFallbackCount,
+    count: followUpIds.size || followUpFallbackCount,
+  };
+}
+
+function getTeacherHomeEvidenceGroups(summary = getHomeOverviewSummary()) {
+  const pupilRows = Array.isArray(summary?.pupilRows) ? summary.pupilRows : [];
+  return {
+    noEvidenceRows: getUniquePupilRows(pupilRows, (item) => Number(item?.checkedWords || 0) === 0),
+    needsAttentionRows: getUniquePupilRows(pupilRows, (item) => !!item?.needsIntervention),
+  };
+}
+
+function getTeacherHomeAttentionReasons(summary = getHomeOverviewSummary()) {
+  const reasons = [];
+  const { noEvidenceRows, needsAttentionRows } = getTeacherHomeEvidenceGroups(summary);
+  const baselineFollowUp = getCurrentLearningFollowUpSummary({ sourceKey: "baseline" });
+
+  if (baselineFollowUp.count > 0) {
     reasons.push({
-      key: "current-learning",
-      label: "Current learning follow-up",
-      count: currentLearningCount,
-      helper: "Pupils still need a look in the current learning cycle.",
-      actionLabel: "Review current learning",
-      primaryView: "pupils",
-      section: "upcoming",
+      key: "baseline-not-complete",
+      label: "Baseline not complete",
+      count: baselineFollowUp.count,
+      tone: "amber",
+      pupilTab: "currentLearning",
     });
   }
 
-  const pupilRows = Array.isArray(summary?.pupilRows) ? summary.pupilRows : [];
-  const noEvidenceRows = pupilRows.filter((item) => Number(item?.checkedWords || 0) === 0);
   if (noEvidenceRows.length > 0) {
     reasons.push({
       key: "no-recent-evidence",
       label: "No recent evidence",
       count: noEvidenceRows.length,
-      helper: "Pupils have no checked words in the current evidence window.",
-      actionLabel: "Open pupil progress",
-      primaryView: "insights",
-      section: "analytics",
+      tone: "amber",
+      pupilTab: "overview",
+      pupilFilter: "no_recent_evidence",
     });
   }
 
-  const reviewRows = pupilRows.filter((item) => item?.needsIntervention);
-  if (reviewRows.length > 0) {
+  if (needsAttentionRows.length > 0) {
     reasons.push({
-      key: "needs-attention",
-      label: "Needs attention",
-      count: reviewRows.length,
-      helper: "Recent spelling evidence suggests follow-up would help.",
-      actionLabel: "Open insights",
-      primaryView: "insights",
-      section: "analytics",
+      key: "progress-needs-review",
+      label: "Progress needs review",
+      count: needsAttentionRows.length,
+      tone: "amber",
+      pupilTab: "overview",
+      pupilFilter: "needs_attention",
     });
   }
 
   return reasons.slice(0, 3);
 }
 
-function getTeacherHomeSummaryCards(readinessModel, summary = getHomeOverviewSummary(), attentionReasons = []) {
-  const readinessMeta = mapTeacherHomeReadinessState(readinessModel);
-  const cards = [
-    {
-      label: "Operational status",
-      value: readinessMeta.label,
-      helper: readinessModel?.title || "Wordloom is checking setup and recent pupil evidence.",
-      tone: readinessMeta.tone,
-    },
-  ];
+function getTeacherHomeMetricComponents(summary = getHomeOverviewSummary()) {
+  if (!summary) return [];
+  const pupilCount = Math.max(0, Number(summary.pupilCount || 0));
+  const activeCount = Math.max(0, Number(summary.activePupilCount || 0));
+  const { noEvidenceRows, needsAttentionRows } = getTeacherHomeEvidenceGroups(summary);
+  const windowDays = Math.max(0, Number(summary.windowDays || state.visualAnalytics?.windowDays || VISUAL_ANALYTICS_WINDOW_DAYS));
+  const metrics = [];
 
-  if (summary) {
-    const pupilCount = Math.max(0, Number(summary.pupilCount || 0));
-    const activeCount = Math.max(0, Number(summary.activePupilCount || 0));
-    cards.push({
-      label: "Participation",
-      value: pupilCount ? `${activeCount}/${pupilCount}` : "Not started",
-      helper: pupilCount ? "pupils with recent checked-word evidence" : "No pupils found in the current view",
+  if (pupilCount > 0 || activeCount > 0) {
+    metrics.push({
+      label: "Active pupils",
+      value: pupilCount ? `${activeCount} / ${pupilCount}` : String(activeCount),
       tone: activeCount ? "green" : "neutral",
-    });
-
-    cards.push({
-      label: "Pupils needing attention",
-      value: String(Math.max(0, Number(summary.interventionCount || 0))),
-      helper: attentionReasons.length ? "grouped from current learning and recent evidence" : "No grouped attention reasons available yet",
-      tone: Number(summary.interventionCount || 0) ? "red" : "green",
-    });
-  } else {
-    const attentionCount = attentionReasons.reduce((sum, item) => sum + Math.max(0, Number(item.count || 0)), 0);
-    cards.push({
-      label: "Pupils needing attention",
-      value: attentionCount ? String(attentionCount) : "No recent evidence",
-      helper: attentionCount ? "grouped from current learning follow-up" : "Recent pupil evidence has not loaded yet",
-      tone: attentionCount ? "red" : "neutral",
+      tooltip: `Active pupils is a pupil count: active roster pupils with at least one checked word in the current ${windowDays}-day evidence window. Pupils without recent checked words are not included.`,
     });
   }
 
-  const currentLearningRows = buildTeacherFirstUseAssignmentRows();
-  const liveLearningCount = currentLearningRows.filter((item) =>
-    ["generated_by_policy", "legacy_personalised", "baseline", "teacher_created"].includes(String(item?.sourceKey || ""))
-    && item?.lifecycle
-    && !["complete", "expired", "cancelled"].includes(String(item.lifecycle.key || ""))
-  ).length;
-  cards.push({
-    label: "Current learning",
-    value: liveLearningCount ? String(liveLearningCount) : "Not started",
-    helper: liveLearningCount ? "live learning cycles visible to this dashboard" : "No live learning cycle found yet",
-    tone: liveLearningCount ? "amber" : "neutral",
-  });
+  if (Array.isArray(summary.pupilRows)) {
+    metrics.push({
+      label: "No recent evidence",
+      value: String(noEvidenceRows.length),
+      tone: noEvidenceRows.length ? "amber" : "green",
+      tooltip: `No recent evidence is a deduped pupil count: active roster pupils with zero checked words in the current ${windowDays}-day evidence window.`,
+    });
+    metrics.push({
+      label: "Needs attention",
+      value: String(needsAttentionRows.length),
+      tone: needsAttentionRows.length ? "amber" : "green",
+      tooltip: `Needs attention is a deduped pupil count: pupils flagged by Wordloom's existing progress rules in the current ${windowDays}-day evidence window. It is a review signal, not an urgent failure state.`,
+    });
+  }
 
-  return cards.slice(0, 3);
+  return metrics.slice(0, 3);
 }
 
-function getTeacherHomeTrendMeta(summary = getHomeOverviewSummary()) {
-  const status = String(state.visualAnalytics?.status || "idle");
-  if (status === "loading") {
+function isTeacherHomeEssentialSetupAction(action = null) {
+  const actionId = String(action?.id || "");
+  return actionId === TEACHER_FIRST_USE_ACTIONS.OPEN_PUPIL_ONBOARDING.id
+    || actionId === TEACHER_FIRST_USE_ACTIONS.CHECK_BASELINE_STATUS.id;
+}
+
+function getTeacherHomePrimaryAction(readinessModel, summary = getHomeOverviewSummary()) {
+  const readinessAction = readinessModel?.primaryAction || null;
+  if (isTeacherHomeEssentialSetupAction(readinessAction)) {
+    if (String(readinessAction?.id || "") === TEACHER_FIRST_USE_ACTIONS.CHECK_BASELINE_STATUS.id) {
+      return {
+        label: "View pupils",
+        action: "open-pupil-workspace",
+        pupilTab: "currentLearning",
+        reason: "baseline",
+      };
+    }
     return {
-      label: "In progress",
-      text: "Wordloom is still checking recent pupil activity.",
-      tone: "neutral",
+      label: "View setup",
+      action: "teacher-first-use-action",
+      firstUseAction: readinessAction.id,
+      reason: "essential_setup",
     };
   }
 
-  const trend = summary?.recentTrend || null;
-  const dayCount = Math.max(0, Number(trend?.dayCount || 0));
-  const rawLabel = String(trend?.label || "").trim();
-  if (!summary?.checkedWords || dayCount < 2 || rawLabel === "Low evidence") {
+  const { noEvidenceRows, needsAttentionRows } = getTeacherHomeEvidenceGroups(summary);
+  if (needsAttentionRows.length > 0) {
     return {
-      label: "Not enough evidence",
-      text: "What changed will appear once there is enough recent checked-word evidence.",
-      tone: "neutral",
+      label: "Review pupils",
+      action: "open-pupil-workspace",
+      pupilTab: "overview",
+      pupilFilter: "needs_attention",
+      reason: "needs_attention",
     };
   }
 
-  const direction = String(trend?.direction || "");
-  const label = direction === "up" || rawLabel === "Improving"
-    ? "Improving"
-    : direction === "down" || rawLabel === "Needs attention"
-      ? "Declining"
-      : "Stable";
-  const tone = label === "Improving" ? "green" : label === "Declining" ? "red" : "amber";
-  const rangeLabel = trend.startLabel && trend.endLabel
-    ? trend.startLabel === trend.endLabel
-      ? trend.startLabel
-      : `${trend.startLabel} to ${trend.endLabel}`
-    : trend.startLabel || trend.endLabel || "recent activity";
+  if (noEvidenceRows.length > 0) {
+    return {
+      label: "Review pupils",
+      action: "open-pupil-workspace",
+      pupilTab: "overview",
+      pupilFilter: "no_recent_evidence",
+      reason: "no_recent_evidence",
+    };
+  }
+
+  const currentLearningFollowUp = getCurrentLearningFollowUpSummary();
+  if (
+    currentLearningFollowUp.count > 0
+    || String(readinessAction?.id || "") === TEACHER_FIRST_USE_ACTIONS.VIEW_ASSIGNMENT_PROGRESS.id
+  ) {
+    return {
+      label: "Review current learning",
+      action: "open-pupil-workspace",
+      pupilTab: "currentLearning",
+      reason: "current_learning",
+    };
+  }
 
   return {
-    label,
-    text: `${label} across ${rangeLabel}, based on ${dayCount} activity days.`,
-    tone,
+    label: "Open Insights",
+    action: "open-dashboard-area",
+    primaryView: "insights",
+    section: "analytics",
+    reason: "insights",
   };
 }
 
-function renderTeacherHomeSummaryCard(card) {
+function getTeacherHomeStatusCopy(readinessModel, primaryAction, summary = getHomeOverviewSummary()) {
+  const readinessMeta = mapTeacherHomeReadinessState(readinessModel);
+  const reason = String(primaryAction?.reason || "");
+  const evidenceState = getTeacherHomeEvidenceState(summary);
+  const { noEvidenceRows, needsAttentionRows } = getTeacherHomeEvidenceGroups(summary);
+  const baselineFollowUp = getCurrentLearningFollowUpSummary({ sourceKey: "baseline" });
+
+  if (readinessModel?.isLoading) {
+    return {
+      statement: "Checking setup and pupil evidence",
+      explanation: "The dashboard will update as soon as the current data has loaded.",
+      tone: readinessMeta.tone,
+    };
+  }
+
+  if (reason === "baseline") {
+    return {
+      statement: baselineFollowUp.count
+        ? `${formatCountLabel(baselineFollowUp.count, "pupil")} still need to complete their baseline`
+        : "Baseline completion needs review",
+      explanation: "Personalised learning will begin afterwards.",
+      tone: "amber",
+    };
+  }
+
+  if (reason === "essential_setup") {
+    return {
+      statement: readinessModel?.title || "Complete essential setup",
+      explanation: readinessModel?.message || "Finish the setup step before pupils can move smoothly into personalised learning.",
+      tone: "amber",
+    };
+  }
+
+  if (reason === "needs_attention") {
+    return {
+      statement: `${formatCountLabel(needsAttentionRows.length, "pupil")} may need review`,
+      explanation: "Based on recent learning evidence.",
+      tone: "amber",
+    };
+  }
+
+  if (reason === "no_recent_evidence") {
+    return {
+      statement: `${formatCountLabel(noEvidenceRows.length, "pupil")} have no recent evidence`,
+      explanation: "Check pupils who have not produced checked-word evidence in the current window.",
+      tone: "amber",
+    };
+  }
+
+  if (reason === "current_learning") {
+    const currentLearningFollowUp = getCurrentLearningFollowUpSummary();
+    return {
+      statement: currentLearningFollowUp.count
+        ? `${formatCountLabel(currentLearningFollowUp.count, "pupil")} need current-learning follow-up`
+        : "Current learning needs a check",
+      explanation: "Review pupils awaiting completion or follow-up in the current learning cycle.",
+      tone: "amber",
+    };
+  }
+
+  if (reason === "insights" && evidenceState.key === "loaded") {
+    return {
+      statement: "Everything is on track",
+      explanation: "No pupils currently need your attention.",
+      tone: "green",
+    };
+  }
+
+  if (evidenceState.key !== "loaded" && reason === "insights") {
+    return {
+      statement: evidenceState.title || "Checking recent pupil evidence...",
+      explanation: evidenceState.detail || "Open Insights when recent pupil evidence is available.",
+      tone: evidenceState.key === "error" ? "amber" : "neutral",
+    };
+  }
+
+  return {
+    statement: readinessModel?.title || "Everything is on track",
+    explanation: readinessModel?.message || "Open Insights when enough pupil activity has been recorded.",
+    tone: readinessMeta.tone,
+  };
+}
+
+function renderTeacherHomeMetric(metric) {
   return `
-    <article class="td-home-summary-card td-home-summary-card--${escapeAttr(card?.tone || "neutral")}">
-      <span>${escapeHtml(card?.label || "")}</span>
-      <strong>${escapeHtml(card?.value || "")}</strong>
-      <p>${escapeHtml(card?.helper || "")}</p>
+    <article class="td-home-metric td-home-metric--${escapeAttr(metric?.tone || "neutral")}" data-role="teacher-home-metric">
+      <div class="td-home-metric-label">
+        <span>${escapeHtml(metric?.label || "")}</span>
+        ${metric?.tooltip ? renderInfoTip(metric.tooltip, {
+          label: `About ${metric.label}`,
+          className: "td-home-info-tip",
+          triggerClassName: "td-home-info-tip-trigger",
+          bubbleClassName: "td-home-info-tip-bubble",
+          align: "start",
+        }) : ""}
+      </div>
+      <strong>${escapeHtml(metric?.value || "")}</strong>
     </article>
   `;
 }
 
 function renderTeacherHomeAttention(reason) {
   return `
-    <article class="td-attention-row">
+    <button
+      class="td-attention-row td-attention-row--${escapeAttr(reason?.tone || "neutral")}"
+      type="button"
+      data-action="open-pupil-workspace"
+      data-pupil-tab="${escapeAttr(reason.pupilTab || "overview")}"
+      data-pupil-filter="${escapeAttr(reason.pupilFilter || "")}"
+    >
       <div>
-        <span class="td-attention-count">${escapeHtml(String(reason.count || 0))}</span>
+        <span class="td-attention-dot" aria-hidden="true"></span>
         <div>
           <strong>${escapeHtml(reason.label)}</strong>
-          <p>${escapeHtml(reason.helper)}</p>
+          <span>${escapeHtml(formatCountLabel(reason.count || 0, "pupil"))}</span>
         </div>
+      </div>
+      <span class="td-row-chevron" aria-hidden="true">&rsaquo;</span>
+    </button>
+  `;
+}
+
+function getTeacherHomeWeekLabel(startDate) {
+  return formatAnalyticsShortDayLabel(analyticsDayKey(startDate));
+}
+
+function getTeacherHomeScopedTrendAttempts(summary = getHomeOverviewSummary()) {
+  const data = getHomeVisualSourceData();
+  if (!summary || !data || !Array.isArray(data.attempts)) return [];
+  const summaryClassIds = Array.isArray(summary.classIds)
+    ? new Set(summary.classIds.map((item) => String(item || "")).filter(Boolean))
+    : new Set();
+  const membershipPairs = data.membershipPairs instanceof Set ? data.membershipPairs : null;
+  if (!summaryClassIds.size && !membershipPairs) return [];
+  return data.attempts.filter((attempt) => {
+    const classId = String(attempt?.class_id || "").trim();
+    const pupilId = String(attempt?.pupil_id || "").trim();
+    if (summaryClassIds.size && !summaryClassIds.has(classId)) return false;
+    if (membershipPairs) {
+      if (!classId || !pupilId) return false;
+      if (!membershipPairs.has(`${classId}::${pupilId}`)) return false;
+    }
+    return true;
+  });
+}
+
+function buildTeacherHomeSixWeekTrend(summary = getHomeOverviewSummary(), { now = new Date() } = {}) {
+  const data = getHomeVisualSourceData();
+  const attempts = getTeacherHomeScopedTrendAttempts(summary);
+  const difficultyByWordId = data?.difficultyByWordId || new Map();
+  const endDate = new Date(now);
+  if (Number.isNaN(endDate.getTime())) {
+    return { label: "Not enough evidence", tone: "neutral", hasTrend: false };
+  }
+
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 41);
+  startDate.setHours(0, 0, 0, 0);
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const weekMaps = Array.from({ length: 6 }, () => new Map());
+
+  for (const attempt of attempts) {
+    if (!isVisualTrendEvidenceAttempt(attempt)) continue;
+    const createdAt = new Date(attempt?.created_at || "");
+    const createdTime = createdAt.getTime();
+    if (!Number.isFinite(createdTime)) continue;
+    if (createdTime < startDate.getTime() || createdTime > endDate.getTime()) continue;
+    const weekIndex = Math.max(0, Math.min(5, Math.floor((createdTime - startDate.getTime()) / weekMs)));
+    const attemptKey = buildVisualTrendAttemptKey(attempt);
+    if (!attemptKey) continue;
+    const currentAttempt = weekMaps[weekIndex].get(attemptKey) || null;
+    if (shouldReplaceVisualTrendAttempt(currentAttempt, attempt)) {
+      weekMaps[weekIndex].set(attemptKey, attempt);
+    }
+  }
+
+  const weeks = weekMaps.map((attemptMap, index) => {
+    const weekStart = new Date(startDate.getTime() + (index * weekMs));
+    const finalAttempts = Array.from(attemptMap.values());
+    const pupilIds = new Set();
+    let correctCount = 0;
+    let firstTrySuccessCount = 0;
+    let attemptNumberTotal = 0;
+    let difficultyTotal = 0;
+    let difficultyCount = 0;
+    let expectedAccuracyTotal = 0;
+    let expectedAccuracyCount = 0;
+
+    for (const attempt of finalAttempts) {
+      const attemptsUsed = Math.max(1, Number(attempt?.attempt_number || 1));
+      const difficultyModel = difficultyByWordId.get(String(attempt?.test_word_id || ""));
+      const difficultyScore = getAnalyticsDifficultyScoreForExpectedAccuracy(difficultyModel);
+      const expectedAccuracy = getExpectedAccuracyForDifficultyScore(difficultyScore);
+      if (attempt?.correct) correctCount += 1;
+      if (attempt?.correct && attemptsUsed === 1) firstTrySuccessCount += 1;
+      attemptNumberTotal += attemptsUsed;
+      if (attempt?.pupil_id) pupilIds.add(String(attempt.pupil_id));
+      if (Number.isFinite(difficultyScore)) {
+        difficultyTotal += difficultyScore;
+        difficultyCount += 1;
+      }
+      if (Number.isFinite(expectedAccuracy)) {
+        expectedAccuracyTotal += expectedAccuracy;
+        expectedAccuracyCount += 1;
+      }
+    }
+
+    return {
+      dayKey: analyticsDayKey(weekStart),
+      label: getTeacherHomeWeekLabel(weekStart),
+      attemptCount: finalAttempts.length,
+      correctCount,
+      firstTrySuccessCount,
+      attemptNumberTotal,
+      pupilCount: pupilIds.size,
+      accuracy: finalAttempts.length ? correctCount / finalAttempts.length : 0,
+      averageDifficultyScore: difficultyCount ? difficultyTotal / difficultyCount : null,
+      difficultyBandKey: difficultyCount ? String(getDifficultyBand(difficultyTotal / difficultyCount)?.key || "") : "",
+      difficultyTotal,
+      difficultyCount,
+      expectedAccuracy: expectedAccuracyCount ? expectedAccuracyTotal / expectedAccuracyCount : null,
+      expectedAccuracyTotal,
+      expectedAccuracyCount,
+      firstTrySuccessRate: finalAttempts.length ? firstTrySuccessCount / finalAttempts.length : null,
+      averageAttempts: finalAttempts.length ? attemptNumberTotal / finalAttempts.length : null,
+    };
+  });
+
+  const populatedWeeks = weeks.filter((item) => Number(item?.attemptCount || 0) > 0);
+  const earlierWeeks = weeks.slice(0, 3);
+  const recentWeeks = weeks.slice(3);
+  const earlier = buildVisualTrendWindow(earlierWeeks);
+  const recent = buildVisualTrendWindow(recentWeeks);
+  const totalAttempts = weeks.reduce((sum, item) => sum + Math.max(0, Number(item?.attemptCount || 0)), 0);
+  const hasEnoughEvidence = totalAttempts >= VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL
+    && recent.attemptCount >= VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT;
+  const periodLabel = `${getTeacherHomeWeekLabel(startDate)} to ${formatAnalyticsShortDayLabel(analyticsDayKey(endDate))}`;
+  const evidenceRequirement = `Trend uses the six-week evidence period ${periodLabel}. It needs at least ${VISUAL_TREND_LOW_EVIDENCE_MIN_TOTAL} checked words in the period and at least ${VISUAL_TREND_LOW_EVIDENCE_MIN_RECENT} checked words in the recent comparison period.`;
+
+  if (
+    !summary?.checkedWords
+    || populatedWeeks.length < 2
+    || !earlier.attemptCount
+    || !recent.attemptCount
+    || !hasEnoughEvidence
+  ) {
+    return {
+      label: "Not enough evidence",
+      tone: "neutral",
+      hasTrend: false,
+      weeks,
+      totalAttempts,
+      periodLabel,
+      tooltip: evidenceRequirement,
+    };
+  }
+
+  const delta = recent.accuracy - earlier.accuracy;
+  const label = delta >= VISUAL_TREND_FLAT_DELTA
+    ? "Improving"
+    : delta <= -VISUAL_TREND_FLAT_DELTA
+      ? "Declining"
+      : "Stable";
+  const tone = label === "Improving" ? "green" : "amber";
+  const tooltip = weeks
+    .map((week) => `${week.label}: ${week.attemptCount} checked, ${formatPercent(week.accuracy)} accuracy`)
+    .join("; ");
+
+  return {
+    label,
+    tone,
+    hasTrend: true,
+    conclusion: `Accuracy moved from ${formatPercent(earlier.accuracy)} to ${formatPercent(recent.accuracy)}.`,
+    periodLabel,
+    tooltip: `${evidenceRequirement} ${tooltip}. Earlier three weeks: ${earlier.attemptCount} checked. Recent three weeks: ${recent.attemptCount} checked.`,
+    weeks,
+    totalAttempts,
+  };
+}
+
+function renderTeacherHomeStatusPanel(readinessModel, summary = getHomeOverviewSummary()) {
+  const primaryAction = getTeacherHomePrimaryAction(readinessModel, summary);
+  const statusCopy = getTeacherHomeStatusCopy(readinessModel, primaryAction, summary);
+  const actionAttrs = primaryAction
+    ? [
+      `data-action="${escapeAttr(primaryAction.action || "open-dashboard-area")}"`,
+      primaryAction.firstUseAction ? `data-first-use-action="${escapeAttr(primaryAction.firstUseAction)}"` : "",
+      primaryAction.primaryView ? `data-primary-view="${escapeAttr(primaryAction.primaryView)}"` : "",
+      primaryAction.section ? `data-section="${escapeAttr(primaryAction.section)}"` : "",
+      primaryAction.pupilTab ? `data-pupil-tab="${escapeAttr(primaryAction.pupilTab)}"` : "",
+      primaryAction.pupilFilter ? `data-pupil-filter="${escapeAttr(primaryAction.pupilFilter)}"` : "",
+    ].filter(Boolean).join(" ")
+    : "";
+
+  return `
+    <section
+      class="td-wordloom-status td-wordloom-status--${escapeAttr(statusCopy.tone || "neutral")}"
+      data-role="teacher-home-status"
+      aria-busy="${readinessModel?.isLoading ? "true" : "false"}"
+    >
+      <div class="td-wordloom-status-copy">
+        <h3>${escapeHtml(statusCopy.statement)}</h3>
+        <p>${escapeHtml(statusCopy.explanation)}</p>
+      </div>
+      ${primaryAction ? `
+        <button class="td-btn td-btn--primary td-home-primary-action" type="button" ${actionAttrs}>
+          ${escapeHtml(primaryAction.label)}
+        </button>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderTeacherHomeTrend(trendMeta) {
+  if (!trendMeta?.hasTrend) {
+    return `
+      <section class="td-home-panel td-home-panel--trend" data-role="teacher-home-trend">
+        <div class="td-home-panel-head">
+          <h3>Recent trend</h3>
+          ${renderInfoTip(trendMeta?.tooltip || "", {
+            label: "Trend evidence",
+            className: "td-home-info-tip",
+            triggerClassName: "td-home-info-tip-trigger",
+            bubbleClassName: "td-home-info-tip-bubble",
+            align: "end",
+          })}
+        </div>
+        <p class="td-home-change-text">Not enough recent evidence yet.</p>
+      </section>
+    `;
+  }
+
+  const maxAttempts = Math.max(1, ...trendMeta.weeks.map((item) => Math.max(0, Number(item?.attemptCount || 0))));
+  return `
+    <section class="td-home-panel td-home-panel--trend" data-role="teacher-home-trend">
+      <div class="td-home-panel-head">
+        <h3>Recent trend</h3>
+        <span class="td-status-chip td-status-chip--${escapeAttr(trendMeta.tone)}">${escapeHtml(trendMeta.label)}</span>
+      </div>
+      <p class="td-home-change-text">
+        ${escapeHtml(`${trendMeta.conclusion} Evidence period: ${trendMeta.periodLabel}.`)}
+        ${renderInfoTip(trendMeta.tooltip, {
+          label: "Trend evidence",
+          className: "td-home-info-tip",
+          triggerClassName: "td-home-info-tip-trigger",
+          bubbleClassName: "td-home-info-tip-bubble",
+          align: "end",
+        })}
+      </p>
+      <div class="td-home-trend-bars" role="img" aria-label="${escapeAttr(`${trendMeta.label} six-week trend, ${trendMeta.totalAttempts} checked words`)}">
+        ${trendMeta.weeks.map((week) => {
+          const height = Math.max(6, Math.round((Math.max(0, Number(week?.attemptCount || 0)) / maxAttempts) * 100));
+          return `
+            <div class="td-home-trend-week">
+              <span class="td-home-trend-bar"><span style="height:${escapeAttr(String(height))}%;"></span></span>
+              <span>${escapeHtml(week.label)}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTeacherHomeAttentionPanel(attentionReasons = [], evidenceState = getTeacherHomeEvidenceState(), { hasReviewPriority = false } = {}) {
+  const evidenceLoaded = evidenceState.key === "loaded";
+  const hasAttention = evidenceLoaded && attentionReasons.length > 0;
+  const statusLabel = evidenceLoaded
+    ? (hasAttention ? formatCountLabel(attentionReasons.length, "reason") : (hasReviewPriority ? "No breakdown" : "On track"))
+    : evidenceState.label;
+
+  return `
+    <section class="td-home-panel">
+      <div class="td-home-panel-head">
+        <h3>Why pupils may need review</h3>
+        <span>${escapeHtml(statusLabel)}</span>
+      </div>
+      ${
+        !evidenceLoaded
+          ? `
+            <div class="td-empty td-empty--compact">
+              <strong>${escapeHtml(evidenceState.title)}</strong>
+              <p>${escapeHtml(evidenceState.detail)}</p>
+            </div>
+          `
+          : hasAttention
+            ? `<div class="td-attention-list">${attentionReasons.map(renderTeacherHomeAttention).join("")}</div>`
+            : hasReviewPriority
+              ? `
+                <div class="td-empty td-empty--compact">
+                  <strong>No specific review reasons are available yet.</strong>
+                  <p>Open the related view for the current pupil list.</p>
+                </div>
+              `
+            : `
+              <div class="td-empty td-empty--compact">
+                <strong>On track</strong>
+                <p>No pupils currently need your attention.</p>
+              </div>
+            `
+      }
+    </section>
+  `;
+}
+
+function normalizeHomeActivityPeriodDays(value) {
+  const numeric = Number(value);
+  return HOME_ACTIVITY_PERIOD_OPTIONS.some((option) => Number(option.value) === numeric)
+    ? numeric
+    : HOME_ACTIVITY_DEFAULT_PERIOD_DAYS;
+}
+
+function getHomeActivityPeriodOption(value) {
+  const periodDays = normalizeHomeActivityPeriodDays(value);
+  return HOME_ACTIVITY_PERIOD_OPTIONS.find((option) => Number(option.value) === periodDays)
+    || HOME_ACTIVITY_PERIOD_OPTIONS[0];
+}
+
+function getHomeActivityPeriodPhrase(value) {
+  return getHomeActivityPeriodOption(value)?.phrase || "last 7 days";
+}
+
+function normalizeHomeActivityGroup(value) {
+  const group = String(value || "").trim();
+  return [HOME_ACTIVITY_GROUP_ACTIVE, HOME_ACTIVITY_GROUP_NO_RECENT].includes(group) ? group : "";
+}
+
+function createDefaultHomeActivityDraftState() {
+  return {
+    open: false,
+    group: "",
+    text: "",
+    statusMessage: "",
+    statusTone: "info",
+  };
+}
+
+function ensureHomeActivityState() {
+  const current = state.homeActivity || {};
+  const draft = current.draft || {};
+  const next = {
+    yearGroup: String(current.yearGroup || "").trim(),
+    classId: String(current.classId || "").trim(),
+    periodDays: normalizeHomeActivityPeriodDays(current.periodDays),
+    expandedGroup: normalizeHomeActivityGroup(current.expandedGroup),
+    draft: {
+      open: !!draft.open,
+      group: normalizeHomeActivityGroup(draft.group),
+      text: String(draft.text || ""),
+      statusMessage: String(draft.statusMessage || ""),
+      statusTone: String(draft.statusTone || "info"),
+    },
+  };
+  state.homeActivity = next;
+  return next;
+}
+
+function getTeacherHomeActivityEvidenceState(data = getHomeVisualSourceData()) {
+  if (data && Array.isArray(data.classes) && Array.isArray(data.memberships) && Array.isArray(data.attempts)) {
+    return {
+      key: "loaded",
+      label: "Activity loaded",
+      title: "",
+      detail: "",
+    };
+  }
+
+  const status = String(state.visualAnalytics?.status || "").trim().toLowerCase();
+  if (status === "error") {
+    return {
+      key: "error",
+      label: "Activity unavailable",
+      title: "Recent pupil activity is not available yet.",
+      detail: state.visualAnalytics?.message || "Wordloom could not load recent pupil activity.",
+    };
+  }
+
+  if (status === "loading" || status === "idle") {
+    return {
+      key: "loading",
+      label: "Checking activity",
+      title: "Checking recent pupil activity...",
+      detail: "Activity counts will appear once recent pupil activity has loaded.",
+    };
+  }
+
+  return {
+    key: "unknown",
+    label: "Activity unavailable",
+    title: "Recent pupil activity is not available yet.",
+    detail: "Activity counts will appear when recent pupil activity is available.",
+  };
+}
+
+function getHomeActivityClassById(data) {
+  if (data?.classById instanceof Map) return data.classById;
+  return new Map((data?.classes || []).map((item) => [String(item?.id || ""), item]));
+}
+
+function getHomeActivityPupilById(data) {
+  if (data?.pupilById instanceof Map) return data.pupilById;
+  return new Map((data?.pupils || []).map((item) => [String(item?.id || ""), item]));
+}
+
+function getHomeActivityAssignmentById(data) {
+  if (data?.assignmentById instanceof Map) return data.assignmentById;
+  return new Map((data?.assignments || []).map((item) => [String(item?.id || ""), item]));
+}
+
+function getHomeActivityYearOptions(data = getHomeVisualSourceData()) {
+  return Array.from(new Set(
+    (data?.classes || [])
+      .map((item) => String(item?.year_group || "").trim())
+      .filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function getHomeActivityClassOptions(data = getHomeVisualSourceData(), yearGroup = "") {
+  const selectedYear = String(yearGroup || "").trim();
+  return (data?.classes || [])
+    .map((item) => ({
+      value: String(item?.id || "").trim(),
+      label: String(item?.name || "Class").trim() || "Class",
+      yearGroup: String(item?.year_group || "").trim(),
+    }))
+    .filter((item) => item.value && (!selectedYear || item.yearGroup === selectedYear))
+    .sort((a, b) =>
+      a.yearGroup.localeCompare(b.yearGroup, undefined, { numeric: true, sensitivity: "base" })
+      || a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" })
+    );
+}
+
+function sanitizeTeacherHomeActivityFilters(filters = {}, data = getHomeVisualSourceData()) {
+  if (!data || !Array.isArray(data.classes)) {
+    return {
+      yearGroup: String(filters.yearGroup || "").trim(),
+      classId: String(filters.classId || "").trim(),
+      periodDays: normalizeHomeActivityPeriodDays(filters.periodDays),
+    };
+  }
+
+  const yearOptions = getHomeActivityYearOptions(data);
+  const requestedYear = String(filters.yearGroup || "").trim();
+  const yearGroup = requestedYear && yearOptions.includes(requestedYear) ? requestedYear : "";
+  const classOptions = getHomeActivityClassOptions(data, yearGroup);
+  const requestedClassId = String(filters.classId || "").trim();
+  const classId = requestedClassId && classOptions.some((option) => option.value === requestedClassId)
+    ? requestedClassId
+    : "";
+
+  return {
+    yearGroup,
+    classId,
+    periodDays: normalizeHomeActivityPeriodDays(filters.periodDays),
+  };
+}
+
+function getTeacherHomeActivityFilters(data = getHomeVisualSourceData()) {
+  const current = ensureHomeActivityState();
+  const filters = sanitizeTeacherHomeActivityFilters(current, data);
+  state.homeActivity = {
+    ...current,
+    ...filters,
+  };
+  return filters;
+}
+
+function setTeacherHomeActivityFilters(nextFilters = {}) {
+  const current = ensureHomeActivityState();
+  const filters = sanitizeTeacherHomeActivityFilters({
+    ...current,
+    ...nextFilters,
+  }, getHomeVisualSourceData());
+  state.homeActivity = {
+    ...current,
+    ...filters,
+    expandedGroup: normalizeHomeActivityGroup(current.expandedGroup),
+    draft: createDefaultHomeActivityDraftState(),
+  };
+  return filters;
+}
+
+function getHomeActivitySelectedClassIds(data, filters = {}) {
+  const classOptions = getHomeActivityClassOptions(data, filters.yearGroup);
+  if (filters.classId && classOptions.some((option) => option.value === filters.classId)) {
+    return [filters.classId];
+  }
+  return classOptions.map((option) => option.value);
+}
+
+function buildTeacherHomeActivityRosterRows(data, filters = {}) {
+  const selectedClassIds = getHomeActivitySelectedClassIds(data, filters);
+  const selectedClassIdSet = new Set(selectedClassIds);
+  const classById = getHomeActivityClassById(data);
+  const pupilById = getHomeActivityPupilById(data);
+  const rowsByPupil = new Map();
+  const memberships = Array.isArray(data?.memberships) ? data.memberships : [];
+
+  if (memberships.length) {
+    for (const membership of memberships) {
+      if (membership?.active === false) continue;
+      const classId = String(membership?.class_id || "").trim();
+      const pupilId = String(membership?.pupil_id || "").trim();
+      if (!classId || !pupilId || !selectedClassIdSet.has(classId)) continue;
+      const current = rowsByPupil.get(pupilId) || { pupilId, classIds: new Set() };
+      current.classIds.add(classId);
+      rowsByPupil.set(pupilId, current);
+    }
+  } else if (data?.pupilIdsByClass instanceof Map) {
+    for (const classId of selectedClassIds) {
+      for (const pupilId of data.pupilIdsByClass.get(String(classId)) || []) {
+        const safePupilId = String(pupilId || "").trim();
+        if (!safePupilId) continue;
+        const current = rowsByPupil.get(safePupilId) || { pupilId: safePupilId, classIds: new Set() };
+        current.classIds.add(String(classId));
+        rowsByPupil.set(safePupilId, current);
+      }
+    }
+  }
+
+  return Array.from(rowsByPupil.values())
+    .map((item) => {
+      const pupil = pupilById.get(item.pupilId);
+      const classNames = Array.from(item.classIds)
+        .map((classId) => String(classById.get(String(classId))?.name || "").trim())
+        .filter(Boolean)
+        .filter((value, index, list) => list.indexOf(value) === index);
+      return {
+        pupilId: item.pupilId,
+        name: pupilDisplayName(pupil),
+        classIds: Array.from(item.classIds),
+        classLabel: classNames.length ? classNames.slice(0, 2).join(", ") : "Class not recorded",
+        canOpenSummary: !!pupil && !!item.pupilId,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getHomeActivityAttemptClassId(attempt, data) {
+  const directClassId = String(attempt?.class_id || "").trim();
+  if (directClassId) return directClassId;
+  const assignmentId = String(attempt?.assignment_id || "").trim();
+  return String(getHomeActivityAssignmentById(data).get(assignmentId)?.class_id || "").trim();
+}
+
+function getHomeActivityAttemptTime(attempt) {
+  const time = new Date(attempt?.created_at || "").getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function isQualifyingHomeActivityAttempt(attempt) {
+  const pupilId = String(attempt?.pupil_id || "").trim();
+  const wordKey = String(attempt?.test_word_id || attempt?.word_text || "").trim();
+  return !!pupilId && !!wordKey && getHomeActivityAttemptTime(attempt) !== null;
+}
+
+function buildHomeActivityAttemptKey(attempt, data) {
+  const directId = String(attempt?.id || "").trim();
+  if (directId) return directId;
+  return [
+    String(attempt?.assignment_id || "").trim(),
+    getHomeActivityAttemptClassId(attempt, data),
+    String(attempt?.pupil_id || "").trim(),
+    String(attempt?.test_word_id || attempt?.word_text || "").trim(),
+    String(attempt?.attempt_number || "").trim(),
+    String(attempt?.created_at || "").trim(),
+    String(attempt?.typed || "").trim(),
+  ].join("::");
+}
+
+function getHomeActivityCheckedWordKey(attempt, data) {
+  const wordKey = String(attempt?.test_word_id || attempt?.word_text || "").trim();
+  if (!wordKey) return "";
+  return [
+    String(attempt?.assignment_id || "").trim(),
+    getHomeActivityAttemptClassId(attempt, data),
+    String(attempt?.pupil_id || "").trim(),
+    wordKey,
+  ].join("::");
+}
+
+function getTeacherHomeActivityScopedAttempts(data, filters = {}, rosterRows = [], { now = new Date(), periodOnly = false } = {}) {
+  const selectedClassIdSet = new Set(getHomeActivitySelectedClassIds(data, filters));
+  const rosterPupilSet = new Set(rosterRows.map((item) => String(item?.pupilId || "")).filter(Boolean));
+  const membershipPairs = data?.membershipPairs instanceof Set ? data.membershipPairs : null;
+  const nowTime = new Date(now).getTime();
+  const safeNowTime = Number.isFinite(nowTime) ? nowTime : Date.now();
+  const cutoffTime = safeNowTime - normalizeHomeActivityPeriodDays(filters.periodDays) * 24 * 60 * 60 * 1000;
+  const seenAttemptKeys = new Set();
+  const scopedAttempts = [];
+
+  for (const attempt of data?.attempts || []) {
+    if (!isQualifyingHomeActivityAttempt(attempt)) continue;
+    const classId = getHomeActivityAttemptClassId(attempt, data);
+    const pupilId = String(attempt?.pupil_id || "").trim();
+    const attemptTime = getHomeActivityAttemptTime(attempt);
+    if (!classId || !pupilId || attemptTime === null) continue;
+    if (!selectedClassIdSet.has(classId) || !rosterPupilSet.has(pupilId)) continue;
+    if (membershipPairs && !membershipPairs.has(`${classId}::${pupilId}`)) continue;
+    if (attemptTime > safeNowTime) continue;
+    if (periodOnly && attemptTime < cutoffTime) continue;
+    const attemptKey = buildHomeActivityAttemptKey(attempt, data);
+    if (seenAttemptKeys.has(attemptKey)) continue;
+    seenAttemptKeys.add(attemptKey);
+    scopedAttempts.push({
+      ...attempt,
+      class_id: classId,
+      pupil_id: pupilId,
+      activityTime: attemptTime,
+    });
+  }
+
+  return scopedAttempts.sort((a, b) => Number(a.activityTime || 0) - Number(b.activityTime || 0));
+}
+
+function compareTeacherHomeActivityNames(a, b) {
+  return String(a?.name || "").localeCompare(String(b?.name || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildTeacherHomeActivityRows(data, filters = {}, { now = new Date() } = {}) {
+  const rosterRows = buildTeacherHomeActivityRosterRows(data, filters);
+  const allScopedAttempts = getTeacherHomeActivityScopedAttempts(data, filters, rosterRows, { now, periodOnly: false });
+  const periodAttempts = getTeacherHomeActivityScopedAttempts(data, filters, rosterRows, { now, periodOnly: true });
+  const allAttemptsByPupil = new Map();
+  const periodAttemptsByPupil = new Map();
+
+  for (const attempt of allScopedAttempts) {
+    const pupilId = String(attempt?.pupil_id || "");
+    const next = allAttemptsByPupil.get(pupilId) || [];
+    next.push(attempt);
+    allAttemptsByPupil.set(pupilId, next);
+  }
+
+  for (const attempt of periodAttempts) {
+    const pupilId = String(attempt?.pupil_id || "");
+    const next = periodAttemptsByPupil.get(pupilId) || [];
+    next.push(attempt);
+    periodAttemptsByPupil.set(pupilId, next);
+  }
+
+  const activeRows = [];
+  const noRecentRows = [];
+
+  for (const rosterRow of rosterRows) {
+    const pupilId = String(rosterRow?.pupilId || "");
+    const pupilPeriodAttempts = periodAttemptsByPupil.get(pupilId) || [];
+    const pupilAllAttempts = allAttemptsByPupil.get(pupilId) || [];
+    const latestActivity = pupilPeriodAttempts
+      .map((item) => Number(item?.activityTime || 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b - a)[0] || null;
+    const lastKnownActivity = pupilAllAttempts
+      .map((item) => Number(item?.activityTime || 0))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b - a)[0] || null;
+    const checkedWordKeys = new Set(
+      pupilPeriodAttempts
+        .map((attempt) => getHomeActivityCheckedWordKey(attempt, data))
+        .filter(Boolean)
+    );
+
+    if (pupilPeriodAttempts.length) {
+      activeRows.push({
+        ...rosterRow,
+        latestActivity,
+        lastKnownActivity,
+        checkedCount: checkedWordKeys.size,
+      });
+    } else {
+      noRecentRows.push({
+        ...rosterRow,
+        latestActivity: null,
+        lastKnownActivity,
+        checkedCount: 0,
+      });
+    }
+  }
+
+  activeRows.sort((a, b) => {
+    const timeDelta = Number(b?.latestActivity || 0) - Number(a?.latestActivity || 0);
+    return timeDelta || compareTeacherHomeActivityNames(a, b);
+  });
+  noRecentRows.sort((a, b) => {
+    const aTime = Number(a?.lastKnownActivity || 0);
+    const bTime = Number(b?.lastKnownActivity || 0);
+    if (!aTime && bTime) return -1;
+    if (aTime && !bTime) return 1;
+    if (aTime !== bTime) return aTime - bTime;
+    return compareTeacherHomeActivityNames(a, b);
+  });
+
+  return {
+    rosterRows,
+    activeRows,
+    noRecentRows,
+    scopedAttemptCount: allScopedAttempts.length,
+    periodAttemptCount: periodAttempts.length,
+  };
+}
+
+function formatHomeActivityPercent(count, total) {
+  const denominator = Number(total || 0);
+  if (denominator <= 0) return "";
+  return `${Math.round((Math.max(0, Number(count || 0)) / denominator) * 100)}%`;
+}
+
+function buildTeacherHomeActivityModel({ data = getHomeVisualSourceData(), filters = null, now = new Date(), draft = null, expandedGroup = "" } = {}) {
+  const activityFilters = sanitizeTeacherHomeActivityFilters(filters || getTeacherHomeActivityFilters(data), data);
+  const evidenceState = getTeacherHomeActivityEvidenceState(data);
+  const yearOptions = getHomeActivityYearOptions(data);
+  const classOptions = getHomeActivityClassOptions(data, activityFilters.yearGroup);
+  const periodOption = getHomeActivityPeriodOption(activityFilters.periodDays);
+
+  if (evidenceState.key !== "loaded") {
+    return {
+      evidenceState,
+      filters: activityFilters,
+      yearOptions,
+      classOptions,
+      periodOption,
+      rosterCount: null,
+      activeRows: [],
+      noRecentRows: [],
+      activeCount: null,
+      noRecentCount: null,
+      activePercent: "",
+      noRecentPercent: "",
+      selectedClassIds: [],
+      expandedGroup: normalizeHomeActivityGroup(expandedGroup || state.homeActivity?.expandedGroup),
+      draft: draft || state.homeActivity?.draft || createDefaultHomeActivityDraftState(),
+    };
+  }
+
+  const rowModel = buildTeacherHomeActivityRows(data, activityFilters, { now });
+  const rosterCount = rowModel.rosterRows.length;
+  const activeCount = rowModel.activeRows.length;
+  const noRecentCount = rowModel.noRecentRows.length;
+
+  return {
+    evidenceState,
+    filters: activityFilters,
+    yearOptions,
+    classOptions,
+    periodOption,
+    rosterCount,
+    activeRows: rowModel.activeRows,
+    noRecentRows: rowModel.noRecentRows,
+    activeCount,
+    noRecentCount,
+    activePercent: formatHomeActivityPercent(activeCount, rosterCount),
+    noRecentPercent: formatHomeActivityPercent(noRecentCount, rosterCount),
+    selectedClassIds: getHomeActivitySelectedClassIds(data, activityFilters),
+    periodAttemptCount: rowModel.periodAttemptCount,
+    scopedAttemptCount: rowModel.scopedAttemptCount,
+    expandedGroup: normalizeHomeActivityGroup(expandedGroup || state.homeActivity?.expandedGroup),
+    draft: draft || state.homeActivity?.draft || createDefaultHomeActivityDraftState(),
+  };
+}
+
+function getTeacherHomeActivityGroupMeta(group, model) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  const isActive = normalizedGroup === HOME_ACTIVITY_GROUP_ACTIVE;
+  const count = isActive ? Number(model?.activeCount || 0) : Number(model?.noRecentCount || 0);
+  const total = Number(model?.rosterCount || 0);
+  return {
+    group: normalizedGroup,
+    label: isActive
+      ? `Active in ${getHomeActivityPeriodPhrase(model?.filters?.periodDays)}`
+      : "No recent activity recorded",
+    heading: isActive ? "Active in this period" : "No recent activity recorded",
+    actionLabel: isActive ? "Optional well-done draft" : "Optional reminder draft",
+    tone: isActive ? "green" : "amber",
+    count,
+    countLabel: formatCountLabel(count, "pupil"),
+    percent: total > 0 ? formatHomeActivityPercent(count, total) : "",
+    width: total > 0 ? `${Math.max(0, Math.min(100, (count / total) * 100)).toFixed(4)}%` : "",
+  };
+}
+
+function getTeacherHomeActivityGroupRows(model, group) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  if (normalizedGroup === HOME_ACTIVITY_GROUP_ACTIVE) return model?.activeRows || [];
+  if (normalizedGroup === HOME_ACTIVITY_GROUP_NO_RECENT) return model?.noRecentRows || [];
+  return [];
+}
+
+function prepareTeacherHomeActivityDraft(group, rows = [], filters = {}) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  const body = normalizedGroup === HOME_ACTIVITY_GROUP_ACTIVE
+    ? "Well done for completing your recent Wordloom practice. Keep up the good work."
+    : "Please remember to complete your Wordloom spelling practice. Speak to your teacher if you are having trouble accessing it.";
+  const periodLabel = getHomeActivityPeriodOption(filters.periodDays).label.toLowerCase();
+  const pupilCount = formatCountLabel((rows || []).length, "pupil");
+  return [
+    body,
+    `This draft is for ${pupilCount} from the ${periodLabel} activity view.`,
+    "Use your school's normal communication system to share this text if appropriate.",
+  ].join("\n\n");
+}
+
+function getTeacherHomeActivityPupilNames(model, group) {
+  return getTeacherHomeActivityGroupRows(model, group)
+    .map((row) => String(row?.name || "").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderTeacherHomeSetupBlocker(readinessModel) {
+  const action = readinessModel?.primaryAction || null;
+  if (!isTeacherHomeEssentialSetupAction(action)) return "";
+  return `
+    <section class="td-home-setup-blocker" data-role="teacher-home-setup-blocker">
+      <div>
+        <h3>${escapeHtml(readinessModel?.title || "Complete essential setup")}</h3>
+        <p>${escapeHtml(readinessModel?.message || "Finish this setup step so pupils can use Wordloom smoothly.")}</p>
       </div>
       <button
         class="td-btn td-btn--ghost td-btn--small"
         type="button"
-        data-action="open-dashboard-area"
-        data-primary-view="${escapeAttr(reason.primaryView || "")}"
-        data-section="${escapeAttr(reason.section || "")}"
+        data-action="teacher-first-use-action"
+        data-first-use-action="${escapeAttr(action.id || "")}"
       >
-        ${escapeHtml(reason.actionLabel || "Open")}
+        ${escapeHtml(getTeacherFirstUseActionDisplayLabel(action))}
       </button>
-    </article>
+    </section>
+  `;
+}
+
+function renderTeacherHomeActivityContextBar(model) {
+  const filters = model?.filters || {};
+  const controlsDisabled = model?.evidenceState?.key !== "loaded";
+  return `
+    <div class="td-home-context-bar" aria-label="Home activity filters">
+      <label class="td-field td-field--compact">
+        <span>Year</span>
+        <select class="td-input" data-field="home-activity-year" ${controlsDisabled ? "disabled" : ""}>
+          <option value="">All visible years</option>
+          ${(model?.yearOptions || []).map((yearGroup) => `
+            <option value="${escapeAttr(yearGroup)}" ${filters.yearGroup === yearGroup ? "selected" : ""}>${escapeHtml(yearGroup)}</option>
+          `).join("")}
+        </select>
+      </label>
+      <label class="td-field td-field--compact">
+        <span>Class</span>
+        <select class="td-input" data-field="home-activity-class" ${controlsDisabled ? "disabled" : ""}>
+          <option value="">All visible classes</option>
+          ${(model?.classOptions || []).map((option) => `
+            <option value="${escapeAttr(option.value)}" ${filters.classId === option.value ? "selected" : ""}>
+              ${escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+      <label class="td-field td-field--compact">
+        <span>Evidence period</span>
+        <select class="td-input" data-field="home-activity-period" ${controlsDisabled ? "disabled" : ""}>
+          ${HOME_ACTIVITY_PERIOD_OPTIONS.map((option) => `
+            <option value="${escapeAttr(String(option.value))}" ${Number(filters.periodDays) === Number(option.value) ? "selected" : ""}>
+              ${escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+    </div>
+  `;
+}
+
+function renderTeacherHomeActivitySummaryButton(meta, model) {
+  const expanded = model?.expandedGroup === meta.group;
+  const totalKnown = Number(model?.rosterCount || 0) > 0;
+  return `
+    <button
+      class="td-home-activity-count td-home-activity-count--${escapeAttr(meta.tone)} ${expanded ? "is-expanded" : ""}"
+      type="button"
+      data-action="toggle-home-activity-group"
+      data-activity-group="${escapeAttr(meta.group)}"
+      aria-expanded="${expanded ? "true" : "false"}"
+      aria-controls="td-home-activity-list"
+    >
+      <span>${escapeHtml(meta.label)}</span>
+      <strong>${escapeHtml(meta.countLabel)}</strong>
+      <em>${escapeHtml(totalKnown ? `${meta.percent} of visible roster` : "Roster denominator unavailable")}</em>
+    </button>
+  `;
+}
+
+function renderTeacherHomeActivityBar(model) {
+  if (!Number.isFinite(Number(model?.rosterCount)) || Number(model?.rosterCount || 0) <= 0) return "";
+  const groups = [
+    getTeacherHomeActivityGroupMeta(HOME_ACTIVITY_GROUP_ACTIVE, model),
+    getTeacherHomeActivityGroupMeta(HOME_ACTIVITY_GROUP_NO_RECENT, model),
+  ];
+  return `
+    <div class="td-home-activity-bar" role="group" aria-label="${escapeAttr(`Activity split for ${model.periodOption.label}`)}">
+      ${groups.map((meta) => {
+        const expanded = model.expandedGroup === meta.group;
+        return `
+          <button
+            class="td-home-activity-segment td-home-activity-segment--${escapeAttr(meta.tone)} ${expanded ? "is-expanded" : ""}"
+            type="button"
+            style="flex-basis:${escapeAttr(meta.width)};"
+            data-action="toggle-home-activity-group"
+            data-activity-group="${escapeAttr(meta.group)}"
+            aria-expanded="${expanded ? "true" : "false"}"
+            aria-controls="td-home-activity-list"
+            aria-label="${escapeAttr(`${meta.label}: ${meta.countLabel}, ${meta.percent} of visible roster`)}"
+          >
+            <span class="sr-only">${escapeHtml(meta.label)}</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderTeacherHomeActivityRow(row, group) {
+  const normalizedGroup = normalizeHomeActivityGroup(group);
+  const isActive = normalizedGroup === HOME_ACTIVITY_GROUP_ACTIVE;
+  const dateText = isActive
+    ? `Most recent ${formatShortDate(row?.latestActivity || null)}`
+    : row?.lastKnownActivity
+      ? `Last recorded ${formatShortDate(row.lastKnownActivity)}`
+      : "No recorded activity";
+  const countText = isActive ? formatCountLabel(row?.checkedCount || 0, "checked word") : dateText;
+  const rowInner = `
+    <div class="td-home-activity-row-main">
+      <strong>${escapeHtml(row?.name || "Unknown pupil")}</strong>
+      <span>${escapeHtml(row?.classLabel || "Class not recorded")}</span>
+    </div>
+    <div class="td-home-activity-row-meta">
+      <span>${escapeHtml(isActive ? dateText : countText)}</span>
+      ${isActive ? `<span>${escapeHtml(countText)}</span>` : ""}
+    </div>
+  `;
+
+  if (row?.canOpenSummary && String(row?.pupilId || "").trim()) {
+    return `
+      <button
+        class="td-home-activity-row"
+        type="button"
+        data-action="open-visual-summary"
+        data-scope-type="pupil"
+        data-scope-id="${escapeAttr(row.pupilId)}"
+      >
+        ${rowInner}
+        <span class="td-row-chevron" aria-hidden="true">&rsaquo;</span>
+      </button>
+    `;
+  }
+
+  return `
+    <div class="td-home-activity-row td-home-activity-row--disabled" aria-disabled="true">
+      ${rowInner}
+      <span class="td-home-activity-row-note">Summary unavailable</span>
+    </div>
+  `;
+}
+
+function renderTeacherHomeActivityDraft(model) {
+  const draft = model?.draft || createDefaultHomeActivityDraftState();
+  if (!draft.open || draft.group !== model?.expandedGroup) return "";
+  const meta = getTeacherHomeActivityGroupMeta(draft.group, model);
+  return `
+    <section
+      class="td-home-activity-draft"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="td-home-activity-draft-title"
+    >
+      <div>
+        <h5 id="td-home-activity-draft-title">${escapeHtml(meta.actionLabel)}</h5>
+        <p>Review and edit this local draft before using your school's normal communication system.</p>
+      </div>
+      <textarea class="td-input" data-field="home-activity-draft-text" rows="5">${escapeHtml(draft.text || "")}</textarea>
+      <div class="td-home-activity-draft-actions">
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="copy-home-activity-draft-text">Copy text</button>
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="copy-home-activity-pupil-names">Copy pupil names</button>
+        <button class="td-btn td-btn--ghost td-btn--small" type="button" data-action="close-home-activity-draft">Close</button>
+      </div>
+      <p class="td-home-activity-live td-home-activity-live--${escapeAttr(draft.statusTone || "info")}" role="status" aria-live="polite">
+        ${escapeHtml(draft.statusMessage || "")}
+      </p>
+    </section>
+  `;
+}
+
+function renderTeacherHomeActivityList(model) {
+  const group = normalizeHomeActivityGroup(model?.expandedGroup);
+  if (!group) return "";
+  const meta = getTeacherHomeActivityGroupMeta(group, model);
+  const rows = getTeacherHomeActivityGroupRows(model, group);
+  return `
+    <section class="td-home-activity-list" id="td-home-activity-list">
+      <div class="td-home-activity-list-head">
+        <div>
+          <h4>${escapeHtml(meta.heading)}</h4>
+          <p>${escapeHtml(`${meta.countLabel} in ${model.periodOption.label.toLowerCase()}.`)}</p>
+        </div>
+        ${rows.length ? `
+          <button
+            class="td-btn td-btn--ghost td-btn--small td-home-activity-draft-trigger"
+            type="button"
+            data-action="prepare-home-activity-draft"
+            data-activity-group="${escapeAttr(group)}"
+          >
+            ${escapeHtml(meta.actionLabel)}
+          </button>
+        ` : ""}
+      </div>
+      ${rows.length
+        ? `<div class="td-home-activity-rows">${rows.map((row) => renderTeacherHomeActivityRow(row, group)).join("")}</div>`
+        : `<div class="td-empty td-empty--compact"><strong>No pupils in this group.</strong></div>`}
+      ${renderTeacherHomeActivityDraft(model)}
+    </section>
+  `;
+}
+
+function renderTeacherHomeActivitySection(model) {
+  const evidenceState = model?.evidenceState || getTeacherHomeActivityEvidenceState();
+  const periodLabel = model?.periodOption?.label || "Last 7 days";
+  const helpText = [
+    `Activity means at least one checked-word attempt in ${periodLabel.toLowerCase()}.`,
+    "Counts are pupils, not attempts.",
+    "No recent activity recorded does not prove work was available.",
+  ].join(" ");
+
+  if (evidenceState.key !== "loaded") {
+    return `
+      <section class="td-home-activity" data-role="teacher-home-activity" aria-busy="${evidenceState.key === "loading" ? "true" : "false"}">
+        <div class="td-home-activity-head">
+          <div>
+            <h3>${escapeHtml(`Activity - ${periodLabel}`)}</h3>
+          </div>
+        </div>
+        <div class="td-empty td-empty--compact">
+          <strong>${escapeHtml(evidenceState.title)}</strong>
+          <p>${escapeHtml(evidenceState.detail)}</p>
+        </div>
+      </section>
+    `;
+  }
+
+  const activeMeta = getTeacherHomeActivityGroupMeta(HOME_ACTIVITY_GROUP_ACTIVE, model);
+  const noRecentMeta = getTeacherHomeActivityGroupMeta(HOME_ACTIVITY_GROUP_NO_RECENT, model);
+  const rosterCount = Number(model.rosterCount || 0);
+  const activeCount = Number(model.activeCount || 0);
+  const noRecentCount = Number(model.noRecentCount || 0);
+  const summaryText = rosterCount <= 0
+    ? "No pupils are available in this view."
+    : activeCount === 0
+      ? "No pupil activity has been recorded in this period."
+      : noRecentCount === 0
+        ? "All visible pupils have recorded activity in this period."
+        : `${formatCountLabel(activeCount, "pupil")} ${activeCount === 1 ? "has" : "have"} activity and ${formatCountLabel(noRecentCount, "pupil")} ${noRecentCount === 1 ? "has" : "have"} no recent activity recorded.`;
+
+  return `
+    <section class="td-home-activity" data-role="teacher-home-activity">
+      <div class="td-home-activity-head">
+        <div>
+          <h3>${escapeHtml(`Activity - ${periodLabel}`)}</h3>
+          <p>${escapeHtml(summaryText)}</p>
+        </div>
+        ${renderInfoTip(helpText, {
+          label: "Activity evidence",
+          className: "td-home-info-tip",
+          triggerClassName: "td-home-info-tip-trigger",
+          bubbleClassName: "td-home-info-tip-bubble",
+          align: "end",
+        })}
+      </div>
+      ${rosterCount <= 0
+        ? `<div class="td-empty td-empty--compact"><strong>No pupils are available in this view.</strong></div>`
+        : `
+          <div class="td-home-activity-counts">
+            ${renderTeacherHomeActivitySummaryButton(activeMeta, model)}
+            ${renderTeacherHomeActivitySummaryButton(noRecentMeta, model)}
+          </div>
+          ${renderTeacherHomeActivityBar(model)}
+          ${renderTeacherHomeActivityList(model)}
+        `}
+    </section>
   `;
 }
 
 function renderHomeView() {
   const readinessModel = buildCurrentTeacherFirstUseReadiness();
-  const summary = getHomeOverviewSummary();
-  const attentionReasons = getTeacherHomeAttentionReasons(summary);
-  const cards = getTeacherHomeSummaryCards(readinessModel, summary, attentionReasons);
-  const trendMeta = getTeacherHomeTrendMeta(summary);
+  const data = getHomeVisualSourceData();
+  const filters = getTeacherHomeActivityFilters(data);
+  const activityModel = buildTeacherHomeActivityModel({
+    data,
+    filters,
+    expandedGroup: ensureHomeActivityState().expandedGroup,
+    draft: ensureHomeActivityState().draft,
+  });
 
   return `
     <section
@@ -16518,40 +18114,164 @@ function renderHomeView() {
       aria-labelledby="td-primary-tab-home"
       data-primary-view-panel="home"
     >
-      ${renderTeacherFirstUseReadinessPanel()}
-      <div class="td-home-summary-grid">
-        ${cards.map(renderTeacherHomeSummaryCard).join("")}
+      ${renderTeacherHomeActivityContextBar(activityModel)}
+      ${renderTeacherHomeSetupBlocker(readinessModel)}
+      ${renderTeacherHomeActivitySection(activityModel)}
+    </section>
+  `;
+}
+
+function renderPupilWorkspaceTabs(activeTab) {
+  return `
+    <div class="td-sub-tabs" role="group" aria-label="Pupils sections">
+      ${PUPIL_WORKSPACE_TABS.map((tab) => {
+        const isSelected = tab.key === activeTab;
+        return `
+          <button
+            type="button"
+            class="td-sub-tab ${isSelected ? "is-selected" : ""}"
+            aria-pressed="${isSelected ? "true" : "false"}"
+            data-action="open-pupil-workspace"
+            data-pupil-tab="${escapeAttr(tab.key)}"
+          >
+            ${escapeHtml(tab.label)}
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function getPupilOverviewStatus(row = {}) {
+  const checkedWords = Math.max(0, Number(row?.checkedWords || 0));
+  if (!checkedWords) return { label: "No recent evidence", tone: "neutral" };
+  if (row?.needsIntervention) return { label: "Needs attention", tone: "red" };
+  if (String(row?.signalTone || "") === "green") return { label: "On track", tone: "green" };
+  return { label: "In progress", tone: "amber" };
+}
+
+function getPupilOverviewSupportText(row = {}) {
+  const checkedWords = Math.max(0, Number(row?.checkedWords || 0));
+  if (!checkedWords) return "No checked words in the current evidence window.";
+  if (row?.needsIntervention && Array.isArray(row?.weakGraphemes) && row.weakGraphemes.length) {
+    return `Check ${row.weakGraphemes.slice(0, 2).join(", ")}.`;
+  }
+  if (row?.latestActivity) return `Latest evidence ${formatShortDate(row.latestActivity)}.`;
+  return `${formatCountLabel(checkedWords, "checked word")}.`;
+}
+
+function getPupilOverviewRows(summary = getHomeOverviewSummary()) {
+  const rows = getUniquePupilRows(Array.isArray(summary?.pupilRows) ? summary.pupilRows : []);
+  const filter = ensurePupilWorkspaceState().overviewFilter;
+  const filteredRows = rows.filter((row) => {
+    if (filter === "needs_attention") return !!row?.needsIntervention;
+    if (filter === "no_recent_evidence") return Number(row?.checkedWords || 0) === 0;
+    return true;
+  });
+
+  return filteredRows.sort((a, b) => {
+    if (Number(b?.needsIntervention) !== Number(a?.needsIntervention)) {
+      return Number(b?.needsIntervention) - Number(a?.needsIntervention);
+    }
+    const aNoEvidence = Number(a?.checkedWords || 0) === 0;
+    const bNoEvidence = Number(b?.checkedWords || 0) === 0;
+    if (aNoEvidence !== bNoEvidence) return aNoEvidence ? -1 : 1;
+    return String(a?.name || "").localeCompare(String(b?.name || ""));
+  });
+}
+
+function renderPupilOverviewFilters(summary = getHomeOverviewSummary()) {
+  const rows = getUniquePupilRows(Array.isArray(summary?.pupilRows) ? summary.pupilRows : []);
+  const counts = {
+    needs_attention: rows.filter((item) => !!item?.needsIntervention).length,
+    no_recent_evidence: rows.filter((item) => Number(item?.checkedWords || 0) === 0).length,
+    all: rows.length,
+  };
+  const activeFilter = ensurePupilWorkspaceState().overviewFilter;
+  return `
+    <div class="td-filter-chip-row td-pupil-overview-filters" role="group" aria-label="Pupil overview filters">
+      ${PUPIL_OVERVIEW_FILTERS.map((filter) => `
+        <button
+          type="button"
+          class="td-filter-chip ${activeFilter === filter.key ? "is-active" : ""}"
+          data-action="set-pupil-overview-filter"
+          data-pupil-filter="${escapeAttr(filter.key)}"
+          aria-pressed="${activeFilter === filter.key ? "true" : "false"}"
+        >
+          ${escapeHtml(filter.label)}
+          <span>${escapeHtml(String(counts[filter.key] || 0))}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPupilOverviewRow(row) {
+  const status = getPupilOverviewStatus(row);
+  const pupilId = String(row?.pupilId || "").trim();
+  const classLabel = Array.isArray(row?.classNames) && row.classNames.length
+    ? row.classNames.slice(0, 2).join(", ")
+    : "No active group";
+  return `
+    <button
+      class="td-pupil-overview-row td-pupil-overview-row--${escapeAttr(status.tone)}"
+      type="button"
+      data-action="open-visual-summary"
+      data-scope-type="pupil"
+      data-scope-id="${escapeAttr(pupilId)}"
+      aria-label="${escapeAttr(`Open Insights for ${row?.name || "pupil"}`)}"
+      ${pupilId ? "" : "disabled"}
+    >
+      <span class="td-pupil-overview-main">
+        <strong>${escapeHtml(row?.name || "Unknown pupil")}</strong>
+        <span>${escapeHtml(classLabel)}</span>
+      </span>
+      <span class="td-status-chip td-status-chip--${escapeAttr(status.tone)}">${escapeHtml(status.label)}</span>
+      <span class="td-pupil-overview-support">${escapeHtml(getPupilOverviewSupportText(row))}</span>
+      <span class="td-row-chevron" aria-hidden="true">&rsaquo;</span>
+    </button>
+  `;
+}
+
+function renderPupilOverviewPanel() {
+  const summary = getHomeOverviewSummary();
+  const rows = getPupilOverviewRows(summary);
+  const activeFilter = ensurePupilWorkspaceState().overviewFilter;
+  const activeFilterLabel = PUPIL_OVERVIEW_FILTERS.find((item) => item.key === activeFilter)?.label || "Pupils";
+
+  return `
+    <section class="td-pupil-workspace-panel">
+      <div class="td-pupil-workspace-head">
+        <div>
+          <h4>Pupil overview</h4>
+          <p>Use current evidence to decide who needs a closer look.</p>
+        </div>
       </div>
-      <div class="td-home-grid">
-        <section class="td-home-panel">
-          <div class="td-home-panel-head">
-            <h3>Attention</h3>
-            <span>${escapeHtml(attentionReasons.length ? "Needs attention" : "On track")}</span>
-          </div>
-          ${
-            attentionReasons.length
-              ? `<div class="td-attention-list">${attentionReasons.map(renderTeacherHomeAttention).join("")}</div>`
-              : `
-                <div class="td-empty td-empty--compact">
-                  <strong>On track</strong>
-                  <p>No grouped attention reasons are available from current learning or recent evidence.</p>
-                </div>
-              `
-          }
-        </section>
-        <section class="td-home-panel">
-          <div class="td-home-panel-head">
-            <h3>What changed</h3>
-            <span class="td-status-chip td-status-chip--${escapeAttr(trendMeta.tone)}">${escapeHtml(trendMeta.label)}</span>
-          </div>
-          <p class="td-home-change-text">${escapeHtml(trendMeta.text)}</p>
-        </section>
-      </div>
+      ${renderPupilOverviewFilters(summary)}
+      ${
+        summary
+          ? rows.length
+            ? `<div class="td-pupil-overview-list">${rows.map(renderPupilOverviewRow).join("")}</div>`
+            : `
+              <div class="td-empty td-empty--compact">
+                <strong>${escapeHtml(`No pupils match ${activeFilterLabel}.`)}</strong>
+                <p>Switch filters to widen the pupil list.</p>
+              </div>
+            `
+          : `
+            <div class="td-empty td-empty--compact">
+              <strong>Pupil overview is loading.</strong>
+              <p>Recent pupil evidence will appear here when available.</p>
+            </div>
+          `
+      }
     </section>
   `;
 }
 
 function renderPupilsView() {
+  const workspace = ensurePupilWorkspaceState();
+  const activeTab = normalizePupilWorkspaceTab(workspace.activeTab);
   return `
     <section
       class="td-primary-view td-primary-view--pupils"
@@ -16560,35 +18280,11 @@ function renderPupilsView() {
       aria-labelledby="td-primary-tab-pupils"
       data-primary-view-panel="pupils"
     >
-      ${renderPrimaryViewHeader("Pupils", "Review baseline status, current learning, pupil follow-up, and class or form-group views.")}
-      <div class="td-view-action-grid">
-        ${renderDashboardAreaActionCard({
-          title: "Baseline status",
-          description: "Check who is ready for personalised learning and who still needs a baseline.",
-          actionLabel: "Open setup",
-          primaryView: "setup",
-          section: "pupilOnboarding",
-          tone: "amber",
-        })}
-        ${renderDashboardAreaActionCard({
-          title: "Current learning",
-          description: "See live learning cycles and pupil follow-up from the existing lifecycle view.",
-          actionLabel: "Review current learning",
-          primaryView: "pupils",
-          section: "upcoming",
-          tone: "green",
-        })}
-        ${renderDashboardAreaActionCard({
-          title: "Classes and form groups",
-          description: "Open class and form-group views using the data already loaded for this dashboard.",
-          actionLabel: "Open groups",
-          primaryView: "pupils",
-          section: "classes",
-          tone: "neutral",
-        })}
-      </div>
-      ${renderDashboardSection("upcoming", renderSectionUpcomingAssignments)}
-      ${renderDashboardSection("classes", renderSectionClasses)}
+      ${renderPrimaryViewHeader("Pupils", "Start with the pupil list, then move into current learning or groups when needed.")}
+      ${renderPupilWorkspaceTabs(activeTab)}
+      ${activeTab === "overview" ? renderPupilOverviewPanel() : ""}
+      ${activeTab === "currentLearning" ? renderDashboardSection("upcoming", renderSectionUpcomingAssignments) : ""}
+      ${activeTab === "classes" ? renderDashboardSection("classes", renderSectionClasses) : ""}
     </section>
   `;
 }
@@ -16608,43 +18304,190 @@ function renderInsightsView() {
   `;
 }
 
-function renderSetupActionCards() {
-  const cards = [];
+function getSetupChecklistStatusTone(statusLabel = "") {
+  const normalized = String(statusLabel || "").trim();
+  if (normalized === "Needs attention") return "red";
+  if (normalized === "On track") return "green";
+  if (normalized === "Not started") return "neutral";
+  return "amber";
+}
+
+function getSetupPupilOnboardingRow() {
+  const onboarding = getPupilOnboardingState();
+  const isLoading = !!onboarding?.referenceLoading || !!onboarding?.placementLoading || !onboarding?.referenceLoaded;
+  if (isLoading) return { status: "In progress", detail: "Checking pupil records" };
+  const attentionRows = getPupilLifecycleRows().filter((row) => {
+    const statusKey = String(row?.lifecycleStatus?.key || "").trim();
+    return ["needs_form_placement", "multiple_live_forms", "inactive", "archived"].includes(statusKey);
+  });
+  if (attentionRows.length) return { status: "Needs attention", detail: formatCountLabel(attentionRows.length, "pupil") };
+  const activeCount = getTeacherFirstUseActiveFormPupilCount();
+  return { status: activeCount ? "On track" : "Not started", detail: activeCount ? formatCountLabel(activeCount, "active pupil") : "No active pupils" };
+}
+
+function getSetupAutomationRow() {
+  const alerts = buildAutomationPolicyAlertEntries();
+  if (alerts.length) return { status: "Needs attention", detail: formatCountLabel(alerts.length, "policy alert") };
+  const policies = getAutomationPolicies();
+  const activePolicies = policies.filter((policy) => {
+    const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
+    return !lifecycle.archived && !lifecycle.expired;
+  });
+  if (activePolicies.length) return { status: "On track", detail: formatCountLabel(activePolicies.length, "active policy", "active policies") };
+  const targetableCount = getAutomationTargetableClasses().length;
+  if (targetableCount) return { status: "Not started", detail: `${formatCountLabel(targetableCount, "form group")} ready` };
+  return { status: "In progress", detail: "No targetable form groups" };
+}
+
+function getSetupStaffAccessRow() {
+  const staff = getStaffAccessState();
+  if (staff?.loadingDirectory) return { status: "In progress", detail: "Loading directory" };
+  if (staff?.error) return { status: "Needs attention", detail: "Directory unavailable" };
+  const profiles = Array.isArray(staff?.profiles) ? staff.profiles : [];
+  const attentionCount = profiles.filter((profile) => doesStaffAccessProfileNeedAttention(profile)).length;
+  if (attentionCount) return { status: "Needs attention", detail: formatCountLabel(attentionCount, "staff record") };
+  return { status: profiles.length ? "On track" : "Not started", detail: profiles.length ? formatCountLabel(profiles.length, "staff record") : "No staff records" };
+}
+
+function getSetupCoreBankRow() {
+  const monitor = getBankMonitorState();
+  const status = String(monitor?.status || "idle");
+  if (status === "loading") return { status: "In progress", detail: "Checking coverage" };
+  if (status === "error" || status === "unavailable") return { status: "Needs attention", detail: "Monitor unavailable" };
+  if (status === "idle") return { status: "Not started", detail: "Not checked yet" };
+  const model = monitor?.data || {};
+  const belowThreshold = Array.isArray(model?.belowThresholdGraphemes) ? model.belowThresholdGraphemes.length : 0;
+  const missingContext = Math.max(0, Number(model?.missingSentenceCount || 0) + Number(model?.missingMeaningCount || 0));
+  if (belowThreshold || missingContext) return { status: "Needs attention", detail: `${belowThreshold + missingContext} coverage item${belowThreshold + missingContext === 1 ? "" : "s"}` };
+  return { status: "On track", detail: "Coverage checked" };
+}
+
+function getSetupClassesRow() {
+  const classes = Array.isArray(state.classes) ? state.classes : [];
+  const formCount = classes.filter((cls) => normalizeClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_FORM).length;
+  const interventionCount = classes.filter((cls) => normalizeClassType(cls?.class_type, { legacyFallback: CLASS_TYPE_FORM }) === CLASS_TYPE_INTERVENTION).length;
+  if (!classes.length) return { status: "Not started", detail: "No groups yet" };
+  return {
+    status: "On track",
+    detail: `${formatCountLabel(formCount, "form group")} | ${formatCountLabel(interventionCount, "intervention group")}`,
+  };
+}
+
+function getSetupChecklistRows() {
+  const rows = [];
 
   if (canImportCsv()) {
-    cards.push(renderDashboardAreaActionCard({
-      title: "Pupil onboarding",
-      description: "Import pupils, confirm form groups, and manage pupil access details.",
-      actionLabel: "Open onboarding",
-      primaryView: "setup",
-      section: "pupilOnboarding",
-      tone: "green",
-    }));
+    const status = getSetupPupilOnboardingRow();
+    rows.push({ key: "pupilOnboarding", label: "Pupil onboarding", panel: "pupilOnboarding", ...status });
   }
 
   if (canManageOwnContent() && canAssignTests()) {
-    cards.push(renderDashboardAreaActionCard({
-      title: "Baseline readiness",
-      description: "Prepare the baseline check that unlocks personalised learning.",
-      actionLabel: "Baseline status",
-      action: "open-setup-tool",
-      setupTool: "baseline",
-      tone: "amber",
-    }));
+    const readiness = buildCurrentTeacherFirstUseReadiness();
+    const meta = mapTeacherHomeReadinessState(readiness);
+    rows.push({
+      key: "baseline",
+      label: "Baseline readiness",
+      panel: "baseline",
+      status: meta.label === "On track" ? "On track" : meta.label === "Needs attention" ? "Needs attention" : "In progress",
+      detail: readiness?.title || "Baseline status",
+    });
   }
 
   if (canManageAutomation()) {
-    cards.push(renderDashboardAreaActionCard({
-      title: "Automation controls",
-      description: "Review personalised generation policies and run them when allowed.",
-      actionLabel: "Open controls",
-      action: "open-setup-tool",
-      setupTool: "automation",
-      tone: "neutral",
-    }));
+    rows.push({ key: "automation", label: "Personalised learning", panel: "automation", ...getSetupAutomationRow() });
   }
 
-  return cards.length ? `<div class="td-view-action-grid">${cards.join("")}</div>` : "";
+  if (canManageRoles()) {
+    rows.push({ key: "staffAccess", label: "Staff access", panel: "staffAccess", ...getSetupStaffAccessRow() });
+  }
+
+  if (canViewWordloomCoreBankMonitor()) {
+    rows.push({ key: "bankMonitor", label: "Core bank", panel: "bankMonitor", ...getSetupCoreBankRow() });
+  }
+
+  rows.push({ key: "classes", label: "Classes and groups", panel: "classes", ...getSetupClassesRow() });
+
+  if (canUseAdvancedManualTools()) {
+    rows.push({
+      key: "tests",
+      label: "Advanced manual tools",
+      panel: "tests",
+      status: state.sections.tests ? "In progress" : "Not started",
+      detail: state.tests.length ? formatCountLabel(state.tests.length, "manual test") : "Closed by default",
+      muted: true,
+    });
+  }
+
+  return rows;
+}
+
+function isSetupChecklistRowOpen(row = {}) {
+  const panel = String(row?.panel || "");
+  if (panel === "baseline") return !!state.createBaselineOpen;
+  if (panel === "automation") return !!state.createAutoAssignOpen;
+  if (panel === "intervention") return !!state.createInterventionGroupOpen;
+  return !!state.sections?.[panel];
+}
+
+function renderSetupChecklistRow(row) {
+  const tone = getSetupChecklistStatusTone(row.status);
+  const isOpen = isSetupChecklistRowOpen(row);
+  return `
+    <button
+      class="td-setup-checklist-row td-setup-checklist-row--${escapeAttr(tone)} ${row.muted ? "is-muted" : ""} ${isOpen ? "is-open" : ""}"
+      type="button"
+      data-action="open-setup-panel"
+      data-setup-panel="${escapeAttr(row.panel)}"
+      aria-expanded="${isOpen ? "true" : "false"}"
+    >
+      <span class="td-setup-status-dot" aria-hidden="true"></span>
+      <span class="td-setup-row-main">
+        <strong>${escapeHtml(row.label)}</strong>
+        <span>${escapeHtml(row.detail || "")}</span>
+      </span>
+      <span class="td-status-chip td-status-chip--${escapeAttr(tone)}">${escapeHtml(row.status || "In progress")}</span>
+      <span class="td-row-chevron" aria-hidden="true">&rsaquo;</span>
+    </button>
+  `;
+}
+
+function renderSetupChecklist() {
+  const rows = getSetupChecklistRows();
+  return `
+    <div class="td-setup-checklist" data-role="setup-checklist">
+      ${rows.map(renderSetupChecklistRow).join("")}
+    </div>
+  `;
+}
+
+function renderSetupClassesActions() {
+  if (!state.sections.classes || !canManageInterventionGroups()) return "";
+  return `
+    <div class="td-setup-inline-actions">
+      <button
+        class="td-btn td-btn--ghost td-btn--small"
+        type="button"
+        data-action="toggle-create-intervention-group"
+        aria-expanded="${state.createInterventionGroupOpen ? "true" : "false"}"
+      >
+        ${escapeHtml(state.createInterventionGroupOpen ? "Close intervention group tools" : "Create intervention group")}
+      </button>
+    </div>
+  `;
+}
+
+function renderSetupDetails() {
+  const createDetails = renderCreateBar({ showToolbar: false });
+  const sectionDetails = [
+    state.sections.staffAccess ? renderSectionStaffAccess() : "",
+    state.sections.pupilOnboarding ? renderSectionPupilOnboarding() : "",
+    state.sections.bankMonitor && canViewWordloomCoreBankMonitor() ? renderSectionWordloomCoreBankMonitor() : "",
+    state.sections.classes ? `${renderSetupClassesActions()}${renderSectionClasses()}` : "",
+    state.sections.tests ? renderSectionTests() : "",
+  ].filter(Boolean).join("");
+
+  if (!createDetails && !sectionDetails) return "";
+  return `<div class="td-setup-details" data-role="setup-detail-panel">${createDetails}${sectionDetails}</div>`;
 }
 
 function renderSetupView() {
@@ -16656,14 +18499,9 @@ function renderSetupView() {
       aria-labelledby="td-primary-tab-setup"
       data-primary-view-panel="setup"
     >
-      ${renderPrimaryViewHeader("Setup", "Manage onboarding, staff access, classes, baseline readiness, automation, and advanced manual tools.")}
-      ${renderSetupActionCards()}
-      ${renderCreateBar()}
-      ${renderSectionStaffAccess()}
-      ${renderSectionPupilOnboarding()}
-      ${canViewWordloomCoreBankMonitor() ? renderSectionWordloomCoreBankMonitor() : ""}
-      ${renderSectionClasses()}
-      ${renderSectionTests()}
+      ${renderPrimaryViewHeader("Setup", "Check the essentials that keep pupils, groups, staff access, and personalised learning ready.")}
+      ${renderSetupChecklist()}
+      ${renderSetupDetails()}
     </section>
   `;
 }
@@ -16780,7 +18618,7 @@ function renderNotice() {
   `;
 }
 
-function renderCreateBar() {
+function renderCreateBar({ showToolbar = true } = {}) {
   const showBaselineAction = canManageOwnContent() && canAssignTests();
   const showRunNowAutomation = canManageAutomation();
   const showCreateInterventionGroup = canManageInterventionGroups();
@@ -16788,7 +18626,11 @@ function renderCreateBar() {
     showBaselineAction
     || showRunNowAutomation
     || showCreateInterventionGroup;
-  if (!hasVisibleCreateControls) return "";
+  const hasOpenCreateDetail =
+    (showBaselineAction && state.createBaselineOpen)
+    || (showRunNowAutomation && state.createAutoAssignOpen)
+    || (showCreateInterventionGroup && state.createInterventionGroupOpen);
+  if ((!showToolbar && !hasOpenCreateDetail) || (!hasVisibleCreateControls && !hasOpenCreateDetail)) return "";
   const automationPolicies = getAutomationPolicies();
   const automationPoliciesCurrentOrScheduled = automationPolicies.filter((policy) => {
     const lifecycle = getPersonalisedAutomationPolicyLifecycle(policy);
@@ -17217,36 +19059,38 @@ function renderCreateBar() {
   );
 
   return `
-    <section class="td-action-bar">
-      <div class="td-action-kicker">Setup tools</div>
+    <section class="td-action-bar ${showToolbar ? "" : "td-action-bar--details-only"}">
+      ${showToolbar ? `
+        <div class="td-action-kicker">Setup tools</div>
 
-      <div class="td-action-row">
-        ${showBaselineAction ? `
-          <div class="td-action-button-shell">
-            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Baseline status</button>
-            ${renderInfoTip(getBaselineActionTooltipText(), {
-              label: "About Baseline status",
-              className: "td-action-info-tip",
-              triggerClassName: "td-action-info-tip-trigger",
-              bubbleClassName: "td-action-info-tip-bubble",
-              align: "start",
-            })}
-          </div>
-        ` : ""}
-        ${showRunNowAutomation ? `
-          <div class="td-action-button-shell">
-            <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-auto-assign">Generate personalised learning</button>
-            ${renderInfoTip(getGeneratePersonalisedActionTooltipText(), {
-              label: "About Generate personalised learning",
-              className: "td-action-info-tip",
-              triggerClassName: "td-action-info-tip-trigger",
-              bubbleClassName: "td-action-info-tip-bubble",
-              align: "start",
-            })}
-          </div>
-        ` : ""}
-        ${showCreateInterventionGroup ? `<button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-intervention-group">Create intervention group</button>` : ""}
-      </div>
+        <div class="td-action-row">
+          ${showBaselineAction ? `
+            <div class="td-action-button-shell">
+              <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-baseline">Baseline status</button>
+              ${renderInfoTip(getBaselineActionTooltipText(), {
+                label: "About Baseline status",
+                className: "td-action-info-tip",
+                triggerClassName: "td-action-info-tip-trigger",
+                bubbleClassName: "td-action-info-tip-bubble",
+                align: "start",
+              })}
+            </div>
+          ` : ""}
+          ${showRunNowAutomation ? `
+            <div class="td-action-button-shell">
+              <button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-auto-assign">Generate personalised learning</button>
+              ${renderInfoTip(getGeneratePersonalisedActionTooltipText(), {
+                label: "About Generate personalised learning",
+                className: "td-action-info-tip",
+                triggerClassName: "td-action-info-tip-trigger",
+                bubbleClassName: "td-action-info-tip-bubble",
+                align: "start",
+              })}
+            </div>
+          ` : ""}
+          ${showCreateInterventionGroup ? `<button class="td-btn td-btn--ghost" type="button" data-action="toggle-create-intervention-group">Create intervention group</button>` : ""}
+        </div>
+      ` : ""}
 
       ${showCreateInterventionGroup ? `
         <div class="td-create-class-inline ${state.createInterventionGroupOpen ? "is-open" : ""}">
@@ -29496,7 +31340,7 @@ function injectStyles() {
     }
 
     .td-primary-tab:hover{
-      background:#fff;
+      background:#eef2f7;
       color:#0f172a;
     }
 
@@ -29507,9 +31351,10 @@ function injectStyles() {
 
     .td-primary-tab.is-selected{
       background:#fff;
-      border-color:#cbd5e1;
+      border-color:#0f172a;
       color:#0f172a;
-      box-shadow:0 10px 22px rgba(15,23,42,.06);
+      box-shadow:inset 0 -3px 0 #0f172a,0 10px 22px rgba(15,23,42,.06);
+      font-weight:900;
     }
 
     .td-primary-view{
@@ -29726,6 +31571,691 @@ function injectStyles() {
       color:#991b1b;
     }
 
+    .td-row-chevron{
+      margin-left:auto;
+      color:#94a3b8;
+      font-size:1.25rem;
+      line-height:1;
+      font-weight:800;
+    }
+
+    .td-wordloom-status{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:16px;
+      align-items:center;
+      padding:18px;
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,.04);
+    }
+
+    .td-wordloom-status--green{
+      border-color:#bbf7d0;
+    }
+
+    .td-wordloom-status--amber{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .td-wordloom-status--red{
+      border-color:#fecaca;
+    }
+
+    .td-wordloom-status-copy{
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+      min-width:0;
+    }
+
+    .td-wordloom-status-copy h3{
+      margin:0;
+      color:#0f172a;
+      font-size:1.34rem;
+      line-height:1.2;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-wordloom-status-copy p{
+      margin:0;
+      color:#475569;
+      font-size:.95rem;
+      line-height:1.45;
+    }
+
+    .td-wordloom-status-copy p strong{
+      color:#0f172a;
+      font-weight:850;
+    }
+
+    .td-home-primary-action{
+      white-space:normal;
+      text-align:center;
+    }
+
+    .td-home-metric-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:12px;
+    }
+
+    .td-home-metric{
+      display:flex;
+      min-height:96px;
+      flex-direction:column;
+      justify-content:space-between;
+      gap:12px;
+      padding:16px;
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,.04);
+    }
+
+    .td-home-metric--green{
+      border-color:#bbf7d0;
+    }
+
+    .td-home-metric--amber{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .td-home-metric--red{
+      border-color:#fecaca;
+    }
+
+    .td-home-metric-label{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      color:#64748b;
+      font-size:.78rem;
+      font-weight:850;
+      text-transform:uppercase;
+    }
+
+    .td-home-metric strong{
+      color:#0f172a;
+      font-size:1.9rem;
+      line-height:1.1;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-home-context-bar{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:10px;
+      padding:12px;
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#f8fafc;
+    }
+
+    .td-home-setup-blocker{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:14px;
+      align-items:center;
+      padding:14px 16px;
+      border:1px solid #fde68a;
+      border-radius:14px;
+      background:#fffbeb;
+    }
+
+    .td-home-setup-blocker h3,
+    .td-home-activity h3,
+    .td-home-activity-list h4,
+    .td-home-activity-draft h5{
+      margin:0;
+      color:#0f172a;
+      line-height:1.25;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-home-setup-blocker h3{
+      font-size:1rem;
+    }
+
+    .td-home-setup-blocker p,
+    .td-home-activity-head p,
+    .td-home-activity-list-head p,
+    .td-home-activity-draft p{
+      margin:5px 0 0;
+      color:#64748b;
+      font-size:.9rem;
+      line-height:1.45;
+    }
+
+    .td-home-activity{
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      padding:16px;
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 10px 24px rgba(15,23,42,.04);
+    }
+
+    .td-home-activity-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+    }
+
+    .td-home-activity h3{
+      font-size:1.08rem;
+    }
+
+    .td-home-activity-counts{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;
+    }
+
+    .td-home-activity-count{
+      appearance:none;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+      padding:14px;
+      border:1px solid #dbe3ee;
+      border-radius:12px;
+      background:#f8fafc;
+      color:inherit;
+      text-align:left;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-home-activity-count--green{
+      border-color:#bbf7d0;
+      background:#f0fdf4;
+    }
+
+    .td-home-activity-count--amber{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .td-home-activity-count:hover,
+    .td-home-activity-count.is-expanded{
+      background:#fff;
+      border-color:#94a3b8;
+      box-shadow:0 10px 20px rgba(15,23,42,.05);
+    }
+
+    .td-home-activity-count span{
+      color:#475569;
+      font-size:.8rem;
+      line-height:1.25;
+      font-weight:850;
+    }
+
+    .td-home-activity-count strong{
+      color:#0f172a;
+      font-size:1.55rem;
+      line-height:1.1;
+      font-weight:850;
+      letter-spacing:0;
+    }
+
+    .td-home-activity-count em{
+      color:#64748b;
+      font-size:.82rem;
+      font-style:normal;
+      font-weight:750;
+    }
+
+    .td-home-activity-bar{
+      display:flex;
+      width:100%;
+      min-height:22px;
+      overflow:hidden;
+      border:1px solid #dbe3ee;
+      border-radius:999px;
+      background:#f1f5f9;
+    }
+
+    .td-home-activity-segment{
+      appearance:none;
+      min-width:8px;
+      min-height:22px;
+      border:0;
+      border-radius:0;
+      cursor:pointer;
+    }
+
+    .td-home-activity-segment--green{
+      background:#0f766e;
+    }
+
+    .td-home-activity-segment--amber{
+      background:#f59e0b;
+    }
+
+    .td-home-activity-segment.is-expanded{
+      box-shadow:inset 0 0 0 3px rgba(255,255,255,.8);
+    }
+
+    .td-home-activity-list{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding-top:2px;
+    }
+
+    .td-home-activity-list-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+    }
+
+    .td-home-activity-list h4{
+      font-size:1rem;
+    }
+
+    .td-home-activity-draft-trigger{
+      color:#64748b;
+      font-weight:750;
+    }
+
+    .td-home-activity-rows{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-home-activity-row{
+      display:grid;
+      grid-template-columns:minmax(0,1.2fr) minmax(160px,.8fr) auto;
+      gap:12px;
+      align-items:center;
+      width:100%;
+      padding:12px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+      color:inherit;
+      text-align:left;
+    }
+
+    button.td-home-activity-row{
+      appearance:none;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    button.td-home-activity-row:hover{
+      background:#fff;
+      border-color:#94a3b8;
+      box-shadow:0 10px 20px rgba(15,23,42,.05);
+    }
+
+    .td-home-activity-row--disabled{
+      color:#64748b;
+      cursor:default;
+    }
+
+    .td-home-activity-row-main,
+    .td-home-activity-row-meta{
+      display:flex;
+      min-width:0;
+      flex-direction:column;
+      gap:3px;
+    }
+
+    .td-home-activity-row-main strong{
+      overflow:hidden;
+      color:#0f172a;
+      font-size:.94rem;
+      line-height:1.3;
+      font-weight:850;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .td-home-activity-row-main span,
+    .td-home-activity-row-meta span,
+    .td-home-activity-row-note{
+      color:#64748b;
+      font-size:.84rem;
+      line-height:1.35;
+      font-weight:700;
+    }
+
+    .td-home-activity-draft{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding:12px;
+      border:1px solid #dbe3ee;
+      border-radius:12px;
+      background:#fff;
+    }
+
+    .td-home-activity-draft h5{
+      font-size:.96rem;
+    }
+
+    .td-home-activity-draft textarea{
+      width:100%;
+      min-height:118px;
+      resize:vertical;
+    }
+
+    .td-home-activity-draft-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    .td-home-activity-live{
+      min-height:1.25em;
+      margin:0;
+      color:#64748b;
+      font-size:.84rem;
+      line-height:1.35;
+      font-weight:750;
+    }
+
+    .td-home-activity-live--success{
+      color:#166534;
+    }
+
+    .td-home-activity-live--warning{
+      color:#92400e;
+    }
+
+    .td-home-info-tip{
+      display:inline-flex;
+    }
+
+    .td-home-trend-bars{
+      display:grid;
+      grid-template-columns:repeat(6,minmax(0,1fr));
+      gap:8px;
+      align-items:end;
+      margin-top:14px;
+      min-height:118px;
+    }
+
+    .td-home-trend-week{
+      display:grid;
+      grid-template-rows:88px auto;
+      gap:6px;
+      align-items:end;
+      min-width:0;
+      color:#64748b;
+      font-size:.72rem;
+      font-weight:800;
+      text-align:center;
+    }
+
+    .td-home-trend-bar{
+      display:flex;
+      align-items:flex-end;
+      justify-content:center;
+      height:88px;
+      border-radius:10px;
+      background:#f1f5f9;
+      overflow:hidden;
+    }
+
+    .td-home-trend-bar span{
+      display:block;
+      width:100%;
+      min-height:6px;
+      border-radius:10px 10px 0 0;
+      background:#0f766e;
+    }
+
+    .td-attention-row{
+      appearance:none;
+      width:100%;
+      text-align:left;
+      color:inherit;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-attention-row:hover{
+      background:#fff;
+      border-color:#94a3b8;
+      box-shadow:0 10px 20px rgba(15,23,42,.05);
+    }
+
+    .td-attention-row:focus-visible,
+    .td-home-activity-count:focus-visible,
+    .td-home-activity-segment:focus-visible,
+    .td-home-activity-row:focus-visible,
+    .td-sub-tab:focus-visible,
+    .td-pupil-overview-row:focus-visible,
+    .td-setup-checklist-row:focus-visible{
+      outline:3px solid rgba(14,165,233,.28);
+      outline-offset:2px;
+    }
+
+    .td-attention-row > div > div{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:0;
+    }
+
+    .td-attention-row span:not(.td-attention-dot):not(.td-row-chevron){
+      color:#64748b;
+      font-size:.84rem;
+      font-weight:700;
+    }
+
+    .td-attention-dot,
+    .td-setup-status-dot{
+      width:12px;
+      height:12px;
+      border-radius:999px;
+      background:#94a3b8;
+      flex:0 0 12px;
+      margin-top:4px;
+    }
+
+    .td-attention-row--amber .td-attention-dot,
+    .td-setup-checklist-row--amber .td-setup-status-dot{
+      background:#d97706;
+    }
+
+    .td-attention-row--red .td-attention-dot,
+    .td-setup-checklist-row--red .td-setup-status-dot{
+      background:#dc2626;
+    }
+
+    .td-attention-row--green .td-attention-dot,
+    .td-setup-checklist-row--green .td-setup-status-dot{
+      background:#16a34a;
+    }
+
+    .td-sub-tabs{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+      padding:6px;
+      border:1px solid #dbe3ee;
+      border-radius:14px;
+      background:#f8fafc;
+    }
+
+    .td-sub-tab{
+      appearance:none;
+      border:1px solid transparent;
+      border-radius:10px;
+      background:transparent;
+      color:#475569;
+      padding:9px 10px;
+      font:inherit;
+      font-size:.9rem;
+      font-weight:850;
+      cursor:pointer;
+      min-width:0;
+    }
+
+    .td-sub-tab:hover,
+    .td-sub-tab.is-selected{
+      background:#fff;
+      border-color:#cbd5e1;
+      color:#0f172a;
+    }
+
+    .td-pupil-workspace-panel{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .td-pupil-workspace-head h4{
+      margin:0;
+      color:#0f172a;
+      font-size:1rem;
+      line-height:1.3;
+      font-weight:850;
+    }
+
+    .td-pupil-workspace-head p{
+      margin:4px 0 0;
+      color:#64748b;
+      font-size:.9rem;
+      line-height:1.4;
+    }
+
+    .td-pupil-overview-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-pupil-overview-row{
+      appearance:none;
+      display:grid;
+      grid-template-columns:minmax(170px,1.1fr) minmax(120px,auto) minmax(180px,1fr) auto;
+      gap:12px;
+      align-items:center;
+      width:100%;
+      padding:12px;
+      border:1px solid #dbe3ee;
+      border-radius:12px;
+      background:#fff;
+      color:inherit;
+      text-align:left;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-pupil-overview-row:hover{
+      border-color:#94a3b8;
+      box-shadow:0 10px 20px rgba(15,23,42,.05);
+    }
+
+    .td-pupil-overview-main{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:0;
+    }
+
+    .td-pupil-overview-main strong{
+      color:#0f172a;
+      font-size:.95rem;
+      line-height:1.25;
+      font-weight:850;
+    }
+
+    .td-pupil-overview-main span,
+    .td-pupil-overview-support{
+      color:#64748b;
+      font-size:.86rem;
+      line-height:1.35;
+    }
+
+    .td-setup-checklist{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .td-setup-checklist-row{
+      appearance:none;
+      display:grid;
+      grid-template-columns:16px minmax(0,1fr) auto auto;
+      gap:12px;
+      align-items:center;
+      width:100%;
+      padding:13px 14px;
+      border:1px solid #dbe3ee;
+      border-radius:12px;
+      background:#fff;
+      color:inherit;
+      text-align:left;
+      cursor:pointer;
+      transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+    }
+
+    .td-setup-checklist-row:hover,
+    .td-setup-checklist-row.is-open{
+      border-color:#94a3b8;
+      box-shadow:0 10px 20px rgba(15,23,42,.05);
+    }
+
+    .td-setup-checklist-row.is-muted{
+      background:#f8fafc;
+    }
+
+    .td-setup-row-main{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:0;
+    }
+
+    .td-setup-row-main strong{
+      color:#0f172a;
+      font-size:.95rem;
+      line-height:1.25;
+      font-weight:850;
+    }
+
+    .td-setup-row-main span{
+      color:#64748b;
+      font-size:.86rem;
+      line-height:1.35;
+    }
+
+    .td-setup-details{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .td-setup-inline-actions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
+
+    .td-action-bar--details-only{
+      margin:0;
+      border-radius:14px;
+      box-shadow:none;
+    }
+
     @media (max-width: 760px){
       .td-primary-tabs{
         grid-template-columns:repeat(2,minmax(0,1fr));
@@ -29733,13 +32263,44 @@ function injectStyles() {
 
       .td-view-action-grid,
       .td-home-summary-grid,
+      .td-home-metric-grid,
+      .td-home-context-bar,
+      .td-home-activity-counts,
+      .td-sub-tabs,
       .td-home-grid{
         grid-template-columns:1fr;
+      }
+
+      .td-wordloom-status,
+      .td-wordloom-status-copy,
+      .td-home-setup-blocker,
+      .td-home-activity-row,
+      .td-pupil-overview-row,
+      .td-setup-checklist-row{
+        grid-template-columns:1fr;
+      }
+
+      .td-wordloom-status{
+        align-items:stretch;
+      }
+
+      .td-home-primary-action{
+        width:100%;
       }
 
       .td-attention-row{
         align-items:flex-start;
         flex-direction:column;
+      }
+
+      .td-home-activity-head,
+      .td-home-activity-list-head{
+        align-items:stretch;
+        flex-direction:column;
+      }
+
+      .td-row-chevron{
+        display:none;
       }
     }
 

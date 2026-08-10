@@ -51,6 +51,9 @@ PRIMARY_DASHBOARD_VIEWS;`, {})));
 assert.deepEqual(primaryViews.map((item) => item.label), ["Home", "Pupils", "Insights", "Setup"]);
 assert.deepEqual(primaryViews.map((item) => item.key), ["home", "pupils", "insights", "setup"]);
 assert.equal(primaryViews.some((item) => item.label === "Assignments"), false);
+assert.match(primaryViewConstantsSource, /Pupil overview/);
+assert.match(primaryViewConstantsSource, /Current learning/);
+assert.match(primaryViewConstantsSource, /Classes and groups/);
 
 assert.match(
   teacherViewSource,
@@ -75,18 +78,17 @@ const insightsSource = extractFunctionSource(teacherViewSource, "renderInsightsV
 const setupSource = extractFunctionSource(teacherViewSource, "renderSetupView");
 const paintSource = extractFunctionSource(teacherViewSource, "paint");
 
-assert.match(homeSource, /renderTeacherFirstUseReadinessPanel\(\)/);
-assert.match(homeSource, /Wordloom status|td-primary-view--home/);
+assert.match(homeSource, /renderTeacherHomeActivitySection\(activityModel\)/);
+assert.match(homeSource, /td-primary-view--home/);
+assert.doesNotMatch(homeSource, /renderTeacherHomeStatusPanel/);
+assert.doesNotMatch(homeSource, /renderTeacherHomeTrend/);
 assert.doesNotMatch(homeSource, /renderAnalyticsBar\(\)/, "Home should not render analytics content");
 assert.doesNotMatch(homeSource, /renderSectionTests\(\)/, "Home should not render advanced manual tools");
 assert.match(pupilsSource, /renderDashboardSection\("upcoming", renderSectionUpcomingAssignments\)/);
 assert.match(pupilsSource, /renderDashboardSection\("classes", renderSectionClasses\)/);
 assert.match(insightsSource, /renderAnalyticsBar\(\)/, "analytics should live under Insights");
-assert.match(setupSource, /renderCreateBar\(\)/);
-assert.match(setupSource, /renderSectionStaffAccess\(\)/);
-assert.match(setupSource, /renderSectionPupilOnboarding\(\)/);
-assert.match(setupSource, /renderSectionClasses\(\)/);
-assert.match(setupSource, /renderSectionTests\(\)/);
+assert.match(setupSource, /renderSetupChecklist\(\)/);
+assert.match(setupSource, /renderSetupDetails\(\)/);
 assert.doesNotMatch(setupSource, /openDashboardSection\("tests"\)/, "Setup should not auto-open advanced manual tools");
 
 assert.ok(
@@ -99,11 +101,17 @@ assert.doesNotMatch(paintSource, /renderSectionUpcomingAssignments\(\)/, "paint 
 
 const helperSource = [
   "normalizePrimaryDashboardView",
+  "normalizePupilWorkspaceTab",
+  "normalizePupilOverviewFilter",
+  "ensurePupilWorkspaceState",
+  "closeSetupInlineToolPanels",
   "getPrimaryViewForDashboardSection",
   "isNormalDashboardSectionQuarantined",
   "revealQuarantinedDashboardSection",
   "shouldRenderDashboardSection",
   "renderDashboardSection",
+  "closePrimaryDashboardSections",
+  "openPupilWorkspaceTab",
   "openDashboardSection",
   "selectPrimaryDashboardView",
   "renderPrimaryDashboardNav",
@@ -116,6 +124,8 @@ function createDashboardContext() {
     String,
     PRIMARY_DASHBOARD_VIEWS: primaryViews,
     PRIMARY_DASHBOARD_VIEW_KEYS: primaryViews.map((item) => item.key),
+    PUPIL_WORKSPACE_TAB_KEYS: ["overview", "currentLearning", "classes"],
+    PUPIL_OVERVIEW_FILTER_KEYS: ["needs_attention", "no_recent_evidence", "all"],
     NORMAL_DASHBOARD_QUARANTINED_SECTION_KEYS: new Set(["bankMonitor", "upcoming", "classes", "tests"]),
     DASHBOARD_SECTION_KEYS: ["staffAccess", "pupilOnboarding", "bankMonitor", "analytics", "upcoming", "classes", "tests"],
     rootEl: { innerHTML: "" },
@@ -131,6 +141,10 @@ function createDashboardContext() {
         tests: false,
         analytics: true,
       },
+      pupilWorkspace: {
+        activeTab: "overview",
+        overviewFilter: "needs_attention",
+      },
       revealedQuarantinedSections: {
         bankMonitor: false,
         upcoming: false,
@@ -144,7 +158,7 @@ function createDashboardContext() {
     escapeHtml: (value) => String(value ?? ""),
     renderCurrentSchoolContextRow: () => "",
     renderNotice: () => "",
-    renderHomeView: () => '<main data-primary-view-panel="home">Wordloom status</main>',
+    renderHomeView: () => '<main data-primary-view-panel="home">Everything is on track</main>',
     renderPupilsView: () => '<main data-primary-view-panel="pupils">Pupils Current learning</main>',
     renderInsightsView: () => '<main data-primary-view-panel="insights">Insights Analytics payload</main>',
     renderSetupView: () => '<main data-primary-view-panel="setup">Setup Advanced manual tools</main>',
@@ -161,7 +175,7 @@ const homeContext = createDashboardContext();
 const homeHtml = vm.runInNewContext(`${helperSource}
 paint();
 rootEl.innerHTML;`, homeContext);
-assert.match(homeHtml, /Wordloom status/);
+assert.match(homeHtml, /Everything is on track/);
 assert.match(homeHtml, /Home/);
 assert.match(homeHtml, /Pupils/);
 assert.match(homeHtml, /Insights/);
@@ -184,8 +198,9 @@ const pupilsContext = createDashboardContext();
 vm.runInNewContext(`${helperSource}
 selectPrimaryDashboardView("pupils");`, pupilsContext);
 assert.equal(pupilsContext.state.primaryView, "pupils");
-assert.equal(pupilsContext.state.sections.upcoming, true);
-assert.equal(pupilsContext.state.revealedQuarantinedSections.upcoming, true);
+assert.equal(pupilsContext.state.pupilWorkspace.activeTab, "overview");
+assert.equal(pupilsContext.state.sections.upcoming, false);
+assert.equal(pupilsContext.state.revealedQuarantinedSections.upcoming, false);
 assert.equal(pupilsContext.state.sections.tests, false);
 
 const setupContext = createDashboardContext();

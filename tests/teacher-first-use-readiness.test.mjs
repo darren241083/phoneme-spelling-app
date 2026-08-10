@@ -8,6 +8,39 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(testDir, "..");
 const teacherViewSource = readFileSync(path.join(rootDir, "js/teacherView.js"), "utf8");
 
+function extractFunctionSource(source, functionName) {
+  const functionStart = source.indexOf(`function ${functionName}(`);
+  assert.notEqual(functionStart, -1, `${functionName} should exist`);
+
+  const signatureStart = source.indexOf("(", functionStart);
+  let parenDepth = 0;
+  let bodyStart = -1;
+  for (let index = signatureStart; index < source.length; index += 1) {
+    if (source[index] === "(") parenDepth += 1;
+    if (source[index] === ")") parenDepth -= 1;
+    if (parenDepth === 0 && source[index] === "{") {
+      bodyStart = index;
+      break;
+    }
+  }
+  assert.notEqual(bodyStart, -1, `${functionName} body should be discoverable`);
+
+  let braceDepth = 0;
+  let functionEnd = -1;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === "{") braceDepth += 1;
+    if (source[index] === "}") {
+      braceDepth -= 1;
+      if (braceDepth === 0) {
+        functionEnd = index + 1;
+        break;
+      }
+    }
+  }
+  assert.notEqual(functionEnd, -1, `${functionName} should have a complete body`);
+  return source.slice(functionStart, functionEnd);
+}
+
 const helperStart = teacherViewSource.indexOf("const TEACHER_FIRST_USE_ACTIONS");
 const helperEnd = teacherViewSource.indexOf("const AUTOMATION_TARGET_YEAR_ALL", helperStart);
 assert.notEqual(helperStart, -1, "first-use action constants should exist");
@@ -210,11 +243,7 @@ for (const item of [
   assert.match(item.pupilAccessMessage, /shown once/);
 }
 
-const actionHandlerStart = teacherViewSource.indexOf("function handleTeacherFirstUseAction(");
-const actionHandlerEnd = teacherViewSource.indexOf("\nasync function onRootClick", actionHandlerStart);
-assert.notEqual(actionHandlerStart, -1, "first-use action handler should exist");
-assert.notEqual(actionHandlerEnd, -1, "first-use action handler slice should be bounded");
-const actionHandlerSource = teacherViewSource.slice(actionHandlerStart, actionHandlerEnd);
+const actionHandlerSource = extractFunctionSource(teacherViewSource, "handleTeacherFirstUseAction");
 assert.match(actionHandlerSource, /openDashboardSection\("pupilOnboarding"\)/);
 assert.match(actionHandlerSource, /openDashboardSection\("upcoming"\)/);
 assert.match(actionHandlerSource, /openDashboardSection\("analytics"\)/);
@@ -222,7 +251,7 @@ assert.match(actionHandlerSource, /openSetupDashboardTool\("baseline"\)/);
 assert.doesNotMatch(actionHandlerSource, /openDashboardSection\("tests"\)/);
 assert.equal(teacherViewSource.includes('data-action="teacher-first-use-action"'), true);
 assert.equal(teacherViewSource.includes("renderTeacherFirstUseReadinessPanel()"), true);
-assert.equal(teacherViewSource.includes("Wordloom status"), true);
+assert.equal(teacherViewSource.includes("Wordloom status"), false);
 assert.equal(teacherViewSource.includes("First-use readiness"), false);
 
 const setupToolStart = teacherViewSource.indexOf("function openSetupDashboardTool(");

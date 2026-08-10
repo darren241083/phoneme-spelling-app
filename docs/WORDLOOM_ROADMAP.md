@@ -1,9 +1,9 @@
 # Wordloom Roadmap
 
 Status: Internal product direction and implementation guardrail
-Last updated: 7 July 2026
-Latest pushed checkpoint: `4cd2a66 Make dashboard analytics first`
-Current implementation checkpoint: Normal dashboard is Analytics-first; ordinary Test Builder question-type choice is hidden; standalone class/lifecycle/core/manual sections are quarantined from normal first-load.
+Last updated: 10 August 2026
+Latest release checkpoint: Home-first dashboard activity triage
+Current implementation checkpoint: Normal dashboard is Home-first activity triage with analytics under Insights; ordinary Test Builder question-type choice is hidden; standalone class/lifecycle/core/manual sections are quarantined from normal first-load.
 
 ## Current Product Direction
 
@@ -13,7 +13,7 @@ Current implementation checkpoint: Normal dashboard is Analytics-first; ordinary
 * Manual dashboard assignment remains limited to teacher-owned tests.
 * Manual Test Builder/Test Library is preserved for occasional custom lists or legacy manual tests, but it is no longer the normal teacher dashboard path.
 * Question types remain internal, specialist, admin, migration, legacy, or runtime compatibility details where needed.
-* The normal dashboard should lead with Analytics, keeping teacher-facing insight simple and low-clutter.
+* The normal dashboard should lead with a Home-first activity overview, keeping analytics under Insights and teacher-facing insight simple and low-clutter.
 
 ## Current Priority
 
@@ -51,7 +51,7 @@ Current implementation checkpoint: Normal dashboard is Analytics-first; ordinary
 ## Recent Checkpoints
 
 * Manual Test Builder/Test Library is quarantined behind Advanced manual tools for occasional custom lists or legacy manual tests.
-* Normal dashboard first-load is Analytics-first, with standalone class/lifecycle/core/manual blocks hidden until explicit fallback/admin-support flows are designed.
+* Normal dashboard first-load is Home-first activity triage, with standalone class/lifecycle/core/manual blocks hidden until explicit fallback/admin-support flows are designed.
 * Ordinary Test Builder flows no longer show the question-type picker; existing stored types remain for legacy/direct/runtime compatibility.
 * Direct `test-builder.html?id=...` links and old test records are preserved.
 * `15a2585 Restrict manual assignment to owned tests` tightened manual dashboard assignment back to owned tests.
