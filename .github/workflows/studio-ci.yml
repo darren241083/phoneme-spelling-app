@@ -1,0 +1,41 @@
+name: Studio CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-free-node-tests:
+    name: Dependency-free Node tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Run dependency-free Node tests
+        shell: bash
+        run: |
+          mapfile -t test_files < <(find tests -name '*.test.mjs' ! -path 'tests/selector-intelligence-audit.test.mjs' | sort)
+
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "No dependency-free Node test files found."
+            exit 1
+          fi
+
+          printf 'Running %s dependency-free Node test files\n' "${#test_files[@]}"
+          printf '%s\n' "${test_files[@]}"
+          node --test "${test_files[@]}"
