@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -22,6 +23,10 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const STUDIO_ROOT = path.join(ROOT_DIR, "studio");
 const FIXTURE_ROOT = path.join(ROOT_DIR, "tests", "fixtures", "studio");
 const REQUIRED_ROLES = ["principal_builder", "product_owner", "reviewer", "verifier"];
+const PROFILE_MEMORY_DOCS = [
+  "studio/profiles/wordloom/product-constitution.md",
+  "studio/profiles/wordloom/adrs/ADR-0001-studio-core-profile-separation.md",
+];
 const CORE_FORBIDDEN_TERMS = new Map([
   ["application name", /\bwordloom\b/i],
   ["person name", /\bdarren\b/i],
@@ -37,6 +42,20 @@ const CORE_FORBIDDEN_TERMS = new Map([
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(ROOT_DIR, relativePath), "utf8"));
+}
+
+function readText(relativePath) {
+  return readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+}
+
+function assertAscii(relativePath) {
+  const source = readText(relativePath);
+  const nonAscii = [...source].find((character) => character.charCodeAt(0) > 127);
+  assert.equal(nonAscii, undefined, `${relativePath} should stay ASCII`);
+}
+
+function countWords(source) {
+  return source.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function listFilesRecursively(directory) {
@@ -119,6 +138,55 @@ test("Core files contain no obvious application or person-specific assumptions",
       assert.doesNotMatch(source, pattern, `${path.relative(ROOT_DIR, filePath)} leaked ${label}`);
     }
   }
+});
+
+test("Wordloom profile memory docs exist without expanding Core or profile metadata", () => {
+  for (const relativePath of PROFILE_MEMORY_DOCS) {
+    assert.equal(existsSync(path.join(ROOT_DIR, relativePath)), true, `${relativePath} should exist`);
+    assertAscii(relativePath);
+  }
+
+  assert.deepEqual(Object.keys(readJson("studio/profiles/wordloom/profile.json")).sort(), [
+    "application",
+    "core_compatibility",
+    "profile_id",
+    "role_metadata",
+    "schema_version",
+  ]);
+});
+
+test("Wordloom Product Constitution stays concise and cautious", () => {
+  const source = readText("studio/profiles/wordloom/product-constitution.md");
+  const requiredPhrases = [
+    "Automation before unnecessary teacher administration",
+    "Simplicity before feature density",
+    "Progressive disclosure before clutter",
+    "Pupil clarity and accessibility",
+    "Educational purpose before gamification",
+    "Deterministic and evidence-led assessment",
+    "Support Ladder by default where appropriate",
+    "Visibility is not permission",
+    "Data minimisation by purpose",
+    "Human oversight for consequential educational logic",
+    "Quality and consistency before isolated convenience",
+  ];
+
+  for (const phrase of requiredPhrases) assert.match(source, new RegExp(phrase));
+  assert.ok(countWords(source) < 850, "Product Constitution should stay concise");
+  assert.doesNotMatch(source, /\b(certified|guaranteed|GDPR compliant|WCAG compliant|DfE approved)\b/i);
+  assert.doesNotMatch(source, /\b(Stage \d+|context rout(?:er|ing)|risk routing|Studio Ready|artifact lifecycle)\b/i);
+});
+
+test("ADR-0001 records Core and profile separation without later routing work", () => {
+  const source = readText("studio/profiles/wordloom/adrs/ADR-0001-studio-core-profile-separation.md");
+
+  assert.match(source, /Studio Core for reusable operating mechanisms/);
+  assert.match(source, /Wordloom is the first profile, not the Studio itself/);
+  assert.match(source, /Core logic must not depend on Wordloom-specific/);
+  assert.match(source, /new unrelated app should\s+primarily require a new profile/);
+  assert.match(source, /should not be automatically injected into every agent\s+prompt/);
+  assert.ok(countWords(source) < 450, "ADR-0001 should stay lightweight");
+  assert.doesNotMatch(source, /\b(Stage \d+|context rout(?:er|ing)|risk routing|Studio Ready|artifact lifecycle)\b/i);
 });
 
 test("the Core boundary detector recognises representative leakage", () => {
