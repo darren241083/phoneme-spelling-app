@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "profile_id": "future-catalog",
+  "application": {
+    "id": "future-catalog"
+  },
+  "core_compatibility": {
+    "core_id": "ai-product-studio-core",
+    "core_major": 99,
+    "profile_schema_version": 1
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "roles": [
+    {
+      "id": "product_owner",
+      "description": "Owns product intent and consequential product decisions."
+    },
+    {
+      "id": "principal_builder",
+      "description": "Owns implementation within an approved scope."
+    },
+    {
+      "id": "reviewer",
+      "description": "Independently reviews correctness, risk, and maintainability."
+    },
+    {
+      "id": "verifier",
+      "description": "Produces objective test and validation evidence."
+    }
+  ]
+}

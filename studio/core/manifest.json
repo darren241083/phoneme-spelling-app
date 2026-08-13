@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "core_id": "ai-product-studio-core",
+  "core_version": "2.1.0",
+  "profile_schema_version": 1,
+  "roles_path": "roles.json",
+  "required_roles": [
+    "product_owner",
+    "principal_builder",
+    "reviewer",
+    "verifier"
+  ]
+}

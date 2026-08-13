@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "profile_id": "harbor-inventory",
+  "application": {
+    "id": "harbor-inventory",
+    "display_name": "Harbor Inventory"
+  },
+  "core_compatibility": {
+    "core_id": "ai-product-studio-core",
+    "core_major": 2,
+    "profile_schema_version": 1
+  },
+  "role_metadata": {
+    "product_owner": {
+      "display_name": "Morgan"
+    }
+  }
+}

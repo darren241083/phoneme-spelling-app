@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "core_manifest": "core/manifest.json",
+  "active_profile": "profiles/wordloom/profile.json"
+}
