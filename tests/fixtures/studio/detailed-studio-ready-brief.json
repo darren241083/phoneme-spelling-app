@@ -1,0 +1,82 @@
+{
+  "intent": "Restore the receiving exception detail page as a read-only review surface while keeping automated exception detection as the normal workflow.",
+  "desired_outcome": "Operations staff can inspect one detected receiving exception, understand its evidence, and export a review packet without manually rebuilding the exception.",
+  "mode": "build",
+  "scope": [
+    "Route saved and newly detected receiving exceptions to the existing detail page.",
+    "Show the ordered evidence, compact metadata, quality notes, and export actions."
+  ],
+  "non_goals": [
+    "Do not add broad manual exception authoring.",
+    "Do not build a new integration relay, scheduler, or deployment workflow."
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "text": "A saved receiving exception opens the existing detail route with its evidence in the original order."
+    },
+    {
+      "id": "AC-002",
+      "text": "A newly detected exception can be reviewed and exported without introducing a recurring manual setup step."
+    },
+    {
+      "id": "AC-003",
+      "text": "Missing exception data and unavailable export states explain the next safe action."
+    }
+  ],
+  "guardrails": [
+    "Automation remains the default path.",
+    "Read-only visibility must not imply edit or approval permission.",
+    "Operational and privacy claims remain evidence-aligned."
+  ],
+  "affected_areas": [
+    "receiving exception detail page",
+    "saved exception navigation",
+    "export review packet"
+  ],
+  "declared_risk": {
+    "tier": "tier_2",
+    "basis": [
+      "The change affects operational review and export behaviour but does not change stored access rights."
+    ]
+  },
+  "evidence_required": [
+    "Record route evidence for both saved and newly detected exceptions.",
+    "Record the exact focused test command and result.",
+    "Confirm the final diff contains no protected-path changes."
+  ],
+  "tests_required": [
+    "Run node --test tests/receiving-exception-detail.test.mjs.",
+    "Run the repository's dependency-free recursive test discovery."
+  ],
+  "context_requirements": [
+    "Locate the existing detail route and focused test file from repository evidence."
+  ],
+  "stop_conditions": [
+    "Stop if implementation requires a product decision about who may approve an exception.",
+    "Stop if config/runtime-secrets.json must change."
+  ],
+  "product_questions": [],
+  "protected_paths": [
+    "config/runtime-secrets.json"
+  ],
+  "required_operations": [
+    "Inspect the full unstaged diff before reporting.",
+    "Run the approved focused and recursive tests."
+  ],
+  "forbidden_operations": [
+    "Do not push.",
+    "Do not commit.",
+    "Do not deploy.",
+    "Do not install or upgrade dependencies.",
+    "Do not apply or create database migrations."
+  ],
+  "writer_restrictions": [
+    "Only the principal builder may edit application code.",
+    "Review and verification roles remain read-only."
+  ],
+  "risk_requirements": [
+    "Deterministic Studio policy outranks agent risk opinion.",
+    "Any stricter Studio safety rule must be recorded as a visible deviation."
+  ]
+}

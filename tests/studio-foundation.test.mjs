@@ -78,6 +78,11 @@ test("Wordloom profile loads through the portable Studio Core", () => {
   assert.equal(studio.operational.core.id, "ai-product-studio-core");
   assert.equal(studio.operational.profile.applicationId, "wordloom");
   assert.deepEqual(studio.operational.profile.roleIds, REQUIRED_ROLES);
+  assert.equal(studio.operational.profile.studioReady.guidanceRefs[0].path, "product-constitution.md");
+  assert.deepEqual(studio.operational.profile.studioReady.guidanceRefs[0].appliesTo, [
+    "guardrails",
+    "product_questions",
+  ]);
   assert.equal(studio.presentation.roleDisplayNames.product_owner, "Darren");
   assert.equal(Object.isFrozen(studio), true);
   assert.equal(Object.isFrozen(studio.operational.profile), true);
@@ -92,6 +97,26 @@ test("an unrelated application profile loads through the same Core mechanism", (
   assert.equal(studio.operational.profile.profileId, "harbor-inventory");
   assert.equal(studio.operational.profile.applicationId, "harbor-inventory");
   assert.deepEqual(studio.operational.profile.roleIds, REQUIRED_ROLES);
+  assert.deepEqual(studio.operational.profile.studioReady, {
+    guidanceRefs: [
+      {
+        id: "inventory_operations",
+        path: "alternate-app-guidance.md",
+        appliesTo: ["guardrails", "product_questions"],
+      },
+    ],
+    artifactPromotionDestinations: [
+      {
+        id: "release-record",
+        description: "Approved lifecycle evidence may be recorded in the Harbor Inventory release record.",
+        reference: "Harbor Inventory release record",
+      },
+    ],
+    evidenceSensitivity: {
+      prohibitedPromotion: ["supplier_confidential"],
+    },
+  });
+  assert.equal(existsSync(path.join(FIXTURE_ROOT, "alternate-app-guidance.md")), true);
   assert.equal(studio.presentation.applicationDisplayName, "Harbor Inventory");
   assert.equal(studio.presentation.roleDisplayNames.product_owner, "Morgan");
 });
@@ -152,6 +177,7 @@ test("Wordloom profile memory docs exist without expanding Core or profile metad
     "profile_id",
     "role_metadata",
     "schema_version",
+    "studio_ready",
   ]);
 });
 
@@ -252,6 +278,90 @@ test("unknown role metadata and malformed profiles fail clearly", () => {
     (error) => {
       assert.equal(error.code, "PROFILE_INVALID");
       assert.equal(error.message, "[PROFILE_INVALID] App profile must be an object.");
+      return true;
+    },
+  );
+});
+
+test("malformed guidance applies_to values fail deterministically", () => {
+  const loaded = loadStudioConfiguration({ studioRoot: STUDIO_ROOT });
+  const profile = readJson("tests/fixtures/studio/alternate-app-profile.json");
+  profile.studio_ready.guidance_refs[0].applies_to = "guardrails";
+  const context = {
+    manifest: {
+      schemaVersion: loaded.operational.studioSchemaVersion,
+      coreId: loaded.operational.core.id,
+      coreMajor: Number(loaded.operational.core.version.split(".")[0]),
+      profileSchemaVersion: loaded.operational.core.profileSchemaVersion,
+    },
+    roleVocabulary: { roleIds: loaded.operational.profile.roleIds },
+  };
+
+  assert.throws(
+    () => validateStudioProfile(profile, context),
+    (error) => {
+      assert.ok(error instanceof StudioConfigurationError);
+      assert.equal(error.code, "PROFILE_INVALID");
+      assert.equal(
+        error.message,
+        "[PROFILE_INVALID] Profile studio_ready.guidance_refs[0].applies_to must be an array.",
+      );
+      return true;
+    },
+  );
+});
+
+test("duplicate artifact promotion destination IDs fail deterministically", () => {
+  const loaded = loadStudioConfiguration({ studioRoot: STUDIO_ROOT });
+  const profile = readJson("tests/fixtures/studio/alternate-app-profile.json");
+  profile.studio_ready.artifact_promotion_destinations.push(
+    structuredClone(profile.studio_ready.artifact_promotion_destinations[0]),
+  );
+  const context = {
+    manifest: {
+      schemaVersion: loaded.operational.studioSchemaVersion,
+      coreId: loaded.operational.core.id,
+      coreMajor: Number(loaded.operational.core.version.split(".")[0]),
+      profileSchemaVersion: loaded.operational.core.profileSchemaVersion,
+    },
+    roleVocabulary: { roleIds: loaded.operational.profile.roleIds },
+  };
+
+  assert.throws(
+    () => validateStudioProfile(profile, context),
+    (error) => {
+      assert.equal(error.code, "PROFILE_INVALID");
+      assert.equal(
+        error.message,
+        "[PROFILE_INVALID] Profile studio_ready.artifact_promotion_destinations ids must be unique.",
+      );
+      return true;
+    },
+  );
+});
+
+test("duplicate guidance reference IDs fail deterministically", () => {
+  const loaded = loadStudioConfiguration({ studioRoot: STUDIO_ROOT });
+  const profile = readJson("tests/fixtures/studio/alternate-app-profile.json");
+  profile.studio_ready.guidance_refs.push(structuredClone(profile.studio_ready.guidance_refs[0]));
+  const context = {
+    manifest: {
+      schemaVersion: loaded.operational.studioSchemaVersion,
+      coreId: loaded.operational.core.id,
+      coreMajor: Number(loaded.operational.core.version.split(".")[0]),
+      profileSchemaVersion: loaded.operational.core.profileSchemaVersion,
+    },
+    roleVocabulary: { roleIds: loaded.operational.profile.roleIds },
+  };
+
+  assert.throws(
+    () => validateStudioProfile(profile, context),
+    (error) => {
+      assert.equal(error.code, "PROFILE_INVALID");
+      assert.equal(
+        error.message,
+        "[PROFILE_INVALID] Profile studio_ready.guidance_refs ids must be unique.",
+      );
       return true;
     },
   );

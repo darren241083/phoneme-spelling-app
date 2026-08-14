@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract_type": "studio_ready",
+  "contract_id": "studio-ready-template",
+  "app_profile": {
+    "profile_id": "example-app",
+    "application_id": "example-app",
+    "guidance_refs": []
+  },
+  "source_provenance": {
+    "input_kind": "structured_brief",
+    "fingerprint": "sha256:0c1d4929c9d95dcda1c47d0cf0583f6ec1f334b06781d91085b820d92426eabc",
+    "source_reference": "studio-ready-contract-template"
+  },
+  "intent": "Concise Product Owner intent.",
+  "desired_outcome": "Observable outcome expected from the change.",
+  "mode": "build",
+  "scope": [],
+  "non_goals": [],
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "text": "The affected experience visibly satisfies the desired outcome."
+    }
+  ],
+  "guardrails": [],
+  "affected_areas": [],
+  "declared_risk": {
+    "tier": "unknown",
+    "basis": []
+  },
+  "evidence_required": [],
+  "tests_required": [],
+  "context_requirements": [],
+  "stop_conditions": [],
+  "product_questions": [],
+  "execution_constraints": {
+    "protected_paths": [],
+    "required_operations": [],
+    "forbidden_operations": [],
+    "writer_restrictions": [],
+    "risk_requirements": []
+  },
+  "policy": {
+    "precedence": "deterministic_studio_policy_over_agent_opinion",
+    "constraints": [],
+    "deviations": []
+  },
+  "metadata": {
+    "contract_version": "studio-ready/1",
+    "revision": 1,
+    "status": "draft"
+  }
+}

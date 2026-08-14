@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const CURRENT_STUDIO_SCHEMA_VERSION = 1;
 const PROFILE_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const ROLE_ID_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+const REFERENCE_ID_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 const DEFAULT_STUDIO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export class StudioConfigurationError extends Error {
@@ -42,12 +43,25 @@ function requireString(value, label, code) {
   return value.trim();
 }
 
+function requireArray(value, label, code) {
+  if (!Array.isArray(value)) fail(code, `${label} must be an array.`);
+  return value;
+}
+
 function requireIdentifier(value, label, pattern, code) {
   const identifier = requireString(value, label, code);
   if (!pattern.test(identifier)) {
     fail(code, `${label} has an invalid identifier: ${identifier}.`);
   }
   return identifier;
+}
+
+function requireRelativeReference(value, label, code) {
+  const referencePath = requireString(value, label, code).replaceAll("\\", "/");
+  if (path.isAbsolute(referencePath) || referencePath.split("/").includes("..")) {
+    fail(code, `${label} must be a relative contained path.`);
+  }
+  return referencePath;
 }
 
 function requireOnlyKeys(value, allowedKeys, label, code) {
@@ -227,6 +241,152 @@ function validateRoleVocabulary(value, manifest) {
   };
 }
 
+function validateStudioReadyProfileContext(value) {
+  const code = "PROFILE_INVALID";
+  if (value === undefined) return undefined;
+
+  const context = requireObject(value, "Profile studio_ready", code);
+  requireOnlyKeys(
+    context,
+    new Set(["guidance_refs", "artifact_promotion_destinations", "evidence_sensitivity"]),
+    "Profile studio_ready",
+    code,
+  );
+
+  const guidanceRefs = requireArray(
+    context.guidance_refs === undefined ? [] : context.guidance_refs,
+    "Profile studio_ready.guidance_refs",
+    code,
+  ).map(
+    (rawRef, index) => {
+      const ref = requireObject(rawRef, `Profile studio_ready.guidance_refs[${index}]`, code);
+      requireOnlyKeys(
+        ref,
+        new Set(["id", "path", "applies_to"]),
+        `Profile studio_ready.guidance_refs[${index}]`,
+        code,
+      );
+      return {
+        id: requireIdentifier(
+          ref.id,
+          `Profile studio_ready.guidance_refs[${index}].id`,
+          REFERENCE_ID_PATTERN,
+          code,
+        ),
+        path: requireRelativeReference(
+          ref.path,
+          `Profile studio_ready.guidance_refs[${index}].path`,
+          code,
+        ),
+        appliesTo: requireArray(
+          ref.applies_to === undefined ? [] : ref.applies_to,
+          `Profile studio_ready.guidance_refs[${index}].applies_to`,
+          code,
+        ).map((item, itemIndex) =>
+          requireIdentifier(
+            item,
+            `Profile studio_ready.guidance_refs[${index}].applies_to[${itemIndex}]`,
+            REFERENCE_ID_PATTERN,
+            code,
+          )
+        ),
+      };
+    },
+  );
+  const guidanceRefIds = guidanceRefs.map(({ id }) => id);
+  if (new Set(guidanceRefIds).size !== guidanceRefIds.length) {
+    fail("PROFILE_INVALID", "Profile studio_ready.guidance_refs ids must be unique.");
+  }
+
+  const destinationRefs = requireArray(
+    context.artifact_promotion_destinations === undefined
+      ? []
+      : context.artifact_promotion_destinations,
+    "Profile studio_ready.artifact_promotion_destinations",
+    code,
+  ).map((rawDestination, index) => {
+    const destination = requireObject(
+      rawDestination,
+      `Profile studio_ready.artifact_promotion_destinations[${index}]`,
+      code,
+    );
+    requireOnlyKeys(
+      destination,
+      new Set(["id", "description", "path", "reference"]),
+      `Profile studio_ready.artifact_promotion_destinations[${index}]`,
+      code,
+    );
+    const normalized = {
+      id: requireIdentifier(
+        destination.id,
+        `Profile studio_ready.artifact_promotion_destinations[${index}].id`,
+        REFERENCE_ID_PATTERN,
+        code,
+      ),
+      description: requireString(
+        destination.description,
+        `Profile studio_ready.artifact_promotion_destinations[${index}].description`,
+        code,
+      ),
+    };
+    if (destination.path !== undefined) {
+      normalized.path = requireRelativeReference(
+        destination.path,
+        `Profile studio_ready.artifact_promotion_destinations[${index}].path`,
+        code,
+      );
+    }
+    if (destination.reference !== undefined) {
+      normalized.reference = requireString(
+        destination.reference,
+        `Profile studio_ready.artifact_promotion_destinations[${index}].reference`,
+        code,
+      );
+    }
+    if (!normalized.path && !normalized.reference) {
+      fail(
+        code,
+        `Profile studio_ready.artifact_promotion_destinations[${index}] must define path or reference.`,
+      );
+    }
+    return normalized;
+  });
+  const destinationIds = destinationRefs.map(({ id }) => id);
+  if (new Set(destinationIds).size !== destinationIds.length) {
+    fail("PROFILE_INVALID", "Profile studio_ready.artifact_promotion_destinations ids must be unique.");
+  }
+
+  const sensitivity = context.evidence_sensitivity === undefined
+    ? {}
+    : requireObject(context.evidence_sensitivity, "Profile studio_ready.evidence_sensitivity", code);
+  requireOnlyKeys(
+    sensitivity,
+    new Set(["prohibited_promotion"]),
+    "Profile studio_ready.evidence_sensitivity",
+    code,
+  );
+  const prohibitedPromotion = requireArray(
+    sensitivity.prohibited_promotion === undefined ? [] : sensitivity.prohibited_promotion,
+    "Profile studio_ready.evidence_sensitivity.prohibited_promotion",
+    code,
+  ).map((item, index) =>
+    requireIdentifier(
+      item,
+      `Profile studio_ready.evidence_sensitivity.prohibited_promotion[${index}]`,
+      REFERENCE_ID_PATTERN,
+      code,
+    )
+  );
+
+  return {
+    guidanceRefs,
+    artifactPromotionDestinations: destinationRefs,
+    evidenceSensitivity: {
+      prohibitedPromotion,
+    },
+  };
+}
+
 export function validateStudioProfile(value, { manifest, roleVocabulary } = {}) {
   const code = "PROFILE_INVALID";
   if (!manifest || !roleVocabulary) {
@@ -236,7 +396,14 @@ export function validateStudioProfile(value, { manifest, roleVocabulary } = {}) 
   const profile = requireObject(value, "App profile", code);
   requireOnlyKeys(
     profile,
-    new Set(["schema_version", "profile_id", "application", "core_compatibility", "role_metadata"]),
+    new Set([
+      "schema_version",
+      "profile_id",
+      "application",
+      "core_compatibility",
+      "role_metadata",
+      "studio_ready",
+    ]),
     "App profile",
     code,
   );
@@ -321,6 +488,9 @@ export function validateStudioProfile(value, { manifest, roleVocabulary } = {}) 
       profileSchemaVersion: compatibleProfileSchema,
     },
     roleIds: [...roleVocabulary.roleIds],
+    ...(profile.studio_ready === undefined
+      ? {}
+      : { studioReady: validateStudioReadyProfileContext(profile.studio_ready) }),
   };
   const presentation = {
     ...(applicationDisplayName === undefined ? {} : { applicationDisplayName }),

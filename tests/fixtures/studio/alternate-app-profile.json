@@ -14,5 +14,29 @@
     "product_owner": {
       "display_name": "Morgan"
     }
+  },
+  "studio_ready": {
+    "guidance_refs": [
+      {
+        "id": "inventory_operations",
+        "path": "alternate-app-guidance.md",
+        "applies_to": [
+          "guardrails",
+          "product_questions"
+        ]
+      }
+    ],
+    "artifact_promotion_destinations": [
+      {
+        "id": "release-record",
+        "description": "Approved lifecycle evidence may be recorded in the Harbor Inventory release record.",
+        "reference": "Harbor Inventory release record"
+      }
+    ],
+    "evidence_sensitivity": {
+      "prohibited_promotion": [
+        "supplier_confidential"
+      ]
+    }
   }
 }

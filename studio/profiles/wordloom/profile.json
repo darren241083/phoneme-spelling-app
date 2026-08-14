@@ -14,5 +14,42 @@
     "product_owner": {
       "display_name": "Darren"
     }
+  },
+  "studio_ready": {
+    "guidance_refs": [
+      {
+        "id": "product-constitution",
+        "path": "product-constitution.md",
+        "applies_to": [
+          "guardrails",
+          "product_questions"
+        ]
+      }
+    ],
+    "artifact_promotion_destinations": [
+      {
+        "id": "product-architecture-decision",
+        "description": "Durable product or architecture decisions move to profile ADRs when appropriate.",
+        "path": "adrs/"
+      },
+      {
+        "id": "profile-safeguard",
+        "description": "Reusable safeguards move to profile guidance or focused regression tests.",
+        "reference": "profile guidance or focused regression tests"
+      },
+      {
+        "id": "release-evidence",
+        "description": "Release evidence moves to the current checkpoint when relevant.",
+        "reference": "current checkpoint"
+      }
+    ],
+    "evidence_sensitivity": {
+      "prohibited_promotion": [
+        "credential",
+        "raw_conversation",
+        "secret",
+        "unnecessary_personal_data"
+      ]
+    }
   }
 }
